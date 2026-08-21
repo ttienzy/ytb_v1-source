@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     chrome_profile_dir: Path = TOOLS_DIR / "Backend" / "Data" / "ChromeProfile"
     config_file: Path = TOOLS_DIR / "Backend" / "Data" / "config.json"
     chrome_executable: Path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    voice_service_url: str = "http://127.0.0.1:8001"  # voice-service (VieNeu-TTS) nội bộ
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
