@@ -11,6 +11,7 @@ from app.core.config import settings
 
 TIMEOUT_REGISTER = 120  # add_voice extract speaker embedding có thể chậm với ref dài
 TIMEOUT_REMOVE = 30
+TIMEOUT_TTS = 300  # ONNX/CPU infer có thể chậm với text dài
 
 
 def _client(timeout: float) -> httpx.AsyncClient:
@@ -22,6 +23,15 @@ async def health() -> dict:
         r = await client.get("/health")
         r.raise_for_status()
         return r.json()
+
+
+async def list_presets() -> list[dict]:
+    """Forward → voice-service GET /internal/voices/presets. Trả [{name, description, gender}]."""
+    async with _client(10.0) as client:
+        r = await client.get("/internal/voices/presets")
+        if r.status_code >= 400:
+            raise RuntimeError(f"voice-service presets failed ({r.status_code}): {r.text}")
+        return r.json().get("presets", [])
 
 
 async def register_voice(voice_id: str, ref_audio: bytes, filename: str, name: str | None) -> dict:
@@ -41,3 +51,19 @@ async def remove_voice(voice_id: str) -> dict:
         if r.status_code >= 400:
             raise RuntimeError(f"voice-service remove failed ({r.status_code}): {r.text}")
         return r.json()
+
+
+async def preview_voice(voice_id: str, text: str | None = None) -> tuple[bytes, str | None]:
+    """Forward → voice-service POST /preview. Trả (wav_bytes, X-Audio-Duration).
+
+    ``text`` tuỳ chọn — None thì voice-service dùng câu mặc định. Trả bytes thô
+    để router stream về FE (audio/wav) + forward header duration cho sync.
+    """
+    payload: dict = {"voice_id": voice_id, "temperature": 0.6}
+    if text:
+        payload["text"] = text
+    async with _client(TIMEOUT_TTS) as client:
+        r = await client.post("/preview", json=payload)
+        if r.status_code >= 400:
+            raise RuntimeError(f"voice-service preview failed ({r.status_code}): {r.text}")
+        return r.content, r.headers.get("X-Audio-Duration")

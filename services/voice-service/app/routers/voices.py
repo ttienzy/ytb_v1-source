@@ -8,10 +8,16 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.engine import engine
-from app.schemas import VoiceRegistered, VoiceRemoved
+from app.schemas import PresetList, PresetVoice, VoiceRegistered, VoiceRemoved
 from app.storage import delete_ref_audio, save_ref_audio, voices_file_path
 
 router = APIRouter()
+
+
+@router.get("/internal/voices/presets", response_model=PresetList)
+def list_presets() -> PresetList:
+    """Danh sách preset voices (sẵn dùng, không cần clone) — cho UI hiển thị."""
+    return PresetList(presets=[PresetVoice(**p) for p in engine.presets()])
 
 
 @router.post("/internal/voices/{voice_id}", response_model=VoiceRegistered)

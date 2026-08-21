@@ -62,6 +62,29 @@ class VoiceEngine:
     def ready(self) -> bool:
         return self.vieneu is not None
 
+    def presets(self) -> list[dict]:
+        """Danh sách preset voices: ``[{name, description, gender}, ...]``.
+
+        Dùng API công khai ``list_preset_voices`` (label, name) + ``get_preset_voice``
+        (metadata). Không expose speaker_emb/codes (lớn, không cần cho UI).
+        """
+        if not self.ready:
+            return []
+        out: list[dict] = []
+        try:
+            for _label, name in self.vieneu.list_preset_voices():
+                v = self.vieneu.get_preset_voice(name)
+                out.append(
+                    {
+                        "name": name,
+                        "description": (v.get("description") or "").strip(),
+                        "gender": (v.get("gender") or "").strip(),
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to list preset voices")
+        return out
+
     def status(self) -> dict:
         voices_count = 0
         if self.ready:

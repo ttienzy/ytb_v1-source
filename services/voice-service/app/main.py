@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.engine import engine
-from app.routers import health, voices
+from app.routers import health, tts, voices
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,3 +22,4 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Voice Service", version="0.1.0", lifespan=lifespan)
 app.include_router(health.router, tags=["health"])
 app.include_router(voices.router, tags=["voices"])
+app.include_router(tts.router, tags=["tts"])

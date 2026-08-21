@@ -22,6 +22,10 @@ def list_voices(db: Session) -> list[Voice]:
     return list(db.scalars(select(Voice).order_by(Voice.created_at.desc())))
 
 
+def get_voice(db: Session, voice_id: str) -> Voice | None:
+    return db.get(Voice, voice_id)
+
+
 async def create_voice(db: Session, name: str, ref_audio: bytes, filename: str) -> Voice:
     voice_id = _new_voice_id()
     suffix = Path(filename).suffix or ".wav"
