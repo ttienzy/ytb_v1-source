@@ -1,0 +1,20 @@
+[project]
+name = "voice-service"
+version = "0.1.0"
+description = "Standalone Vietnamese TTS voice service (VieNeu-TTS) — HTTP API for the Google Search Tools backend"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { text = "Internal" }
+dependencies = [
+    # VieNeu-TTS v3 Turbo — torch-free core (ONNX Runtime, CPU, int8, 48kHz).
+    # `pip install vieneu` pulls onnxruntime + huggingface_hub + librosa + gradio.
+    "vieneu>=3.3.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",   # multipart upload (ref audio) cho /internal/voices/{id}
+    "pydantic-settings>=2.5",
+]
+
+[tool.uv]
+# voice-service không phải package phát hành — chỉ là app chạy; uv không build nó.
+package = false

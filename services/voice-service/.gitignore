@@ -1,0 +1,11 @@
+# Voice service env
+.venv/
+__pycache__/
+*.pyc
+*.log
+voice.log
+
+# Runtime data (ref audio clones + engine voices.json) — sinh khi chạy, không commit
+data/voices/*
+!data/voices/.gitkeep
+data/voices.json
