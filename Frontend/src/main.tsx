@@ -119,28 +119,46 @@ type StudioJob = {
   voice_id: string
   scenes: StudioScene[]
   overspeed: number[]
+  clips: string[]
 }
 
-const MOCK_SCENES: StudioScene[] = [
-  { scene_title: 'Mở đầu', segments: [
-    { idx: 0, start: '00:00', end: '00:14', duration: 14, original_text: 'Hey everyone, welcome back to the channel.', vietnamese_vo: 'Xin chào mọi người, hoan h nghen chao tro lai voi kenh.' },
-    { idx: 1, start: '00:14', end: '00:32', duration: 18, original_text: 'Today we look at three underrated tools.', vietnamese_vo: 'Hom nay chung ta se xem ba cong cu it nguoi biet.' },
-  ] },
-  { scene_title: 'Nội dung chính', segments: [
-    { idx: 2, start: '00:40', end: '01:02', duration: 22, original_text: 'First, this app automates your recap.', vietnamese_vo: 'Dau tien, ung dung nay tu dong tao tom tat cho ban.' },
-    { idx: 3, start: '01:15', end: '01:38', duration: 23, original_text: 'Second, it clones your voice in seconds.', vietnamese_vo: 'Thu hai, no nhan ban giong cua ban trong vai giay.' },
-  ] },
-]
+// Recap trả về từ BE — /api/recap/generate
+type BackendSegment = { start_time_sec: number; end_time_sec: number; duration_sec: number; original_text: string; vietnamese_vo: string }
+type BackendScene = { scene_title?: string; segments: BackendSegment[] }
+type BackendRecap = { video_url?: string; scenes: BackendScene[] }
+type RecapJobOut = { job_id: string; youtube_url: string; status: string; error?: string | null; recap?: BackendRecap | null; clips?: string[] | null }
+
+function fmtTime(sec: number) {
+  const s = Math.max(0, Math.floor(sec || 0))
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+function mapRecap(job: RecapJobOut, voiceId: string): StudioJob {
+  const scenes: StudioScene[] = (job.recap?.scenes ?? []).map(sc => ({
+    scene_title: sc.scene_title ?? '',
+    segments: sc.segments.map(seg => ({
+      idx: 0, start: fmtTime(seg.start_time_sec), end: fmtTime(seg.end_time_sec),
+      duration: seg.duration_sec, original_text: seg.original_text, vietnamese_vo: seg.vietnamese_vo,
+    })),
+  }))
+  let i = 0
+  scenes.forEach(sc => sc.segments.forEach(seg => { seg.idx = i++ }))
+  return { job_id: job.job_id, youtube_url: job.youtube_url, status: 'recap_done', voice_id: voiceId, scenes, overspeed: [], clips: [] }
+}
+
 const MOCK_VOICES = ['Adam', 'Trúc Ly', 'Ngọc Huyền', 'Minh Đức', 'Giọng review của tôi']
 
 function fmtDur(s: number) { return `${s.toFixed(1)}s` }
 
 function StudioPage() {
-  // MOCK — chưa nối BE recap. Dữ liệu giả để xem trước flow.
+  // recap đã nối BE thật (POST /api/recap/generate). cut/voice/merge vẫn mock — chờ R2/R3/R4.
   const [youtubeUrl, setYoutubeUrl] = useState('https://www.youtube.com/watch?v=oa4WoU-dm0o')
   const [rawFile, setRawFile] = useState<File | null>(null)
   const [job, setJob] = useState<StudioJob | null>(null)
   const [voiceId, setVoiceId] = useState('Adam')
+  const [busy, setBusy] = useState(false)
+  const [recapError, setRecapError] = useState('')
+  const [cutError, setCutError] = useState('')
 
   const allSegments = job ? job.scenes.flatMap(s => s.segments) : []
   const stepState = (k: 'recap' | 'cut' | 'voice' | 'merge') => {
@@ -157,11 +175,40 @@ function StudioPage() {
 
   function wait(ms: number) { return new Promise(r => setTimeout(r, ms)) }
   async function startRecap() {
-    setJob({ job_id: 'mock-' + Math.random().toString(36).slice(2, 8), youtube_url: youtubeUrl, status: 'recap_running', voice_id: voiceId, scenes: [], overspeed: [] })
-    await wait(900)
-    setJob(j => j ? { ...j, status: 'recap_done', scenes: MOCK_SCENES } : j)
+    if (!youtubeUrl.trim()) { setRecapError('Dán link YouTube.'); return }
+    if (!rawFile) { setRecapError('Cần tải file transcript (raw.txt).'); return }
+    setBusy(true); setRecapError('')
+    setJob({ job_id: '', youtube_url: youtubeUrl.trim(), status: 'recap_running', voice_id: voiceId, scenes: [], overspeed: [], clips: [] })
+    try {
+      const form = new FormData()
+      form.append('youtube_url', youtubeUrl.trim())
+      form.append('raw_file', rawFile)
+      const r = await fetch(`${API_URL}/api/recap/generate`, { method: 'POST', body: form })
+      const data: RecapJobOut = await r.json()
+      if (!r.ok) throw new Error(data.error || data.detail || `Lỗi ${r.status}`)
+      setJob(mapRecap(data, voiceId))
+    } catch (e) {
+      setRecapError(e instanceof Error ? e.message : 'Tạo recap thất bại.')
+      setJob(null)
+    } finally { setBusy(false) }
   }
-  async function cut() { setJob(j => j ? { ...j, status: 'cut_running' } : j); await wait(1100); setJob(j => j ? { ...j, status: 'cut_done' } : j) }
+  async function cut() {
+    if (!job) return
+    setCutError('')
+    setJob(j => j ? { ...j, status: 'cut_running' } : j)
+    try {
+      const r = await fetch(`${API_URL}/api/recap/cut`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: job.job_id }),
+      })
+      const data: RecapJobOut = await r.json()
+      if (!r.ok) throw new Error(data.error || data.detail || `Lỗi ${r.status}`)
+      setJob(j => j ? { ...j, status: 'cut_done', clips: data.clips ?? [] } : j)
+    } catch (e) {
+      setCutError(e instanceof Error ? e.message : 'Cắt video thất bại.')
+      setJob(j => j ? { ...j, status: 'recap_done' } : j) // revert để bật lại nút
+    }
+  }
   async function voice() { setJob(j => j ? { ...j, status: 'voice_running' } : j); await wait(1300); setJob(j => j ? { ...j, status: 'voice_done', overspeed: [3] } : j) }
   async function merge() { setJob(j => j ? { ...j, status: 'merge_running' } : j); await wait(1100); setJob(j => j ? { ...j, status: 'merged' } : j) }
   function reset() { setJob(null); setRawFile(null) }
@@ -177,7 +224,7 @@ function StudioPage() {
     <div className="settings-heading"><div>
       <p className="overline">YOUTUBE RECAP</p><h1>Studio</h1>
       <p className="page-subtitle">Tóm tắt video YouTube + lồng tiếng Việt — pipeline 4 bước.</p>
-      <span className="mock-badge">MOCK — xem trước, chưa nối BE</span>
+      <span className="mock-badge">Recap đã nối BE · cut/voice/merge đang dựng</span>
     </div></div>
 
     <div className="studio-stepper">
@@ -192,12 +239,13 @@ function StudioPage() {
 
     {!job
       ? <div className="settings-card">
-          <div className="integration-title"><div className="gemini-icon"><Upload size={17} /></div><div><h2>Bước 1 — Tạo recap</h2><p>Dán link YouTube + tải file transcript (raw.txt). Gemini phân tích → recap.json.</p></div></div>
+          <div className="integration-title"><div className="gemini-icon"><Upload size={17} /></div><div><h2>Bước 1 — Tạo recap</h2><p>Dán link YouTube + tải file transcript (raw.txt). Gemini phân tích → recap (giữ in-memory state).</p></div></div>
           <label>Link YouTube</label>
           <input value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=..." />
           <label style={{ marginTop: 18 }}>Transcript (raw.txt)</label>
           <div className="voice-file-row"><input type="file" accept=".txt" onChange={(e) => setRawFile(e.target.files?.[0] ?? null)} /><span className="voice-file-name">{rawFile ? rawFile.name : 'Chưa chọn file'}</span></div>
-          <div className="settings-actions"><button className="primary-button" onClick={startRecap} disabled={!youtubeUrl.trim()}><Sparkles size={16} /> Tạo recap</button></div>
+          <div className="settings-actions"><button className="primary-button" onClick={startRecap} disabled={!youtubeUrl.trim() || !rawFile || busy}>{busy ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />} {busy ? 'Đang phân tích…' : 'Tạo recap'}</button></div>
+          {recapError && <p className="settings-message">{recapError}</p>}
         </div>
       : <>
         {/* recap result */}
@@ -216,9 +264,11 @@ function StudioPage() {
 
         {/* cut */}
         <div className="settings-card" style={{ marginTop: 22 }}>
-          <div className="integration-title"><div className="gemini-icon"><Scissors size={17} /></div><div><h2>Bước 2 — Cắt video</h2><p>yt-dlp tải 1 lần → FFmpeg cut [start, end] mỗi segment → clip_i.mp4.</p></div></div>
+          <div className="integration-title"><div className="gemini-icon"><Scissors size={17} /></div><div><h2>Bước 2 — Cắt video</h2><p>yt-dlp tải 1 lần (1080p, video-only) → FFmpeg cut [start, end] mỗi segment → clip_i.mp4.</p></div></div>
           <div className="settings-actions"><button className="primary-button" onClick={cut} disabled={stepState('cut') === 'done' || stepState('cut') === 'running' || stepState('recap') !== 'done'}>{stepState('cut') === 'running' ? <Loader2 size={16} className="spin" /> : <Scissors size={16} />} {stepState('cut') === 'done' ? 'Đã cắt xong' : stepState('cut') === 'running' ? 'Đang cắt…' : 'Cắt video'}</button></div>
-          {stepState('cut') === 'done' && <div className="chips">{allSegments.map(s => <span key={s.idx} className="chip">🎬 clip_{s.idx}.mp4</span>)}</div>}
+          {stepState('cut') === 'running' && <p className="settings-message">Đang tải video 1080p + cắt {allSegments.length} đoạn (có thể mất 1-2 phút với video dài)…</p>}
+          {cutError && <p className="settings-message">{cutError}</p>}
+          {stepState('cut') === 'done' && <div className="chips">{(job.clips.length ? job.clips : allSegments.map(s => `clip_${s.idx}.mp4`)).map(name => <span key={name} className="chip">🎬 {name}</span>)}</div>}
         </div>
 
         {/* voice */}
