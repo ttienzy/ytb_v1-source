@@ -4,8 +4,10 @@
   "private": true,
   "scripts": {
     "backend": "..\\Backend\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --app-dir ..\\Backend --host 127.0.0.1 --port 8000",
+    "voice": "uv run --directory ..\\services\\voice-service uvicorn app.main:app --port 8001",
     "frontend": "set \"ELECTRON_RUN_AS_NODE=\" && npm --prefix ..\\Frontend run dev",
-    "start": "concurrently --kill-others-on-fail --names BACKEND,FRONTEND --prefix-colors blue,green \"npm run backend\" \"npm run frontend\""
+    "start": "concurrently --kill-others-on-fail --names BACKEND,VOICE,FRONTEND --prefix-colors blue,magenta,green \"npm run backend\" \"npm run voice\" \"npm run frontend\"",
+    "start:core": "concurrently --kill-others-on-fail --names BACKEND,FRONTEND --prefix-colors blue,green \"npm run backend\" \"npm run frontend\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

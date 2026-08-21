@@ -39,7 +39,28 @@ Chi tiết: [docs/RECAP_PIPELINE_PLAN.md](docs/RECAP_PIPELINE_PLAN.md) · [docs/
 - `ffmpeg` + `yt-dlp` trong PATH (cho pipeline recap)
 - Tài khoản Google (cookie Gemini) — cấu hình ở `Backend/Data/config.json` (không commit)
 
-## Chạy
+## Khởi động nhanh (dev — tất cả service)
+
+```bash
+# Lần đầu: cài deps
+cd Frontend && npm install && cd ..
+cd services/voice-service && uv sync && cd ../..     # voice-service env riêng (torch-free)
+
+# Chạy cả 3 cùng lúc: backend :8000 + voice-service :8001 + frontend (electron)
+npm start
+```
+
+`npm start` (qua [Desktop/package.json](Desktop/package.json)) dùng `concurrently` khởi động
+song song **BACKEND + VOICE + FRONTEND**; Ctrl+C sẽ tắt hết. Muốn chạy không cần voice
+(nhẹ hơn): `npm run start:core --prefix Desktop` (chỉ backend + frontend).
+
+Verify từng service:
+```bash
+curl http://127.0.0.1:8000/api/ping     # backend (DB ping)
+curl http://127.0.0.1:8001/health      # voice-service → {model_loaded:true, backend:"onnx", voices_count:20}
+```
+
+## Chạy từng phần (thủ công)
 
 ### Backend
 
