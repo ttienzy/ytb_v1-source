@@ -1,20 +1,42 @@
-"""Recap orchestration — Phase R1 (generate) + R2 (cut). State in-memory, không DB/file recap.
+"""Recap orchestration — Phase R1 (generate) + R2 (cut) + R3 (voice+sync) + R4 (merge). State in-memory.
 
 - ``generate``: tạo recap dict (Gemini HTTP) → status recap_done.
-- ``cut``: load recap → tải video (yt-dlp, video-only 1080p) → stream-copy cut từng segment
-  → ``Data/Downloads/{job_id}/clip_i.mp4`` → xoá video.mp4 (tiết kiệm disk) → status cut_done.
+- ``cut``: tải video (yt-dlp, video-only 1080p) vào source/ → stream-copy cut từng segment
+  vào clips/ → giữ source → status cut_done.
+- ``voice``: TTS batch (voice-service) cloned voice → giải nén + atempo sync từng VO về
+  ``duration_sec`` → voice/voice_i.wav → status voice_done + overspeed[].
+- ``merge``: mux clip_i + voice_i → seg_i (merge/) → concat → final_recap.mp4 → status merged.
 Mỗi bước chạy ``run_in_threadpool`` (sync httpx/yt-dlp/ffmpeg blocking) để không block event loop.
 """
+import io
+import json
+import re
+import zipfile
+from pathlib import Path
+
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 
 from app.core.config import TOOLS_DIR
 from app.ai.gemini.recap import RecapConfigError, generate_recap
 from app.recap import state
-from app.recap.ffmpeg import cut_segment
-from app.recap.paths import clip_path, job_dir_of, video_path
+from app.recap.ffmpeg import atempo_sync, concat_segments, cut_segment, mux_segment
+from app.recap.paths import (
+    DOWNLOADS_DIR,
+    clip_path,
+    clips_dir,
+    final_path,
+    job_dir_of,
+    merge_dir,
+    recap_path,
+    segment_path,
+    source_dir,
+    voice_dir,
+    voice_path,
+)
 from app.recap.state import JobState
 from app.recap.ytdlp import download_video
+from app.voices import voice_client
 
 PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "System Prompt YouTube Video Recap.txt"
 
@@ -42,6 +64,14 @@ async def generate(youtube_url: str, raw_bytes: bytes, raw_name: str) -> JobStat
         raise HTTPException(status_code=502, detail=str(error)) from error
 
     state.update_job(job.job_id, status="recap_done", recap=recap)
+    # Persist recap ra disk → rehydrate được sau restart server.
+    try:
+        rp = recap_path(job.job_id)
+        rp.parent.mkdir(parents=True, exist_ok=True)
+        rp.write_text(json.dumps(recap, ensure_ascii=False), encoding="utf-8")
+        state.update_job(job.job_id, job_dir=str(rp.parent))
+    except OSError:
+        pass  # recap trong memory vẫn dùng được; chỉ mất resume sau restart
     return state.get_job(job.job_id)
 
 
@@ -54,8 +84,66 @@ def _segments_flat(recap: dict) -> list[dict]:
     return flat
 
 
+def _status_from_disk(job_id: str, n_segs: int) -> tuple[str, list[str], str | None]:
+    """Suy luận status + clips + final từ file trên disk (sau restart)."""
+    clips = [f"clip_{i}.mp4" for i in range(n_segs)] if (clips_dir(job_id) / "clip_0.mp4").exists() else []
+    has_clips = bool(clips)
+    has_voice = (voice_dir(job_id) / "voice_0.wav").exists()
+    has_final = final_path(job_id).exists() and final_path(job_id).stat().st_size
+    if has_final:
+        return "merged", clips, "final_recap.mp4"
+    if has_voice:
+        return "voice_done", clips, None
+    if has_clips:
+        return "cut_done", clips, None
+    return "recap_done", [], None
+
+
+def rehydrate(job_id: str) -> JobState | None:
+    """Đọc ``Downloads/{job_id}/recap.json`` + file trên disk → dựng lại JobState.
+
+    Dùng sau khi server restart (state in-memory mất). overspeed không suy luận được
+    (cần re-run voice) → None. Trả None nếu không có recap.json.
+    """
+    rp = recap_path(job_id)
+    if not rp.exists():
+        return None
+    try:
+        recap = json.loads(rp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    n = len(_segments_flat(recap))
+    status, clips, final = _status_from_disk(job_id, n)
+    # youtube_url: ưu tiên field `youtube_url` (nếu có), fallback regex video_url.
+    url = str(recap.get("youtube_url") or recap.get("video_url") or "")
+    m = re.search(r"https?://[^\s\)\]]+watch\?v=[\w-]+", url)
+    job = JobState(
+        job_id=job_id,
+        youtube_url=m.group(0) if m else url,
+        status=status,
+        recap=recap,
+        clips=clips,
+        overspeed=None,
+        final=final,
+        job_dir=str(job_dir_of(job_id)),
+    )
+    state._JOBS[job_id] = job
+    return job
+
+
+def list_disk_jobs() -> list[str]:
+    """Scan ``Downloads/`` lấy các job_id có recap.json (chưa có trong memory)."""
+    if not DOWNLOADS_DIR.exists():
+        return []
+    out: list[str] = []
+    for p in sorted(DOWNLOADS_DIR.iterdir(), reverse=True):
+        if p.is_dir() and (p / "recap.json").exists() and p.name not in state._JOBS:
+            out.append(p.name)
+    return out
+
+
 def _do_cut(job: JobState) -> None:
-    """Sync: tải video → cut từng segment → xoá video.mp4 → lưu clips vào state."""
+    """Sync: tải video vào source/ → cut từng segment vào clips/ → giữ source (re-merge)."""
     recap = job.recap or {}
     segs = _segments_flat(recap)
     if not segs:
@@ -63,7 +151,7 @@ def _do_cut(job: JobState) -> None:
 
     jdir = job_dir_of(job.job_id)
     jdir.mkdir(parents=True, exist_ok=True)
-    video = download_video(job.youtube_url, jdir)
+    video = download_video(job.youtube_url, source_dir(job.job_id))
 
     clips: list[str] = []
     for i, seg in enumerate(segs):
@@ -73,12 +161,7 @@ def _do_cut(job: JobState) -> None:
         cut_segment(video, start, end, out)
         clips.append(out.name)
 
-    # Video full đã dùng xong — xoá để tránh ngốn disk (re-cut → re-download).
-    try:
-        video.unlink(missing_ok=True)
-    except OSError:
-        pass
-
+    # Giữ file nguồn (source/video.mp4) để R4 merge / re-cut khỏi re-download.
     state.update_job(job.job_id, job_dir=str(jdir), clips=clips)
 
 
@@ -101,4 +184,138 @@ async def cut(job_id: str) -> JobState:
         state.update_job(job_id, status="error", error=str(error))
         raise HTTPException(status_code=502, detail=str(error)) from error
     state.update_job(job_id, status="cut_done")
+    return state.get_job(job_id)
+
+
+def _do_voice(job: JobState, segs: list[dict], zip_bytes: bytes) -> list[int]:
+    """Sync: giải nén zip → từng vo_i.wav + manifest → atempo sync về duration_sec.
+
+    VO raw tạm (_tts_i.wav) ghi trong voice/, xoá sau khi sync. Trả list idx các đoạn
+    bị overspeed (factor ngoài [0.5,2.0]).
+    """
+    vdir = voice_dir(job.job_id)
+    vdir.mkdir(parents=True, exist_ok=True)
+
+    zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    manifest = json.loads(zf.read("manifest.json"))
+    dur_map = {int(it["index"]): float(it["duration"]) for it in manifest.get("items", [])}
+
+    overspeed_idx: list[int] = []
+    for i, seg in enumerate(segs):
+        raw_bytes = zf.read(f"vo_{i}.wav")
+        tmp_wav = vdir / f"_tts_{i}.wav"
+        tmp_wav.write_bytes(raw_bytes)
+
+        target = float(seg.get("duration_sec", 0.0) or 0.0)
+        tts_dur = dur_map.get(i, 0.0)
+        _, over = atempo_sync(tmp_wav, tts_dur, target, voice_path(job.job_id, i))
+        if over:
+            overspeed_idx.append(i)
+
+        tmp_wav.unlink(missing_ok=True)
+
+    return overspeed_idx
+
+
+async def voice(job_id: str, voice_id: str) -> JobState:
+    """Phase R3: TTS batch VO Việt (cloned voice) → atempo sync về duration_sec → voice_done.
+
+    Gate: cần status=cut_done (đã có clips). VO text lấy từ ``vietnamese_vo`` mỗi segment.
+    """
+    job = state.get_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy job — state in-memory, có thể server đã restart.",
+        )
+    if job.status != "cut_done" or not job.clips:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cần cut trước khi voice (status hiện tại: {job.status}).",
+        )
+
+    segs = _segments_flat(job.recap or {})
+    if not segs:
+        raise HTTPException(status_code=400, detail="Recap không có segment nào để voice.")
+
+    items = [{"text": (seg.get("vietnamese_vo") or "").strip()} for seg in segs]
+    missing = [i for i, it in enumerate(items) if not it["text"]]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Có segment thiếu vietnamese_vo: idx {missing[:8]}.",
+        )
+
+    voice_id = voice_id.strip()
+    if not voice_id:
+        raise HTTPException(status_code=400, detail="voice_id rỗng.")
+
+    state.update_job(job_id, status="voice_running", voice_id=voice_id)
+
+    try:
+        zip_bytes = await voice_client.tts_batch(items, voice_id)
+    except RuntimeError as error:
+        state.update_job(job_id, status="error", error=str(error))
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    try:
+        overspeed = await run_in_threadpool(_do_voice, job, segs, zip_bytes)
+    except RuntimeError as error:
+        state.update_job(job_id, status="error", error=str(error))
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    state.update_job(job_id, status="voice_done", overspeed=overspeed)
+    return state.get_job(job_id)
+
+
+def _do_merge(job: JobState, segs: list[dict]) -> None:
+    """Sync: mux từng clip+voice → seg_i.mp4 (merge/) → concat → final_recap.mp4."""
+    mdir = merge_dir(job.job_id)
+    mdir.mkdir(parents=True, exist_ok=True)
+
+    segments: list[Path] = []
+    for i, _seg in enumerate(segs):
+        clip = clip_path(job.job_id, i)
+        vo = voice_path(job.job_id, i)
+        if not clip.exists() or not clip.stat().st_size:
+            raise RuntimeError(f"clips/clip_{i}.mp4 chưa có — chạy cut trước.")
+        if not vo.exists() or not vo.stat().st_size:
+            raise RuntimeError(f"voice/voice_{i}.wav chưa có — chạy voice trước.")
+        out = segment_path(job.job_id, i)
+        mux_segment(clip, vo, out)
+        segments.append(out)
+
+    final = final_path(job.job_id)
+    concat_segments(segments, final, mdir)
+    state.update_job(job.job_id, final=final.name)
+
+
+async def merge(job_id: str) -> JobState:
+    """Phase R4: mux clip_i + voice_i → seg_i → concat → final_recap.mp4 → status merged.
+
+    Gate: cần status=voice_done (đã có clips + voice cho mọi segment).
+    """
+    job = state.get_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy job — state in-memory, có thể server đã restart.",
+        )
+    if job.status != "voice_done":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cần voice trước khi merge (status hiện tại: {job.status}).",
+        )
+
+    segs = _segments_flat(job.recap or {})
+    if not segs:
+        raise HTTPException(status_code=400, detail="Recap không có segment nào để merge.")
+
+    state.update_job(job_id, status="merge_running")
+    try:
+        await run_in_threadpool(_do_merge, job, segs)
+    except RuntimeError as error:
+        state.update_job(job_id, status="error", error=str(error))
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    state.update_job(job_id, status="merged")
     return state.get_job(job_id)

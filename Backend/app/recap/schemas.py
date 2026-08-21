@@ -9,3 +9,5 @@ class JobOut(BaseModel):
     error: str | None = None
     recap: dict | None = None
     clips: list[str] | None = None
+    overspeed: list[int] | None = None
+    final: str | None = None

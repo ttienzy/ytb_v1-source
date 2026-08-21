@@ -19,7 +19,7 @@ RESPONSE_TXT = ROOT / "response.txt"
 sys.path.insert(0, str(ROOT / "Backend"))
 
 from app.recap import service, state  # noqa: E402
-from app.recap.paths import job_dir_of  # noqa: E402
+from app.recap.paths import clips_dir, job_dir_of, source_dir  # noqa: E402
 
 
 def _load_recap() -> tuple[str, dict]:
@@ -45,14 +45,15 @@ async def main() -> None:
     print(f"[cut] status={result.status} | clips={len(result.clips or [])}")
 
     jdir = job_dir_of(job.job_id)
-    files = sorted(jdir.glob("clip_*.mp4"))
-    print(f"[verify] {jdir}")
-    for f in files:
-        print(f"   {f.name}  {f.stat().st_size / 1024:.0f} KB")
+    clips = sorted(clips_dir(job.job_id).glob("clip_*.mp4"))
+    src_video = source_dir(job.job_id) / "video.mp4"
+    print(f"[verify] {jdir} (source/ · clips/ · voice/)")
+    for f in clips:
+        print(f"   clips/{f.name}  {f.stat().st_size / 1024:.0f} KB")
     assert result.status == "cut_done", f"status sai: {result.status} err={result.error}"
-    assert len(files) == len(segs), f"số clip {len(files)} != segment {len(segs)}"
-    assert not (jdir / "video.mp4").exists(), "video.mp4 chưa bị xoá sau cut"
-    print(f"\n✅ R2 OK: {len(files)} clip, video.mp4 đã xoá.")
+    assert len(clips) == len(segs), f"số clip {len(clips)} != segment {len(segs)}"
+    assert src_video.exists(), "source/video.mp4 chưa có sau cut (file nguồn phải giữ lại)"
+    print(f"\n✅ R2 OK: {len(clips)} clip trong clips/, source/video.mp4 đã giữ.")
 
 
 if __name__ == "__main__":

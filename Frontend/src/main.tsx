@@ -1,6 +1,6 @@
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { CheckCircle2, ChevronDown, Clock3, Film, LayoutDashboard, Loader2, Menu, Mic, PanelLeftClose, Play, PlaySquare, Plus, Save, Scissors, Search, Settings, Sparkles, Trash2, Upload, Volume2 } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Clock3, Film, LayoutDashboard, Loader2, Menu, Mic, PanelLeftClose, Pause, Play, PlaySquare, Plus, Save, Scissors, Search, Settings, Sparkles, Trash2, Upload, Volume2 } from 'lucide-react'
 import './styles.css'
 
 const API_URL = 'http://127.0.0.1:8000'
@@ -126,7 +126,7 @@ type StudioJob = {
 type BackendSegment = { start_time_sec: number; end_time_sec: number; duration_sec: number; original_text: string; vietnamese_vo: string }
 type BackendScene = { scene_title?: string; segments: BackendSegment[] }
 type BackendRecap = { video_url?: string; scenes: BackendScene[] }
-type RecapJobOut = { job_id: string; youtube_url: string; status: string; error?: string | null; recap?: BackendRecap | null; clips?: string[] | null }
+type RecapJobOut = { job_id: string; youtube_url: string; status: string; error?: string | null; recap?: BackendRecap | null; clips?: string[] | null; overspeed?: number[] | null; final?: string | null }
 
 function fmtTime(sec: number) {
   const s = Math.max(0, Math.floor(sec || 0))
@@ -143,22 +143,72 @@ function mapRecap(job: RecapJobOut, voiceId: string): StudioJob {
   }))
   let i = 0
   scenes.forEach(sc => sc.segments.forEach(seg => { seg.idx = i++ }))
-  return { job_id: job.job_id, youtube_url: job.youtube_url, status: 'recap_done', voice_id: voiceId, scenes, overspeed: [], clips: [] }
+  // Dùng status/clips/overspeed thật từ BE (rehydrate sau restart trả đúng trạng thái trên disk).
+  return {
+    job_id: job.job_id,
+    youtube_url: job.youtube_url,
+    status: (job.status as StudioJob['status']) || 'recap_done',
+    voice_id: voiceId,
+    scenes,
+    overspeed: job.overspeed ?? [],
+    clips: job.clips ?? [],
+  }
 }
-
-const MOCK_VOICES = ['Adam', 'Trúc Ly', 'Ngọc Huyền', 'Minh Đức', 'Giọng review của tôi']
 
 function fmtDur(s: number) { return `${s.toFixed(1)}s` }
 
 function StudioPage() {
-  // recap đã nối BE thật (POST /api/recap/generate). cut/voice/merge vẫn mock — chờ R2/R3/R4.
+  // Toàn bộ 4 bước (recap + cut + voice + merge) đã nối BE thật.
   const [youtubeUrl, setYoutubeUrl] = useState('https://www.youtube.com/watch?v=oa4WoU-dm0o')
   const [rawFile, setRawFile] = useState<File | null>(null)
   const [job, setJob] = useState<StudioJob | null>(null)
-  const [voiceId, setVoiceId] = useState('Adam')
+  const [clonedVoices, setClonedVoices] = useState<Voice[]>([])
+  const [voiceId, setVoiceId] = useState('')
   const [busy, setBusy] = useState(false)
   const [recapError, setRecapError] = useState('')
   const [cutError, setCutError] = useState('')
+  const [voiceError, setVoiceError] = useState('')
+  const [mergeError, setMergeError] = useState('')
+  const [playingVo, setPlayingVo] = useState<number | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [recentJobs, setRecentJobs] = useState<RecapJobOut[]>([])
+  const [loadingRecent, setLoadingRecent] = useState(false)
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/voices`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('not ok'))))
+      .then((d) => {
+        const list: Voice[] = d.voices ?? d ?? []
+        setClonedVoices(list)
+        if (!voiceId && list.length) setVoiceId(list[0].voice_id)
+      })
+      .catch(() => setClonedVoices([]))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tải danh sách job gần đây (từ disk qua rehydrate) — chỉ khi chưa có job nào đang mở.
+  useEffect(() => {
+    if (job) return
+    setLoadingRecent(true)
+    fetch(`${API_URL}/api/recap/jobs`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('not ok'))))
+      .then((list: RecapJobOut[]) => setRecentJobs(Array.isArray(list) ? list : []))
+      .catch(() => setRecentJobs([]))
+      .finally(() => setLoadingRecent(false))
+  }, [job])
+
+  function openJob(j: RecapJobOut) {
+    stopVo()
+    setRecapError(''); setCutError(''); setVoiceError(''); setMergeError('')
+    setJob(mapRecap(j, voiceId || j.youtube_url))
+  }
+
+  function statusLabel(status: string) {
+    const m: Record<string, string> = {
+      recap_running: 'Đang recap', recap_done: 'Đã recap', cut_running: 'Đang cắt', cut_done: 'Đã cắt',
+      voice_running: 'Đang voice', voice_done: 'Đã voice', merge_running: 'Đang ghép', merged: 'Đã ghép xong', error: 'Lỗi',
+    }
+    return m[status] || status
+  }
 
   const allSegments = job ? job.scenes.flatMap(s => s.segments) : []
   const stepState = (k: 'recap' | 'cut' | 'voice' | 'merge') => {
@@ -173,7 +223,6 @@ function StudioPage() {
     return 'pending' as const
   }
 
-  function wait(ms: number) { return new Promise(r => setTimeout(r, ms)) }
   async function startRecap() {
     if (!youtubeUrl.trim()) { setRecapError('Dán link YouTube.'); return }
     if (!rawFile) { setRecapError('Cần tải file transcript (raw.txt).'); return }
@@ -209,9 +258,63 @@ function StudioPage() {
       setJob(j => j ? { ...j, status: 'recap_done' } : j) // revert để bật lại nút
     }
   }
-  async function voice() { setJob(j => j ? { ...j, status: 'voice_running' } : j); await wait(1300); setJob(j => j ? { ...j, status: 'voice_done', overspeed: [3] } : j) }
-  async function merge() { setJob(j => j ? { ...j, status: 'merge_running' } : j); await wait(1100); setJob(j => j ? { ...j, status: 'merged' } : j) }
-  function reset() { setJob(null); setRawFile(null) }
+  async function voice() {
+    if (!job || !voiceId) return
+    setVoiceError('')
+    setJob(j => j ? { ...j, status: 'voice_running' } : j)
+    try {
+      const r = await fetch(`${API_URL}/api/recap/voice`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: job.job_id, voice_id: voiceId }),
+      })
+      const data: RecapJobOut = await r.json()
+      if (!r.ok) throw new Error(data.error || data.detail || `Lỗi ${r.status}`)
+      setJob(j => j ? { ...j, status: 'voice_done', voice_id: voiceId, overspeed: data.overspeed ?? [] } : j)
+    } catch (e) {
+      setVoiceError(e instanceof Error ? e.message : 'Tạo voice thất bại.')
+      setJob(j => j ? { ...j, status: 'cut_done' } : j) // revert để bật lại nút
+    }
+  }
+  async function merge() {
+    if (!job) return
+    setMergeError('')
+    setJob(j => j ? { ...j, status: 'merge_running' } : j)
+    try {
+      const r = await fetch(`${API_URL}/api/recap/merge`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: job.job_id }),
+      })
+      const data: RecapJobOut = await r.json()
+      if (!r.ok) throw new Error(data.error || data.detail || `Lỗi ${r.status}`)
+      setJob(j => j ? { ...j, status: 'merged' } : j)
+    } catch (e) {
+      setMergeError(e instanceof Error ? e.message : 'Ghép video thất bại.')
+      setJob(j => j ? { ...j, status: 'voice_done' } : j) // revert để bật lại nút
+    }
+  }
+  function stopVo() { audioRef.current?.pause(); audioRef.current = null; setPlayingVo(null) }
+  async function toggleVo(idx: number) {
+    if (!job) return
+    const audio = audioRef.current
+    if (audio && playingVo === idx) { stopVo(); return } // đang phát đoạn này → bấm lại = dừng
+    audio?.pause()
+    setPlayingVo(idx)
+    try {
+      const r = await fetch(`${API_URL}/api/recap/jobs/${job.job_id}/voice/${idx}`)
+      if (!r.ok) { const e = await r.json().catch(() => null); throw new Error(e?.detail || `Lỗi ${r.status}`) }
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = audio ?? new Audio()
+      a.onended = () => { URL.revokeObjectURL(url); setPlayingVo(null) }
+      a.src = url
+      audioRef.current = a
+      await a.play()
+    } catch (e) {
+      setVoiceError(e instanceof Error ? e.message : `Phát vo_${idx}.wav thất bại.`)
+      setPlayingVo(null)
+    }
+  }
+  function reset() { stopVo(); setJob(null); setRawFile(null) }
 
   const steps = [
     { k: 'recap' as const, label: 'Tạo recap', icon: Sparkles },
@@ -224,7 +327,7 @@ function StudioPage() {
     <div className="settings-heading"><div>
       <p className="overline">YOUTUBE RECAP</p><h1>Studio</h1>
       <p className="page-subtitle">Tóm tắt video YouTube + lồng tiếng Việt — pipeline 4 bước.</p>
-      <span className="mock-badge">Recap đã nối BE · cut/voice/merge đang dựng</span>
+      <span className="mock-badge">Pipeline 4 bước đã nối BE · tải final_recap.mp4 khi ghép xong</span>
     </div></div>
 
     <div className="studio-stepper">
@@ -238,7 +341,8 @@ function StudioPage() {
     </div>
 
     {!job
-      ? <div className="settings-card">
+      ? <>
+        <div className="settings-card">
           <div className="integration-title"><div className="gemini-icon"><Upload size={17} /></div><div><h2>Bước 1 — Tạo recap</h2><p>Dán link YouTube + tải file transcript (raw.txt). Gemini phân tích → recap (giữ in-memory state).</p></div></div>
           <label>Link YouTube</label>
           <input value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=..." />
@@ -247,6 +351,28 @@ function StudioPage() {
           <div className="settings-actions"><button className="primary-button" onClick={startRecap} disabled={!youtubeUrl.trim() || !rawFile || busy}>{busy ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />} {busy ? 'Đang phân tích…' : 'Tạo recap'}</button></div>
           {recapError && <p className="settings-message">{recapError}</p>}
         </div>
+        {(recentJobs.length > 0 || loadingRecent) && <div className="settings-card" style={{ marginTop: 22 }}>
+          <div className="integration-title"><div className="gemini-icon"><Clock3 size={17} /></div><div><h2>Việc gần đây</h2><p>Các job đã tạo (tự khôi phục từ disk sau khi restart server). Bấm “Mở” để xem/tiếp tục.</p></div></div>
+          {loadingRecent && recentJobs.length === 0
+            ? <p className="settings-message">Đang tải việc gần đây…</p>
+            : recentJobs.length === 0
+              ? <p className="settings-message">Chưa có job nào trên disk.</p>
+              : <div className="voices-list">
+                  {recentJobs.map(j => {
+                    const n = (j.recap?.scenes ?? []).reduce((a, sc) => a + (sc.segments?.length ?? 0), 0)
+                    return <div key={j.job_id} className="voice-item">
+                      <div className="voice-item-info">
+                        <strong>{j.youtube_url || j.job_id}</strong>
+                        <span>{j.job_id} · {statusLabel(j.status)}{n ? ` · ${n} đoạn` : ''}{j.final ? ' · có final' : ''}</span>
+                      </div>
+                      <div className="voice-item-actions">
+                        <button className="primary-button" onClick={() => openJob(j)}><Play size={15} /> Mở</button>
+                      </div>
+                    </div>
+                  })}
+                </div>}
+        </div>}
+        </>
       : <>
         {/* recap result */}
         <div className="settings-card" style={{ marginTop: 22 }}>
@@ -273,24 +399,41 @@ function StudioPage() {
 
         {/* voice */}
         <div className="settings-card" style={{ marginTop: 22 }}>
-          <div className="integration-title"><div className="gemini-icon"><Mic size={17} /></div><div><h2>Bước 3 — Tạo voice</h2><p>Gom vietnamese_vo → /tts/batch → vo_i.wav + atempo sync theo duration_sec.</p></div></div>
-          <label>Chọn giọng</label>
-          <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)} disabled={stepState('voice') === 'done'}>
-            {MOCK_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
-          <div className="settings-actions"><button className="primary-button" onClick={voice} disabled={stepState('voice') === 'done' || stepState('voice') === 'running' || stepState('cut') !== 'done'}>{stepState('voice') === 'running' ? <Loader2 size={16} className="spin" /> : <Mic size={16} />} {stepState('voice') === 'done' ? 'Đã tạo voice xong' : stepState('voice') === 'running' ? 'Đang tạo voice…' : 'Tạo voice'}</button></div>
-          {stepState('voice') === 'done' && <div className="chips">{allSegments.map(s => <span key={s.idx} className={`chip ${job.overspeed.includes(s.idx) ? 'chip-warn' : ''}`}>🔊 vo_{s.idx}.wav{job.overspeed.includes(s.idx) ? ' · quá dài' : ''}</span>)}</div>}
+          <div className="integration-title"><div className="gemini-icon"><Mic size={17} /></div><div><h2>Bước 3 — Tạo voice</h2><p>Gom vietnamese_vo → /tts/batch (voice-service) → vo_i.wav + atempo sync theo duration_sec.</p></div></div>
+          <label>Chọn giọng <span>(chỉ giọng đã clone)</span></label>
+          {clonedVoices.length === 0
+            ? <p className="settings-message">Chưa có giọng clone — tạo ở trang Voices trước.</p>
+            : <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)} disabled={stepState('voice') === 'done'}>
+                {clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
+              </select>}
+          <div className="settings-actions"><button className="primary-button" onClick={voice} disabled={!voiceId || stepState('voice') === 'done' || stepState('voice') === 'running' || stepState('cut') !== 'done'}>{stepState('voice') === 'running' ? <Loader2 size={16} className="spin" /> : <Mic size={16} />} {stepState('voice') === 'done' ? 'Đã tạo voice xong' : stepState('voice') === 'running' ? 'Đang tạo voice…' : 'Tạo voice'}</button></div>
+          {stepState('voice') === 'running' && <p className="settings-message">Đang TTS {allSegments.length} đoạn + atempo sync (CPU/ONNX, có thể mất 1-2 phút)…</p>}
+          {voiceError && <p className="settings-message">{voiceError}</p>}
+          {stepState('voice') === 'done' && <div className="chips">{allSegments.map(s => {
+            const over = job.overspeed.includes(s.idx)
+            const isPlaying = playingVo === s.idx
+            return <button key={s.idx} className={`chip ${over ? 'chip-warn' : ''} ${isPlaying ? 'chip-active' : ''}`} onClick={() => toggleVo(s.idx)} title="Bấm để nghe thử">
+              {isPlaying ? <Pause size={13} /> : <Play size={13} />} vo_{s.idx}.wav{over ? ' · ép tốc độ' : ''}
+            </button>
+          })}</div>}
+          {stepState('voice') === 'done' && job.overspeed.length > 0 && <p className="settings-message">⚠ {job.overspeed.length} đoạn VO dài hơn 2× clip → atempo ép tốc độ nhiều (nghe có thể hơi nhanh).</p>}
         </div>
 
         {/* merge */}
         <div className="settings-card" style={{ marginTop: 22 }}>
-          <div className="integration-title"><div className="gemini-icon"><Film size={17} /></div><div><h2>Bước 4 — Ghép</h2><p>FFmpeg concat clip_i + vo_i đã sync → final_recap.mp4.</p></div></div>
-          <div className="settings-actions"><button className="primary-button" onClick={merge} disabled={stepState('merge') === 'done' || stepState('merge') === 'running' || stepState('voice') !== 'done'}>{stepState('merge') === 'running' ? <Loader2 size={16} className="spin" /> : <Film size={16} />} {stepState('merge') === 'merged' ? 'Đã ghép xong' : stepState('merge') === 'running' ? 'Đang ghép…' : 'Ghép video'}</button></div>
-          {stepState('merge') === 'merged' && <div className="studio-final">
-            <div className="final-placeholder"><Play size={40} /></div>
-            <div className="final-meta"><strong>final_recap.mp4</strong><span>{allSegments.length} đoạn · tổng ~{fmtDur(allSegments.reduce((a, s) => a + s.duration, 0))}</span></div>
-            <button className="chrome-button" onClick={reset}><Trash2 size={15} /> Bắt đầu lại</button>
-          </div>}
+          <div className="integration-title"><div className="gemini-icon"><Film size={17} /></div><div><h2>Bước 4 — Ghép</h2><p>Mux clip_i + vo_i → seg_i → concat (stream-copy) → final_recap.mp4.</p></div></div>
+          <div className="settings-actions"><button className="primary-button" onClick={merge} disabled={stepState('merge') === 'done' || stepState('merge') === 'running' || stepState('voice') !== 'done'}>{stepState('merge') === 'running' ? <Loader2 size={16} className="spin" /> : <Film size={16} />} {stepState('merge') === 'done' ? 'Đã ghép xong' : stepState('merge') === 'running' ? 'Đang ghép…' : 'Ghép video'}</button></div>
+          {stepState('merge') === 'running' && <p className="settings-message">Đang mux {allSegments.length} đoạn + concat (stream-copy, ~1-2 phút với video dài)…</p>}
+          {mergeError && <p className="settings-message">{mergeError}</p>}
+          {stepState('merge') === 'done' && job.job_id && <>
+            <div className="studio-final">
+              <video className="final-video" controls preload="metadata" src={`${API_URL}/api/recap/jobs/${job.job_id}/final`} />
+              <div className="final-meta"><strong>final_recap.mp4</strong><span>{allSegments.length} đoạn · ~{fmtDur(allSegments.reduce((a, s) => a + s.duration, 0))} · 1080p + VO Việt</span>
+                <a className="chrome-button" href={`${API_URL}/api/recap/jobs/${job.job_id}/final`} download="final_recap.mp4" style={{ textDecoration: 'none', display: 'inline-flex' }}><Upload size={15} /> Tải về</a>
+              </div>
+              <button className="chrome-button" onClick={reset}><Trash2 size={15} /> Bắt đầu lại</button>
+            </div>
+          </>}
         </div>
       </>}
   </section>

@@ -22,6 +22,8 @@ class JobState:
     raw_name: str | None = None
     job_dir: str | None = None  # thư mục media (Data/Downloads/{job_id}) — set khi R2 cut chạy
     clips: list[str] | None = None  # ["clip_0.mp4", ...] — tên file đoạn cắt (R2)
+    overspeed: list[int] | None = None  # idx các đoạn VO bị atempo ép tốc độ mạnh (R3)
+    final: str | None = None  # "final_recap.mp4" — tên file video cuối (R4)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
