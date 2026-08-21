@@ -1,0 +1,51 @@
+# ── Secrets / credentials (KHÔNG BAO GIỜ commit) ──
+Backend/Data/config.json
+Backend/Data/ChromeProfile/
+*.har
+.env
+.env.*
+*.pem
+*.key
+
+# ── Runtime data / output (sinh ra khi chạy) ──
+Backend/Data/*.txt
+Backend/Data/recap.json
+Data/app.db
+Data/jobs/
+Backend/Data/test_*.txt
+Backend/Data/*_response.txt
+Backend/Data/*_answer.txt
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+Backend/.venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Node / Frontend build ──
+node_modules/
+Frontend/out/
+Frontend/dist/
+Frontend/release/
+Desktop/node_modules/
+*.log
+npm-debug.log*
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*~

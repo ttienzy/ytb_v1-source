@@ -1,0 +1,11 @@
+{
+  "gemini": {
+    "cookies": "DÁN COOKIE TỪ gemini.google.com TẠI ĐÂY (định dạng: key1=val1; key2=val2; ...)",
+    "client_context_token": "(tuỳ chọn, chỉ cần khi upload FILE qua Gemini — lấy từ DevTools)",
+    "app_url": "https://gemini.google.com/app"
+  },
+  "google_chrome": {
+    "executable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "profile_dir": "Backend/Data/ChromeProfile"
+  }
+}
