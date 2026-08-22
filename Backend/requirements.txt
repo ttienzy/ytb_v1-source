@@ -6,3 +6,4 @@ python-multipart>=0.0.20
 sqlalchemy==2.0.46
 uvicorn[standard]==0.41.0
 playwright==1.62.0
+yt-dlp>=2026.8.20  # nightly: bản stable cũ bị YouTube 403/SABR — cần hỗ trợ visionos client + EJS solver

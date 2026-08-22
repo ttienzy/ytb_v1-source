@@ -10,11 +10,16 @@ Backend/Data/ChromeProfile/
 # ── Runtime data / output (sinh ra khi chạy) ──
 Backend/Data/*.txt
 Backend/Data/recap.json
+Backend/Data/Downloads/
 Data/app.db
 Data/jobs/
 Backend/Data/test_*.txt
 Backend/Data/*_response.txt
 Backend/Data/*_answer.txt
+
+# ── Local test inputs (recap fixtures — chuẩn bị local, không commit) ──
+/raw.txt
+/response.txt
 
 # ── Python ──
 __pycache__/

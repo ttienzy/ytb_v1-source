@@ -12,6 +12,7 @@ from app.core.config import settings
 TIMEOUT_REGISTER = 120  # add_voice extract speaker embedding có thể chậm với ref dài
 TIMEOUT_REMOVE = 30
 TIMEOUT_TTS = 300  # ONNX/CPU infer có thể chậm với text dài
+TIMEOUT_TTS_BATCH = 900  # 25 inferences tuần tự trên CPU — chậm nhất ~30-60p text dài
 
 
 def _client(timeout: float) -> httpx.AsyncClient:
@@ -67,3 +68,18 @@ async def preview_voice(voice_id: str, text: str | None = None) -> tuple[bytes, 
         if r.status_code >= 400:
             raise RuntimeError(f"voice-service preview failed ({r.status_code}): {r.text}")
         return r.content, r.headers.get("X-Audio-Duration")
+
+
+async def tts_batch(items: list[dict], voice_id: str) -> bytes:
+    """Forward → voice-service POST /tts/batch. Trả zip bytes ({vo_i.wav, manifest.json}).
+
+    ``items`` = [{"text": str}, ...] (voice_id truyền 1 lần ở batch level). manifest có
+    duration/đoạn để main backend tính atempo sync về đúng ``duration_sec`` của segment.
+    Dùng timeout dài (25 infer CPU tuần tự).
+    """
+    payload = {"items": items, "voice_id": voice_id, "temperature": 0.8, "max_chars": 256}
+    async with _client(TIMEOUT_TTS_BATCH) as client:
+        r = await client.post("/tts/batch", json=payload)
+        if r.status_code >= 400:
+            raise RuntimeError(f"voice-service tts/batch failed ({r.status_code}): {r.text}")
+        return r.content
