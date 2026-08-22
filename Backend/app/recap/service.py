@@ -20,7 +20,7 @@ from fastapi.concurrency import run_in_threadpool
 from app.core.config import TOOLS_DIR
 from app.ai.gemini.recap import RecapConfigError, generate_recap
 from app.recap import state
-from app.recap.ffmpeg import atempo_sync, concat_segments, cut_segment, mux_segment
+from app.recap.ffmpeg import concat_segments, cut_segment, ffprobe_duration, mux_segment
 from app.recap.paths import (
     DOWNLOADS_DIR,
     clip_path,
@@ -31,6 +31,7 @@ from app.recap.paths import (
     recap_path,
     segment_path,
     source_dir,
+    video_path,
     voice_dir,
     voice_path,
 )
@@ -188,10 +189,11 @@ async def cut(job_id: str) -> JobState:
 
 
 def _do_voice(job: JobState, segs: list[dict], zip_bytes: bytes) -> list[int]:
-    """Sync: giải nén zip → từng vo_i.wav + manifest → atempo sync về duration_sec.
+    """Sync: giải nén zip → vo_i.wav nguyên gốc (KHÔNG atempo kéo giãn).
 
-    VO raw tạm (_tts_i.wav) ghi trong voice/, xoá sau khi sync. Trả list idx các đoạn
-    bị overspeed (factor ngoài [0.5,2.0]).
+    VO giữ tốc độ đọc tự nhiên của TTS. Trả list idx các đoạn "low-coverage"
+    (voice_dur < 70% target) → R4 sẽ cắt clip ngắn theo voice, video bị lược bớt;
+    giọng nghe vẫn tự nhiên vì không nén/kéo. Idempotent: voice_i đã có → skip.
     """
     vdir = voice_dir(job.job_id)
     vdir.mkdir(parents=True, exist_ok=True)
@@ -200,21 +202,21 @@ def _do_voice(job: JobState, segs: list[dict], zip_bytes: bytes) -> list[int]:
     manifest = json.loads(zf.read("manifest.json"))
     dur_map = {int(it["index"]): float(it["duration"]) for it in manifest.get("items", [])}
 
-    overspeed_idx: list[int] = []
+    low_coverage_idx: list[int] = []
     for i, seg in enumerate(segs):
-        raw_bytes = zf.read(f"vo_{i}.wav")
-        tmp_wav = vdir / f"_tts_{i}.wav"
-        tmp_wav.write_bytes(raw_bytes)
+        out = voice_path(job.job_id, i)
+        if out.exists() and out.stat().st_size:
+            # idempotent skip (re-run sau retry TTS)
+            tts_dur = dur_map.get(i, 0.0)
+        else:
+            out.write_bytes(zf.read(f"vo_{i}.wav"))
+            tts_dur = dur_map.get(i, 0.0)
 
         target = float(seg.get("duration_sec", 0.0) or 0.0)
-        tts_dur = dur_map.get(i, 0.0)
-        _, over = atempo_sync(tmp_wav, tts_dur, target, voice_path(job.job_id, i))
-        if over:
-            overspeed_idx.append(i)
+        if target > 0 and 0 < tts_dur < target * 0.7:
+            low_coverage_idx.append(i)
 
-        tmp_wav.unlink(missing_ok=True)
-
-    return overspeed_idx
+    return low_coverage_idx
 
 
 async def voice(job_id: str, voice_id: str) -> JobState:
@@ -269,18 +271,43 @@ async def voice(job_id: str, voice_id: str) -> JobState:
 
 
 def _do_merge(job: JobState, segs: list[dict]) -> None:
-    """Sync: mux từng clip+voice → seg_i.mp4 (merge/) → concat → final_recap.mp4."""
+    """Sync: VO drives duration — re-cut clip_i theo voice_dur từ source → mux → concat.
+
+    KHÔNG kéo giãn voice. Voice_i.wav chạy tốc độ tự nhiên; clip_i được re-cut từ
+    ``source/video.mp4`` đúng ``[start, start+voice_dur]`` (mở rộng cho intro/outro,
+    lược bớt khi VO ngắn). Clamp về source_dur để không vượt quá video. Cuối cùng
+    mux clip+voice (``-shortest`` vô hại vì clip đã khớp voice) → seg_i → concat.
+    """
     mdir = merge_dir(job.job_id)
     mdir.mkdir(parents=True, exist_ok=True)
 
+    source = video_path(job.job_id)
+    if not source.exists() or not source.stat().st_size:
+        raise RuntimeError("source/video.mp4 chưa có — chạy cut trước.")
+    source_dur = ffprobe_duration(source)
+    if source_dur <= 0:
+        raise RuntimeError(f"Không đo được duration source video: {source}")
+
     segments: list[Path] = []
-    for i, _seg in enumerate(segs):
-        clip = clip_path(job.job_id, i)
+    for i, seg in enumerate(segs):
         vo = voice_path(job.job_id, i)
-        if not clip.exists() or not clip.stat().st_size:
-            raise RuntimeError(f"clips/clip_{i}.mp4 chưa có — chạy cut trước.")
         if not vo.exists() or not vo.stat().st_size:
             raise RuntimeError(f"voice/voice_{i}.wav chưa có — chạy voice trước.")
+        voice_dur = ffprobe_duration(vo)
+        if voice_dur <= 0:
+            raise RuntimeError(f"Không đo được duration voice_{i}.wav (ffprobe fail).")
+
+        start = max(0.0, float(seg.get("start_time_sec", 0.0) or 0.0))
+        end = min(start + voice_dur, source_dur)  # clamp: không vượt quá video gốc
+        clip = clip_path(job.job_id, i)
+        # Bỏ clip draft (cut theo target) → re-cut đúng voice_dur. Idempotent: cut_segment
+        # skip nếu file có, nên phải unlink để re-cut lấy duration mới.
+        if clip.exists():
+            clip.unlink()
+        cut_segment(source, start, end, clip)
+        if not clip.exists() or not clip.stat().st_size:
+            raise RuntimeError(f"re-cut clip_{i}.mp4 thất bại.")
+
         out = segment_path(job.job_id, i)
         mux_segment(clip, vo, out)
         segments.append(out)

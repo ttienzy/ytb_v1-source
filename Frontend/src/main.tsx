@@ -407,16 +407,16 @@ function StudioPage() {
                 {clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
               </select>}
           <div className="settings-actions"><button className="primary-button" onClick={voice} disabled={!voiceId || stepState('voice') === 'done' || stepState('voice') === 'running' || stepState('cut') !== 'done'}>{stepState('voice') === 'running' ? <Loader2 size={16} className="spin" /> : <Mic size={16} />} {stepState('voice') === 'done' ? 'Đã tạo voice xong' : stepState('voice') === 'running' ? 'Đang tạo voice…' : 'Tạo voice'}</button></div>
-          {stepState('voice') === 'running' && <p className="settings-message">Đang TTS {allSegments.length} đoạn + atempo sync (CPU/ONNX, có thể mất 1-2 phút)…</p>}
+          {stepState('voice') === 'running' && <p className="settings-message">Đang TTS {allSegments.length} đoạn (CPU/ONNX, có thể mất 1-2 phút)…</p>}
           {voiceError && <p className="settings-message">{voiceError}</p>}
           {stepState('voice') === 'done' && <div className="chips">{allSegments.map(s => {
             const over = job.overspeed.includes(s.idx)
             const isPlaying = playingVo === s.idx
             return <button key={s.idx} className={`chip ${over ? 'chip-warn' : ''} ${isPlaying ? 'chip-active' : ''}`} onClick={() => toggleVo(s.idx)} title="Bấm để nghe thử">
-              {isPlaying ? <Pause size={13} /> : <Play size={13} />} vo_{s.idx}.wav{over ? ' · ép tốc độ' : ''}
+              {isPlaying ? <Pause size={13} /> : <Play size={13} />} vo_{s.idx}.wav{over ? ' · ngắn quá' : ''}
             </button>
           })}</div>}
-          {stepState('voice') === 'done' && job.overspeed.length > 0 && <p className="settings-message">⚠ {job.overspeed.length} đoạn VO dài hơn 2× clip → atempo ép tốc độ nhiều (nghe có thể hơi nhanh).</p>}
+          {stepState('voice') === 'done' && job.overspeed.length > 0 && <p className="settings-message">⚠ {job.overspeed.length} đoạn VO ngắn hẳn so với clip → video bị cắt bớt (giọng đọc vẫn tự nhiên, không kéo giãn). Có thể tăng richness VO trong prompt nếu muốn giữ video.</p>}
         </div>
 
         {/* merge */}
