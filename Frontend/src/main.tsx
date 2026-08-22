@@ -159,7 +159,7 @@ function fmtDur(s: number) { return `${s.toFixed(1)}s` }
 
 function StudioPage() {
   // Toàn bộ 4 bước (recap + cut + voice + merge) đã nối BE thật.
-  const [youtubeUrl, setYoutubeUrl] = useState('https://www.youtube.com/watch?v=oa4WoU-dm0o')
+  const [youtubeUrl, setYoutubeUrl] = useState('')
   const [rawFile, setRawFile] = useState<File | null>(null)
   const [job, setJob] = useState<StudioJob | null>(null)
   const [clonedVoices, setClonedVoices] = useState<Voice[]>([])
@@ -325,9 +325,8 @@ function StudioPage() {
 
   return <section className="settings-page studio-page">
     <div className="settings-heading"><div>
-      <p className="overline">YOUTUBE RECAP</p><h1>Studio</h1>
+      <h1>Studio</h1>
       <p className="page-subtitle">Tóm tắt video YouTube + lồng tiếng Việt — pipeline 4 bước.</p>
-      <span className="mock-badge">Pipeline 4 bước đã nối BE · tải final_recap.mp4 khi ghép xong</span>
     </div></div>
 
     <div className="studio-stepper">
