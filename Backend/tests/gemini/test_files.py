@@ -9,7 +9,7 @@ CONFIG = r"D:\GOOGLE SEARCH\tools\Backend\Data\config.json"
 TEMPLATE_HAR = r"D:\GOOGLE SEARCH\tools\gemini.google.com.har"
 FILES = [
     r"D:\GOOGLE SEARCH\tools\raw.txt",
-    r"D:\GOOGLE SEARCH\tools\System Prompt YouTube Video Recap.txt",
+    r"D:\GOOGLE SEARCH\tools\Backend\prompts\System Prompt Food Review Recap.txt",
 ]
 PROMPT = "https://www.youtube.com/watch?v=oa4WoU-dm0o"
 
