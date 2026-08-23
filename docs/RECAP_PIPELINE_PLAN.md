@@ -51,7 +51,7 @@ lưu voice clone bền vững, cấu trúc đủ triển khai nội bộ. Tham k
 
 ### 2.1 Recap (Gemini) — ĐÃ CHẠY
 - Input: link YouTube + `raw.txt` + system prompt tại
-  `Backend/prompts/System Prompt YouTube Video Recap.txt`.
+  `Backend/prompts/System Prompt Food Review Recap.txt`.
 - Cơ chế đã chốt (HTTP thuần, không automation):
   - GET trang → 3 token fresh: `at` (SNlM0e), `bl` (cfb2h), `f.sid` (FdrFJe).
   - Upload file (resumable `push.clients6.google.com/upload/`): header cố định

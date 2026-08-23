@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "npm --prefix Desktop start"
+    "start": "node Desktop/dev.js"
   }
 }

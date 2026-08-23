@@ -52,6 +52,9 @@ ehthumbs.db
 # ── Reference clones (để đọc API, không commit) ──
 .ref/
 
+# ── Debug screenshots (artifact khi dev transcript/headless) ──
+Backend/_debug_*.png
+
 # ── IDE ──
 .idea/
 .vscode/

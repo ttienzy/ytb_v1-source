@@ -38,7 +38,7 @@ Bước 4 merge     → final_recap.mp4     (ffmpeg concat clip_i+vo_i)
 | --- | --- | --- |
 | Cơ chế Gemini HTTP (token fresh, f.req, StreamGenerate) | `tests/gemini/test_gemini_config.py` (đã validate HTTP 200) | Bước 1 (recap) — reference HTTP |
 | Recap thật (upload 2 file + attachments, `extract_recap_json`) | `tests/gemini/test_files.py` | Bước 1 — **port thành service** |
-| System prompt | `Backend/prompts/System Prompt YouTube Video Recap.txt` | Bước 1 (upload kèm) |
+| System prompt | `Backend/prompts/System Prompt Food Review Recap.txt` | Bước 1 (upload kèm) |
 | Inner template 97-pt + cookies (đã sanitize idx 3/4/59) | `Backend/Data/config.json` (`gemini.inner_template` + `cookies` + `user_agent`) | Bước 1 — **capture bởi `app/ai/gemini/capture.py`, không cần HAR** |
 | Settings/login + capture template Gemini | `app/ai/gemini/{router,service,schemas}.py` (login→cookies) + `app/ai/gemini/capture.py` (capture→inner_template) | Bước 1 — đọc/ghi `config.json` |
 | Voice-service (TTS) | `services/voice-service/` — `/tts`, `/tts/batch`, `/preview`, `/internal/voices/*` (Phase 1–3 đã xong) | Bước 3 |
