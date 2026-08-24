@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from app.config import settings
 from app.db import Base
 from app.voices import models as _voice_models  # noqa: F401 — register metadata cho autogenerate
+from app.media import models as _media_models  # noqa: F401 — register BgmTrack
 
 
 config = context.config

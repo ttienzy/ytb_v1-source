@@ -11,22 +11,28 @@ Endpoints:
 - GET  /api/recap/jobs/{id}/final     → video/mp4
 - GET  /api/recap/jobs                → list JobOut
 """
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from app.db import get_db
+from app.media.service import resolve_for_polish
 from app.recap import service, state
-from app.recap.paths import final_path, voice_path
+from app.recap.paths import final_path, final_studio_path, voice_path
 from app.recap.schemas import JobOut
+from app.recap.ytdlp import login_youtube, yt_login_status
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
 
 
 def _overall(job: state.JobState) -> str:
     """Tính overall status theo precedence."""
-    phases = [job.recap_status, job.cut_status, job.voice_status, job.merge_status]
+    phases = [job.recap_status, job.cut_status, job.voice_status, job.merge_status, job.polish_status]
     if any(p == "error" for p in phases):
         return "error"
+    if job.polish_status == "done":
+        return "polished"
     if job.merge_status == "done":
         return "merged"
     if any(p == "running" for p in phases):
@@ -44,11 +50,13 @@ def _to_out(job: state.JobState) -> JobOut:
         cut_status=job.cut_status,
         voice_status=job.voice_status,
         merge_status=job.merge_status,
+        polish_status=job.polish_status,
         overall=_overall(job),
         progress={
             "cut": job.progress_cut,
             "voice": job.progress_voice,
             "merge": job.progress_merge,
+            "polish": job.progress_polish,
         },
         created_at=job.created_at,
         updated_at=job.updated_at,
@@ -58,6 +66,8 @@ def _to_out(job: state.JobState) -> JobOut:
         clips=job.clips,
         overspeed=job.overspeed,
         final=job.final,
+        final_studio=job.final_studio,
+        credits=job.credits,
     )
 
 
@@ -76,6 +86,11 @@ class MergeRequest(BaseModel):
     job_id: str
 
 
+class PolishRequest(BaseModel):
+    bgm_ids: list[str] = []
+    volume: float = 0.15
+
+
 # ── 1-button run endpoint (Phase C) ─────────────────────────────────────────
 
 @router.post("/run", status_code=202)
@@ -83,16 +98,37 @@ async def run_pipeline(
     background_tasks: BackgroundTasks,
     youtube_url: str = Form(...),
     voice_id: str = Form(...),
+    bgm_ids: str = Form(""),
+    bgm_volume: float = Form(0.15),
     raw_file: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
 ):
-    """1-click: [fetch transcript] → generate → gather(cut, voice) song song → merge.
+    """1-click: [fetch transcript] → generate → gather(cut, voice) → merge → [polish BGM].
 
-    ``raw_file`` tùy chọn — để trống → backend tự fetch transcript từ YouTube
-    (Playwright get_panel). Trả 202 {job_id} ngay; frontend poll GET /jobs/{id}.
+    ``raw_file`` tùy chọn — để trống → backend tự fetch transcript từ YouTube.
+    ``bgm_ids`` = JSON string mảng track_id. Để trống → bỏ qua polish (output = final_recap.mp4).
+    Trả 202 {job_id}.
     """
     voice_id = voice_id.strip()
     if not voice_id:
         raise HTTPException(status_code=400, detail="voice_id rỗng.")
+
+    # Resolve BGM ids → paths + credits (router có db; service thuần ffmpeg).
+    polish_opts: dict | None = None
+    if bgm_ids.strip():
+        import json as _json
+        try:
+            ids = _json.loads(bgm_ids)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bgm_ids không phải JSON array hợp lệ.")
+        if not isinstance(ids, list) or not ids:
+            raise HTTPException(status_code=400, detail="bgm_ids rỗng hoặc không phải list.")
+        bgm_paths, credits = resolve_for_polish(db, ids)
+        polish_opts = {
+            "bgm_paths": [str(p) for p in bgm_paths],
+            "credits": credits,
+            "volume": bgm_volume,
+        }
 
     raw_bytes: bytes | None = None
     raw_name: str | None = None
@@ -103,7 +139,7 @@ async def run_pipeline(
         else:
             raw_name = raw_file.filename or "raw.txt"
 
-    job_id = await service.run(youtube_url, raw_bytes, raw_name, voice_id)
+    job_id = await service.run(youtube_url, raw_bytes, raw_name, voice_id, polish_opts)
     return JSONResponse({"job_id": job_id}, status_code=202)
 
 
@@ -136,6 +172,24 @@ async def voice(req: VoiceRequest) -> JobOut:
 @router.post("/merge", response_model=JobOut)
 async def merge(req: MergeRequest) -> JobOut:
     job = await service.merge(req.job_id)
+    return _to_out(job)
+
+
+@router.post("/jobs/{job_id}/polish", response_model=JobOut)
+async def polish_job(req: PolishRequest, job_id: str, db: Session = Depends(get_db)) -> JobOut:
+    """Manual polish — mix BGM dưới VO. Gate: merge_status=done. resolve trong router."""
+    job = state.get_job(job_id)
+    if job is None:
+        job = service.rehydrate(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
+    if not req.bgm_ids:
+        raise HTTPException(status_code=400, detail="Cần ít nhất 1 bgm_id.")
+    opts: dict = {"volume": req.volume}
+    bgm_paths, credits = resolve_for_polish(db, req.bgm_ids)
+    opts["bgm_paths"] = [str(p) for p in bgm_paths]
+    opts["credits"] = credits
+    job = await service.polish(job_id, opts)
     return _to_out(job)
 
 
@@ -180,6 +234,19 @@ def get_final(job_id: str):
     return FileResponse(p, media_type="video/mp4", filename=p.name)
 
 
+@router.get("/jobs/{job_id}/studio")
+def get_studio(job_id: str):
+    """Serve final_studio.mp4 (đã polish BGM) — FileResponse hỗ trợ range (seek)."""
+    if state.get_job(job_id) is None:
+        service.rehydrate(job_id)
+    if state.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
+    p = final_studio_path(job_id)
+    if not p.exists() or not p.stat().st_size:
+        raise HTTPException(status_code=404, detail="final_studio.mp4 chưa có — chạy polish trước.")
+    return FileResponse(p, media_type="video/mp4", filename=p.name)
+
+
 @router.get("/jobs", response_model=list[JobOut])
 def list_jobs() -> list[JobOut]:
     """List tất cả job (memory + disk rehydrate). Sort theo created_at desc."""
@@ -188,3 +255,17 @@ def list_jobs() -> list[JobOut]:
     jobs = state.list_jobs()
     jobs.sort(key=lambda j: j.created_at, reverse=True)
     return [_to_out(j) for j in jobs]
+
+
+# ── YouTube login (fallback cookies khi bị IP bot-wall) ───────────────────────
+
+@router.get("/yt/login")
+def yt_login_status_endpoint() -> dict:
+    """Trạng thái login YouTube — có cookies file (cho yt-dlp fallback) không."""
+    return yt_login_status()
+
+
+@router.post("/yt/login")
+def yt_login_endpoint() -> dict:
+    """Mở Chrome tới youtube.com để user login Google → xuất cookies cho yt-dlp."""
+    return login_youtube()

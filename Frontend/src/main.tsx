@@ -1,6 +1,6 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { AlertCircle, CheckCircle2, ChevronDown, Clock3, Download, Film, GitBranch, LayoutDashboard, Loader2, Menu, Mic, PanelLeftClose, Pause, Play, PlaySquare, Plus, Save, Scissors, Search, Settings, Sparkles, Trash2, Upload, Volume2, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, Clock3, Download, Film, GitBranch, LayoutDashboard, Loader2, Menu, Mic, Music, PanelLeftClose, Pause, Play, PlaySquare, Plus, Save, Scissors, Search, Settings, Sparkles, Trash2, Upload, Volume2, XCircle } from 'lucide-react'
 import './styles.css'
 
 const API_URL = 'http://127.0.0.1:8000'
@@ -8,19 +8,25 @@ const navigation = [
   { label: 'Dashboard', icon: LayoutDashboard },
   { label: 'Studio', icon: PlaySquare },
   { label: 'Voices', icon: Mic },
+  { label: 'Thư viện nhạc', icon: Music },
   { label: 'Lịch sử', icon: Clock3 },
   { label: 'Cài đặt', icon: Settings },
 ]
 
 type GeminiState = { has_cookie: boolean; cookie_count: number; saved_at?: string; client_context_token: string; app_url: string }
+type YtState = { logged_in: boolean; cookie_count: number; saved_at?: string | null }
 
 function SettingsPage() {
   const [state, setState] = useState<GeminiState>({ has_cookie: false, cookie_count: 0, client_context_token: '', app_url: 'https://gemini.google.com/app' })
   const [cookies, setCookies] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [yt, setYt] = useState<YtState>({ logged_in: false, cookie_count: 0 })
+  const [ytLoading, setYtLoading] = useState(false)
+  const [ytMsg, setYtMsg] = useState('')
 
   useEffect(() => { fetch(`${API_URL}/api/settings/gemini`).then((response) => response.json()).then(setState).catch(() => setMessage('Không kết nối được Backend.')) }, [])
+  useEffect(() => { fetch(`${API_URL}/api/recap/yt/login`).then((r) => r.json()).then(setYt).catch(() => {}) }, [])
 
   async function save() {
     setLoading(true); setMessage('')
@@ -41,11 +47,22 @@ function SettingsPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Đăng nhập thất bại.') } finally { setLoading(false) }
   }
 
-  return <section className="settings-page"><div className="settings-heading"><div><p className="overline">CẤU HÌNH</p><h1>Cài đặt</h1><p className="page-subtitle">Quản lý kết nối và thông tin xác thực cho các công cụ.</p></div></div><div className="settings-card"><div className="integration-title"><div className="gemini-icon"><Sparkles size={17} /></div><div><h2>Gemini (Highlight video)</h2><p>Dùng Gemini web bằng cookie (free) — dẫn cookie từ gemini.google.com</p></div></div><label>Cookies <span>(đã có — dán mới để đổi)</span></label><textarea value={cookies} onChange={(event) => setCookies(event.target.value)} placeholder={state.has_cookie ? '•••••••• (đã lưu)' : 'Dán cookie Gemini tại đây...'} /><div className="settings-grid"><div><label>Client context token <span>(chỉ cần khi upload FILE)</span></label><input value={state.client_context_token} onChange={(event) => setState({ ...state, client_context_token: event.target.value })} placeholder="...(lấy từ DevTools, link YouTube không cần)" /></div><div><label>App URL <span>(tùy chọn)</span></label><input value={state.app_url} onChange={(event) => setState({ ...state, app_url: event.target.value })} /></div></div><div className="settings-actions"><button className="primary-button" onClick={save} disabled={loading}><Save size={16} /> Lưu</button><button className="chrome-button" onClick={loginChrome} disabled={loading}><span className="chrome-logo">◉</span> Đăng nhập Gemini (Chrome)</button>{state.has_cookie && <span className="cookie-status"><CheckCircle2 size={15} /> Đã có cookie</span>}</div>{message && <p className="settings-message">{message}</p>}<p className="settings-help"><strong>Cách 1:</strong> bấm “Đăng nhập Gemini (Chrome)” → cửa sổ Chrome mở, đăng nhập Google 1 lần → tool tự lấy cookie (lần sau tự gia hạn). <strong>Cách 2:</strong> dán cookie thủ công ở trên.</p></div></section>
+  async function loginYt() {
+    setYtLoading(true); setYtMsg('Đang mở Chrome tới YouTube. Hãy đăng nhập Google (account KHÁC Gemini, không bị SABR để giữ 1080p)...')
+    try {
+      const response = await fetch(`${API_URL}/api/recap/yt/login`, { method: 'POST' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
+      setYt({ logged_in: true, cookie_count: result.cookie_count }); setYtMsg('Đã đăng nhập YouTube — cookies lưu để yt-dlp fallback khi bị bot-wall.')
+    } catch (error) { setYtMsg(error instanceof Error ? error.message : 'Đăng nhập thất bại.') } finally { setYtLoading(false) }
+  }
+
+  return <section className="settings-page"><div className="settings-heading"><div><p className="overline">CẤU HÌNH</p><h1>Cài đặt</h1><p className="page-subtitle">Quản lý kết nối và thông tin xác thực cho các công cụ.</p></div></div><div className="settings-card"><div className="integration-title"><div className="gemini-icon"><Sparkles size={17} /></div><div><h2>Gemini (Highlight video)</h2><p>Dùng Gemini web bằng cookie (free) — dẫn cookie từ gemini.google.com</p></div></div><label>Cookies <span>(đã có — dán mới để đổi)</span></label><textarea value={cookies} onChange={(event) => setCookies(event.target.value)} placeholder={state.has_cookie ? '•••••••• (đã lưu)' : 'Dán cookie Gemini tại đây...'} /><div className="settings-grid"><div><label>Client context token <span>(chỉ cần khi upload FILE)</span></label><input value={state.client_context_token} onChange={(event) => setState({ ...state, client_context_token: event.target.value })} placeholder="...(lấy từ DevTools, link YouTube không cần)" /></div><div><label>App URL <span>(tùy chọn)</span></label><input value={state.app_url} onChange={(event) => setState({ ...state, app_url: event.target.value })} /></div></div><div className="settings-actions"><button className="primary-button" onClick={save} disabled={loading}><Save size={16} /> Lưu</button><button className="chrome-button" onClick={loginChrome} disabled={loading}><span className="chrome-logo">◉</span> Đăng nhập Gemini (Chrome)</button>{state.has_cookie && <span className="cookie-status"><CheckCircle2 size={15} /> Đã có cookie</span>}</div>{message && <p className="settings-message">{message}</p>}<p className="settings-help"><strong>Cách 1:</strong> bấm “Đăng nhập Gemini (Chrome)” → cửa sổ Chrome mở, đăng nhập Google 1 lần → tool tự lấy cookie (lần sau tự gia hạn). <strong>Cách 2:</strong> dán cookie thủ công ở trên.</p></div><div className="settings-card" style={{ marginTop: 22 }}><div className="integration-title"><div className="gemini-icon"><Film size={17} /></div><div><h2>YouTube (tải video recap)</h2><p>Khi IP bị YouTube chặn bot (“Sign in to confirm”), yt-dlp tự fallback sang cookies account đã login. Profile riêng — không đụng Gemini.</p></div></div><div className="settings-actions"><button className="chrome-button" onClick={loginYt} disabled={ytLoading}><span className="chrome-logo">◉</span> {ytLoading ? 'Đang chờ đăng nhập...' : 'Đăng nhập YouTube (Chrome)'}</button>{yt.logged_in && <span className="cookie-status"><CheckCircle2 size={15} /> Đã có cookie{yt.cookie_count ? ` · ${yt.cookie_count}` : ''}{yt.saved_at ? ` · ${new Date(yt.saved_at).toLocaleString()}` : ''}</span>}</div>{ytMsg && <p className="settings-message">{ytMsg}</p>}<p className="settings-help">Mặc định tải KHÔNG dùng cookies (1080p). Chỉ khi bị bot-wall mới tự chuyển sang cookies. <strong>Dùng account Google khác (không bị thử nghiệm SABR) để giữ 1080p</strong> — account bị SABR sẽ ra 360p.</p></div></section>
 }
 
 type Voice = { voice_id: string; name: string; created_at?: string; tags?: string[] }
 type Preset = { name: string; description: string; gender: string }
+type BgmOut = { track_id: string; name: string; needs_attribution: boolean; description: string | null; duration_sec: number; created_at?: string }
 
 function VoicesPage() {
   const [voices, setVoices] = useState<Voice[]>([])
@@ -110,21 +127,147 @@ function VoicesPage() {
   return <section className="settings-page"><div className="settings-heading"><div><p className="overline">GIỌNG NÓI</p><h1>Voices</h1><p className="page-subtitle">Quản lý giọng đọc Việt cho recap — clone từ audio mẫu, chọn giọng khi TTS.</p></div></div><div className="settings-card"><div className="integration-title"><div className="gemini-icon"><Mic size={17} /></div><div><h2>Thêm giọng (voice clone)</h2><p>Tải audio mẫu 3-8 giây — VieNeu-TTS sẽ tự khử ồn rồi clone zero-shot.</p></div></div><label>Tên giọng</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="vd: Giọng review hài" /><label style={{ marginTop: 18 }}>Audio mẫu <span>(3-8s, wav/mp3)</span></label><div className="voice-file-row"><input type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /><span className="voice-file-name">{file ? file.name : 'Chưa chọn file'}</span></div><div className="settings-actions"><button className="primary-button" onClick={create} disabled={loading}><Plus size={16} /> Tạo giọng</button></div>{message && <p className="settings-message">{message}</p>}</div><div className="settings-card" style={{ marginTop: 22 }}><div className="integration-title"><div className="gemini-icon"><Play size={17} /></div><div><h2>Nghe thử</h2><p>Nhập text rồi bấm “Nghe thử” ở bất kỳ giọng nào dưới đây.</p></div></div><label>Text nghe thử <span>(để trống → câu mặc định)</span></label><input value={previewText} onChange={(e) => setPreviewText(e.target.value)} placeholder="vd: Xin chào, đây là giọng đọc thử." /></div><div className="settings-card" style={{ marginTop: 22 }}><div className="integration-title"><div className="gemini-icon"><Volume2 size={17} /></div><div><h2>Danh sách giọng (đã clone)</h2><p>Giọng bạn clone từ audio mẫu.</p></div></div>{voices.length === 0 ? <p className="settings-message">Chưa có giọng nào.</p> : <div className="voices-list">{voices.map((v) => <div key={v.voice_id} className="voice-item"><div className="voice-item-info"><strong>{v.name}</strong><span>{v.voice_id}{v.created_at ? ` · ${v.created_at}` : ''}</span></div><div className="voice-item-actions"><button className="primary-button" onClick={() => preview(v.voice_id)} disabled={previewing === v.voice_id}><Play size={15} /> {previewing === v.voice_id ? 'Đang tạo...' : 'Nghe thử'}</button><button className="chrome-button" onClick={() => remove(v.voice_id)}><Trash2 size={15} /> Xoá</button></div></div>)}</div>}</div><div className="settings-card" style={{ marginTop: 22 }}><div className="integration-title"><div className="gemini-icon"><Mic size={17} /></div><div><h2>Preset voices</h2><p>20 giọng sẵn dùng của VieNeu — không cần clone.</p></div></div>{presets.length === 0 ? <p className="settings-message">Chưa tải được preset (voice-service chưa chạy?).</p> : <div className="voices-list">{presets.map((p) => <div key={p.name} className="voice-item"><div className="voice-item-info"><strong>{p.name}</strong><span>{p.description}</span></div><div className="voice-item-actions"><button className="primary-button" onClick={() => preview(p.name)} disabled={previewing === p.name}><Play size={15} /> {previewing === p.name ? 'Đang tạo...' : 'Nghe thử'}</button></div></div>)}</div>}</div></section>
 }
 
+// ─── BgmPage (Thư viện nhạc) ─────────────────────────────────────────────────
+function BgmPage() {
+  const [tracks, setTracks] = useState<BgmOut[]>([])
+  const [name, setName] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [needsAttr, setNeedsAttr] = useState(false)
+  const [description, setDescription] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [message, setMessage] = useState('')
+  const [playing, setPlaying] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  function load() {
+    fetch(`${API_URL}/api/bgm`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((d: BgmOut[]) => setTracks(d))
+      .catch(() => setMessage('Không tải được thư viện nhạc.'))
+  }
+  useEffect(() => { load() }, []) // eslint-disable-line
+
+  async function create() {
+    if (!file || !name.trim()) { setMessage('Cần tên track và file audio.'); return }
+    setLoading(true); setMessage('')
+    const form = new FormData()
+    form.append('name', name.trim())
+    form.append('audio', file)
+    form.append('needs_attribution', String(needsAttr))
+    if (needsAttr && description.trim()) form.append('description', description.trim())
+    try {
+      const r = await fetch(`${API_URL}/api/bgm`, { method: 'POST', body: form })
+      if (!r.ok) { const e = await r.json().catch(() => null); throw new Error(e?.detail || `Lỗi ${r.status}`) }
+      const t: BgmOut = await r.json()
+      setTracks([t, ...tracks]); setName(''); setFile(null); setNeedsAttr(false); setDescription('')
+      setMessage('Đã thêm track.')
+    } catch (e) { setMessage(e instanceof Error ? e.message : 'Thêm track thất bại.') }
+    finally { setLoading(false) }
+  }
+
+  async function importFolder() {
+    const folder = window.prompt('Đường dẫn thư mục nhạc:', 'C:\\Users\\nguye\\Music\\music_no_copyright')
+    if (!folder) return
+    setImporting(true); setMessage('')
+    try {
+      const r = await fetch(`${API_URL}/api/bgm/import`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder }),
+      })
+      if (!r.ok) { const e = await r.json().catch(() => null); throw new Error(e?.detail || `Lỗi ${r.status}`) }
+      const imported: BgmOut[] = await r.json()
+      setMessage(`Đã nhập ${imported.length} track.`); load()
+    } catch (e) { setMessage(e instanceof Error ? e.message : 'Nhập thất bại.') }
+    finally { setImporting(false) }
+  }
+
+  async function remove(id: string) {
+    try {
+      const r = await fetch(`${API_URL}/api/bgm/${id}`, { method: 'DELETE' })
+      if (!r.ok) throw new Error()
+      setTracks(tracks.filter(t => t.track_id !== id))
+    } catch { setMessage('Xoá thất bại.') }
+  }
+
+  function stopPreview() { audioRef.current?.pause(); audioRef.current = null; setPlaying(null) }
+  function preview(id: string) {
+    if (playing === id) { stopPreview(); return }
+    stopPreview(); setPlaying(id)
+    const a = new Audio(`${API_URL}/api/bgm/${id}/audio`)
+    a.onended = () => { setPlaying(null) }
+    a.onerror = () => { setPlaying(null); setMessage('Không phát được audio.') }
+    audioRef.current = a; a.play().catch(() => setPlaying(null))
+  }
+
+  return <section className="settings-page">
+    <div className="settings-heading"><div>
+      <p className="overline">NHẠC NỀN</p><h1>Thư viện nhạc</h1>
+      <p className="page-subtitle">Nhạc không bản quyền — mix dưới VO khi tạo recap. Track cần ghi credit có badge CC BY.</p>
+    </div></div>
+
+    <div className="settings-card">
+      <div className="integration-title"><div className="gemini-icon"><Music size={17} /></div>
+        <div><h2>Thêm track</h2><p>Tải file audio + tên. Tick “cần credit” nếu track yêu cầu attribution (CC BY…).</p></div></div>
+      <label>Tên track</label>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="vd: carefree-by-kevin-macleod" />
+      <label style={{ marginTop: 18 }}>File audio <span>(mp3/wav)</span></label>
+      <div className="voice-file-row"><input type="file" accept="audio/*" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+        <span className="voice-file-name">{file ? file.name : 'Chưa chọn file'}</span></div>
+      <label style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={needsAttr} onChange={e => setNeedsAttr(e.target.checked)} style={{ width: 16, height: 16 }} />
+        Cần ghi credit (attribution)
+      </label>
+      {needsAttr && <><label style={{ marginTop: 14 }}>Credit text <span>(dán vào mô tả YouTube)</span></label>
+        <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3}
+          placeholder="vd: Carefree by Kevin MacLeod (incompetech.com) — Licensed under Creative Commons: By Attribution 4.0…" /></>}
+      <div className="settings-actions">
+        <button className="primary-button" onClick={create} disabled={loading}>
+          {loading ? <Loader2 size={16} className="spin" /> : <Plus size={16} />} Thêm track
+        </button>
+        <button className="chrome-button" onClick={importFolder} disabled={importing}>
+          {importing ? <Loader2 size={15} className="spin" /> : <Upload size={15} />} Nhập từ thư mục
+        </button>
+      </div>
+      {message && <p className="settings-message">{message}</p>}
+    </div>
+
+    <div className="settings-card" style={{ marginTop: 22 }}>
+      <div className="integration-title"><div className="gemini-icon"><Music size={17} /></div>
+        <div><h2>Danh sách track</h2><p>{tracks.length} track. Bấm ▶ để nghe thử.</p></div></div>
+      {tracks.length === 0
+        ? <p className="settings-message">Chưa có track nào — thêm thủ công hoặc “Nhập từ thư mục”.</p>
+        : <div className="voices-list">{tracks.map(t => <div key={t.track_id} className="voice-item">
+            <div className="voice-item-info">
+              <strong>{t.name}{t.needs_attribution && <span className="badge b-merged" style={{ marginLeft: 8, fontSize: 10, padding: '2px 7px' }}>CC BY</span>}</strong>
+              <span>{t.duration_sec ? `${t.duration_sec.toFixed(0)}s` : '—'}{t.needs_attribution && t.description ? ' · cần credit' : ' · không cần credit'}</span>
+            </div>
+            <div className="voice-item-actions">
+              <button className="primary-button" onClick={() => preview(t.track_id)}>
+                {playing === t.track_id ? <Pause size={15} /> : <Play size={15} />} {playing === t.track_id ? 'Dừng' : 'Nghe'}
+              </button>
+              <button className="chrome-button" onClick={() => remove(t.track_id)}><Trash2 size={15} /> Xoá</button>
+            </div>
+          </div>)}</div>}
+    </div>
+  </section>
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 type BackendSegment = { start_time_sec: number; end_time_sec: number; duration_sec: number; original_text: string; vietnamese_vo: string }
 type BackendScene = { scene_title?: string; segments: BackendSegment[] }
 type BackendRecap = { video_url?: string; scenes: BackendScene[] }
-
 /** JobOut mới — 4 per-phase status + overall + progress + timestamps */
 type JobOut = {
   job_id: string
   youtube_url: string
-  overall: string          // idle | running | recap_done | error | merged
+  overall: string          // idle | running | recap_done | error | merged | polished
   recap_status: string     // idle | running | done | error
   cut_status: string
   voice_status: string
   merge_status: string
-  progress: { cut: { done: number; total: number }; voice: { done: number; total: number; phase?: string }; merge: { done: number; total: number } }
+  polish_status: string    // idle | running | done | error (Phase R5)
+  progress: { cut: { done: number; total: number }; voice: { done: number; total: number; phase?: string }; merge: { done: number; total: number }; polish?: { done: number; total: number; step?: string } }
   created_at?: string
   updated_at?: string
   voice_id?: string | null
@@ -133,6 +276,8 @@ type JobOut = {
   clips?: string[] | null
   overspeed?: number[] | null
   final?: string | null
+  final_studio?: string | null
+  credits?: string | null
   // legacy compat
   detail?: string
 }
@@ -148,11 +293,12 @@ function fmtTs(iso?: string | null) {
 }
 
 // ─── Node icons helper ───────────────────────────────────────────────────────
-type NodeState = 'idle' | 'running' | 'done' | 'error'
+type NodeState = 'idle' | 'running' | 'done' | 'error' | 'skipped'
 function NodeIcon({ state, icon: Icon }: { state: NodeState; icon: React.ElementType }) {
   if (state === 'running') return <Loader2 size={22} className="spin" />
   if (state === 'done') return <CheckCircle2 size={22} />
   if (state === 'error') return <XCircle size={22} />
+  if (state === 'skipped') return <span className="n-skip">—</span>
   return <Icon size={20} />
 }
 
@@ -164,12 +310,12 @@ function PipelineNode({
   return <div className={`node ${st}`}>
     <div className="n-icon"><NodeIcon state={st} icon={Icon} /></div>
     <span className="n-label">{label}</span>
-    <span className="n-sub">{subLabel || (st === 'idle' ? 'Chờ…' : st === 'running' ? 'Đang chạy…' : st === 'done' ? 'Hoàn tất' : 'Lỗi')}</span>
+    <span className="n-sub">{subLabel || (st === 'idle' ? 'Chờ…' : st === 'running' ? 'Đang chạy…' : st === 'done' ? 'Hoàn tất' : st === 'skipped' ? 'Bỏ qua' : 'Lỗi')}</span>
     {st === 'running' && pct !== null && <div className="n-pbar"><i style={{ width: pct + '%' }} /></div>}
   </div>
 }
 
-function PipelineDiagram({ job, voiceId }: { job: JobOut; voiceId: string }) {
+function PipelineDiagram({ job, voiceId, polishEnabled }: { job: JobOut; voiceId: string; polishEnabled: boolean }) {
   const segs = (job.recap?.scenes ?? []).reduce((a, s) => a + (s.segments?.length ?? 0), 0)
   const p = job.progress ?? { cut: { done: 0, total: 0 }, voice: { done: 0, total: 0 }, merge: { done: 0, total: 0 } }
 
@@ -177,9 +323,13 @@ function PipelineDiagram({ job, voiceId }: { job: JobOut; voiceId: string }) {
   const cutState: NodeState = job.cut_status === 'done' ? 'done' : job.cut_status === 'running' ? 'running' : job.cut_status === 'error' ? 'error' : 'idle'
   const voiceState: NodeState = job.voice_status === 'done' ? 'done' : job.voice_status === 'running' ? 'running' : job.voice_status === 'error' ? 'error' : 'idle'
   const mergeState: NodeState = job.merge_status === 'done' ? 'done' : job.merge_status === 'running' ? 'running' : job.merge_status === 'error' ? 'error' : 'idle'
+  const polishState: NodeState = !polishEnabled
+    ? 'skipped'
+    : job.polish_status === 'done' ? 'done' : job.polish_status === 'running' ? 'running' : job.polish_status === 'error' ? 'error' : 'idle'
 
   const afterRecapDone = recapState === 'done'
   const bothDone = cutState === 'done' && voiceState === 'done'
+  const mergeDone = mergeState === 'done'
 
   const connCls = (active: boolean, done: boolean) =>
     `conn${done ? ' done' : active ? ' active' : ''}`
@@ -192,9 +342,12 @@ function PipelineDiagram({ job, voiceId }: { job: JobOut; voiceId: string }) {
   const subCut = cutState === 'running' && p.cut.total > 0 ? `Đang cắt ${p.cut.done}/${p.cut.total}` : cutState === 'done' ? `${p.cut.total} clip` : undefined
   const subVoice = voiceState === 'running' ? (p.voice.phase === 'unpack' ? `Giải nén ${p.voice.done}/${p.voice.total}` : `TTS đang tổng hợp…`) : voiceState === 'done' ? `${p.voice.total} VO` : undefined
   const subMerge = mergeState === 'running' && p.merge.total > 0 ? `Mux ${p.merge.done}/${p.merge.total}` : mergeState === 'done' ? 'final_recap.mp4' : undefined
+  const subPolish = polishState === 'running' ? 'Đang mix BGM…' : polishState === 'done' ? 'final_studio.mp4' : polishState === 'skipped' ? 'Không dùng' : undefined
 
   const statusText = (() => {
     if (job.overall === 'error') return `Lỗi: ${job.error ?? 'không xác định'}`
+    if (polishState === 'done') return '✅ Hoàn tất — final_studio.mp4 sẵn sàng tải về'
+    if (polishState === 'running') return 'Polish — đang mix nhạc nền dưới VO…'
     if (mergeState === 'done') return '✅ Hoàn tất — final_recap.mp4 sẵn sàng tải về'
     if (mergeState === 'running') return 'Ghép video — mux clip + VO → concat final…'
     if (cutState === 'running' || voiceState === 'running') return 'Cut & Voice đang chạy song song…'
@@ -202,12 +355,25 @@ function PipelineDiagram({ job, voiceId }: { job: JobOut; voiceId: string }) {
     return 'Đang khởi động pipeline…'
   })()
 
-  const dotCls = mergeState === 'done' ? 'dot done' : job.overall === 'error' ? 'dot err' : 'dot run'
+  const dotCls = polishState === 'done' ? 'dot done' : mergeState === 'done' ? 'dot done' : job.overall === 'error' ? 'dot err' : 'dot run'
+
+  const overallPct = (() => {
+    const sc = (s: NodeState) => s === 'done' ? 1 : s === 'running' ? 0.5 : 0
+    const denom = polishEnabled ? 5 : 4
+    const pts = sc(recapState) + sc(cutState) + sc(voiceState) + sc(mergeState) + (polishEnabled ? sc(polishState) : 0)
+    return Math.round(pts / denom * 100)
+  })()
 
   return <>
     <div className="pc-hdr">
-      <span className="title">Tiến trình pipeline</span>
-      <span className="jid">job: {job.job_id}</span>
+      <div className="pc-title-wrap">
+        <span className="title">Tiến trình pipeline</span>
+        <span className="jid">job: {job.job_id}</span>
+      </div>
+      <div className="pc-progress">
+        <span className="pc-pct">{overallPct}%</span>
+        <div className="pc-pbar"><i style={{ width: overallPct + '%' }} /></div>
+      </div>
     </div>
     <div className="flow">
       <PipelineNode label="Recap" state={recapState} icon={Sparkles} subLabel={subRecap} />
@@ -219,8 +385,10 @@ function PipelineDiagram({ job, voiceId }: { job: JobOut; voiceId: string }) {
         <PipelineNode label="Tạo voice" state={voiceState} icon={Mic} subLabel={subVoice} progress={voiceState === 'running' && p.voice.phase === 'unpack' ? p.voice : undefined} />
       </div>
       <div className={joinCls(afterRecapDone, bothDone)} />
-      <div className={connCls(bothDone, mergeState !== 'idle')} />
+      <div className={connCls(bothDone, mergeDone)} />
       <PipelineNode label="Ghép video" state={mergeState} icon={Film} subLabel={subMerge} progress={mergeState === 'running' ? p.merge : undefined} />
+      <div className={connCls(mergeDone, polishState !== 'idle' && polishState !== 'skipped')} />
+      <PipelineNode label="Polish" state={polishState} icon={Music} subLabel={subPolish} />
     </div>
     <div className="sbar">
       <span className={dotCls} />
@@ -229,12 +397,75 @@ function PipelineDiagram({ job, voiceId }: { job: JobOut; voiceId: string }) {
   </>
 }
 
+// ─── Video result card (Studio + History) ────────────────────────────────────
+function VideoResultCard({
+  jobId, variant, segments, scenes, overspeedCount, credits, onReset, compact,
+}: {
+  jobId: string
+  variant: 'polished' | 'merged'
+  segments: number
+  scenes: number
+  overspeedCount?: number | null
+  credits?: string | null
+  onReset?: () => void
+  compact?: boolean
+}) {
+  const polished = variant === 'polished'
+  const endpoint = polished ? 'studio' : 'final'
+  const filename = polished ? 'final_studio.mp4' : 'final_recap.mp4'
+  const Icon = polished ? Music : Film
+  const subtitle = polished
+    ? `${segments} đoạn · ${scenes} cảnh · 1080p · VO Việt + BGM`
+    : `${segments} đoạn · ${scenes} cảnh · 1080p · VO Việt`
+  const src = `${API_URL}/api/recap/jobs/${jobId}/${endpoint}`
+
+  return <div className={`vrc${compact ? ' vrc-compact' : ''}`}>
+    <div className="vrc-player">
+      <video className="vrc-video" src={src} controls preload="metadata" playsInline />
+      <div className="vrc-badge"><Icon size={13} /> {filename}</div>
+    </div>
+    <div className="vrc-side">
+      <div className="vrc-status">
+        <CheckCircle2 size={18} />
+        <div>
+          <strong>{filename} ✓</strong>
+          <span className="meta">{subtitle}</span>
+        </div>
+      </div>
+      {overspeedCount && overspeedCount > 0 && (
+        <p className="vrc-warn"><AlertCircle size={13} /> {overspeedCount} đoạn VO ngắn — xem lịch sử để nghe thử</p>
+      )}
+      <div className="vrc-actions">
+        <a className="btn-p vrc-dl" href={src} download={filename}>
+          <Download size={14} /> Tải về
+        </a>
+        {onReset && (
+          <button className="btn-g" onClick={onReset}>
+            <Trash2 size={14} /> Bắt đầu lại
+          </button>
+        )}
+      </div>
+      {credits && (
+        <div className="vrc-credit">
+          <div className="vrc-credit-hdr"><Sparkles size={14} /> Credit nhạc — dán vào mô tả YouTube</div>
+          <textarea readOnly value={credits} rows={4}
+            onClick={e => (e.target as HTMLTextAreaElement).select()} />
+        </div>
+      )}
+    </div>
+  </div>
+}
+
 // ─── StudioPage ──────────────────────────────────────────────────────────────
 function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [rawFile, setRawFile] = useState<File | null>(null)
   const [voiceId, setVoiceId] = useState('')
   const [clonedVoices, setClonedVoices] = useState<Voice[]>([])
+  const [bgmList, setBgmList] = useState<BgmOut[]>([])
+  const [bgmEnabled, setBgmEnabled] = useState(false)
+  const [bgmIds, setBgmIds] = useState<string[]>([])
+  const [bgmVolume, setBgmVolume] = useState(0.15)
   const [jobId, setJobId] = useState<string | null>(null)
   const [job, setJob] = useState<JobOut | null>(null)
   const [submitError, setSubmitError] = useState('')
@@ -243,11 +474,15 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Load voices on mount
+  // Load voices + bgm on mount
   useEffect(() => {
     fetch(`${API_URL}/api/voices`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => { const list: Voice[] = d.voices ?? d ?? []; setClonedVoices(list); if (!voiceId && list.length) setVoiceId(list[0].voice_id) })
+      .catch(() => {})
+    fetch(`${API_URL}/api/bgm`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((d: BgmOut[]) => setBgmList(d))
       .catch(() => {})
   }, []) // eslint-disable-line
 
@@ -259,7 +494,7 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
       const data: JobOut = await r.json()
       setJob(data)
       // Stop polling when pipeline fully done or error
-      if (data.overall === 'merged' || data.overall === 'error') {
+      if (data.overall === 'merged' || data.overall === 'polished' || data.overall === 'error') {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
       }
     } catch { /* network hiccup — keep polling */ }
@@ -275,6 +510,7 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
   async function startPipeline() {
     if (!youtubeUrl.trim()) { setSubmitError('Dán link YouTube.'); return }
     if (!voiceId) { setSubmitError('Chọn giọng trước.'); return }
+    if (bgmEnabled && bgmIds.length === 0) { setSubmitError('Bật nhạc nền thì chọn ít nhất 1 track.'); return }
     setSubmitError('')
     setSubmitting(true)
     setJob(null)
@@ -283,6 +519,10 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
       form.append('youtube_url', youtubeUrl.trim())
       form.append('voice_id', voiceId)
       if (rawFile) form.append('raw_file', rawFile)  // để trống → backend auto-fetch
+      if (bgmEnabled && bgmIds.length) {
+        form.append('bgm_ids', JSON.stringify(bgmIds))
+        form.append('bgm_volume', String(bgmVolume))
+      }
       const r = await fetch(`${API_URL}/api/recap/run`, { method: 'POST', body: form })
       const data = await r.json()
       if (!r.ok) throw new Error(data.detail || data.error || `Lỗi ${r.status}`)
@@ -326,32 +566,69 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
 
     {/* ── Input form ── */}
     <div className="settings-card" id="formCard">
-      <div className="fgrid">
-        <div className="field">
-          <label>Link YouTube</label>
-          <input value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)}
-            placeholder="https://www.youtube.com/watch?v=..." disabled={!!jobId} />
-        </div>
-        <div className="field">
-          <label>Voice</label>
-          {clonedVoices.length === 0
-            ? <p className="settings-message" style={{ marginTop: 4 }}>Chưa có giọng — tạo ở Voices trước.</p>
-            : <select value={voiceId} onChange={e => setVoiceId(e.target.value)} disabled={!!jobId}
-                style={{ width: '100%', height: 44, padding: '0 12px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 9, color: 'var(--text)', fontSize: 13 }}>
-                {clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
-              </select>}
-        </div>
-        <div className="field field-full">
-          <label>Raw transcript <span>(tùy chọn — để trống tự lấy transcript từ YouTube)</span></label>
-          <label className="file-trig" style={{ opacity: jobId ? 0.5 : 1, pointerEvents: jobId ? 'none' : 'auto' }}>
-            <Upload size={15} />
-            <span className="fname">{rawFile ? rawFile.name : 'Tự động lấy từ YouTube'}</span>
-            {rawFile && <span className="fsize">· {(rawFile.size / 1024).toFixed(0)} KB</span>}
-            <input type="file" accept=".txt" style={{ display: 'none' }} onChange={e => setRawFile(e.target.files?.[0] ?? null)} />
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--indigo2)' }}>{rawFile ? 'Đổi ↑' : 'Đính kèm riêng ↑'}</span>
-          </label>
+      <div className="fsection">
+        <p className="foverline">NGUỒN</p>
+        <div className="fgrid">
+          <div className="field">
+            <label>Link YouTube</label>
+            <input value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)}
+              placeholder="https://www.youtube.com/watch?v=..." disabled={!!jobId} />
+          </div>
+          <div className="field field-full">
+            <label>Raw transcript <span>(tùy chọn — để trống tự lấy transcript từ YouTube)</span></label>
+            <label className="file-trig" style={{ opacity: jobId ? 0.5 : 1, pointerEvents: jobId ? 'none' : 'auto' }}>
+              <Upload size={15} />
+              <span className="fname">{rawFile ? rawFile.name : 'Tự động lấy từ YouTube'}</span>
+              {rawFile && <span className="fsize">· {(rawFile.size / 1024).toFixed(0)} KB</span>}
+              <input type="file" accept=".txt" style={{ display: 'none' }} onChange={e => setRawFile(e.target.files?.[0] ?? null)} />
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--indigo2)' }}>{rawFile ? 'Đổi ↑' : 'Đính kèm riêng ↑'}</span>
+            </label>
+          </div>
         </div>
       </div>
+
+      <div className="fsection">
+        <p className="foverline">GIỌNG &amp; NHẠC</p>
+        <div className="fgrid">
+          <div className="field">
+            <label>Voice</label>
+            {clonedVoices.length === 0
+              ? <p className="settings-message" style={{ marginTop: 4 }}>Chưa có giọng — tạo ở Voices trước.</p>
+              : <select value={voiceId} onChange={e => setVoiceId(e.target.value)} disabled={!!jobId}
+                  style={{ width: '100%', height: 44, padding: '0 12px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 9, color: 'var(--text)', fontSize: 13 }}>
+                  {clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
+                </select>}
+          </div>
+          <div className="field field-full">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={bgmEnabled} onChange={e => setBgmEnabled(e.target.checked)} disabled={!!jobId} style={{ width: 16, height: 16 }} />
+              <Music size={15} /> Nhạc nền (BGM) <span style={{ fontWeight: 400, color: 'var(--text2)' }}>— mix dưới VO; chọn nhiều → tự nối theo thứ tự, video dài hơn sẽ lặp</span>
+            </label>
+            {bgmEnabled && (
+              <div className="bgm-body">
+                {bgmList.length === 0
+                  ? <p className="bgm-empty">Chưa có track — thêm ở “Thư viện nhạc”.</p>
+                  : <div className="chips">
+                      {bgmList.map(t => {
+                        const order = bgmIds.indexOf(t.track_id)
+                        const on = order >= 0
+                        return <button key={t.track_id} type="button" className={`chip${on ? ' chip-active' : ''}`} disabled={!!jobId}
+                          onClick={() => setBgmIds(prev => on ? prev.filter(x => x !== t.track_id) : [...prev, t.track_id])}>
+                          {on && <span className="chip-order">{order + 1}. </span>}{t.name}{t.duration_sec ? ` · ${t.duration_sec.toFixed(0)}s` : ''}{t.needs_attribution ? ' · CC' : ''}
+                        </button>
+                      })}
+                    </div>}
+                <label className="bgm-vol">
+                  <span className="bgm-vol-label">Volume: {(bgmVolume * 100).toFixed(0)}%</span>
+                  <input type="range" className="bgm-range" min={0} max={0.5} step={0.01} value={bgmVolume}
+                    onChange={e => setBgmVolume(parseFloat(e.target.value))} disabled={!!jobId} />
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="ff">
         {!jobId
           ? <button className="btn-p" onClick={startPipeline} disabled={submitting}>
@@ -365,15 +642,15 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
           <Clock3 size={14} /> Xem Lịch sử
         </button>
         {submitError && <span style={{ color: '#dc2626', fontSize: 12 }}><AlertCircle size={13} style={{ display: 'inline', marginRight: 4 }} />{submitError}</span>}
-        {job && !submitting && <span className="hint" style={{ marginLeft: 'auto', color: job.overall === 'error' ? '#dc2626' : job.overall === 'merged' ? '#16a34a' : '#6366f1' }}>
-          {job.overall === 'merged' ? '✅ Hoàn tất' : job.overall === 'error' ? '❌ Có lỗi' : '⟳ Đang chạy…'}
+        {job && !submitting && <span className="hint" style={{ marginLeft: 'auto', color: job.overall === 'error' ? '#dc2626' : job.overall === 'merged' || job.overall === 'polished' ? '#16a34a' : '#6366f1' }}>
+          {job.overall === 'polished' ? '✅ Hoàn tất (có BGM)' : job.overall === 'merged' ? '✅ Hoàn tất' : job.overall === 'error' ? '❌ Có lỗi' : '⟳ Đang chạy…'}
         </span>}
       </div>
     </div>
 
     {/* ── Pipeline diagram ── */}
     {job && <div className="pc">
-      <PipelineDiagram job={job} voiceId={voiceId} />
+      <PipelineDiagram job={job} voiceId={voiceId} polishEnabled={bgmEnabled && bgmIds.length > 0} />
 
       {/* Error detail */}
       {job.overall === 'error' && job.error && <div className="err-block">
@@ -381,24 +658,17 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
         <span>{job.error}</span>
       </div>}
 
-      {/* Final block */}
-      {job.overall === 'merged' && job.job_id && <div className="final-block">
-        <div className="fthumb"><Film size={36} /></div>
-        <div className="finfo">
-          <strong>final_recap.mp4 ✓</strong>
-          <span className="meta">{allSegs.length} đoạn · {job.recap?.scenes?.length ?? 0} cảnh · 1080p · VO Việt</span>
-          {job.overspeed && job.overspeed.length > 0 && <span style={{ fontSize: 11, color: 'var(--amber)' }}>⚠ {job.overspeed.length} đoạn VO ngắn — xem lịch sử để nghe thử</span>}
-          <div className="faction">
-            <a className="btn-p" href={`${API_URL}/api/recap/jobs/${job.job_id}/final`} download="final_recap.mp4"
-               style={{ height: 38, fontSize: 12, textDecoration: 'none' }}>
-              <Download size={14} /> Tải về
-            </a>
-            <button className="btn-g" onClick={reset} style={{ height: 38, fontSize: 12 }}>
-              <Trash2 size={14} /> Bắt đầu lại
-            </button>
-          </div>
-        </div>
-      </div>}
+      {/* Final block — polished (BGM) */}
+      {(job.overall === 'polished' || job.overall === 'merged') && job.job_id && (
+        <VideoResultCard
+          jobId={job.job_id}
+          variant={job.overall === 'polished' ? 'polished' : 'merged'}
+          segments={allSegs.length}
+          scenes={job.recap?.scenes?.length ?? 0}
+          overspeedCount={job.overspeed?.length}
+          credits={job.overall === 'polished' ? job.credits : null}
+          onReset={reset} />
+      )}
     </div>}
   </section>
 }
@@ -424,8 +694,8 @@ function HistoryPage() {
   }
   useEffect(() => { loadJobs() }, []) // eslint-disable-line
 
-  const overallLabel: Record<string, string> = { merged: 'Hoàn tất', running: 'Đang chạy', error: 'Lỗi', recap_done: 'Đã recap', idle: 'Chờ' }
-  const overallBadge: Record<string, string> = { merged: 'b-merged', running: 'b-running', error: 'b-error', recap_done: 'b-idle', idle: 'b-idle' }
+  const overallLabel: Record<string, string> = { merged: 'Hoàn tất', polished: 'BGM', running: 'Đang chạy', error: 'Lỗi', recap_done: 'Đã recap', idle: 'Chờ' }
+  const overallBadge: Record<string, string> = { merged: 'b-merged', polished: 'b-merged', running: 'b-running', error: 'b-error', recap_done: 'b-idle', idle: 'b-idle' }
 
   const filtered = jobs.filter(j =>
     j.youtube_url?.toLowerCase().includes(search.toLowerCase()) ||
@@ -554,20 +824,17 @@ function HistoryPage() {
               {/* Final video */}
               <div className="dsec mt">
                 <h3><Film size={13} /> Video cuối</h3>
-                {sel.final && sel.job_id
-                  ? <div className="fmini">
-                      <div className="fmthumb"><Film size={24} /></div>
-                      <div className="fminfo">
-                        <strong>final_recap.mp4</strong>
-                        <span>{segsOf(sel).length} đoạn · 1080p · VO Việt</span>
-                        <a href={`${API_URL}/api/recap/jobs/${sel.job_id}/final`} download="final_recap.mp4"
-                           className="btn-g" style={{ marginTop: 8, height: 34, fontSize: 11, width: 'fit-content', textDecoration: 'none' }}>
-                          <Download size={13} /> Tải về
-                        </a>
-                      </div>
-                    </div>
-                  : <p className="settings-message">Chưa có video cuối.</p>}
+                {sel.job_id && (sel.final_studio || sel.final) ? (
+                  <VideoResultCard
+                    jobId={sel.job_id}
+                    variant={sel.final_studio ? 'polished' : 'merged'}
+                    segments={segsOf(sel).length}
+                    scenes={sel.recap?.scenes?.length ?? 0}
+                    credits={sel.final_studio ? sel.credits : null}
+                    compact />
+                ) : <p className="settings-message">Chưa có video cuối.</p>}
               </div>
+
               <div style={{ height: 20 }} />
             </div>}
       </div>
@@ -579,7 +846,7 @@ function App() {
 
   const [activePage, setActivePage] = useState('Studio')
   const [collapsed, setCollapsed] = useState(false)
-  return <div className="app-shell"><aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}><div className="brand-row"><div className="brand-mark"><Sparkles size={17} /></div>{!collapsed && <span className="brand-name">Search Studio</span>}<button className="icon-button sidebar-toggle" onClick={() => setCollapsed(!collapsed)}>{collapsed ? <Menu size={18} /> : <PanelLeftClose size={18} />}</button></div><div className="workspace-select"><div className="workspace-avatar">S</div>{!collapsed && <><div className="workspace-copy"><span>Workspace</span><strong>Personal space</strong></div><ChevronDown size={15} /></>}</div><nav className="nav-list">{!collapsed && <span className="nav-label">MENU</span>}{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`} onClick={() => setActivePage(label)}><Icon size={18} /><span className={collapsed ? 'sr-only' : ''}>{label}</span></button>)}</nav><div className="sidebar-footer"><div className="profile-row"><div className="profile-avatar">A</div>{!collapsed && <div className="profile-copy"><strong>Admin</strong><span>admin@example.com</span></div>}</div></div></aside><main className="main-content"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{activePage}</strong></div><button className="help-button">?</button></header><div className="content-wrap">{activePage === 'Cài đặt' ? <SettingsPage /> : activePage === 'Voices' ? <VoicesPage /> : activePage === 'Studio' ? <StudioPage setActivePage={setActivePage} /> : activePage === 'Lịch sử' ? <HistoryPage /> : <section className="empty-state"><div className="empty-illustration"><Search size={34} /></div><h2>Chưa có dữ liệu</h2><p>Khu vực này đang được chuẩn bị.</p></section>}</div></main></div>
+  return <div className="app-shell"><aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}><div className="brand-row"><div className="brand-mark"><Sparkles size={17} /></div>{!collapsed && <span className="brand-name">Search Studio</span>}<button className="icon-button sidebar-toggle" onClick={() => setCollapsed(!collapsed)}>{collapsed ? <Menu size={18} /> : <PanelLeftClose size={18} />}</button></div><div className="workspace-select"><div className="workspace-avatar">S</div>{!collapsed && <><div className="workspace-copy"><span>Workspace</span><strong>Personal space</strong></div><ChevronDown size={15} /></>}</div><nav className="nav-list">{!collapsed && <span className="nav-label">MENU</span>}{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`} onClick={() => setActivePage(label)}><Icon size={18} /><span className={collapsed ? 'sr-only' : ''}>{label}</span></button>)}</nav><div className="sidebar-footer"><div className="profile-row"><div className="profile-avatar">A</div>{!collapsed && <div className="profile-copy"><strong>Admin</strong><span>admin@example.com</span></div>}</div></div></aside><main className="main-content"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{activePage}</strong></div><button className="help-button">?</button></header><div className="content-wrap">{activePage === 'Cài đặt' ? <SettingsPage /> : activePage === 'Voices' ? <VoicesPage /> : activePage === 'Thư viện nhạc' ? <BgmPage /> : activePage === 'Studio' ? <StudioPage setActivePage={setActivePage} /> : activePage === 'Lịch sử' ? <HistoryPage /> : <section className="empty-state"><div className="empty-illustration"><Search size={34} /></div><h2>Chưa có dữ liệu</h2><p>Khu vực này đang được chuẩn bị.</p></section>}</div></main></div>
 
 }
 

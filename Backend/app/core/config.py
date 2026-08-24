@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     config_file: Path = TOOLS_DIR / "Backend" / "Data" / "config.json"
     chrome_executable: Path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
     voice_service_url: str = "http://127.0.0.1:8001"  # voice-service (VieNeu-TTS) nội bộ
+    # Profile riêng cho YouTube login (KHÔNG dùng ChromeProfile của Gemini — tránh account
+    # bị SABR-only cướp 1080p, và để user login account khác không bị SABR). Cookie xuất ra
+    # yt_cookies_file (Netscape) cho yt-dlp fallback khi bị IP bot-wall. Xem [[ytdlp-youtube-block]].
+    yt_profile_dir: Path = TOOLS_DIR / "Backend" / "Data" / "YtProfile"
+    yt_cookies_file: Path = TOOLS_DIR / "Backend" / "Data" / "yt_cookies.txt"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

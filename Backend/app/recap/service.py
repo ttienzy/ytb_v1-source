@@ -28,14 +28,16 @@ from fastapi.concurrency import run_in_threadpool
 from app.core.config import TOOLS_DIR
 from app.ai.gemini.recap import RecapConfigError, generate_recap
 from app.recap import state
-from app.recap.ffmpeg import concat_segments, cut_segment, ffprobe_duration, mux_segment
+from app.recap.ffmpeg import concat_segments, cut_segment, ffprobe_duration, mux_segment, polish_final
 from app.recap.paths import (
     DOWNLOADS_DIR,
     clip_path,
     clips_dir,
     final_path,
+    final_studio_path,
     job_dir_of,
     merge_dir,
+    polish_dir,
     recap_path,
     segment_path,
     source_dir,
@@ -73,14 +75,18 @@ def _status_from_disk(job_id: str, n_segs: int) -> dict:
     has_voice = (voice_dir(job_id) / "voice_0.wav").exists()
     fp = final_path(job_id)
     has_final = fp.exists() and fp.stat().st_size > 0
+    sfp = final_studio_path(job_id)
+    has_studio = sfp.exists() and sfp.stat().st_size > 0
 
     return {
         "recap_status": "done",   # recap.json tồn tại nên luôn done
         "cut_status": "done" if has_clips else "idle",
         "voice_status": "done" if has_voice else "idle",
-        "merge_status": "done" if has_final else "idle",
+        "merge_status": "done" if (has_final or has_studio) else "idle",
+        "polish_status": "done" if has_studio else "idle",
         "clips": clips if has_clips else [],
         "final": "final_recap.mp4" if has_final else None,
+        "final_studio": "final_studio.mp4" if has_studio else None,
     }
 
 
@@ -190,10 +196,12 @@ def rehydrate(job_id: str) -> JobState | None:
         cut_status=disk["cut_status"],
         voice_status=disk["voice_status"],
         merge_status=disk["merge_status"],
+        polish_status=disk["polish_status"],
         recap=recap,
         clips=disk["clips"],
         overspeed=None,  # không suy luận được từ disk
         final=disk["final"],
+        final_studio=disk["final_studio"],
         job_dir=str(job_dir_of(job_id)),
     )
     if created_at:
@@ -429,13 +437,79 @@ async def merge(job_id: str) -> JobState:
     return state.get_job(job_id)
 
 
+# ── Phase R5: polish (BGM ducked dưới VO) ────────────────────────────────────
+
+def _do_polish(job: JobState, bgm_paths: list[Path], credits: str, volume: float) -> None:
+    """Sync: polish final_recap → final_studio (amix BGM + video copy, 1 pass nhanh).
+
+    Sau khi polish xong, xoá ``final_recap.mp4`` (bản trung gian không BGM) — chỉ giữ
+    1 file output khi BGM on. Khi BGM off, polish không chạy → final_recap là output cuối.
+    Rehydrate coi merge done khi (final_recap HOẶC final_studio) để xoá không vỡ restart.
+    """
+    src = final_path(job.job_id)
+    if not src.exists() or not src.stat().st_size:
+        raise RuntimeError("final_recap.mp4 chưa có — chạy merge trước.")
+    out = final_studio_path(job.job_id)
+    work = polish_dir(job.job_id)
+    polish_final(src, out, bgm_paths=bgm_paths or None, volume=volume, work_dir=work)
+    # Polish xong → xoá final_recap (chỉ còn final_studio). Bỏ qua nếu xoá lỗi (không fatal).
+    if out.exists() and out.stat().st_size:
+        try:
+            src.unlink()
+        except OSError:
+            pass
+    state.update_job(job.job_id, final=None, final_studio=out.name, credits=credits or None)
+
+
+async def polish(job_id: str, opts: dict) -> JobState:
+    """Phase R5 polish — gate: merge_status=done.
+
+    opts = {bgm_paths, credits?, volume?} — cần ít nhất 1 BGM track.
+    """
+    job = state.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
+    if job.merge_status != "done":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cần merge_done trước khi polish (merge_status={job.merge_status}).",
+        )
+    bgm_paths = [Path(p) for p in opts.get("bgm_paths", [])]
+    if not bgm_paths:
+        raise HTTPException(status_code=400, detail="polish: cần ít nhất 1 BGM track.")
+    credits = opts.get("credits", "") or ""
+    volume = float(opts.get("volume", 0.15))
+
+    state.update_job(
+        job_id,
+        polish_status="running",
+        progress_polish={"done": 0, "total": 1, "step": "encode"},
+        polish_opts=opts,
+        credits=credits or None,
+    )
+    try:
+        await run_in_threadpool(_do_polish, job, bgm_paths, credits, volume)
+    except RuntimeError as error:
+        state.update_job(job_id, polish_status="error", error=f"polish: {error}")
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    state.update_job(job_id, polish_status="done", progress_polish={"done": 1, "total": 1, "step": "done"})
+    return state.get_job(job_id)
+
+
 # ── Phase C: 1-button orchestration ─────────────────────────────────────────
 
-async def run(youtube_url: str, raw_bytes: bytes | None, raw_name: str | None, voice_id: str) -> str:
-    """Trigger toàn bộ pipeline: [fetch transcript] → generate → gather(cut, voice) → merge.
+async def run(
+    youtube_url: str,
+    raw_bytes: bytes | None,
+    raw_name: str | None,
+    voice_id: str,
+    polish_opts: dict | None = None,
+) -> str:
+    """Trigger toàn bộ pipeline: [fetch transcript] → generate → gather(cut, voice) → merge → [polish].
 
     Tạo job ngay + trả job_id (HTTP 202); pipeline chạy background asyncio task.
     ``raw_bytes`` None → tự fetch transcript từ YouTube qua Playwright (get_panel).
+    ``polish_opts`` không None → chạy R5 polish (BGM) sau khi merge xong.
     """
     youtube_url = youtube_url.strip()
     if not youtube_url:
@@ -445,13 +519,13 @@ async def run(youtube_url: str, raw_bytes: bytes | None, raw_name: str | None, v
         raise HTTPException(status_code=400, detail="voice_id rỗng.")
 
     job = state.create_job(youtube_url, raw_bytes=raw_bytes, raw_name=raw_name)
-    state.update_job(job.job_id, recap_status="running")
-    asyncio.create_task(_run_pipeline(job.job_id, voice_id))
+    state.update_job(job.job_id, recap_status="running", polish_opts=polish_opts)
+    asyncio.create_task(_run_pipeline(job.job_id, voice_id, polish_opts))
     return job.job_id
 
 
-async def _run_pipeline(job_id: str, voice_id: str) -> None:
-    """Background task: [fetch transcript] → generate → gather(cut, voice) → merge.
+async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = None) -> None:
+    """Background task: [fetch transcript] → generate → gather(cut, voice) → merge → [polish].
 
     return_exceptions=True: HTTPException trong gather thành value, không cancel sibling.
     Phase error được set bên trong cut()/voice() trước khi raise → state luôn consistent.
@@ -495,6 +569,10 @@ async def _run_pipeline(job_id: str, voice_id: str) -> None:
 
         # 4) Cả 2 thành công → merge.
         await merge(job_id)
+
+        # 5) Polish (BGM) nếu có polish_opts.
+        if polish_opts:
+            await polish(job_id, polish_opts)
 
     except Exception as exc:  # noqa: BLE001
         # Unexpected error thoát ra ngoài gather

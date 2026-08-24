@@ -1,6 +1,8 @@
 # ── Secrets / credentials (KHÔNG BAO GIỜ commit) ──
 Backend/Data/config.json
 Backend/Data/ChromeProfile/
+Backend/Data/YtProfile/
+Backend/Data/yt_cookies.txt
 *.har
 .env
 .env.*
@@ -10,6 +12,8 @@ Backend/Data/ChromeProfile/
 # ── Runtime data / output (sinh ra khi chạy) ──
 Backend/Data/*.txt
 Backend/Data/recap.json
+Backend/Data/app.db
+Backend/Data/media/
 Backend/Data/Downloads/
 Data/app.db
 Data/jobs/
