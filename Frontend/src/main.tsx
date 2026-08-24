@@ -459,6 +459,7 @@ function VideoResultCard({
 // ─── StudioPage ──────────────────────────────────────────────────────────────
 function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
   const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [rawText, setRawText] = useState('')
   const [rawFile, setRawFile] = useState<File | null>(null)
   const [voiceId, setVoiceId] = useState('')
   const [clonedVoices, setClonedVoices] = useState<Voice[]>([])
@@ -518,7 +519,8 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
       const form = new FormData()
       form.append('youtube_url', youtubeUrl.trim())
       form.append('voice_id', voiceId)
-      if (rawFile) form.append('raw_file', rawFile)  // để trống → backend auto-fetch
+      if (rawFile) form.append('raw_file', rawFile)  // file đính kèm → skip auto-fetch (ưu tiên)
+      else if (rawText.trim()) form.append('raw_text', rawText)  // dán text → skip auto-fetch
       if (bgmEnabled && bgmIds.length) {
         form.append('bgm_ids', JSON.stringify(bgmIds))
         form.append('bgm_volume', String(bgmVolume))
@@ -537,7 +539,7 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
   function reset() {
     audioRef.current?.pause(); audioRef.current = null; setPlayingVo(null)
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-    setJobId(null); setJob(null); setSubmitError(''); setRawFile(null); setYoutubeUrl('')
+    setJobId(null); setJob(null); setSubmitError(''); setRawText(''); setRawFile(null); setYoutubeUrl('')
   }
 
   function stopVo() { audioRef.current?.pause(); audioRef.current = null; setPlayingVo(null) }
@@ -575,14 +577,26 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
               placeholder="https://www.youtube.com/watch?v=..." disabled={!!jobId} />
           </div>
           <div className="field field-full">
-            <label>Raw transcript <span>(tùy chọn — để trống tự lấy transcript từ YouTube)</span></label>
-            <label className="file-trig" style={{ opacity: jobId ? 0.5 : 1, pointerEvents: jobId ? 'none' : 'auto' }}>
-              <Upload size={15} />
-              <span className="fname">{rawFile ? rawFile.name : 'Tự động lấy từ YouTube'}</span>
-              {rawFile && <span className="fsize">· {(rawFile.size / 1024).toFixed(0)} KB</span>}
-              <input type="file" accept=".txt" style={{ display: 'none' }} onChange={e => setRawFile(e.target.files?.[0] ?? null)} />
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--indigo2)' }}>{rawFile ? 'Đổi ↑' : 'Đính kèm riêng ↑'}</span>
-            </label>
+            <label>Raw transcript <span>(tùy chọn — đính kèm file hoặc dán text khi YouTube chặn tự lấy; để trống → tự fetch)</span></label>
+            <div className="raw-row">
+              <label className="file-trig" style={{ opacity: jobId ? 0.5 : 1, pointerEvents: jobId ? 'none' : 'auto' }}>
+                <Upload size={15} />
+                <span className="fname">{rawFile ? rawFile.name : 'Đính kèm raw.txt'}</span>
+                {rawFile && <span className="fsize">· {(rawFile.size / 1024).toFixed(0)} KB</span>}
+                <input type="file" accept=".txt,.json" style={{ display: 'none' }} onChange={e => setRawFile(e.target.files?.[0] ?? null)} />
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--indigo2)' }}>{rawFile ? 'Đổi ↑' : 'File ↑'}</span>
+              </label>
+              {rawFile && <button type="button" className="raw-clear" onClick={() => setRawFile(null)}>✕ huỷ file</button>}
+            </div>
+            <textarea
+              className="raw-input"
+              value={rawText}
+              onChange={e => setRawText(e.target.value)}
+              placeholder={rawFile ? 'Đã đính kèm file — text ở đây bị bỏ qua' : "Hoặc dán transcript tại đây (mỗi dòng [MM:SS] caption). Bỏ trống cả 2 → tự lấy từ YouTube."}
+              rows={3}
+              disabled={!!jobId || !!rawFile}
+            />
+            {(rawFile || rawText.trim()) && <span className="raw-hint">{rawFile ? `file ${rawFile.name} (${(rawFile.size/1024).toFixed(0)} KB)` : `${rawText.length.toLocaleString()} ký tự`} · sẽ skip auto-fetch</span>}
           </div>
         </div>
       </div>

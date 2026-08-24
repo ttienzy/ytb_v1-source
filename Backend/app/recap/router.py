@@ -101,11 +101,14 @@ async def run_pipeline(
     bgm_ids: str = Form(""),
     bgm_volume: float = Form(0.15),
     raw_file: UploadFile | None = File(None),
+    raw_text: str = Form(""),
     db: Session = Depends(get_db),
 ):
     """1-click: [fetch transcript] → generate → gather(cut, voice) → merge → [polish BGM].
 
-    ``raw_file`` tùy chọn — để trống → backend tự fetch transcript từ YouTube.
+    ``raw_file`` (file) hoặc ``raw_text`` (text dán) tùy chọn — để trống cả hai → backend tự
+    fetch transcript từ YouTube. Có ``raw_text`` ưu tiên cho UI dán transcript thủ công (dành
+    video bị attestation-wall không auto-fetch được). Backend tự chuẩn hoá JSON→text sạch.
     ``bgm_ids`` = JSON string mảng track_id. Để trống → bỏ qua polish (output = final_recap.mp4).
     Trả 202 {job_id}.
     """
@@ -138,6 +141,10 @@ async def run_pipeline(
             raw_bytes = None  # upload rỗng → coi như auto-fetch
         else:
             raw_name = raw_file.filename or "raw.txt"
+    elif raw_text.strip():
+        # UI dán transcript thủ công (text '[MM:SS] ...' hoặc JSON) — service sẽ chuẩn hoá.
+        raw_bytes = raw_text.strip().encode("utf-8")
+        raw_name = "raw.txt"
 
     job_id = await service.run(youtube_url, raw_bytes, raw_name, voice_id, polish_opts)
     return JSONResponse({"job_id": job_id}, status_code=202)

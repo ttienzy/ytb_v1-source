@@ -38,6 +38,7 @@ from app.recap.paths import (
     job_dir_of,
     merge_dir,
     polish_dir,
+    raw_path,
     recap_path,
     segment_path,
     source_dir,
@@ -46,7 +47,7 @@ from app.recap.paths import (
     voice_path,
 )
 from app.recap.state import JobState
-from app.recap.transcript import fetch_transcript_raw
+from app.recap.transcript import fetch_transcript_raw, transcript_to_text
 from app.recap.ytdlp import download_video
 from app.voices import voice_client
 
@@ -264,7 +265,7 @@ async def cut(job_id: str) -> JobState:
     state.update_job(job_id, cut_status="running")
     try:
         await run_in_threadpool(_do_cut, job)
-    except RuntimeError as error:
+    except Exception as error:  # noqa: BLE001 — bắt mọi lỗi để không stuck cut_status="running"
         state.update_job(job_id, cut_status="error", error=f"cut: {error}")
         raise HTTPException(status_code=502, detail=str(error)) from error
     state.update_job(job_id, cut_status="done")
@@ -546,8 +547,23 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
                     error=f"transcript: {exc}",
                 )
                 return
-            raw_bytes = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+            # Extract text sạch '[MM:SS] caption' (thay dump JSON 47KB) — payload nhỏ,
+            # deterministic, prompt chấp nhận text + MM:SS. Fallback JSON nếu không parse được.
+            raw_bytes = transcript_to_text(transcript).encode("utf-8")
             state.update_job(job_id, raw_bytes=raw_bytes, raw_name="raw.txt")
+        else:
+            # Raw do user đính kèm/dán thủ công → GIỮ NGUYÊN (user controls content, không
+            # normalize/mangle). Chỉ ghi ra file raw.txt rồi upload file đó đi.
+            raw_bytes = job.raw_bytes
+
+        # Persist raw ra file Downloads/{job_id}/raw.txt — upload file này đi (không giữ
+        # raw lớn trong memory), user có thể inspect lại raw thật sự gửi đi.
+        try:
+            rp = raw_path(job_id)
+            rp.parent.mkdir(parents=True, exist_ok=True)
+            rp.write_bytes(raw_bytes)
+        except OSError:
+            pass  # ghi file fail không fatal — vẫn upload raw_bytes
 
         # 2) Generate (Gemini) — recap_status error đã set bên trong nếu lỗi.
         try:

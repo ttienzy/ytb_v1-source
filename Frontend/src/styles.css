@@ -138,6 +138,15 @@ button.chip-active:hover { background: #4f46e5; }
 .file-trig:hover { border-color: #6366f1; background: #f5f4ff; }
 .file-trig .fname { font-size: 13px; color: #4a5568; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 280px; }
 .file-trig .fsize { font-size: 11px; color: #9aa5b5; }
+.raw-input { width: 100%; min-height: 88px; padding: 10px 14px; background: #f8f9fc; border: 1.5px dashed #d0d7e3; border-radius: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.5; color: var(--text); resize: vertical; transition: border-color .2s, background .2s; box-sizing: border-box; }
+.raw-input:focus { outline: none; border-color: #6366f1; background: #f5f4ff; }
+.raw-input::placeholder { color: #9aa5b5; }
+.raw-input:disabled { opacity: 0.5; cursor: not-allowed; }
+.raw-hint { font-size: 11px; color: var(--indigo2); font-weight: 600; }
+.raw-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.raw-row .file-trig { flex: 1; }
+.raw-clear { background: none; border: none; color: #e53e3e; font-size: 12px; font-weight: 600; cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: background .2s; white-space: nowrap; }
+.raw-clear:hover { background: #fef2f2; }
 .ff { display: flex; align-items: center; gap: 12px; padding-top: 6px; flex-wrap: wrap; }
 .hint { font-size: 12px; font-weight: 600; }
 

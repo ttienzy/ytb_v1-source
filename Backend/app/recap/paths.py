@@ -78,3 +78,9 @@ def polish_dir(job_id: str):
 def recap_path(job_id: str):
     """recap.json — lưu recap khi generate, để rehydrate job sau restart server."""
     return job_dir_of(job_id) / "recap.json"
+
+
+def raw_path(job_id: str):
+    """raw.txt — transcript gốc (user dán/đính kèm hoặc auto-fetch) đã chuẩn hoá,
+    persisted ra file để upload file đó đi (không giữ raw lớn trong memory)."""
+    return job_dir_of(job_id) / "raw.txt"
