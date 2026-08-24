@@ -18,6 +18,7 @@ TIMEOUT = 120  # mỗi đoạn — stream-copy rất nhanh; atempo re-encode aud
 TIMEOUT_MUX = 300  # mux 1 segment: video copy + audio aac, nhanh.
 TIMEOUT_CONCAT = 1800  # concat 25 segment (stream-copy) — có thể chậm với file lớn.
 TIMEOUT_PROBE = 30
+TIMEOUT_POLISH = 1800  # polish: BGM amix + video copy (KHÔNG re-encode video) — nhanh, vài giây.
 
 
 def ffprobe_duration(path: Path) -> float:
@@ -129,4 +130,79 @@ def concat_segments(segments: list[Path], out: Path, work_dir: Path) -> Path:
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_CONCAT)
     if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
         raise RuntimeError(f"ffmpeg concat thất bại: {(proc.stderr or '')[-500:]}")
+    return out
+
+
+def polish_final(
+    src: Path,
+    out: Path,
+    bgm_paths: list[Path] | None = None,
+    volume: float = 0.15,
+    work_dir: Path | None = None,
+) -> Path:
+    """Phase R5 — polish final_recap → final_studio.mp4 (mix BGM ducked dưới VO).
+
+    Chỉ động tới audio: BGM ``amix`` + ``-c:v copy`` (KHÔNG re-encode video) → rất
+    nhanh (~3s cho 1080p 221s). Watermark/drawtext đã bỏ (burn-in text bắt buộc re-encode
+    toàn frame video, chậm — user quyết định không cần). Xem memory [[recap-polish-encoder]].
+
+    BGM: >1 track → pre-concat (concat demuxer copy) → ``bgm_chain``. ``-stream_loop -1``
+    (lặp vô tận) + ``amix duration=first`` + ``-shortest`` → BGM phủ kín final.
+
+    Idempotent: skip nếu ``out`` đã có + size>0.
+    """
+    if out.exists() and out.stat().st_size:
+        return out
+    if not bgm_paths:
+        raise RuntimeError("polish_final: cần bgm_paths (ít nhất 1 track).")
+    # Resolve tuyệt đối (tránh phụ thuộc cwd của caller).
+    src = src.resolve()
+    out = out.resolve()
+    bgm_paths = [p.resolve() for p in bgm_paths]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if work_dir:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    wd = work_dir or out.parent
+
+    # 1. Pre-concat BGM chain (nếu >1 track)
+    if len(bgm_paths) > 1:
+        bgm_chain = wd / "bgm_chain.mp3"
+        if not (bgm_chain.exists() and bgm_chain.stat().st_size):
+            lst = wd / "bgm_concat_list.txt"
+            lines = [f"file '{p.as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'"
+                     for p in bgm_paths]
+            lst.write_text("\n".join(lines), encoding="utf-8")
+            cmd_chain = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(lst),
+                "-c", "copy",
+                str(bgm_chain),
+            ]
+            proc = subprocess.run(cmd_chain, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=TIMEOUT_CONCAT)
+            if proc.returncode != 0 or not bgm_chain.exists():
+                raise RuntimeError(f"ffmpeg BGM concat thất bại: {(proc.stderr or '')[-400:]}")
+        bgm_input = bgm_chain
+    else:
+        bgm_input = bgm_paths[0]
+
+    # 2. Mix pass: video copy + audio amix (BGM ducked dưới VO).
+    filter_complex = (
+        f"[1:a]volume={volume:.3f}[bg];"
+        "[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[a]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(src),
+        "-stream_loop", "-1", "-i", str(bgm_input),
+        "-filter_complex", filter_complex,
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+        str(out),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=TIMEOUT_POLISH)
+    if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
+        raise RuntimeError(f"ffmpeg polish thất bại: {(proc.stderr or '')[-500:]}")
     return out

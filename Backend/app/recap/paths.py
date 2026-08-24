@@ -65,6 +65,22 @@ def final_path(job_id: str):
     return job_dir_of(job_id) / "final_recap.mp4"
 
 
+def final_studio_path(job_id: str):
+    """Video đã polish (BGM/watermark) — final_studio.mp4 ở job root (Phase R5)."""
+    return job_dir_of(job_id) / "final_studio.mp4"
+
+
+def polish_dir(job_id: str):
+    """Intermediate R5: bgm chain concat list — job root / polish."""
+    return job_dir_of(job_id) / "polish"
+
+
 def recap_path(job_id: str):
     """recap.json — lưu recap khi generate, để rehydrate job sau restart server."""
     return job_dir_of(job_id) / "recap.json"
+
+
+def raw_path(job_id: str):
+    """raw.txt — transcript gốc (user dán/đính kèm hoặc auto-fetch) đã chuẩn hoá,
+    persisted ra file để upload file đó đi (không giữ raw lớn trong memory)."""
+    return job_dir_of(job_id) / "raw.txt"

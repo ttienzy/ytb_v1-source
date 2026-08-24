@@ -11,7 +11,8 @@ class JobOut(BaseModel):
     cut_status: str = "idle"
     voice_status: str = "idle"
     merge_status: str = "idle"
-    # Computed overall (idle | running | recap_done | error | merged)
+    polish_status: str = "idle"
+    # Computed overall (idle | running | recap_done | error | merged | polished)
     overall: str = "idle"
     # Progress per phase
     progress: dict = {}
@@ -25,3 +26,5 @@ class JobOut(BaseModel):
     clips: list[str] | None = None
     overspeed: list[int] | None = None
     final: str | None = None
+    final_studio: str | None = None
+    credits: str | None = None

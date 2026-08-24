@@ -25,10 +25,12 @@ class JobState:
     cut_status: str = "idle"
     voice_status: str = "idle"
     merge_status: str = "idle"
+    polish_status: str = "idle"  # Phase R5 (BGM/watermark hậu xử lý)
     # ── Per-phase progress ──
     progress_cut: dict = field(default_factory=lambda: {"done": 0, "total": 0})
     progress_voice: dict = field(default_factory=lambda: {"done": 0, "total": 0, "phase": "tts"})
     progress_merge: dict = field(default_factory=lambda: {"done": 0, "total": 0})
+    progress_polish: dict = field(default_factory=lambda: {"done": 0, "total": 1, "step": "encode"})
     # ── Payload ──
     recap: dict | None = None
     voice_id: str | None = None
@@ -39,6 +41,9 @@ class JobState:
     clips: list[str] | None = None   # ["clip_0.mp4", ...] — tên file (Phase B cut)
     overspeed: list[int] | None = None  # idx VO bị nén mạnh (Phase B voice)
     final: str | None = None         # "final_recap.mp4" (Phase B merge)
+    final_studio: str | None = None  # "final_studio.mp4" (Phase R5 polish)
+    polish_opts: dict | None = None  # snapshot opts lúc trigger (bgm_ids, volume...)
+    credits: str | None = None       # credit text BGM (để FE show dán lên YouTube)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -54,9 +59,11 @@ def create_job(youtube_url: str, raw_bytes: bytes | None = None, raw_name: str |
         cut_status="idle",
         voice_status="idle",
         merge_status="idle",
+        polish_status="idle",
         progress_cut={"done": 0, "total": 0},
         progress_voice={"done": 0, "total": 0, "phase": "tts"},
         progress_merge={"done": 0, "total": 0},
+        progress_polish={"done": 0, "total": 1, "step": "encode"},
         raw_bytes=raw_bytes,
         raw_name=raw_name,
     )
