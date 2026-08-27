@@ -14,12 +14,16 @@ Backend/Data/*.txt
 Backend/Data/recap.json
 Backend/Data/app.db
 Backend/Data/media/
+Backend/Data/watermark/
 Backend/Data/Downloads/
-Data/app.db
-Data/jobs/
+Desktop/Data/
+Data/
 Backend/Data/test_*.txt
 Backend/Data/*_response.txt
 Backend/Data/*_answer.txt
+1.txt
+raw_test.txt
+Frontend/electron.vite.config.*.mjs
 
 # ── Local test inputs (recap fixtures — chuẩn bị local, không commit) ──
 /raw.txt

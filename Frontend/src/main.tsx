@@ -1,6 +1,6 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { AlertCircle, CheckCircle2, ChevronDown, Clock3, Download, Film, GitBranch, LayoutDashboard, Loader2, Menu, Mic, Music, PanelLeftClose, Pause, Play, PlaySquare, Plus, Save, Scissors, Search, Settings, Sparkles, Trash2, Upload, Volume2, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, Clock3, Download, Eraser, FileVideo, Film, FolderOpen, GitBranch, LayoutDashboard, Loader2, Menu, Mic, Music, PanelLeftClose, Pause, Play, PlaySquare, Plus, RefreshCw, Save, Scissors, Search, Settings, Sparkles, Trash2, Upload, Volume2, XCircle } from 'lucide-react'
 import './styles.css'
 
 const API_URL = 'http://127.0.0.1:8000'
@@ -9,6 +9,7 @@ const navigation = [
   { label: 'Studio', icon: PlaySquare },
   { label: 'Voices', icon: Mic },
   { label: 'Thư viện nhạc', icon: Music },
+  { label: 'Xóa Watermark', icon: Eraser },
   { label: 'Lịch sử', icon: Clock3 },
   { label: 'Cài đặt', icon: Settings },
 ]
@@ -26,7 +27,7 @@ function SettingsPage() {
   const [ytMsg, setYtMsg] = useState('')
 
   useEffect(() => { fetch(`${API_URL}/api/settings/gemini`).then((response) => response.json()).then(setState).catch(() => setMessage('Không kết nối được Backend.')) }, [])
-  useEffect(() => { fetch(`${API_URL}/api/recap/yt/login`).then((r) => r.json()).then(setYt).catch(() => {}) }, [])
+  useEffect(() => { fetch(`${API_URL}/api/recap/yt/login`).then((r) => r.json()).then(setYt).catch(() => { }) }, [])
 
   async function save() {
     setLoading(true); setMessage('')
@@ -238,19 +239,527 @@ function BgmPage() {
       {tracks.length === 0
         ? <p className="settings-message">Chưa có track nào — thêm thủ công hoặc “Nhập từ thư mục”.</p>
         : <div className="voices-list">{tracks.map(t => <div key={t.track_id} className="voice-item">
-            <div className="voice-item-info">
-              <strong>{t.name}{t.needs_attribution && <span className="badge b-merged" style={{ marginLeft: 8, fontSize: 10, padding: '2px 7px' }}>CC BY</span>}</strong>
-              <span>{t.duration_sec ? `${t.duration_sec.toFixed(0)}s` : '—'}{t.needs_attribution && t.description ? ' · cần credit' : ' · không cần credit'}</span>
-            </div>
-            <div className="voice-item-actions">
-              <button className="primary-button" onClick={() => preview(t.track_id)}>
-                {playing === t.track_id ? <Pause size={15} /> : <Play size={15} />} {playing === t.track_id ? 'Dừng' : 'Nghe'}
-              </button>
-              <button className="chrome-button" onClick={() => remove(t.track_id)}><Trash2 size={15} /> Xoá</button>
-            </div>
-          </div>)}</div>}
+          <div className="voice-item-info">
+            <strong>{t.name}{t.needs_attribution && <span className="badge b-merged" style={{ marginLeft: 8, fontSize: 10, padding: '2px 7px' }}>CC BY</span>}</strong>
+            <span>{t.duration_sec ? `${t.duration_sec.toFixed(0)}s` : '—'}{t.needs_attribution && t.description ? ' · cần credit' : ' · không cần credit'}</span>
+          </div>
+          <div className="voice-item-actions">
+            <button className="primary-button" onClick={() => preview(t.track_id)}>
+              {playing === t.track_id ? <Pause size={15} /> : <Play size={15} />} {playing === t.track_id ? 'Dừng' : 'Nghe'}
+            </button>
+            <button className="chrome-button" onClick={() => remove(t.track_id)}><Trash2 size={15} /> Xoá</button>
+          </div>
+        </div>)}</div>}
     </div>
   </section>
+}
+
+// ─── WatermarkPage (Xóa Watermark Gemini SynthID) ───────────────────────────
+type WatermarkVideoItem = {
+  name: string
+  size_bytes: number
+  status: 'pending' | 'running' | 'done' | 'error'
+  output_name?: string | null
+  error?: string | null
+  processed_frames?: number | null
+  frame_estimate?: number | null
+}
+
+type WatermarkBatchJob = {
+  job_id: string
+  status: 'idle' | 'running' | 'done' | 'error'
+  total: number
+  done: number
+  failed: number
+  videos: WatermarkVideoItem[]
+  created_at: string
+  updated_at: string
+}
+
+type QueuedFile = {
+  path: string       // đường dẫn native hoặc tên file
+  name: string
+  size: number
+  file?: File        // File object từ browser (cho upload mode)
+}
+
+function fmtBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+}
+
+function WatermarkPage() {
+  const [cliOk, setCliOk] = useState<boolean | null>(null)
+  const [cliMsg, setCliMsg] = useState('')
+  const [queue, setQueue] = useState<QueuedFile[]>([])
+  const [currentJob, setCurrentJob] = useState<WatermarkBatchJob | null>(null)
+  const [historyJobs, setHistoryJobs] = useState<WatermarkBatchJob[]>([])
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const pollTimerRef = useRef<any>(null)
+
+  // Check CLI status
+  const checkCli = useCallback(() => {
+    fetch(`${API_URL}/api/watermark/check`)
+      .then(r => r.json())
+      .then(data => {
+        setCliOk(data.gwr_available)
+        setCliMsg(data.message)
+      })
+      .catch(() => {
+        setCliOk(false)
+        setCliMsg('Không thể kết nối với Backend service.')
+      })
+  }, [])
+
+  // Load Job History
+  const loadHistory = useCallback(() => {
+    fetch(`${API_URL}/api/watermark/jobs`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((jobs: WatermarkBatchJob[]) => setHistoryJobs(jobs))
+      .catch(() => { })
+  }, [])
+
+  useEffect(() => {
+    checkCli()
+    loadHistory()
+  }, [checkCli, loadHistory])
+
+  // Polling current job
+  useEffect(() => {
+    if (!currentJob || currentJob.status === 'done' || currentJob.status === 'error') {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+      setIsProcessing(false)
+      return
+    }
+
+    setIsProcessing(true)
+    pollTimerRef.current = setInterval(() => {
+      fetch(`${API_URL}/api/watermark/jobs/${currentJob.job_id}`)
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then((updated: WatermarkBatchJob) => {
+          setCurrentJob(updated)
+          if (updated.status === 'done' || updated.status === 'error') {
+            clearInterval(pollTimerRef.current)
+            setIsProcessing(false)
+            loadHistory()
+          }
+        })
+        .catch(() => { })
+    }, 1000)
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    }
+  }, [currentJob?.job_id, currentJob?.status, loadHistory])
+
+  // Helper lấy đường dẫn native từ Electron Desktop
+  function getNativeFilePath(f: File): string {
+    try {
+      if ((window as any).desktop?.getPathForFile) {
+        const p = (window as any).desktop.getPathForFile(f)
+        if (p) return p
+      }
+    } catch (e) {
+      console.warn('getPathForFile failed:', e)
+    }
+    return (f as any).path || ''
+  }
+
+  // Add files to queue
+  function handleAddFiles(files: FileList | File[] | null) {
+    if (!files || files.length === 0) return
+    setErrorMsg('')
+    const newItems: QueuedFile[] = []
+
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]
+      const nativePath = getNativeFilePath(f)
+      if (f.name.toLowerCase().endsWith('.mp4') || nativePath.toLowerCase().endsWith('.mp4')) {
+        if (!queue.some(q => q.name === f.name)) {
+          newItems.push({
+            path: nativePath || f.name,
+            name: f.name,
+            size: f.size || 0,
+            file: f,  // Lưu File object để upload sau
+          })
+        }
+      }
+    }
+
+    if (newItems.length > 0) {
+      setQueue(prev => [...prev, ...newItems])
+    }
+  }
+
+  // Import by direct path (prompt) — hỗ trợ cả file và thư mục
+  function handleImportPath() {
+    const entered = window.prompt(
+      'Nhập đường dẫn file MP4 hoặc thư mục chứa video:',
+      'C:\\Users\\nguye\\Videos\\fl1\\Cooking_beef_fried_rice_202608232323.mp4'
+    )
+    if (!entered) return
+    setErrorMsg('')
+    const trimmed = entered.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
+    if (trimmed) {
+      const name = trimmed.split(/[\\/]/).pop() || trimmed
+      if (!queue.some(q => q.path === trimmed)) {
+        setQueue(prev => [...prev, { path: trimmed, name, size: 0 }])
+      }
+    }
+  }
+
+  // Start processing — auto-detect upload mode vs path mode
+  async function handleStartProcess() {
+    if (queue.length === 0) return
+    setErrorMsg('')
+    setIsProcessing(true)
+
+    try {
+      // Detect mode: nếu có File object → upload mode, còn không → path mode
+      const hasFileObjects = queue.some(q => q.file)
+      const hasValidPaths = queue.some(q => q.path && q.path !== q.name && !q.path.includes(' '))
+
+      let res: Response
+      let data: any
+
+      if (hasFileObjects && !hasValidPaths) {
+        // ═══ UPLOAD MODE (Web Browser) ═══
+        const formData = new FormData()
+        for (const item of queue) {
+          if (item.file) {
+            formData.append('files', item.file)
+          }
+        }
+
+        res = await fetch(`${API_URL}/api/watermark/upload`, {
+          method: 'POST',
+          body: formData,
+        })
+      } else {
+        // ═══ PATH MODE (Electron or manual path) ═══
+        res = await fetch(`${API_URL}/api/watermark/process`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: queue.map(q => q.path) }),
+        })
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => null)
+        throw new Error(err?.detail || `Lỗi ${res.status}`)
+      }
+
+      data = await res.json()
+
+      // Initial fetch of job
+      const jobRes = await fetch(`${API_URL}/api/watermark/jobs/${data.job_id}`)
+      if (jobRes.ok) {
+        const jobData = await jobRes.json()
+        setCurrentJob(jobData)
+      } else {
+        setCurrentJob({
+          job_id: data.job_id,
+          status: 'running',
+          total: data.total,
+          done: 0,
+          failed: 0,
+          videos: queue.map(q => ({ name: q.name, size_bytes: q.size, status: 'pending' })),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+      setQueue([])
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Khởi động xóa watermark thất bại.')
+      setIsProcessing(false)
+    }
+  }
+
+  return (
+    <section className="settings-page wm-page">
+      <div className="settings-heading wm-heading">
+        <div>
+          <p className="overline">GEMINI SYNTHID</p>
+          <h1>Xóa Watermark</h1>
+          <p className="page-subtitle">
+            Tự động phát hiện và xóa biểu tượng watermark ✦ SynthID khỏi video gốc bằng AI Inpainting.
+          </p>
+        </div>
+      </div>
+
+      {/* CLI Check Banner */}
+      {cliOk !== null && (
+        <div className={`wm-cli-banner ${cliOk ? 'wm-cli-ok' : 'wm-cli-error'}`}>
+          {cliOk ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          <span>{cliMsg}</span>
+          {!cliOk && <span className="wm-cli-cmd">npm install -g @pilio/gemini-watermark-remover</span>}
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="err-block">
+          <AlertCircle size={15} />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {/* Active Job Progress Card */}
+      {currentJob && (
+        <div className="wm-progress-card">
+          <div className="wm-prog-header">
+            <div className="wm-queue-label">
+              <Film size={16} />
+              <span>Tiến trình xử lý — Job <code style={{ color: '#6366f1' }}>{currentJob.job_id}</code></span>
+            </div>
+            <span className={`wm-badge wm-badge-${currentJob.status}`}>
+              {currentJob.status === 'running' && <Loader2 size={12} className="spin" />}
+              {currentJob.status === 'running' ? 'Đang xử lý' : currentJob.status === 'done' ? 'Hoàn thành' : currentJob.status === 'error' ? 'Có lỗi' : 'Chờ'}
+            </span>
+            {currentJob.failed > 0 && (
+              <span className="wm-prog-fail">{currentJob.failed} file lỗi</span>
+            )}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+              {currentJob.done > 0 && (
+                <a
+                  href={`${API_URL}/api/watermark/download-all/${currentJob.job_id}`}
+                  download={`watermark_clean_${currentJob.job_id}.zip`}
+                  className="primary-button"
+                  style={{ minHeight: 32, height: 32, fontSize: 12, padding: '0 12px', textDecoration: 'none', background: '#16a34a' }}
+                  title="Tải toàn bộ các video sạch trong job này về máy dưới dạng 1 file ZIP"
+                >
+                  <Download size={14} /> Tải tất cả ({currentJob.done} video ZIP)
+                </a>
+              )}
+              <button
+                className="wm-new-btn"
+                onClick={() => { setCurrentJob(null); setQueue([]) }}
+              >
+                + Mẻ mới
+              </button>
+            </div>
+          </div>
+
+          <div className="wm-prog-bar-wrap">
+            <div
+              className="wm-prog-bar"
+              style={{ width: `${currentJob.total > 0 ? ((currentJob.done + currentJob.failed) / currentJob.total) * 100 : 0}%` }}
+            />
+          </div>
+
+          <div className="wm-prog-pct">
+            {currentJob.done}/{currentJob.total} video hoàn thành ({currentJob.total > 0 ? Math.round(((currentJob.done) / currentJob.total) * 100) : 0}%)
+          </div>
+
+          {/* Videos in this job */}
+          <div className="wm-list" style={{ marginTop: 14 }}>
+            {currentJob.videos.map((v, i) => (
+              <div key={i} className={`wm-item wm-item-${v.status}`}>
+                <FileVideo size={16} className="wm-file-icon" />
+                <div className="wm-item-info">
+                  <div className="wm-item-name">{v.name}</div>
+                  <div className="wm-item-size">
+                    {fmtBytes(v.size_bytes)}
+                    {v.output_name && ` → fl1_clean/${v.output_name}`}
+                  </div>
+                </div>
+                <div className="wm-item-status">
+                  {v.status === 'pending' && <span className="wm-st wm-st-pending">Đang chờ</span>}
+                  {v.status === 'running' && (
+                    <span className="wm-st wm-st-running">
+                      <Loader2 size={13} className="spin" />
+                      {v.processed_frames != null
+                        ? `${v.processed_frames}${v.frame_estimate ? `/${v.frame_estimate}` : ''} frames`
+                        : 'Đang xóa...'}
+                    </span>
+                  )}
+                  {v.status === 'done' && (
+                    <span className="wm-st wm-st-done">
+                      <CheckCircle2 size={13} /> Sạch 100%
+                    </span>
+                  )}
+                  {v.status === 'error' && (
+                    <span className="wm-st wm-st-error" title={v.error || 'Lỗi xử lý'}>
+                      <XCircle size={13} /> Lỗi
+                    </span>
+                  )}
+                  {v.status === 'done' && (
+                    <a
+                      href={`${API_URL}/api/watermark/download/${currentJob.job_id}/${encodeURIComponent(v.name)}`}
+                      download={v.name}
+                      className="wm-dl"
+                      title="Tải video sạch về máy"
+                    >
+                      <Download size={14} />
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Upload / Queue Card */}
+      {!currentJob && (
+        <div className="settings-card">
+          <div className="integration-title">
+            <div className="gemini-icon">
+              <Eraser size={18} />
+            </div>
+            <div>
+              <h2>Chọn Video cần xóa Watermark</h2>
+              <p>Kéo thả nhiều file MP4 từ máy tính hoặc bấm để duyệt chọn.</p>
+            </div>
+          </div>
+
+          <div
+            className={`wm-dropzone ${isDragging ? 'wm-dropzone-over' : ''} ${cliOk === false ? 'wm-dropzone-disabled' : ''}`}
+            onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setIsDragging(false)
+              handleAddFiles(e.dataTransfer.files)
+            }}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="video/mp4"
+              multiple
+              style={{ display: 'none' }}
+              onChange={e => handleAddFiles(e.target.files)}
+            />
+            <Upload size={32} className="wm-drop-icon" />
+            <p className="wm-drop-title">Kéo & thả video MP4 vào đây</p>
+            <p className="wm-drop-sub">hoặc <span className="wm-drop-link">duyệt chọn từ máy</span></p>
+          </div>
+
+          <div className="settings-actions" style={{ justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className="primary-button"
+                onClick={handleStartProcess}
+                disabled={queue.length === 0 || isProcessing || cliOk === false}
+              >
+                {isProcessing ? <Loader2 size={16} className="spin" /> : <Eraser size={16} />}
+                Bắt đầu xóa watermark ({queue.length} video)
+              </button>
+              <button
+                className="chrome-button"
+                onClick={handleImportPath}
+                disabled={isProcessing}
+              >
+                <FolderOpen size={15} /> Nhập đường dẫn file
+              </button>
+            </div>
+
+            {queue.length > 0 && (
+              <button
+                className="chrome-button"
+                onClick={() => setQueue([])}
+                style={{ color: '#ef4444' }}
+              >
+                <Trash2 size={14} /> Xóa danh sách
+              </button>
+            )}
+          </div>
+
+          {/* Queue files list */}
+          {queue.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div className="wm-queue-label" style={{ marginBottom: 10 }}>
+                <span>Danh sách chờ xử lý ({queue.length} file):</span>
+              </div>
+              <div className="wm-list">
+                {queue.map((q, idx) => (
+                  <div key={idx} className="wm-item">
+                    <FileVideo size={16} className="wm-file-icon" />
+                    <div className="wm-item-info">
+                      <div className="wm-item-name">{q.name}</div>
+                      <div className="wm-item-size">{q.path || '—'} {q.size > 0 ? `· ${fmtBytes(q.size)}` : ''}</div>
+                    </div>
+                    <button
+                      className="wm-remove-btn"
+                      onClick={() => setQueue(queue.filter((_, i) => i !== idx))}
+                      title="Bỏ file này"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* History Jobs Card */}
+      {historyJobs.length > 0 && (
+        <div className="settings-card" style={{ marginTop: 22 }}>
+          <div className="integration-title">
+            <div className="gemini-icon">
+              <Clock3 size={17} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+              <div>
+                <h2>Lịch sử các đợt xử lý ({historyJobs.length})</h2>
+                <p>Xem lại các đợt xóa watermark đã hoàn thành gần đây.</p>
+              </div>
+              <button className="chrome-button" onClick={loadHistory} style={{ height: 34, padding: '0 12px' }}>
+                <RefreshCw size={13} /> Làm mới
+              </button>
+            </div>
+          </div>
+
+          <div className="voices-list">
+            {historyJobs.map(job => (
+              <div key={job.job_id} className="voice-item" style={{ alignItems: 'center' }}>
+                <div className="voice-item-info">
+                  <strong>
+                    Batch {job.job_id}
+                    <span className={`wm-badge wm-badge-${job.status}`} style={{ marginLeft: 8, fontSize: 10, padding: '2px 7px' }}>
+                      {job.status === 'done' ? 'Hoàn thành' : job.status === 'running' ? 'Đang chạy' : job.status}
+                    </span>
+                  </strong>
+                  <span>
+                    {job.done}/{job.total} video xong · {new Date(job.created_at).toLocaleString()}
+                    {job.videos.length > 0 ? ` · ${job.videos[0].name}${job.videos.length > 1 ? ` (+${job.videos.length - 1})` : ''}` : ''}
+                  </span>
+                </div>
+                <div className="voice-item-actions">
+                  {job.done > 0 && (
+                    <a
+                      href={`${API_URL}/api/watermark/download-all/${job.job_id}`}
+                      download={`watermark_clean_${job.job_id}.zip`}
+                      className="chrome-button"
+                      style={{ height: 32, padding: '0 10px', fontSize: 11, textDecoration: 'none' }}
+                      title="Tải tất cả file sạch dạng ZIP"
+                    >
+                      <Download size={12} /> ZIP ({job.done})
+                    </a>
+                  )}
+                  <button
+                    className="primary-button"
+                    onClick={() => { setCurrentJob(job); setQueue([]) }}
+                  >
+                    Xem chi tiết
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -480,11 +989,11 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
     fetch(`${API_URL}/api/voices`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => { const list: Voice[] = d.voices ?? d ?? []; setClonedVoices(list); if (!voiceId && list.length) setVoiceId(list[0].voice_id) })
-      .catch(() => {})
+      .catch(() => { })
     fetch(`${API_URL}/api/bgm`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then((d: BgmOut[]) => setBgmList(d))
-      .catch(() => {})
+      .catch(() => { })
   }, []) // eslint-disable-line
 
   // Poll loop
@@ -596,7 +1105,7 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
               rows={3}
               disabled={!!jobId || !!rawFile}
             />
-            {(rawFile || rawText.trim()) && <span className="raw-hint">{rawFile ? `file ${rawFile.name} (${(rawFile.size/1024).toFixed(0)} KB)` : `${rawText.length.toLocaleString()} ký tự`} · sẽ skip auto-fetch</span>}
+            {(rawFile || rawText.trim()) && <span className="raw-hint">{rawFile ? `file ${rawFile.name} (${(rawFile.size / 1024).toFixed(0)} KB)` : `${rawText.length.toLocaleString()} ký tự`} · sẽ skip auto-fetch</span>}
           </div>
         </div>
       </div>
@@ -609,9 +1118,9 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
             {clonedVoices.length === 0
               ? <p className="settings-message" style={{ marginTop: 4 }}>Chưa có giọng — tạo ở Voices trước.</p>
               : <select value={voiceId} onChange={e => setVoiceId(e.target.value)} disabled={!!jobId}
-                  style={{ width: '100%', height: 44, padding: '0 12px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 9, color: 'var(--text)', fontSize: 13 }}>
-                  {clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
-                </select>}
+                style={{ width: '100%', height: 44, padding: '0 12px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 9, color: 'var(--text)', fontSize: 13 }}>
+                {clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
+              </select>}
           </div>
           <div className="field field-full">
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
@@ -623,15 +1132,15 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
                 {bgmList.length === 0
                   ? <p className="bgm-empty">Chưa có track — thêm ở “Thư viện nhạc”.</p>
                   : <div className="chips">
-                      {bgmList.map(t => {
-                        const order = bgmIds.indexOf(t.track_id)
-                        const on = order >= 0
-                        return <button key={t.track_id} type="button" className={`chip${on ? ' chip-active' : ''}`} disabled={!!jobId}
-                          onClick={() => setBgmIds(prev => on ? prev.filter(x => x !== t.track_id) : [...prev, t.track_id])}>
-                          {on && <span className="chip-order">{order + 1}. </span>}{t.name}{t.duration_sec ? ` · ${t.duration_sec.toFixed(0)}s` : ''}{t.needs_attribution ? ' · CC' : ''}
-                        </button>
-                      })}
-                    </div>}
+                    {bgmList.map(t => {
+                      const order = bgmIds.indexOf(t.track_id)
+                      const on = order >= 0
+                      return <button key={t.track_id} type="button" className={`chip${on ? ' chip-active' : ''}`} disabled={!!jobId}
+                        onClick={() => setBgmIds(prev => on ? prev.filter(x => x !== t.track_id) : [...prev, t.track_id])}>
+                        {on && <span className="chip-order">{order + 1}. </span>}{t.name}{t.duration_sec ? ` · ${t.duration_sec.toFixed(0)}s` : ''}{t.needs_attribution ? ' · CC' : ''}
+                      </button>
+                    })}
+                  </div>}
                 <label className="bgm-vol">
                   <span className="bgm-vol-label">Volume: {(bgmVolume * 100).toFixed(0)}%</span>
                   <input type="range" className="bgm-range" min={0} max={0.5} step={0.01} value={bgmVolume}
@@ -646,12 +1155,12 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
       <div className="ff">
         {!jobId
           ? <button className="btn-p" onClick={startPipeline} disabled={submitting}>
-              {submitting ? <Loader2 size={15} className="spin" /> : <Play size={15} />}
-              {submitting ? 'Đang khởi động…' : 'Tạo recap video'}
-            </button>
+            {submitting ? <Loader2 size={15} className="spin" /> : <Play size={15} />}
+            {submitting ? 'Đang khởi động…' : 'Tạo recap video'}
+          </button>
           : <button className="btn-g" onClick={reset}>
-              <Trash2 size={14} /> Bắt đầu lại
-            </button>}
+            <Trash2 size={14} /> Bắt đầu lại
+          </button>}
         <button className="btn-g" onClick={() => setActivePage('Lịch sử')} style={{ gap: 6 }}>
           <Clock3 size={14} /> Xem Lịch sử
         </button>
@@ -738,7 +1247,7 @@ function HistoryPage() {
       <h1>Lịch sử</h1>
       <p className="page-subtitle">Mọi job đã chạy — chi tiết recap, clips, voice và video cuối kèm dấu thời gian.</p>
     </div>
-    <button className="chrome-button" onClick={loadJobs}><Search size={15} /> Làm mới</button>
+      <button className="chrome-button" onClick={loadJobs}><Search size={15} /> Làm mới</button>
     </div>
 
     <div className="history-layout">
@@ -769,88 +1278,88 @@ function HistoryPage() {
       <div className="dpanel">
         {!sel
           ? <div className="dempty">
-              <Clock3 size={40} />
-              <div>Chọn một job bên trái để xem chi tiết.</div>
-            </div>
+            <Clock3 size={40} />
+            <div>Chọn một job bên trái để xem chi tiết.</div>
+          </div>
           : <div className="card scroll" style={{ padding: 0, overflow: 'hidden' }}>
-              <div className="dhead">
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                  <strong style={{ wordBreak: 'break-all', fontSize: 13 }}>{sel.youtube_url}</strong>
-                  <span className={`badge ${overallBadge[sel.overall] ?? 'b-idle'}`} style={{ flexShrink: 0 }}>{overallLabel[sel.overall] ?? sel.overall}</span>
-                </div>
-                <div className="dkv" style={{ marginTop: 12 }}>
-                  <span className="k">Job ID</span><span className="v" style={{ fontFamily: 'monospace' }}>{sel.job_id}</span>
-                  <span className="k">Voice</span><span className="v">{sel.voice_id ?? '—'}</span>
-                  <span className="k">Số đoạn</span><span className="v">{segsOf(sel).length} segment · {sel.recap?.scenes?.length ?? 0} cảnh</span>
-                  <span className="k">Tạo lúc</span><span className="v">{fmtTs(sel.created_at)}</span>
-                  <span className="k">Cập nhật</span><span className="v">{fmtTs(sel.updated_at)}</span>
-                </div>
+            <div className="dhead">
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                <strong style={{ wordBreak: 'break-all', fontSize: 13 }}>{sel.youtube_url}</strong>
+                <span className={`badge ${overallBadge[sel.overall] ?? 'b-idle'}`} style={{ flexShrink: 0 }}>{overallLabel[sel.overall] ?? sel.overall}</span>
               </div>
-
-              {sel.error && <div className="err-block" style={{ margin: '12px 20px 0' }}>
-                <AlertCircle size={14} style={{ flexShrink: 0 }} /><span>{sel.error}</span>
-              </div>}
-
-              <hr className="divider" style={{ margin: '16px 20px' }} />
-
-              {/* Recap table */}
-              <div className="dsec">
-                <h3><Sparkles size={13} /> Recap — kịch bản VO</h3>
-                {segsOf(sel).length === 0
-                  ? <p className="settings-message">Chưa có recap.</p>
-                  : <div className="stw"><table className="st">
-                      <thead><tr><th>#</th><th>Cảnh</th><th>Giờ</th><th>Dài</th><th>Vietnamese VO</th></tr></thead>
-                      <tbody>{sel.recap?.scenes?.flatMap((sc, si) => sc.segments.map((seg, i) => {
-                        const idx = (sel.recap?.scenes?.slice(0, si) ?? []).reduce((a, s) => a + s.segments.length, 0) + i
-                        return <tr key={idx}>
-                          <td>{idx}</td>
-                          <td>{sc.scene_title ?? `Cảnh ${si + 1}`}</td>
-                          <td>{fmtTime(seg.start_time_sec)} → {fmtTime(seg.end_time_sec)}</td>
-                          <td>{seg.duration_sec.toFixed(1)}s</td>
-                          <td style={{ maxWidth: 240 }}>{seg.vietnamese_vo}</td>
-                        </tr>
-                      }))}
-                      </tbody>
-                    </table></div>}
+              <div className="dkv" style={{ marginTop: 12 }}>
+                <span className="k">Job ID</span><span className="v" style={{ fontFamily: 'monospace' }}>{sel.job_id}</span>
+                <span className="k">Voice</span><span className="v">{sel.voice_id ?? '—'}</span>
+                <span className="k">Số đoạn</span><span className="v">{segsOf(sel).length} segment · {sel.recap?.scenes?.length ?? 0} cảnh</span>
+                <span className="k">Tạo lúc</span><span className="v">{fmtTs(sel.created_at)}</span>
+                <span className="k">Cập nhật</span><span className="v">{fmtTs(sel.updated_at)}</span>
               </div>
+            </div>
 
-              {/* Clips */}
-              {sel.clips && sel.clips.length > 0 && <div className="dsec mt">
-                <h3><Scissors size={13} /> Clips đã cắt</h3>
-                <div className="chips">{sel.clips.map(c => <span key={c} className="chip">🎬 {c}</span>)}</div>
-              </div>}
-
-              {/* Voice */}
-              {sel.voice_status === 'done' && <div className="dsec mt">
-                <h3><Mic size={13} /> Voice — nghe thử</h3>
-                <div className="chips">
-                  {segsOf(sel).map((_, idx) => {
-                    const isOver = sel.overspeed?.includes(idx)
-                    const isPlaying = playingVo === idx
-                    return <button key={idx} className={`chip chip-play${isOver ? ' chip-warn' : ''}`}
-                      onClick={() => toggleVo(sel, idx)}>
-                      {isPlaying ? <Pause size={12} /> : <Play size={12} />} vo_{idx}.wav{isOver ? ' ⚠' : ''}
-                    </button>
-                  })}
-                </div>
-              </div>}
-
-              {/* Final video */}
-              <div className="dsec mt">
-                <h3><Film size={13} /> Video cuối</h3>
-                {sel.job_id && (sel.final_studio || sel.final) ? (
-                  <VideoResultCard
-                    jobId={sel.job_id}
-                    variant={sel.final_studio ? 'polished' : 'merged'}
-                    segments={segsOf(sel).length}
-                    scenes={sel.recap?.scenes?.length ?? 0}
-                    credits={sel.final_studio ? sel.credits : null}
-                    compact />
-                ) : <p className="settings-message">Chưa có video cuối.</p>}
-              </div>
-
-              <div style={{ height: 20 }} />
+            {sel.error && <div className="err-block" style={{ margin: '12px 20px 0' }}>
+              <AlertCircle size={14} style={{ flexShrink: 0 }} /><span>{sel.error}</span>
             </div>}
+
+            <hr className="divider" style={{ margin: '16px 20px' }} />
+
+            {/* Recap table */}
+            <div className="dsec">
+              <h3><Sparkles size={13} /> Recap — kịch bản VO</h3>
+              {segsOf(sel).length === 0
+                ? <p className="settings-message">Chưa có recap.</p>
+                : <div className="stw"><table className="st">
+                  <thead><tr><th>#</th><th>Cảnh</th><th>Giờ</th><th>Dài</th><th>Vietnamese VO</th></tr></thead>
+                  <tbody>{sel.recap?.scenes?.flatMap((sc, si) => sc.segments.map((seg, i) => {
+                    const idx = (sel.recap?.scenes?.slice(0, si) ?? []).reduce((a, s) => a + s.segments.length, 0) + i
+                    return <tr key={idx}>
+                      <td>{idx}</td>
+                      <td>{sc.scene_title ?? `Cảnh ${si + 1}`}</td>
+                      <td>{fmtTime(seg.start_time_sec)} → {fmtTime(seg.end_time_sec)}</td>
+                      <td>{seg.duration_sec.toFixed(1)}s</td>
+                      <td style={{ maxWidth: 240 }}>{seg.vietnamese_vo}</td>
+                    </tr>
+                  }))}
+                  </tbody>
+                </table></div>}
+            </div>
+
+            {/* Clips */}
+            {sel.clips && sel.clips.length > 0 && <div className="dsec mt">
+              <h3><Scissors size={13} /> Clips đã cắt</h3>
+              <div className="chips">{sel.clips.map(c => <span key={c} className="chip">🎬 {c}</span>)}</div>
+            </div>}
+
+            {/* Voice */}
+            {sel.voice_status === 'done' && <div className="dsec mt">
+              <h3><Mic size={13} /> Voice — nghe thử</h3>
+              <div className="chips">
+                {segsOf(sel).map((_, idx) => {
+                  const isOver = sel.overspeed?.includes(idx)
+                  const isPlaying = playingVo === idx
+                  return <button key={idx} className={`chip chip-play${isOver ? ' chip-warn' : ''}`}
+                    onClick={() => toggleVo(sel, idx)}>
+                    {isPlaying ? <Pause size={12} /> : <Play size={12} />} vo_{idx}.wav{isOver ? ' ⚠' : ''}
+                  </button>
+                })}
+              </div>
+            </div>}
+
+            {/* Final video */}
+            <div className="dsec mt">
+              <h3><Film size={13} /> Video cuối</h3>
+              {sel.job_id && (sel.final_studio || sel.final) ? (
+                <VideoResultCard
+                  jobId={sel.job_id}
+                  variant={sel.final_studio ? 'polished' : 'merged'}
+                  segments={segsOf(sel).length}
+                  scenes={sel.recap?.scenes?.length ?? 0}
+                  credits={sel.final_studio ? sel.credits : null}
+                  compact />
+              ) : <p className="settings-message">Chưa có video cuối.</p>}
+            </div>
+
+            <div style={{ height: 20 }} />
+          </div>}
       </div>
     </div>
   </section>
@@ -860,7 +1369,7 @@ function App() {
 
   const [activePage, setActivePage] = useState('Studio')
   const [collapsed, setCollapsed] = useState(false)
-  return <div className="app-shell"><aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}><div className="brand-row"><div className="brand-mark"><Sparkles size={17} /></div>{!collapsed && <span className="brand-name">Search Studio</span>}<button className="icon-button sidebar-toggle" onClick={() => setCollapsed(!collapsed)}>{collapsed ? <Menu size={18} /> : <PanelLeftClose size={18} />}</button></div><div className="workspace-select"><div className="workspace-avatar">S</div>{!collapsed && <><div className="workspace-copy"><span>Workspace</span><strong>Personal space</strong></div><ChevronDown size={15} /></>}</div><nav className="nav-list">{!collapsed && <span className="nav-label">MENU</span>}{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`} onClick={() => setActivePage(label)}><Icon size={18} /><span className={collapsed ? 'sr-only' : ''}>{label}</span></button>)}</nav><div className="sidebar-footer"><div className="profile-row"><div className="profile-avatar">A</div>{!collapsed && <div className="profile-copy"><strong>Admin</strong><span>admin@example.com</span></div>}</div></div></aside><main className="main-content"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{activePage}</strong></div><button className="help-button">?</button></header><div className="content-wrap">{activePage === 'Cài đặt' ? <SettingsPage /> : activePage === 'Voices' ? <VoicesPage /> : activePage === 'Thư viện nhạc' ? <BgmPage /> : activePage === 'Studio' ? <StudioPage setActivePage={setActivePage} /> : activePage === 'Lịch sử' ? <HistoryPage /> : <section className="empty-state"><div className="empty-illustration"><Search size={34} /></div><h2>Chưa có dữ liệu</h2><p>Khu vực này đang được chuẩn bị.</p></section>}</div></main></div>
+  return <div className="app-shell"><aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}><div className="brand-row"><div className="brand-mark"><Sparkles size={17} /></div>{!collapsed && <span className="brand-name">Search Studio</span>}<button className="icon-button sidebar-toggle" onClick={() => setCollapsed(!collapsed)}>{collapsed ? <Menu size={18} /> : <PanelLeftClose size={18} />}</button></div><div className="workspace-select"><div className="workspace-avatar">S</div>{!collapsed && <><div className="workspace-copy"><span>Workspace</span><strong>Personal space</strong></div><ChevronDown size={15} /></>}</div><nav className="nav-list">{!collapsed && <span className="nav-label">MENU</span>}{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`} onClick={() => setActivePage(label)}><Icon size={18} /><span className={collapsed ? 'sr-only' : ''}>{label}</span></button>)}</nav><div className="sidebar-footer"><div className="profile-row"><div className="profile-avatar">A</div>{!collapsed && <div className="profile-copy"><strong>Admin</strong><span>admin@example.com</span></div>}</div></div></aside><main className="main-content"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{activePage}</strong></div><button className="help-button">?</button></header><div className="content-wrap">{activePage === 'Cài đặt' ? <SettingsPage /> : activePage === 'Voices' ? <VoicesPage /> : activePage === 'Thư viện nhạc' ? <BgmPage /> : activePage === 'Xóa Watermark' ? <WatermarkPage /> : activePage === 'Studio' ? <StudioPage setActivePage={setActivePage} /> : activePage === 'Lịch sử' ? <HistoryPage /> : <section className="empty-state"><div className="empty-illustration"><Search size={34} /></div><h2>Chưa có dữ liệu</h2><p>Khu vực này đang được chuẩn bị.</p></section>}</div></main></div>
 
 }
 

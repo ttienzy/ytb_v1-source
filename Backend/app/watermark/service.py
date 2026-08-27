@@ -1,0 +1,159 @@
+"""Service layer cho watermark remover — hybrid path/upload mode.
+
+Hỗ trợ 2 mode:
+1. Path-based (Electron): gwr đọc file từ đường dẫn gốc
+2. Upload mode (Web): gwr đọc file từ Data/watermark/uploads/
+
+Setup (chạy 1 lần):
+    npm install -g @pilio/gemini-watermark-remover
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import secrets
+import shutil
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+from app.watermark import state as wstate
+from app.watermark.state import BatchJobState, VideoState
+
+logger = logging.getLogger(__name__)
+
+GWR_CMD = "gwr"
+
+
+def _generate_job_id() -> str:
+    """Generate unique job ID."""
+    return secrets.token_hex(6)
+
+
+def _gwr_available() -> bool:
+    return shutil.which(GWR_CMD) is not None
+
+
+def _gwr_command() -> list[str]:
+    """Dựng prefix lệnh gwr — handle npm global shim .cmd/.bat trên Windows."""
+    exe = shutil.which(GWR_CMD)
+    if not exe:
+        return [GWR_CMD]
+    if exe.lower().endswith((".cmd", ".bat")):
+        return ["cmd", "/c", exe]
+    return [exe]
+
+
+def _parse_frame_progress(line: str) -> tuple[int | None, int | None]:
+    """Parse: '[video] 63% 140/240 frames (AI 81, reused 59)'"""
+    m = re.search(r"(\d+)/(\d+)\s+frames", line, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None, None
+
+
+def get_output_path(input_path: Path) -> Path:
+    """Output nằm cạnh file gốc, trong thư mục _clean/.
+
+    Ví dụ:
+        input:  C:/Videos/fl1/Cooking_beef.mp4
+        output: C:/Videos/fl1_clean/Cooking_beef.mp4
+    """
+    clean_dir = input_path.parent.parent / (input_path.parent.name + "_clean")
+    clean_dir.mkdir(parents=True, exist_ok=True)
+    return clean_dir / input_path.name
+
+
+# ── Core single-file processing ────────────────────────────────────────────────
+
+def _process_single_sync(video: VideoState, job_id: str) -> None:
+    """Xử lý 1 file đồng bộ trong thread pool."""
+    inp = Path(video.input_path)   # đường dẫn gốc trên disk
+    out = get_output_path(inp)
+
+    video.status = "running"
+    video.output_path = str(out)
+    video.output_name = out.name
+    try:
+        wstate.update_job(job_id)
+    except KeyError:
+        pass
+
+    cmd = [*_gwr_command(), "remove", str(inp), "--output", str(out), "--overwrite"]
+    logger.info("[watermark] Running: %s", " ".join(cmd))
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            line = line.strip()
+            if line:
+                logger.debug("[gwr] %s", line)
+            processed, total = _parse_frame_progress(line)
+            if processed is not None:
+                video.processed_frames = processed
+                if total is not None:
+                    video.frame_estimate = total
+
+        proc.wait()
+        if proc.returncode == 0:
+            video.status = "done"
+            logger.info("[watermark] Done: %s", video.name)
+        else:
+            video.status = "error"
+            video.error = f"gwr exited with code {proc.returncode}"
+            logger.error("[watermark] Failed %s (exit code %s)", video.name, proc.returncode)
+
+    except FileNotFoundError:
+        video.status = "error"
+        video.error = "`gwr` không tìm thấy. Cài: npm install -g @pilio/gemini-watermark-remover"
+    except Exception as exc:  # noqa: BLE001
+        video.status = "error"
+        video.error = str(exc)
+        logger.exception("[watermark] Unexpected error for %s", video.name)
+
+    try:
+        wstate.update_job(job_id)
+    except KeyError:
+        pass
+
+
+# ── Async batch orchestration ──────────────────────────────────────────────────
+
+async def run_batch(job: BatchJobState) -> None:
+    """Chạy batch job trong background — xử lý tuần tự."""
+    job.status = "running"
+    logger.info("[watermark] Batch %s started — %d files", job.job_id, job.total)
+
+    for video in job.videos:
+        if video.status != "pending":
+            continue
+        await asyncio.to_thread(_process_single_sync, video, job.job_id)
+
+    job.status = "error" if job.failed == job.total else "done"
+    job.updated_at = datetime.now(timezone.utc)
+    logger.info("[watermark] Batch %s finished — done=%d failed=%d",
+                job.job_id, job.done, job.failed)
+
+
+def create_batch_job_from_paths(file_paths: list[str]) -> BatchJobState:
+    """Tạo batch job từ danh sách đường dẫn file trên disk."""
+    videos = []
+    for p in file_paths:
+        path = Path(p)
+        if not path.exists():
+            logger.warning("[watermark] File không tồn tại: %s", p)
+            continue
+        v = VideoState(name=path.name, size_bytes=path.stat().st_size)
+        v.input_path = str(path)   # lưu path gốc vào state
+        videos.append(v)
+    return wstate.create_job(videos)

@@ -17,10 +17,11 @@ Desktop/    package.json gốc (concurrently) — `npm start` chạy cả 3 serv
 docs/       Plan + implementation notes pipeline
 ```
 
-- **Frontend** (Electron): sidebar Dashboard / Studio / Voices / Lịch sử / Cài đặt. Studio chạy
-  recap 4 bước + nghe thử từng VO / xem final, có **resume** (dựng lại job sau restart server).
+- **Frontend** (Electron): sidebar Dashboard / Studio / Voices / Thư viện nhạc / Xóa Watermark / Lịch sử / Cài đặt. Studio chạy
+  recap 4 bước + nghe thử từng VO / xem final, có **resume** (dựng lại job sau restart server). Tab Xóa Watermark hỗ trợ xử lý hàng loạt video bằng AI Inpainting.
 - **Backend** (FastAPI, `http://127.0.0.1:8000`):
   - `app/recap/` — orchestration R1–R4 (router, service, schemas, state, ffmpeg, paths, ytdlp).
+  - `app/watermark/` — xóa Gemini SynthID ✦ watermark (Hybrid: path-based cho Desktop + upload cho Web, tải toàn bộ ZIP).
   - `app/ai/gemini/` — gọi **Gemini web qua HTTP thuần** (cookie + token, không automation/Playwright).
   - `app/voices/` — voice_client gọi voice-service `/tts`.
   - `app/routers/health.py` — health check.
