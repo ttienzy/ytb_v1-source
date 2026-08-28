@@ -27,7 +27,16 @@ import { VideoResultCard } from '../studio/components/VideoResultCard'
 import { PippitHistoryTab } from './components/PippitHistoryTab'
 import type { JobOut } from '../studio/types'
 
+function FacebookIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  )
+}
+
 export function HistoryPage() {
+
   const [historyTab, setHistoryTab] = useState<'studio' | 'pippit'>('studio')
   const [jobs, setJobs] = useState<JobOut[]>([])
 
@@ -121,12 +130,18 @@ export function HistoryPage() {
   }
 
   const filtered = jobs.filter(j => {
-    const q = search.toLowerCase()
+    const q = search.toLowerCase().trim()
+    if (!q) return true
     const title = (j.caption?.title || j.recap?.caption?.title || '').toLowerCase()
     const url = (j.youtube_url || '').toLowerCase()
     const id = (j.job_id || '').toLowerCase()
-    return title.includes(q) || url.includes(q) || id.includes(q)
+    const hasFb = j.pippit_tasks && j.pippit_tasks.length > 0
+    const fbText = hasFb
+      ? `facebook fb đã đăng ${j.pippit_tasks?.map((t: any) => `${t.page_name} ${t.page_id}`).join(' ')}`.toLowerCase()
+      : ''
+    return title.includes(q) || url.includes(q) || id.includes(q) || fbText.includes(q)
   })
+
 
   function stopVo() {
     audioRef.current?.pause()
@@ -299,6 +314,25 @@ export function HistoryPage() {
                   </div>
                   <div className="hright">
                     <div className="hitem-actions">
+                      {j.pippit_tasks && j.pippit_tasks.length > 0 && (
+                        <span
+                          className="badge"
+                          style={{
+                            background: '#e0f2fe',
+                            color: '#0369a1',
+                            borderColor: '#bae6fd',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '2px 7px',
+                            fontSize: 10,
+                            fontWeight: 700,
+                          }}
+                          title={`Đã lên lịch/đăng Facebook lên Fanpage: ${j.pippit_tasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
+                        >
+                          <FacebookIcon size={10} /> Đã đăng FB
+                        </span>
+                      )}
                       <span className={`badge ${overallBadge[j.overall] ?? 'b-idle'}`}>
                         {overallLabel[j.overall] ?? j.overall}
                       </span>
@@ -379,6 +413,20 @@ export function HistoryPage() {
                   <span className="hmeta-pill">
                     <Calendar size={11} /> {fmtTs(sel.created_at)}
                   </span>
+                  {sel.pippit_tasks && sel.pippit_tasks.length > 0 && (
+                    <span
+                      className="hmeta-pill"
+                      style={{
+                        background: '#e0f2fe',
+                        color: '#0369a1',
+                        borderColor: '#bae6fd',
+                        fontWeight: 600,
+                      }}
+                      title={`Đã lên lịch/đăng lên: ${sel.pippit_tasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
+                    >
+                      <FacebookIcon size={12} /> Đã đăng FB ({sel.pippit_tasks.length} lần: <strong>{sel.pippit_tasks.map((t: any) => t.page_name || t.page_id).join(', ')}</strong>)
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -399,6 +447,7 @@ export function HistoryPage() {
                     scenes={sel.recap?.scenes?.length ?? 0}
                     credits={sel.final_studio ? sel.credits : null}
                     caption={sel.caption || sel.recap?.caption}
+                    pippitTasks={sel.pippit_tasks}
                     compact
                   />
                 ) : sel.recap ? (
@@ -413,6 +462,7 @@ export function HistoryPage() {
                         </div>
                         {(sel.caption?.title || sel.recap?.caption?.title) && (
                           <p className="caption-title-text">
+
                             {sel.caption?.title || sel.recap?.caption?.title}
                           </p>
                         )}

@@ -12,6 +12,10 @@ class VideoItem(BaseModel):
     error: str | None = None        # thông báo lỗi nếu có
     processed_frames: int | None = None
     frame_estimate: int | None = None
+    drive_status: str = "idle"     # idle | uploading | done | error
+    drive_file_id: str | None = None
+    drive_url: str | None = None
+
 
 
 class BatchRequest(BaseModel):

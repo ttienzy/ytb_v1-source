@@ -1,13 +1,20 @@
-"""In-memory batch job store cho watermark remover.
+"""Persistent batch job store cho watermark remover.
 
-Mỗi batch job theo dõi trạng thái xử lý từng video.
-State mất khi restart (chấp nhận cho phase hiện tại — giống recap/state.py).
+Lưu trạng thái vào Data/watermark/jobs.json để không bị mất khi restart server.
 """
 from __future__ import annotations
 
+import json
+import logging
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+DATA_DIR = Path("Data/watermark")
+JOBS_FILE = DATA_DIR / "jobs.json"
 
 
 @dataclass
@@ -22,6 +29,10 @@ class VideoState:
     error: str | None = None
     processed_frames: int | None = None
     frame_estimate: int | None = None
+    drive_status: str = "idle"        # idle | uploading | done | error
+    drive_file_id: str | None = None
+    drive_url: str | None = None
+    drive_error: str | None = None
 
 
 @dataclass
@@ -47,31 +58,85 @@ class BatchJobState:
 
 
 _JOBS: dict[str, BatchJobState] = {}
+_INITIALIZED = False
+
+
+def _load_jobs_from_disk() -> None:
+    global _INITIALIZED, _JOBS
+    if not JOBS_FILE.exists():
+        _INITIALIZED = True
+        return
+    try:
+        raw_list = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+        for j in raw_list:
+            videos = [VideoState(**v) for v in j.get("videos", [])]
+            created_at = datetime.fromisoformat(j["created_at"]) if "created_at" in j else datetime.now(timezone.utc)
+            updated_at = datetime.fromisoformat(j["updated_at"]) if "updated_at" in j else datetime.now(timezone.utc)
+            job = BatchJobState(
+                job_id=j["job_id"],
+                status=j.get("status", "idle"),
+                videos=videos,
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+            _JOBS[job.job_id] = job
+    except Exception as exc:
+        logger.warning("[watermark] Không thể nạp jobs.json: %s", exc)
+    _INITIALIZED = True
+
+
+def _save_jobs_to_disk() -> None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        raw_list = []
+        for job in _JOBS.values():
+            j_dict = {
+                "job_id": job.job_id,
+                "status": job.status,
+                "created_at": job.created_at.isoformat(),
+                "updated_at": job.updated_at.isoformat(),
+                "videos": [asdict(v) for v in job.videos],
+            }
+            raw_list.append(j_dict)
+        JOBS_FILE.write_text(json.dumps(raw_list, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("[watermark] Không thể lưu jobs.json: %s", exc)
+
+
+def _ensure_init() -> None:
+    if not _INITIALIZED:
+        _load_jobs_from_disk()
 
 
 def create_job(videos: list[VideoState]) -> BatchJobState:
+    _ensure_init()
     job = BatchJobState(
         job_id=secrets.token_hex(6),
         status="idle",
         videos=videos,
     )
     _JOBS[job.job_id] = job
+    _save_jobs_to_disk()
     return job
 
 
 def get_job(job_id: str) -> BatchJobState | None:
+    _ensure_init()
     return _JOBS.get(job_id)
 
 
 def update_job(job_id: str, **fields) -> BatchJobState:
+    _ensure_init()
     job = _JOBS.get(job_id)
     if job is None:
         raise KeyError(job_id)
     for key, value in fields.items():
         setattr(job, key, value)
     job.updated_at = datetime.now(timezone.utc)
+    _save_jobs_to_disk()
     return job
 
 
 def list_jobs() -> list[BatchJobState]:
+    _ensure_init()
     return list(_JOBS.values())

@@ -47,7 +47,32 @@ def _overall(job: state.JobState) -> str:
     return "idle"
 
 
+def _find_job_pippit_tasks(job_id: str, title: str | None = None) -> list[dict]:
+    """Tìm các bài đăng Facebook qua Pippit đã liên kết với job này."""
+    try:
+        from app.externals.pippit.service import _get_saved_tasks
+        all_tasks = _get_saved_tasks()
+        matched = []
+        clean_title = (title or "").strip().lower()
+        for t in all_tasks:
+            t_jid = t.get("job_id")
+            t_title = (t.get("title") or "").strip().lower()
+            if t_jid and t_jid == job_id:
+                matched.append(t)
+            elif clean_title and t_title and len(clean_title) >= 10 and (clean_title in t_title or t_title in clean_title):
+                matched.append(t)
+        return matched
+    except Exception:
+        return []
+
+
 def _to_out(job: state.JobState) -> JobOut:
+    caption_obj = job.caption or (job.recap.get("caption") if job.recap else None)
+    job_title = None
+    if caption_obj and isinstance(caption_obj, dict):
+        job_title = caption_obj.get("title")
+    pippit_tasks = _find_job_pippit_tasks(job.job_id, job_title)
+
     return JobOut(
         job_id=job.job_id,
         youtube_url=job.youtube_url,
@@ -68,13 +93,15 @@ def _to_out(job: state.JobState) -> JobOut:
         voice_id=job.voice_id,
         error=job.error,
         recap=job.recap,
-        caption=job.caption or (job.recap.get("caption") if job.recap else None),
+        caption=caption_obj,
         clips=job.clips,
         overspeed=job.overspeed,
         final=job.final,
         final_studio=job.final_studio,
         credits=job.credits,
+        pippit_tasks=pippit_tasks,
     )
+
 
 
 # ── Request bodies ──────────────────────────────────────────────────────────

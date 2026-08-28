@@ -42,7 +42,11 @@ def _video_item(v: wstate.VideoState) -> VideoItem:
         error=v.error,
         processed_frames=v.processed_frames,
         frame_estimate=v.frame_estimate,
+        drive_status=v.drive_status,
+        drive_file_id=v.drive_file_id,
+        drive_url=v.drive_url,
     )
+
 
 
 def _job_out(job: wstate.BatchJobState) -> BatchJob:
@@ -250,3 +254,104 @@ def download_all_files(job_id: str):
         media_type="application/zip",
         filename=f"watermark_clean_{job_id}.zip",
     )
+
+
+@router.post("/jobs/{job_id}/sync-drive", response_model=BatchJob)
+def sync_job_to_drive(job_id: str):
+    """Đẩy thủ công toàn bộ video đã xử lý sạch trong job lên Google Drive."""
+    from app.externals.gdrive import service as gdrive_service
+
+    client = gdrive_service.get_client()
+    if not client:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive chưa được kết nối. Vui lòng vào Cài đặt để kết nối Google Drive.",
+        )
+
+    job = wstate.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
+
+    cfg = gdrive_service.get_gdrive_config()
+    target_folder_id = cfg.get("folder_id")
+
+    for v in job.videos:
+        if v.status == "done" and v.output_path and Path(v.output_path).exists():
+            v.drive_status = "uploading"
+            try:
+                wstate.update_job(job_id)
+            except KeyError:
+                pass
+
+            try:
+                res = client.upload_file_resumable(
+                    file_path=v.output_path,
+                    folder_id=target_folder_id,
+                    custom_name=v.output_name or v.name,
+                )
+                v.drive_status = "done"
+                v.drive_file_id = res.get("file_id")
+                v.drive_url = res.get("web_view_link")
+            except Exception as exc:
+                logger.error("[GDrive] Lỗi upload thủ công %s: %s", v.name, exc)
+                v.drive_status = "error"
+                v.drive_error = str(exc)
+
+    try:
+        wstate.update_job(job_id)
+    except KeyError:
+        pass
+
+    return _job_out(job)
+
+
+@router.post("/jobs/{job_id}/videos/{filename}/sync-drive", response_model=BatchJob)
+def sync_single_video_to_drive(job_id: str, filename: str):
+    """Đẩy thủ công 1 video sạch trong job lên Google Drive."""
+    from app.externals.gdrive import service as gdrive_service
+
+    client = gdrive_service.get_client()
+    if not client:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive chưa được kết nối. Vui lòng vào Cài đặt để kết nối Google Drive.",
+        )
+
+    job = wstate.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
+
+    video = next((v for v in job.videos if v.name == filename or v.output_name == filename), None)
+    if not video or not video.output_path or not Path(video.output_path).exists():
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy file sạch của {filename}.")
+
+    cfg = gdrive_service.get_gdrive_config()
+    target_folder_id = cfg.get("folder_id")
+
+    video.drive_status = "uploading"
+    try:
+        wstate.update_job(job_id)
+    except KeyError:
+        pass
+
+    try:
+        res = client.upload_file_resumable(
+            file_path=video.output_path,
+            folder_id=target_folder_id,
+            custom_name=video.output_name or video.name,
+        )
+        video.drive_status = "done"
+        video.drive_file_id = res.get("file_id")
+        video.drive_url = res.get("web_view_link")
+    except Exception as exc:
+        logger.error("[GDrive] Lỗi upload thủ công %s: %s", video.name, exc)
+        video.drive_status = "error"
+        video.drive_error = str(exc)
+
+    try:
+        wstate.update_job(job_id)
+    except KeyError:
+        pass
+
+    return _job_out(job)
+

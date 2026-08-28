@@ -6,7 +6,11 @@ export type WatermarkVideoItem = {
   error?: string | null
   processed_frames?: number | null
   frame_estimate?: number | null
+  drive_status?: 'idle' | 'uploading' | 'done' | 'error' | null
+  drive_file_id?: string | null
+  drive_url?: string | null
 }
+
 
 export type WatermarkBatchJob = {
   job_id: string

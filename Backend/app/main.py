@@ -15,6 +15,7 @@ if hasattr(sys.stderr, "reconfigure"):
         pass
 
 from app.ai.gemini.router import router as gemini_router
+from app.externals.gdrive.router import router as gdrive_router
 from app.externals.mailtm.router import router as mailtm_router
 from app.externals.pippit.router import router as pippit_router
 from app.media.router import router as media_router
@@ -22,6 +23,7 @@ from app.recap.router import router as recap_router
 from app.routers.health import router as health_router
 from app.voices.router import router as voices_router
 from app.watermark.router import router as watermark_router
+
 
 
 app = FastAPI(title="Google Search Backend", version="0.1.0")
@@ -34,4 +36,6 @@ app.include_router(recap_router)
 app.include_router(watermark_router)
 app.include_router(mailtm_router)
 app.include_router(pippit_router)
+app.include_router(gdrive_router)
+
 

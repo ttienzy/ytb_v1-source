@@ -50,6 +50,7 @@ function getNextSlot(d: Date = new Date()): { date: string; time: string } {
 interface FacebookPublishModalProps {
   jobId: string
   caption?: BackendCaption | null
+  pippitTasks?: any[]
   onClose: () => void
 }
 
@@ -65,8 +66,10 @@ interface ConnectedPageOption {
 export function FacebookPublishModal({
   jobId,
   caption,
+  pippitTasks,
   onClose,
 }: FacebookPublishModalProps) {
+
   const [pages, setPages] = useState<ConnectedPageOption[]>([])
   const [loadingPages, setLoadingPages] = useState(true)
   const [selectedKey, setSelectedKey] = useState<string>('')
@@ -322,8 +325,32 @@ export function FacebookPublishModal({
           </button>
         </div>
 
+        {/* Duplicate warning notice */}
+        {pippitTasks && pippitTasks.length > 0 && !success && (
+          <div
+            style={{
+              padding: '10px 14px',
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              borderRadius: 10,
+              fontSize: 12,
+              color: '#92400e',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+            }}
+          >
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1, color: '#d97706' }} />
+            <div>
+              <strong>Lưu ý tránh đăng trùng:</strong> Video này đã được lên lịch/đăng lên Fanpage: <strong>{pippitTasks.map(t => t.page_name || t.page_id).join(', ')}</strong> ({pippitTasks.length} lần). Vui lòng chọn Page khác nếu không muốn đăng lặp nội dung.
+            </div>
+          </div>
+        )}
+
         {/* Success State */}
         {success ? (
+
           <div style={{ textAlign: 'center', padding: '16px 8px 8px' }}>
             <div
               style={{

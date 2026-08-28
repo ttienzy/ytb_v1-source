@@ -281,6 +281,7 @@ def publish_video_to_page(payload: PippitPublishRequest) -> PippitPublishRespons
     _save_task_record({
         "task_id": task_id,
         "asset_id": asset_id,
+        "job_id": payload.job_id,
         "account_id": payload.account_id,
         "account_email": acc.get("email", ""),
         "page_id": str(payload.page_id),
@@ -292,6 +293,7 @@ def publish_video_to_page(payload: PippitPublishRequest) -> PippitPublishRespons
         "status": 1,
         "published": False,
     })
+
 
     return PippitPublishResponse(
         ok=True,

@@ -108,10 +108,39 @@ def _process_single_sync(video: VideoState, job_id: str) -> None:
         if proc.returncode == 0:
             video.status = "done"
             logger.info("[watermark] Done: %s", video.name)
+
+            # Tự động upload lên Google Drive nếu người dùng bật trong Cài đặt
+            try:
+                from app.externals.gdrive import service as gdrive_service
+
+                cfg = gdrive_service.get_gdrive_config()
+                if cfg.get("enabled") and cfg.get("auto_upload", True):
+                    video.drive_status = "uploading"
+                    try:
+                        wstate.update_job(job_id)
+                    except KeyError:
+                        pass
+
+                    client = gdrive_service.get_client()
+                    if client:
+                        target_folder = cfg.get("folder_id")
+                        upload_res = client.upload_file_resumable(
+                            file_path=out,
+                            folder_id=target_folder,
+                            custom_name=out.name,
+                        )
+                        video.drive_status = "done"
+                        video.drive_file_id = upload_res.get("file_id")
+                        video.drive_url = upload_res.get("web_view_link")
+            except Exception as drive_exc:
+                logger.warning("[watermark] Tự động upload Drive thất bại: %s", drive_exc)
+                video.drive_status = "error"
+                video.drive_error = str(drive_exc)
         else:
             video.status = "error"
             video.error = f"gwr exited with code {proc.returncode}"
             logger.error("[watermark] Failed %s (exit code %s)", video.name, proc.returncode)
+
 
     except FileNotFoundError:
         video.status = "error"

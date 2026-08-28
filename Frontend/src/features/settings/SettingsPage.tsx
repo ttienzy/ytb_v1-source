@@ -7,15 +7,18 @@ import {
   Save,
   Sparkles,
 } from 'lucide-react'
+import { HardDrive } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
+import { GoogleDriveSection } from './components/GoogleDriveSection'
 import { MailTmSection } from './components/MailTmSection'
 import { PippitSection } from './components/PippitSection'
 import type { GeminiState, YtState } from './types'
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<'gemini_yt' | 'mailtm' | 'pippit'>(
-    'gemini_yt'
-  )
+  const [activeTab, setActiveTab] = useState<
+    'gemini_yt' | 'mailtm' | 'pippit' | 'gdrive'
+  >('gemini_yt')
+
 
   const [state, setState] = useState<GeminiState>({
     has_cookie: false,
@@ -158,7 +161,19 @@ export function SettingsPage() {
           <Bot size={16} />
           <span>Pippit AI &amp; Fanpages</span>
         </button>
+
+        <button
+          type="button"
+          className={`settings-tab-btn ${
+            activeTab === 'gdrive' ? 'active' : ''
+          }`}
+          onClick={() => setActiveTab('gdrive')}
+        >
+          <HardDrive size={16} />
+          <span>Google Drive</span>
+        </button>
       </div>
+
 
       {/* ── Tab 1: Gemini & YouTube ── */}
       {activeTab === 'gemini_yt' && (
@@ -311,6 +326,14 @@ export function SettingsPage() {
           <PippitSection key={pippitRefreshKey} />
         </div>
       )}
+
+      {/* ── Tab 4: Google Drive ── */}
+      {activeTab === 'gdrive' && (
+        <div className="tab-fade-in">
+          <GoogleDriveSection />
+        </div>
+      )}
     </section>
   )
 }
+

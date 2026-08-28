@@ -29,6 +29,8 @@ class JobOut(BaseModel):
     final: str | None = None
     final_studio: str | None = None
     credits: str | None = None
+    pippit_tasks: list[dict] = []
+
 
 
 class JobPublishFacebookRequest(BaseModel):

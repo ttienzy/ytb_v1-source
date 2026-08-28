@@ -405,6 +405,29 @@ button.chip-active:hover { background: #4f46e5; }
 .wm-dl { display: grid; place-items: center; width: 26px; height: 26px; color: #6366f1; background: #eef2ff; border-radius: 7px; transition: background .15s; text-decoration: none; }
 .wm-dl:hover { background: #e0e7ff; color: #4338ca; }
 
+/* Drive action button/link */
+.wm-drive-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  color: #0284c7;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.wm-drive-btn:hover {
+  background: #bae6fd;
+  color: #0369a1;
+}
+
+
 /* Spin animation (shared with Loader2) */
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

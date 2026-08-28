@@ -49,8 +49,12 @@ export type JobOut = {
   final?: string | null
   final_studio?: string | null
   credits?: string | null
+  pippit_tasks?: any[]
   // legacy compat
   detail?: string
+
+
+
 }
 
 export type NodeState = 'idle' | 'running' | 'done' | 'error' | 'skipped'

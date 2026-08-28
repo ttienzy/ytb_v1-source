@@ -5,13 +5,16 @@ import {
   Clock3,
   Download,
   Eraser,
+  ExternalLink,
   FileVideo,
   Film,
   FolderOpen,
+  HardDrive,
   Loader2,
   RefreshCw,
   Trash2,
   Upload,
+  UploadCloud,
   XCircle,
 } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
@@ -21,12 +24,16 @@ import type { QueuedFile, WatermarkBatchJob } from './types'
 export function WatermarkPage() {
   const [cliOk, setCliOk] = useState<boolean | null>(null)
   const [cliMsg, setCliMsg] = useState('')
+  const [driveStatus, setDriveStatus] = useState<any>(null)
   const [queue, setQueue] = useState<QueuedFile[]>([])
+
   const [currentJob, setCurrentJob] = useState<WatermarkBatchJob | null>(null)
   const [historyJobs, setHistoryJobs] = useState<WatermarkBatchJob[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [syncingDriveJobId, setSyncingDriveJobId] = useState<string | null>(null)
+  const [syncingVideoName, setSyncingVideoName] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const pollTimerRef = useRef<any>(null)
 
@@ -52,10 +59,18 @@ export function WatermarkPage() {
       .catch(() => {})
   }, [])
 
+  const loadDriveStatus = useCallback(() => {
+    fetch(`${API_URL}/api/gdrive/status`)
+      .then(r => (r.ok ? r.json() : Promise.reject()))
+      .then(data => setDriveStatus(data))
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     checkCli()
     loadHistory()
-  }, [checkCli, loadHistory])
+    loadDriveStatus()
+  }, [checkCli, loadHistory, loadDriveStatus])
 
   // Polling current job
   useEffect(() => {
@@ -120,7 +135,7 @@ export function WatermarkPage() {
             path: nativePath || f.name,
             name: f.name,
             size: f.size || 0,
-            file: f, // Lưu File object để upload sau
+            file: f,
           })
         }
       }
@@ -131,7 +146,7 @@ export function WatermarkPage() {
     }
   }
 
-  // Import by direct path (prompt) — hỗ trợ cả file và thư mục
+  // Import by direct path
   function handleImportPath() {
     const entered = window.prompt(
       'Nhập đường dẫn file MP4 hoặc thư mục chứa video:',
@@ -151,14 +166,13 @@ export function WatermarkPage() {
     }
   }
 
-  // Start processing — auto-detect upload mode vs path mode
+  // Start processing
   async function handleStartProcess() {
     if (queue.length === 0) return
     setErrorMsg('')
     setIsProcessing(true)
 
     try {
-      // Detect mode: nếu có File object → upload mode, còn không → path mode
       const hasFileObjects = queue.some(q => q.file)
       const hasValidPaths = queue.some(
         q => q.path && q.path !== q.name && !q.path.includes(' ')
@@ -168,7 +182,6 @@ export function WatermarkPage() {
       let data: any
 
       if (hasFileObjects && !hasValidPaths) {
-        // ═══ UPLOAD MODE (Web Browser) ═══
         const formData = new FormData()
         for (const item of queue) {
           if (item.file) {
@@ -181,7 +194,6 @@ export function WatermarkPage() {
           body: formData,
         })
       } else {
-        // ═══ PATH MODE (Electron or manual path) ═══
         res = await fetch(`${API_URL}/api/watermark/process`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -196,7 +208,6 @@ export function WatermarkPage() {
 
       data = await res.json()
 
-      // Initial fetch of job
       const jobRes = await fetch(
         `${API_URL}/api/watermark/jobs/${data.job_id}`
       )
@@ -230,6 +241,51 @@ export function WatermarkPage() {
     }
   }
 
+  async function handleSyncBatchToDrive(jobId: string) {
+    setSyncingDriveJobId(jobId)
+    setErrorMsg('')
+    try {
+      const res = await fetch(`${API_URL}/api/watermark/jobs/${jobId}/sync-drive`, {
+        method: 'POST',
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Không thể đồng bộ video lên Google Drive.')
+      }
+      if (currentJob?.job_id === jobId) {
+        setCurrentJob(data)
+      }
+      loadHistory()
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Lỗi đồng bộ Google Drive.')
+    } finally {
+      setSyncingDriveJobId(null)
+    }
+  }
+
+  async function handleSyncSingleToDrive(jobId: string, filename: string) {
+    setSyncingVideoName(filename)
+    setErrorMsg('')
+    try {
+      const res = await fetch(
+        `${API_URL}/api/watermark/jobs/${jobId}/videos/${encodeURIComponent(filename)}/sync-drive`,
+        { method: 'POST' }
+      )
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Không thể đồng bộ video lên Google Drive.')
+      }
+      if (currentJob?.job_id === jobId) {
+        setCurrentJob(data)
+      }
+      loadHistory()
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Lỗi đồng bộ Google Drive.')
+    } finally {
+      setSyncingVideoName(null)
+    }
+  }
+
   return (
     <section className="settings-page wm-page">
       <div className="settings-heading wm-heading">
@@ -240,6 +296,30 @@ export function WatermarkPage() {
             Tự động phát hiện và xóa biểu tượng watermark ✦ SynthID khỏi video
             gốc bằng AI Inpainting.
           </p>
+          {driveStatus?.connected && (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: '#e0f2fe',
+                color: '#0284c7',
+                border: '1px solid #bae6fd',
+                padding: '4px 10px',
+                borderRadius: 999,
+                fontSize: 11.5,
+                fontWeight: 700,
+                marginTop: 8,
+              }}
+            >
+              <HardDrive size={13} />
+              <span>
+                Đồng bộ Google Drive:{' '}
+                <strong>{driveStatus.folder_name || 'AI_Clean_Videos'}</strong>
+                {driveStatus.auto_upload ? ' (Tự động bật)' : ' (Thủ công)'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -303,25 +383,89 @@ export function WatermarkPage() {
                 alignItems: 'center',
               }}
             >
-              {currentJob.done > 0 && (
-                <a
-                  href={`${API_URL}/api/watermark/download-all/${currentJob.job_id}`}
-                  download={`watermark_clean_${currentJob.job_id}.zip`}
-                  className="primary-button"
-                  style={{
-                    minHeight: 32,
-                    height: 32,
-                    fontSize: 12,
-                    padding: '0 12px',
-                    textDecoration: 'none',
-                    background: '#16a34a',
-                  }}
-                  title="Tải toàn bộ các video sạch trong job này về máy dưới dạng 1 file ZIP"
-                >
-                  <Download size={14} /> Tải tất cả ({currentJob.done} video
-                  ZIP)
-                </a>
-              )}
+              {currentJob.done > 0 && (() => {
+                const pendingDriveCount = currentJob.videos.filter(
+                  v => v.status === 'done' && v.drive_status !== 'done'
+                ).length
+                const allDriveDone = currentJob.done > 0 && pendingDriveCount === 0
+
+                return (
+                  <>
+                    {driveStatus?.connected && (
+                      allDriveDone ? (
+                        <span
+                          style={{
+                            minHeight: 32,
+                            height: 32,
+                            fontSize: 12,
+                            padding: '0 12px',
+                            background: '#f0fdf4',
+                            color: '#16a34a',
+                            border: '1px solid #bbf7d0',
+                            borderRadius: 8,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            fontWeight: 600,
+                          }}
+                        >
+                          <CheckCircle2 size={14} /> Đã lên Drive ({currentJob.done}/{currentJob.done})
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-p"
+                          onClick={() => handleSyncBatchToDrive(currentJob.job_id)}
+                          disabled={syncingDriveJobId === currentJob.job_id}
+                          style={{
+                            minHeight: 32,
+                            height: 32,
+                            fontSize: 12,
+                            padding: '0 12px',
+                            background: '#0284c7',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            color: '#fff',
+                            borderRadius: 8,
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                          }}
+                          title="Tải/sao lưu toàn bộ các video sạch còn lại trong job này lên Google Drive"
+                        >
+                          {syncingDriveJobId === currentJob.job_id ? (
+                            <>
+                              <Loader2 size={13} className="spin" /> Đang tải Drive...
+                            </>
+                          ) : (
+                            <>
+                              <UploadCloud size={14} /> Đẩy lên Drive ({pendingDriveCount})
+                            </>
+                          )}
+                        </button>
+                      )
+                    )}
+                    <a
+                      href={`${API_URL}/api/watermark/download-all/${currentJob.job_id}`}
+                      download={`watermark_clean_${currentJob.job_id}.zip`}
+                      className="primary-button"
+                      style={{
+                        minHeight: 32,
+                        height: 32,
+                        fontSize: 12,
+                        padding: '0 12px',
+                        textDecoration: 'none',
+                        background: '#16a34a',
+                      }}
+                      title="Tải toàn bộ các video sạch trong job này về máy dưới dạng 1 file ZIP"
+                    >
+                      <Download size={14} /> Tải tất cả ({currentJob.done} ZIP)
+                    </a>
+                  </>
+                )
+              })()}
+
               <button
                 type="button"
                 className="wm-new-btn"
@@ -400,17 +544,56 @@ export function WatermarkPage() {
                     </span>
                   )}
                   {v.status === 'done' && (
-                    <a
-                      href={`${API_URL}/api/watermark/download/${
-                        currentJob.job_id
-                      }/${encodeURIComponent(v.name)}`}
-                      download={v.name}
-                      className="wm-dl"
-                      title="Tải video sạch về máy"
-                    >
-                      <Download size={14} />
-                    </a>
+                    <>
+                      {v.drive_status === 'uploading' || syncingVideoName === v.name ? (
+                        <span
+                          className="wm-st"
+                          style={{
+                            background: '#e0f2fe',
+                            color: '#0284c7',
+                            borderColor: '#bae6fd',
+                            fontSize: 11,
+                            padding: '3px 8px',
+                          }}
+                        >
+                          <Loader2 size={12} className="spin" /> Đang tải Drive...
+                        </span>
+                      ) : v.drive_status === 'done' && v.drive_url ? (
+                        <a
+                          href={v.drive_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="wm-drive-btn"
+                          title="Mở video trên Google Drive ↗"
+                        >
+                          <ExternalLink size={12} /> Drive ↗
+                        </a>
+                      ) : driveStatus?.connected ? (
+                        <button
+                          type="button"
+                          className="wm-dl"
+                          onClick={() => handleSyncSingleToDrive(currentJob.job_id, v.name)}
+                          disabled={syncingVideoName === v.name || syncingDriveJobId === currentJob.job_id}
+                          title="Đẩy video này lên Google Drive"
+                          style={{ color: '#0284c7', background: '#f0f9ff', borderColor: '#bae6fd', cursor: 'pointer' }}
+                        >
+                          <UploadCloud size={14} />
+                        </button>
+                      ) : null}
+
+                      <a
+                        href={`${API_URL}/api/watermark/download/${
+                          currentJob.job_id
+                        }/${encodeURIComponent(v.name)}`}
+                        download={v.name}
+                        className="wm-dl"
+                        title="Tải video sạch về máy (Local)"
+                      >
+                        <Download size={14} />
+                      </a>
+                    </>
                   )}
+
                 </div>
               </div>
             ))}
@@ -453,13 +636,15 @@ export function WatermarkPage() {
               accept="video/mp4"
               multiple
               style={{ display: 'none' }}
-              onChange={e => handleAddFiles(e.target.files)}
+              onChange={e => {
+                if (e.target.files) handleAddFiles(e.target.files)
+              }}
             />
             <Upload size={32} className="wm-drop-icon" />
-            <p className="wm-drop-title">Kéo & thả video MP4 vào đây</p>
-            <p className="wm-drop-sub">
-              hoặc <span className="wm-drop-link">duyệt chọn từ máy</span>
-            </p>
+            <div className="wm-drop-text">
+              <strong>Kéo thả các file video MP4 vào đây</strong>
+              <span>hoặc bấm để chọn từ máy tính</span>
+            </div>
           </div>
 
           <div
@@ -504,12 +689,18 @@ export function WatermarkPage() {
             )}
           </div>
 
-          {/* Queue files list */}
+          {/* Queue List */}
           {queue.length > 0 && (
-            <div style={{ marginTop: 20 }}>
-              <div className="wm-queue-label" style={{ marginBottom: 10 }}>
-                <span>Danh sách chờ xử lý ({queue.length} file):</span>
+            <div className="wm-queue" style={{ marginTop: 20 }}>
+              <div className="wm-queue-header">
+                <div className="wm-queue-label">
+                  <Film size={15} />
+                  <span>
+                    Danh sách chờ xóa watermark ({queue.length} video)
+                  </span>
+                </div>
               </div>
+
               <div className="wm-list">
                 {queue.map((q, idx) => (
                   <div key={idx} className="wm-item">
@@ -606,34 +797,91 @@ export function WatermarkPage() {
                       : ''}
                   </span>
                 </div>
-                <div className="voice-item-actions">
-                  {job.done > 0 && (
-                    <a
-                      href={`${API_URL}/api/watermark/download-all/${job.job_id}`}
-                      download={`watermark_clean_${job.job_id}.zip`}
-                      className="chrome-button"
-                      style={{
-                        height: 32,
-                        padding: '0 10px',
-                        fontSize: 11,
-                        textDecoration: 'none',
-                      }}
-                      title="Tải tất cả file sạch dạng ZIP"
-                    >
-                      <Download size={12} /> ZIP ({job.done})
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => {
-                      setCurrentJob(job)
-                      setQueue([])
-                    }}
-                  >
-                    Xem chi tiết
-                  </button>
-                </div>
+                {(() => {
+                  const jobPending = job.videos.filter(
+                    v => v.status === 'done' && v.drive_status !== 'done'
+                  ).length
+                  const allJobDone = job.done > 0 && jobPending === 0
+
+                  return (
+                    <div className="voice-item-actions">
+                      {driveStatus?.connected && job.done > 0 && (
+                        allJobDone ? (
+                          <span
+                            className="chrome-button"
+                            style={{
+                              height: 32,
+                              padding: '0 10px',
+                              fontSize: 11,
+                              color: '#16a34a',
+                              borderColor: '#bbf7d0',
+                              background: '#f0fdf4',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              fontWeight: 600,
+                            }}
+                          >
+                            <CheckCircle2 size={12} /> Drive ({job.done})
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="chrome-button"
+                            onClick={() => handleSyncBatchToDrive(job.job_id)}
+                            disabled={syncingDriveJobId === job.job_id}
+                            style={{
+                              height: 32,
+                              padding: '0 10px',
+                              fontSize: 11,
+                              color: '#0284c7',
+                              borderColor: '#bae6fd',
+                              background: '#f0f9ff',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              fontWeight: 600,
+                            }}
+                            title="Đẩy toàn bộ file sạch còn lại lên Google Drive"
+                          >
+                            {syncingDriveJobId === job.job_id ? (
+                              <Loader2 size={12} className="spin" />
+                            ) : (
+                              <UploadCloud size={12} />
+                            )}
+                            Drive ({jobPending})
+                          </button>
+                        )
+                      )}
+                      {job.done > 0 && (
+                        <a
+                          href={`${API_URL}/api/watermark/download-all/${job.job_id}`}
+                          download={`watermark_clean_${job.job_id}.zip`}
+                          className="chrome-button"
+                          style={{
+                            height: 32,
+                            padding: '0 10px',
+                            fontSize: 11,
+                            textDecoration: 'none',
+                          }}
+                          title="Tải tất cả file sạch dạng ZIP"
+                        >
+                          <Download size={12} /> ZIP ({job.done})
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => {
+                          setCurrentJob(job)
+                          setQueue([])
+                        }}
+                      >
+                        Xem chi tiết
+                      </button>
+                    </div>
+                  )
+                })()}
               </div>
             ))}
           </div>

@@ -40,6 +40,8 @@ class PippitPublishRequest(BaseModel):
     caption: str = Field(default="", description="Nội dung mô tả bài viết")
     title: str = Field(default="", description="Tiêu đề bài viết (tùy chọn)")
     when_minutes_ahead: int = Field(default=1, description="Hẹn giờ đăng sau bao nhiêu phút (tối thiểu 1)")
+    job_id: str | None = Field(default=None, description="ID của Video Studio Job liên kết nếu có")
+
 
 
 class PippitPublishResponse(BaseModel):

@@ -33,6 +33,7 @@ export function VideoResultCard({
   overspeedCount,
   credits,
   caption,
+  pippitTasks,
   onReset,
   compact,
 }: {
@@ -43,9 +44,11 @@ export function VideoResultCard({
   overspeedCount?: number | null
   credits?: string | null
   caption?: BackendCaption | null
+  pippitTasks?: any[]
   onReset?: () => void
   compact?: boolean
 }) {
+
   const [copiedAll, setCopiedAll] = useState(false)
   const [copiedTitle, setCopiedTitle] = useState(false)
   const [showPublishModal, setShowPublishModal] = useState(false)
@@ -131,8 +134,29 @@ export function VideoResultCard({
         {overspeedCount && overspeedCount > 0 && (
           <p className="vrc-warn">
             <AlertCircle size={13} /> {overspeedCount} đoạn VO ngắn — xem lịch sử
-            để nghe thử
+            dể nghe thử
           </p>
+        )}
+        {pippitTasks && pippitTasks.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              background: '#e0f2fe',
+              color: '#0369a1',
+              border: '1px solid #bae6fd',
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <FacebookIcon size={14} />
+            <span>
+              Đã đăng FB ({pippitTasks.length} lần): <strong>{pippitTasks.map(t => t.page_name || t.page_id).join(', ')}</strong>
+            </span>
+          </div>
         )}
         <div className="vrc-actions">
           <a className="btn-p vrc-dl" href={src} download={filename}>
@@ -142,9 +166,18 @@ export function VideoResultCard({
             type="button"
             className="btn-fb-publish"
             onClick={() => setShowPublishModal(true)}
-            title="Đăng video trực tiếp lên Facebook Fanpage qua Pippit"
+            style={
+              pippitTasks && pippitTasks.length > 0
+                ? { background: '#f8fafc', color: '#1877f2', border: '1px solid #94a3b8' }
+                : undefined
+            }
+            title={
+              pippitTasks && pippitTasks.length > 0
+                ? `Video này đã được đăng lên: ${pippitTasks.map(t => t.page_name || t.page_id).join(', ')}. Bấm nếu muốn đăng tiếp lên Page khác.`
+                : 'Đăng video trực tiếp lên Facebook Fanpage qua Pippit'
+            }
           >
-            <FacebookIcon size={14} /> Đăng Facebook
+            <FacebookIcon size={14} /> {pippitTasks && pippitTasks.length > 0 ? 'Đã đăng FB (Đăng thêm)' : 'Đăng Facebook'}
           </button>
           {onReset && (
             <button type="button" className="btn-g" onClick={onReset}>
@@ -202,6 +235,7 @@ export function VideoResultCard({
           </div>
         )}
 
+        {/* ── BGM Credit Box (nếu có) ── */}
         {credits && (
           <div className="vrc-credit">
             <div className="vrc-credit-hdr">
@@ -222,6 +256,7 @@ export function VideoResultCard({
         <FacebookPublishModal
           jobId={jobId}
           caption={caption}
+          pippitTasks={pippitTasks}
           onClose={() => setShowPublishModal(false)}
         />
       )}
