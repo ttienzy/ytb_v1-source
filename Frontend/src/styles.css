@@ -397,5 +397,64 @@ button.chip-active:hover { background: #4f46e5; }
 .pip-progress-step.active .pip-step-icon { background: #e0e7ff; color: #4f46e5; }
 .pip-progress-step.done .pip-step-icon { background: #dcfce7; color: #16a34a; }
 
+/* ── Settings Navigation Tabs ──────────────────────────────────────────────── */
+.settings-nav-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f1f5f9;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 22px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+.settings-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+}
+.settings-tab-btn:hover {
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.6);
+}
+.settings-tab-btn.active {
+  color: #4f46e5;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.tab-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  margin-left: 2px;
+  box-shadow: 0 0 0 2px #d1fae5;
+}
+.tab-fade-in {
+  animation: tabFadeIn 0.2s ease-out;
+}
+@keyframes tabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
 
 
