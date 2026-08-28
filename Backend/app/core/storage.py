@@ -8,6 +8,7 @@ def default_config() -> dict:
     return {
         "gemini": {"cookies": "", "cookie_count": 0, "client_context_token": "", "app_url": "https://gemini.google.com/app"},
         "google_chrome": {"executable": str(settings.chrome_executable), "profile_dir": str(settings.chrome_profile_dir)},
+        "mailtm": {"accounts": []},
     }
 
 
@@ -16,7 +17,13 @@ def read_config() -> dict:
     try:
         if settings.config_file.exists() and settings.config_file.stat().st_size:
             config = json.loads(settings.config_file.read_text(encoding="utf-8"))
-            return {**defaults, **config, "gemini": {**defaults["gemini"], **config.get("gemini", {})}, "google_chrome": {**defaults["google_chrome"], **config.get("google_chrome", {})}}
+            return {
+                **defaults,
+                **config,
+                "gemini": {**defaults["gemini"], **config.get("gemini", {})},
+                "google_chrome": {**defaults["google_chrome"], **config.get("google_chrome", {})},
+                "mailtm": {**defaults["mailtm"], **config.get("mailtm", {})},
+            }
     except (OSError, json.JSONDecodeError):
         pass
     return defaults
