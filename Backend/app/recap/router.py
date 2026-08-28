@@ -68,6 +68,7 @@ def _to_out(job: state.JobState) -> JobOut:
         voice_id=job.voice_id,
         error=job.error,
         recap=job.recap,
+        caption=job.caption or (job.recap.get("caption") if job.recap else None),
         clips=job.clips,
         overspeed=job.overspeed,
         final=job.final,

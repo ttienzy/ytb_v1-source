@@ -17,9 +17,19 @@ import json
 import re
 import urllib.parse
 
+import sys
 import httpx
 
 from app.core.storage import read_config
+
+def _log(msg: str) -> None:
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        try:
+            print(msg.encode("ascii", errors="backslashreplace").decode("ascii"), flush=True)
+        except Exception:
+            pass
 
 # Push-ID / X-Client-Pctx cố định của Gemini web (telemetry routing cho push upload service).
 # Lấy từ HAR gốc (cùng account đã capture inner_template) — đã chạy được trong test_files.py.
@@ -54,7 +64,7 @@ def _gemini_config() -> dict:
 def _auto_refresh_cookies() -> dict:
     """Tự động mở Chrome profile để refresh cookies Gemini và lưu vào config.json."""
     from app.ai.gemini.service import login_and_save_cookie
-    print("[Gemini] Đang tự động làm mới cookie Gemini qua Chrome profile...")
+    _log("[Gemini] Đang tự động làm mới cookie Gemini qua Chrome profile...")
     res = login_and_save_cookie()
     if not res.get("has_cookie"):
         raise RuntimeError("Không lấy được cookie Gemini sau khi mở Chrome.")
@@ -136,11 +146,30 @@ def _parse_stream_frames(raw: str) -> list:
 
 
 def _normalize_recap_dict(data: dict) -> dict:
-    """Chuẩn hóa recap dict: làm sạch link markdown [url](url) nếu có."""
+    """Chuẩn hóa recap dict: làm sạch link markdown [url](url) nếu có, chuẩn hoá caption."""
     if "video_url" in data and isinstance(data["video_url"], str):
         m = re.search(r"https?://[^\s\)\]]+", data["video_url"])
         if m:
             data["video_url"] = m.group(0)
+    if "caption" in data and isinstance(data["caption"], dict):
+        cap = data["caption"]
+        if "title" in cap and isinstance(cap["title"], str):
+            cap["title"] = cap["title"].strip()
+        if "description" in cap and isinstance(cap["description"], str):
+            cap["description"] = cap["description"].strip()
+        if "hashtags" in cap:
+            if isinstance(cap["hashtags"], list):
+                cap["hashtags"] = [
+                    (h.strip() if h.strip().startswith("#") else f"#{h.strip()}")
+                    for h in cap["hashtags"]
+                    if isinstance(h, str) and h.strip()
+                ]
+            elif isinstance(cap["hashtags"], str):
+                cap["hashtags"] = [
+                    (h.strip() if h.strip().startswith("#") else f"#{h.strip()}")
+                    for h in cap["hashtags"].split()
+                    if h.strip()
+                ]
     return data
 
 
@@ -200,7 +229,7 @@ def _extract_recap_json(raw: str) -> dict | None:
 
     # 2) Quét tất cả điểm bắt đầu JSON và tự động sửa các lỗi ngắt quãng / mất closing bracket
     for txt in sorted(candidates, key=len, reverse=True):
-        start_indices = [m.start() for m in re.finditer(r'\{\s*\"(video_url|scenes|developer_note)', txt)]
+        start_indices = [m.start() for m in re.finditer(r'\{\s*\"(video_url|caption|scenes|title|developer_note)', txt)]
         if not start_indices:
             idx = txt.find("{")
             if idx != -1:
@@ -213,7 +242,7 @@ def _extract_recap_json(raw: str) -> dict | None:
                 sub = chunk[:e_idx + 1]
                 try:
                     data = json.loads(sub)
-                    if isinstance(data, dict) and ("scenes" in data or "video_url" in data):
+                    if isinstance(data, dict) and ("scenes" in data or "video_url" in data or "caption" in data):
                         return _normalize_recap_dict(data)
                 except json.JSONDecodeError:
                     pass
@@ -224,7 +253,7 @@ def _extract_recap_json(raw: str) -> dict | None:
                 for suffix in ["", "\n  ]\n}", "\n}", "\n]"]:
                     try:
                         data = json.loads(candidate + suffix)
-                        if isinstance(data, dict) and ("scenes" in data or "video_url" in data) and len(data.get("scenes", [])) > 0:
+                        if isinstance(data, dict) and ("scenes" in data or "video_url" in data or "caption" in data) and len(data.get("scenes", [])) > 0:
                             return _normalize_recap_dict(data)
                     except json.JSONDecodeError:
                         pass
@@ -266,7 +295,7 @@ def _do_generate_recap(
             at_val, bl_val, fsid_val = _fresh_tokens(client, cookies, ua)
         except Exception as exc:
             if allow_refresh:
-                print(f"[Gemini] Không lấy được token fresh ({exc}). Tự động làm mới cookie...")
+                _log(f"[Gemini] Không lấy được token fresh ({exc}). Tự động làm mới cookie...")
                 try:
                     _auto_refresh_cookies()
                     return _do_generate_recap(
@@ -288,7 +317,7 @@ def _do_generate_recap(
             gcs_prompt = _upload_file(client, prompt_bytes, prompt_name, cookies, ua)
         except Exception as exc:
             if allow_refresh and ("401" in str(exc) or "403" in str(exc) or "upload start fail" in str(exc)):
-                print(f"[Gemini] Upload file auth fail ({exc}). Tự động làm mới cookie...")
+                _log(f"[Gemini] Upload file auth fail ({exc}). Tự động làm mới cookie...")
                 try:
                     _auto_refresh_cookies()
                     return _do_generate_recap(
@@ -337,7 +366,7 @@ def _do_generate_recap(
         )
         if rr.status_code != 200 or '"er"' in rr.text[:200]:
             if allow_refresh and (rr.status_code in (401, 403) or "unauthenticated" in rr.text.lower()):
-                print(f"[Gemini] StreamGenerate auth fail (HTTP {rr.status_code}). Tự động làm mới cookie...")
+                _log(f"[Gemini] StreamGenerate auth fail (HTTP {rr.status_code}). Tự động làm mới cookie...")
                 try:
                     _auto_refresh_cookies()
                     return _do_generate_recap(

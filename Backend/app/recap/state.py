@@ -33,6 +33,7 @@ class JobState:
     progress_polish: dict = field(default_factory=lambda: {"done": 0, "total": 1, "step": "encode"})
     # ── Payload ──
     recap: dict | None = None
+    caption: dict | None = None
     voice_id: str | None = None
     error: str | None = None
     raw_bytes: bytes | None = None   # transcript gốc (giữ để re-run nếu lỗi)

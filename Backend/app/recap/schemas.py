@@ -23,6 +23,7 @@ class JobOut(BaseModel):
     voice_id: str | None = None
     error: str | None = None
     recap: dict | None = None
+    caption: dict | None = None
     clips: list[str] | None = None
     overspeed: list[int] | None = None
     final: str | None = None

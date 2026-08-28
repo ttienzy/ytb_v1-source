@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   Clock3,
+  FileText,
   Film,
   Mic,
   Pause,
@@ -355,6 +356,7 @@ export function HistoryPage() {
                     segments={segsOf(sel).length}
                     scenes={sel.recap?.scenes?.length ?? 0}
                     credits={sel.final_studio ? sel.credits : null}
+                    caption={sel.caption || sel.recap?.caption}
                     compact
                   />
                 ) : (

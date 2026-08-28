@@ -458,6 +458,7 @@ export function StudioPage({
                 scenes={job.recap?.scenes?.length ?? 0}
                 overspeedCount={job.overspeed?.length}
                 credits={job.overall === 'polished' ? job.credits : null}
+                caption={job.caption || job.recap?.caption}
                 onReset={reset}
               />
             )}

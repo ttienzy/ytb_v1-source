@@ -11,8 +11,15 @@ export type BackendScene = {
   segments: BackendSegment[]
 }
 
+export type BackendCaption = {
+  title?: string
+  description?: string
+  hashtags?: string[]
+}
+
 export type BackendRecap = {
   video_url?: string
+  caption?: BackendCaption
   scenes: BackendScene[]
 }
 
@@ -36,6 +43,7 @@ export type JobOut = {
   voice_id?: string | null
   error?: string | null
   recap?: BackendRecap | null
+  caption?: BackendCaption | null
   clips?: string[] | null
   overspeed?: number[] | null
   final?: string | null

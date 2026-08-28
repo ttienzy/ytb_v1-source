@@ -79,7 +79,7 @@ def download_video(youtube_url: str, dest_dir: Path) -> Path:
     for use_cookies, extra in attempts:
         cmd = [*base_cmd, *extra, youtube_url]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
         except subprocess.TimeoutExpired:
             # yt-dlp hang/throttle quá TIMEOUT — raise RuntimeError để ``cut()`` bắt được
             # (nếu không, TimeoutExpired không phải RuntimeError → cut_status stuck "running").

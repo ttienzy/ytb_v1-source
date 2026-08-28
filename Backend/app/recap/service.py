@@ -144,7 +144,7 @@ async def _generate_for_job(job_id: str) -> None:
         state.update_job(job_id, recap_status="error", error=str(error))
         raise HTTPException(status_code=502, detail=str(error)) from error
 
-    state.update_job(job_id, recap_status="done", recap=recap)
+    state.update_job(job_id, recap_status="done", recap=recap, caption=recap.get("caption"))
 
     # Persist recap ra disk → rehydrate được sau restart.
     # Ghi thêm youtube_url + created_at để rehydrate đầy đủ.
@@ -204,6 +204,7 @@ def rehydrate(job_id: str) -> JobState | None:
         merge_status=disk["merge_status"],
         polish_status=disk["polish_status"],
         recap=recap,
+        caption=recap.get("caption"),
         clips=disk["clips"],
         overspeed=None,  # không suy luận được từ disk
         final=disk["final"],

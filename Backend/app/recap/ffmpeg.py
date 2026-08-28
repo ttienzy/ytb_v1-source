@@ -35,7 +35,7 @@ def ffprobe_duration(path: Path) -> float:
         str(path),
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_PROBE)
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_PROBE)
     except (subprocess.SubprocessError, FileNotFoundError):
         return 0.0
     out = (proc.stdout or "").strip()
@@ -59,7 +59,7 @@ def cut_segment(video: Path, start_sec: float, end_sec: float, out: Path) -> Pat
         "-c", "copy",
         str(out),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
     if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
         raise RuntimeError(f"ffmpeg cut thất bại [{out.name}]: {(proc.stderr or '')[-400:]}")
     return out
@@ -98,7 +98,7 @@ def mux_segment(clip: Path, voice: Path, out: Path) -> Path:
         "-shortest",
         str(out),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_MUX)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_MUX)
     if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
         raise RuntimeError(f"ffmpeg mux thất bại [{out.name}]: {(proc.stderr or '')[-400:]}")
     return out
@@ -128,7 +128,7 @@ def concat_segments(segments: list[Path], out: Path, work_dir: Path) -> Path:
         "-c", "copy",
         str(out),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_CONCAT)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_CONCAT)
     if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
         raise RuntimeError(f"ffmpeg concat thất bại: {(proc.stderr or '')[-500:]}")
     return out
