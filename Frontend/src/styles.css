@@ -364,4 +364,38 @@ button.chip-active:hover { background: #4f46e5; }
 .mtm-otp-banner { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 12px; background: #ecfdf5; border: 1.5px solid #6ee7b7; border-radius: 8px; color: #065f46; font-size: 12px; font-weight: 600; }
 .mtm-otp-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 800; color: #047857; letter-spacing: 0.1em; background: #fff; padding: 2px 8px; border-radius: 6px; border: 1px dashed #34d399; }
 
+/* ── Pippit AI & Facebook Pages Styles ─────────────────────────────────────── */
+.pip-btn-reg { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; font-size: 11.5px; font-weight: 600; color: #059669; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 7px; transition: all .15s; }
+.pip-btn-reg:hover { background: #d1fae5; color: #047857; }
+
+.pip-acc-grid { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.pip-acc-card { background: #fff; border: 1.5px solid #e2e8f0; border-radius: 14px; padding: 18px 20px; transition: all .2s; }
+.pip-acc-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+.pip-acc-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.pip-acc-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pip-email-title { font-size: 14px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 6px; }
+
+.pip-fb-container { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-top: 12px; }
+.pip-fb-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.pip-fb-title { font-size: 12px; font-weight: 700; color: #475569; display: flex; align-items: center; gap: 6px; }
+
+.pip-fb-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.pip-slot-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 12px; }
+.pip-slot-card.connected { border-color: #bfdbfe; background: #eff6ff; }
+.pip-slot-num { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 6px; background: #e2e8f0; font-size: 11px; font-weight: 800; color: #475569; }
+.pip-slot-card.connected .pip-slot-num { background: #3b82f6; color: #fff; }
+.pip-slot-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.pip-slot-info strong { color: #1e293b; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pip-slot-info span { color: #64748b; font-size: 10.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Progress tracker modal */
+.pip-progress-box { display: flex; flex-direction: column; gap: 14px; padding: 16px 0; }
+.pip-progress-step { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #64748b; }
+.pip-progress-step.active { color: #4f46e5; font-weight: 600; }
+.pip-progress-step.done { color: #16a34a; font-weight: 600; }
+.pip-step-icon { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; background: #f1f5f9; color: #94a3b8; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.pip-progress-step.active .pip-step-icon { background: #e0e7ff; color: #4f46e5; }
+.pip-progress-step.done .pip-step-icon { background: #dcfce7; color: #16a34a; }
+
+
 

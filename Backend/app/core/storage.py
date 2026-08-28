@@ -9,6 +9,7 @@ def default_config() -> dict:
         "gemini": {"cookies": "", "cookie_count": 0, "client_context_token": "", "app_url": "https://gemini.google.com/app"},
         "google_chrome": {"executable": str(settings.chrome_executable), "profile_dir": str(settings.chrome_profile_dir)},
         "mailtm": {"accounts": []},
+        "pippit": {"accounts": []},
     }
 
 
@@ -23,6 +24,7 @@ def read_config() -> dict:
                 "gemini": {**defaults["gemini"], **config.get("gemini", {})},
                 "google_chrome": {**defaults["google_chrome"], **config.get("google_chrome", {})},
                 "mailtm": {**defaults["mailtm"], **config.get("mailtm", {})},
+                "pippit": {**defaults["pippit"], **config.get("pippit", {})},
             }
     except (OSError, json.JSONDecodeError):
         pass

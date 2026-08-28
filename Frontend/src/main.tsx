@@ -1,6 +1,6 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock3, Copy, Download, Eraser, Eye, EyeOff, FileVideo, Film, FolderOpen, GitBranch, Inbox, Key, Layers, LayoutDashboard, Loader2, Mail, Menu, Mic, Music, PanelLeftClose, Pause, Play, PlaySquare, Plus, RefreshCw, Save, Scissors, Search, Settings, Sparkles, Trash2, Upload, Volume2, X, XCircle } from 'lucide-react'
+import { AlertCircle, Bot, Check, CheckCircle2, ChevronDown, Clock3, Copy, Download, Edit3, Eraser, ExternalLink, Eye, EyeOff, FileVideo, Film, FolderOpen, GitBranch, Globe, Inbox, Key, Layers, LayoutDashboard, Loader2, Mail, Menu, Mic, Music, PanelLeftClose, Pause, Play, PlaySquare, Plus, RefreshCw, Save, Scissors, Search, Settings, Share2, Sparkles, Trash2, Upload, Volume2, X, XCircle } from 'lucide-react'
 import './styles.css'
 
 const API_URL = 'http://127.0.0.1:8000'
@@ -21,7 +21,42 @@ type MailAccount = { id: string; address: string; password: string; token?: stri
 type MailMessage = { id: string; from_addr: string; from_name: string; subject: string; intro: string; seen: boolean; created_at: string; otp_code?: string | null }
 type MailMessageDetail = { id: string; from_addr: string; from_name: string; subject: string; intro: string; text: string; html: string | string[]; created_at: string; otp_code?: string | null }
 
-function MailTmSection() {
+type FacebookPageSlot = {
+  page_id: string
+  page_name: string
+  avatar_url?: string
+  status: string
+  un_expired?: boolean
+}
+
+type PippitAccount = {
+  id: string
+  mailtm_id?: string
+  email: string
+  password: string
+  user_id?: string
+  workspace_id?: string
+  proxy?: string
+  status: string
+  created_at: string
+  facebook_pages: FacebookPageSlot[]
+}
+
+type PippitTask = {
+  task_id?: string
+  status?: number
+  published: boolean
+  post_id: string
+  post_url: string
+  page_id: string
+  page_name: string
+  schedule_time_ms: number
+  title: string
+  description: string
+  failed_reason: string
+}
+
+function MailTmSection({ onRegisteredPippit }: { onRegisteredPippit?: () => void }) {
   const [domains, setDomains] = useState<MailDomain[]>([])
   const [accounts, setAccounts] = useState<MailAccount[]>([])
   const [tab, setTab] = useState<'single' | 'batch'>('single')
@@ -50,6 +85,15 @@ function MailTmSection() {
   const [inboxLoading, setInboxLoading] = useState(false)
   const [selectedMsg, setSelectedMsg] = useState<MailMessageDetail | null>(null)
   const [msgLoading, setMsgLoading] = useState(false)
+
+  // Pure HTTP Login & Sync Modal
+  const [syncModal, setSyncModal] = useState<{
+    open: boolean
+    account: MailAccount | null
+    step: 'idle' | 'running' | 'done' | 'error'
+    message: string
+    pagesCount?: number
+  }>({ open: false, account: null, step: 'idle', message: '' })
 
   const loadDomains = useCallback(async () => {
     try {
@@ -196,6 +240,44 @@ function MailTmSection() {
       // ignore
     } finally {
       setMsgLoading(false)
+    }
+  }
+
+  async function startLoginSyncPippit(account: MailAccount) {
+    setSyncModal({
+      open: true,
+      account,
+      step: 'running',
+      message: 'Đang đăng nhập Pure HTTP vào Pippit và trích xuất Workspace ID, Real Facebook Pages...',
+    })
+    try {
+      const res = await fetch(`${API_URL}/api/pippit/accounts/login-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: account.address,
+          password: account.password,
+          mailtm_id: account.id,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Đăng nhập Pippit thất bại')
+      const connectedCount = (data.facebook_pages || []).filter((p: any) => p.page_id).length
+      setSyncModal({
+        open: true,
+        account,
+        step: 'done',
+        message: `Đăng nhập thành công! Đã kết nối ${connectedCount} Real Facebook Pages cho ${account.address}.`,
+        pagesCount: connectedCount,
+      })
+      if (onRegisteredPippit) onRegisteredPippit()
+    } catch (err: any) {
+      setSyncModal({
+        open: true,
+        account,
+        step: 'error',
+        message: err.message || 'Đăng nhập Pippit thất bại. Vui lòng kiểm tra lại tài khoản.',
+      })
     }
   }
 
@@ -432,6 +514,14 @@ function MailTmSection() {
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                       <button
                         type="button"
+                        className="pip-btn-reg"
+                        onClick={() => startLoginSyncPippit(acc)}
+                        title="Đăng nhập Pure HTTP và kéo toàn bộ Real Facebook Pages của tài khoản này"
+                      >
+                        <Bot size={13} /> Đăng nhập & Kéo Pages
+                      </button>
+                      <button
+                        type="button"
                         className="mtm-btn-inbox"
                         onClick={() => openInbox(acc)}
                       >
@@ -451,6 +541,61 @@ function MailTmSection() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Pippit Login & Sync Modal */}
+      {syncModal.open && (
+        <div className="mtm-modal-backdrop" onClick={() => setSyncModal({ ...syncModal, open: false })}>
+          <div className="mtm-modal-card" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
+            <div className="mtm-modal-hdr">
+              <div>
+                <h3>Đồng Bộ Pippit Pure HTTP (Không Cần Trình Duyệt)</h3>
+                <span style={{ fontSize: 11, color: '#64748b' }}>Tài khoản: {syncModal.account?.address}</span>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setSyncModal({ ...syncModal, open: false })}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mtm-modal-body" style={{ padding: '24px 22px' }}>
+              <div className="pip-progress-box">
+                <div className={`pip-progress-step ${syncModal.step !== 'idle' ? 'done' : ''}`}>
+                  <span className="pip-step-icon">1</span>
+                  <span>Đăng nhập qua Passport XOR 0x05 & cấp Session Cookies</span>
+                </div>
+                <div className={`pip-progress-step ${syncModal.step === 'running' ? 'active' : syncModal.step === 'done' ? 'done' : ''}`}>
+                  <span className="pip-step-icon">
+                    {syncModal.step === 'running' ? <Loader2 size={14} className="spin" /> : '2'}
+                  </span>
+                  <span>Trích xuất Workspace ID từ bootstrap HTML</span>
+                </div>
+                <div className={`pip-progress-step ${syncModal.step === 'done' ? 'done' : ''}`}>
+                  <span className="pip-step-icon">3</span>
+                  <span>Kéo danh sách Real Facebook Pages (platform_type=301)</span>
+                </div>
+              </div>
+
+              <p className="settings-message" style={{ color: syncModal.step === 'error' ? '#dc2626' : '#059669', fontWeight: 600, margin: '8px 0' }}>
+                {syncModal.message}
+              </p>
+
+              {syncModal.step === 'done' && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ alignSelf: 'flex-end', marginTop: 14 }}
+                  onClick={() => setSyncModal({ ...syncModal, open: false })}
+                >
+                  <Check size={16} /> Đóng & Xem danh sách Pages
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -543,6 +688,330 @@ function MailTmSection() {
   )
 }
 
+function PippitSection() {
+  const [accounts, setAccounts] = useState<PippitAccount[]>([])
+  const [loading, setLoading] = useState(false)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [message, setMessage] = useState('')
+
+  // Add account form
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [addEmail, setAddEmail] = useState('')
+  const [addPassword, setAddPassword] = useState('')
+  const [addProxy, setAddProxy] = useState('')
+
+  // Task list modal
+  const [viewTasksAcc, setViewTasksAcc] = useState<PippitAccount | null>(null)
+  const [tasks, setTasks] = useState<PippitTask[]>([])
+  const [tasksLoading, setTasksLoading] = useState(false)
+
+  const loadPippitAccounts = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/pippit/accounts`)
+      if (!res.ok) throw new Error()
+      const data: PippitAccount[] = await res.json()
+      setAccounts(data)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    loadPippitAccounts()
+  }, [loadPippitAccounts])
+
+  function copyText(text: string, key: string) {
+    navigator.clipboard.writeText(text)
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey(null), 2000)
+  }
+
+  async function handleAddAccount(e: React.FormEvent) {
+    e.preventDefault()
+    if (!addEmail.trim() || !addPassword.trim()) {
+      setMessage('Vui lòng nhập đầy đủ Email và Mật khẩu.')
+      return
+    }
+    setLoading(true); setMessage('')
+    try {
+      const res = await fetch(`${API_URL}/api/pippit/accounts/login-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: addEmail.trim(),
+          password: addPassword.trim(),
+          proxy: addProxy.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Đăng nhập Pippit thất bại')
+      await loadPippitAccounts()
+      setShowAddForm(false)
+      setAddEmail(''); setAddPassword(''); setAddProxy('')
+      setMessage(`Đã đăng nhập thành công cho ${data.email}!`)
+    } catch (err: any) {
+      setMessage(err.message || 'Lỗi đăng nhập tài khoản')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRefreshPages(acc: PippitAccount) {
+    setLoading(true); setMessage(`Đang quét lại Real Pages cho ${acc.email}...`)
+    try {
+      const res = await fetch(`${API_URL}/api/pippit/accounts/${acc.id}/refresh-pages`, {
+        method: 'POST',
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Quét Pages thất bại')
+      await loadPippitAccounts()
+      const count = (data.facebook_pages || []).filter((p: any) => p.page_id).length
+      setMessage(`Đã quét xong: Tìm thấy ${count} Real Facebook Pages cho ${acc.email}.`)
+    } catch (err: any) {
+      setMessage(err.message || 'Lỗi quét lại Fanpages')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleViewTasks(acc: PippitAccount) {
+    setViewTasksAcc(acc)
+    setTasksLoading(true)
+    try {
+      const res = await fetch(`${API_URL}/api/pippit/accounts/${acc.id}/tasks`)
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      setTasks(Array.isArray(data) ? data : [])
+    } catch {
+      setTasks([])
+    } finally {
+      setTasksLoading(false)
+    }
+  }
+
+  async function handleDeletePippit(acc: PippitAccount) {
+    if (!confirm(`Bạn có chắc muốn xóa tài khoản Pippit ${acc.email}?`)) return
+    try {
+      const res = await fetch(`${API_URL}/api/pippit/accounts/${acc.id}`, { method: 'DELETE' })
+      if (res.ok) {
+        setAccounts(prev => prev.filter(a => a.id !== acc.id))
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <div className="settings-card" style={{ marginTop: 22 }}>
+      <div className="integration-title">
+        <div className="gemini-icon" style={{ background: '#ecfdf5', color: '#059669' }}>
+          <Bot size={18} />
+        </div>
+        <div>
+          <h2>Pippit AI (Quản lý tài khoản & Real Facebook Pages)</h2>
+          <p>Sử dụng Pure HTTP Reverse-Engineered REST API để đăng nhập, kéo Facebook Pages thật và lên lịch video.</p>
+        </div>
+      </div>
+
+      <div className="mtm-section-hdr" style={{ borderTop: 'none', margin: '0 0 14px', paddingTop: 0 }}>
+        <span className="mtm-section-title">
+          Danh sách tài khoản Pippit <span className="mtm-badge">{accounts.length}</span>
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            type="button"
+            className="chrome-button"
+            style={{ minHeight: 32, padding: '0 10px', fontSize: 11 }}
+            onClick={() => setShowAddForm(!showAddForm)}
+          >
+            <Plus size={13} /> {showAddForm ? 'Đóng form' : 'Thêm tài khoản'}
+          </button>
+          <button
+            type="button"
+            className="chrome-button"
+            style={{ minHeight: 32, padding: '0 10px', fontSize: 11 }}
+            onClick={loadPippitAccounts}
+          >
+            <RefreshCw size={13} /> Làm mới
+          </button>
+        </div>
+      </div>
+
+      {showAddForm && (
+        <form onSubmit={handleAddAccount} style={{ background: '#f8fafc', padding: 16, borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+          <div className="mtm-form-grid">
+            <div>
+              <label>Email Pippit</label>
+              <input value={addEmail} onChange={e => setAddEmail(e.target.value)} placeholder="vd: user@domain.com" disabled={loading} />
+            </div>
+            <div>
+              <label>Mật khẩu</label>
+              <input type="password" value={addPassword} onChange={e => setAddPassword(e.target.value)} placeholder="Mật khẩu..." disabled={loading} />
+            </div>
+            <div>
+              <label>Proxy riêng <span>(tùy chọn: host:port)</span></label>
+              <input value={addProxy} onChange={e => setAddProxy(e.target.value)} placeholder="user:pass@host:port" disabled={loading} />
+            </div>
+          </div>
+          <div className="settings-actions">
+            <button type="submit" className="primary-button" disabled={loading}>
+              {loading ? <Loader2 size={15} className="spin" /> : <Bot size={15} />} Đăng nhập Pure HTTP & Kéo Pages
+            </button>
+          </div>
+        </form>
+      )}
+
+      {accounts.length === 0 ? (
+        <div style={{ padding: '24px 16px', textAlign: 'center', background: '#f8fafc', borderRadius: 10, border: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 12 }}>
+          Chưa có tài khoản Pippit nào. Hãy bấm <strong>“Đăng nhập & Kéo Pages”</strong> trên bảng Mail.tm ở trên hoặc bấm <strong>“Thêm tài khoản”</strong> để bắt đầu!
+        </div>
+      ) : (
+        <div className="pip-acc-grid">
+          {accounts.map(acc => (
+            <div key={acc.id} className="pip-acc-card">
+              <div className="pip-acc-top">
+                <div className="pip-acc-meta">
+                  <span className="pip-email-title">
+                    <Bot size={16} style={{ color: '#059669' }} /> {acc.email}
+                  </span>
+                  <span className="cookie-status" style={{ padding: '3px 8px', fontSize: 11 }}>
+                    <CheckCircle2 size={12} /> {acc.status}
+                  </span>
+                  {acc.workspace_id && (
+                    <span className="mtm-badge" style={{ background: '#f1f5f9', color: '#475569' }}>
+                      ws: {acc.workspace_id}
+                    </span>
+                  )}
+                  {acc.proxy && (
+                    <span className="mtm-badge" style={{ background: '#fef3c7', color: '#b45309' }}>
+                      proxy: {acc.proxy.split('@').pop()}
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="chrome-button"
+                    style={{ minHeight: 28, padding: '0 9px', fontSize: 11 }}
+                    onClick={() => handleRefreshPages(acc)}
+                    disabled={loading}
+                    title="Quét lại Real Facebook Pages từ Pippit"
+                  >
+                    <RefreshCw size={12} className={loading ? 'spin' : ''} /> Quét lại Pages
+                  </button>
+                  <button
+                    type="button"
+                    className="chrome-button"
+                    style={{ minHeight: 28, padding: '0 9px', fontSize: 11 }}
+                    onClick={() => handleViewTasks(acc)}
+                    title="Xem lịch bài đăng trên Facebook"
+                  >
+                    <Clock3 size={12} /> Lịch đăng ({acc.facebook_pages?.filter(p => p.page_id).length || 0} Pages)
+                  </button>
+                  <button
+                    type="button"
+                    className="mtm-btn-del"
+                    onClick={() => handleDeletePippit(acc)}
+                    title="Xóa tài khoản Pippit"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* 3 Real Facebook Pages Management */}
+              <div className="pip-fb-container">
+                <div className="pip-fb-hdr">
+                  <span className="pip-fb-title">
+                    <Share2 size={13} style={{ color: '#3b82f6' }} /> 3 Real Facebook Pages (platform_type=301)
+                  </span>
+                </div>
+
+                <div className="pip-fb-slots">
+                  {[0, 1, 2].map(idx => {
+                    const slot = acc.facebook_pages?.[idx]
+                    const isConn = Boolean(slot?.page_id)
+                    return (
+                      <div key={idx} className={`pip-slot-card ${isConn ? 'connected' : ''}`}>
+                        <span className="pip-slot-num">{idx + 1}</span>
+                        <div className="pip-slot-info">
+                          <strong>{slot?.page_name || `Slot ${idx + 1} (Chưa gán Page)`}</strong>
+                          <span>{slot?.page_id ? `ID: ${slot.page_id}` : 'Chưa có Page liên kết'}</span>
+                        </div>
+                        {isConn && (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: slot?.un_expired ? '#16a34a' : '#d97706', background: slot?.un_expired ? '#dcfce7' : '#fef3c7', padding: '2px 6px', borderRadius: 6 }}>
+                            {slot?.un_expired ? 'Sẵn sàng' : 'Cần cấp quyền lại'}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {message && (
+        <p className="settings-message" style={{ color: '#059669', display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
+          <CheckCircle2 size={15} /> {message}
+        </p>
+      )}
+
+      {/* View Tasks Modal */}
+      {viewTasksAcc && (
+        <div className="mtm-modal-backdrop" onClick={() => setViewTasksAcc(null)}>
+          <div className="mtm-modal-card" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
+            <div className="mtm-modal-hdr">
+              <div>
+                <h3>Lịch bài đăng Pippit (Facebook)</h3>
+                <span style={{ fontSize: 11, color: '#64748b' }}>Tài khoản: {viewTasksAcc.email}</span>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setViewTasksAcc(null)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mtm-modal-body" style={{ padding: 18 }}>
+              {tasksLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 30, color: '#64748b' }}>
+                  <Loader2 size={20} className="spin" /> Đang tải danh sách bài đăng...
+                </div>
+              ) : tasks.length === 0 ? (
+                <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                  Chưa có bài đăng nào được lên lịch qua tài khoản này.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {tasks.map((t, i) => (
+                    <div key={t.task_id || i} style={{ padding: 12, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: 12.5 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <strong>{t.page_name || `Page ID: ${t.page_id}`}</strong>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: t.published ? '#16a34a' : '#4f46e5' }}>
+                          {t.published ? 'ĐÃ ĐĂNG' : 'ĐANG HẸN GIỜ'}
+                        </span>
+                      </div>
+                      <div style={{ color: '#475569', marginBottom: 4 }}>{t.description || t.title || '(Không có nội dung)'}</div>
+                      {t.post_url && (
+                        <a href={t.post_url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <ExternalLink size={12} /> Xem bài đăng Facebook
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function SettingsPage() {
   const [state, setState] = useState<GeminiState>({ has_cookie: false, cookie_count: 0, client_context_token: '', app_url: 'https://gemini.google.com/app' })
   const [cookies, setCookies] = useState('')
@@ -551,6 +1020,7 @@ function SettingsPage() {
   const [yt, setYt] = useState<YtState>({ logged_in: false, cookie_count: 0 })
   const [ytLoading, setYtLoading] = useState(false)
   const [ytMsg, setYtMsg] = useState('')
+  const [pippitRefreshKey, setPippitRefreshKey] = useState(0)
 
   useEffect(() => { fetch(`${API_URL}/api/settings/gemini`).then((response) => response.json()).then(setState).catch(() => setMessage('Không kết nối được Backend.')) }, [])
   useEffect(() => { fetch(`${API_URL}/api/recap/yt/login`).then((r) => r.json()).then(setYt).catch(() => { }) }, [])
@@ -661,10 +1131,14 @@ function SettingsPage() {
       </div>
 
       {/* Mail.tm Multi-Account Management Section */}
-      <MailTmSection />
+      <MailTmSection onRegisteredPippit={() => setPippitRefreshKey(k => k + 1)} />
+
+      {/* Pippit AI & 3 Facebook Fanpages Management Section */}
+      <PippitSection key={pippitRefreshKey} />
     </section>
   )
 }
+
 
 
 type Voice = { voice_id: string; name: string; created_at?: string; tags?: string[] }
