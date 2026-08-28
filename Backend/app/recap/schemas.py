@@ -29,3 +29,12 @@ class JobOut(BaseModel):
     final: str | None = None
     final_studio: str | None = None
     credits: str | None = None
+
+
+class JobPublishFacebookRequest(BaseModel):
+    account_id: str
+    page_id: str
+    title: str = ""
+    caption: str = ""
+    when_minutes_ahead: int = 1
+

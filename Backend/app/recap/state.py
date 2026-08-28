@@ -88,3 +88,9 @@ def update_job(job_id: str, **fields) -> JobState:
 
 def list_jobs() -> list[JobState]:
     return list(_JOBS.values())
+
+
+def delete_job(job_id: str) -> JobState | None:
+    """Xóa job khỏi in-memory state."""
+    return _JOBS.pop(job_id, None)
+

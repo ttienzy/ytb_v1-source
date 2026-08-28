@@ -20,7 +20,7 @@ from app.db import get_db
 from app.media.service import resolve_for_polish
 from app.recap import service, state
 from app.recap.paths import final_path, final_studio_path, voice_path
-from app.recap.schemas import JobOut
+from app.recap.schemas import JobOut, JobPublishFacebookRequest
 from app.recap.ytdlp import login_youtube, yt_login_status
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
@@ -268,6 +268,21 @@ def list_jobs() -> list[JobOut]:
     jobs = state.list_jobs()
     jobs.sort(key=lambda j: j.created_at, reverse=True)
     return [_to_out(j) for j in jobs]
+
+
+@router.delete("/jobs/{job_id}")
+def delete_job_endpoint(job_id: str) -> dict:
+    """Xóa 1 job: xóa toàn bộ thư mục Data/Downloads/{job_id}/ và xóa state."""
+    deleted = service.delete_job_data(job_id)
+    return {"status": "ok", "job_id": job_id, "deleted": deleted}
+
+
+@router.post("/jobs/{job_id}/publish-facebook")
+def publish_facebook_endpoint(job_id: str, payload: JobPublishFacebookRequest):
+    """Upload video của job lên Pippit và lên lịch đăng bài cho Facebook Page."""
+    return service.publish_job_to_facebook(job_id, payload)
+
+
 
 
 # ── YouTube login (fallback cookies khi bị IP bot-wall) ───────────────────────

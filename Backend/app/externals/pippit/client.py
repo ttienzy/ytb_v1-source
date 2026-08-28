@@ -531,11 +531,20 @@ class PippitClient:
         return str(first.get("id") or "")
 
     # -- Tra cứu lịch bài đăng --------------------------------------------
-    def list_schedule_tasks(self, limit: int = 50) -> list[dict]:
-        body = {"cursor": "0", "count": limit, "platform_type_list": [301]}
+    def list_schedule_tasks(self, limit: int = 100) -> list[dict]:
+        now_ms = int(time.time() * 1000)
+        # Quét lịch trong khoảng 180 ngày trước và 180 ngày tới
+        body = {
+            "cursor": "0",
+            "count": limit,
+            "platform_type_list": [301],
+            "start_time": now_ms - (180 * 86400 * 1000),
+            "end_time": now_ms + (180 * 86400 * 1000),
+        }
         j = self.post("/api/biz/v1/publish/list_schedule_task", body, "publish")
         if j.get("ret") != "0":
             raise PippitError(f"list_schedule_task thất bại: {j}")
+
         out = []
         for t in j.get("data") or []:
             param = t.get("facebook_page_publish_param") or {}

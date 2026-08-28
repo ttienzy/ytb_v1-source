@@ -13,6 +13,17 @@ import {
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 import type { BackendCaption } from '../types'
+import { FacebookPublishModal } from './FacebookPublishModal'
+
+function FacebookIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  )
+}
+
+
 
 export function VideoResultCard({
   jobId,
@@ -37,6 +48,8 @@ export function VideoResultCard({
 }) {
   const [copiedAll, setCopiedAll] = useState(false)
   const [copiedTitle, setCopiedTitle] = useState(false)
+  const [showPublishModal, setShowPublishModal] = useState(false)
+
 
   const polished = variant === 'polished'
   const endpoint = polished ? 'studio' : 'final'
@@ -48,23 +61,27 @@ export function VideoResultCard({
   const src = `${API_URL}/api/recap/jobs/${jobId}/${endpoint}`
 
   const hasCaption = Boolean(
-    caption && (caption.title || caption.description || caption.hashtags?.length)
+    caption &&
+      (caption.title ||
+        caption.description ||
+        (Array.isArray(caption.hashtags) && caption.hashtags.length > 0))
   )
 
   function getFullCaptionText(): string {
     if (!caption) return ''
     const parts: string[] = []
-    if (caption.title) parts.push(caption.title.trim())
-    if (caption.description) parts.push(caption.description.trim())
-    if (caption.hashtags && caption.hashtags.length > 0) {
+    if (caption.title) parts.push(String(caption.title).trim())
+    if (caption.description) parts.push(String(caption.description).trim())
+    if (Array.isArray(caption.hashtags) && caption.hashtags.length > 0) {
       parts.push(
         caption.hashtags
-          .map(h => (h.startsWith('#') ? h : `#${h}`))
+          .map(h => (String(h).startsWith('#') ? String(h) : `#${String(h)}`))
           .join(' ')
       )
     }
     return parts.join('\n\n')
   }
+
 
   async function copyAllCaption() {
     const text = getFullCaptionText()
@@ -121,6 +138,14 @@ export function VideoResultCard({
           <a className="btn-p vrc-dl" href={src} download={filename}>
             <Download size={14} /> Tải về
           </a>
+          <button
+            type="button"
+            className="btn-fb-publish"
+            onClick={() => setShowPublishModal(true)}
+            title="Đăng video trực tiếp lên Facebook Fanpage qua Pippit"
+          >
+            <FacebookIcon size={14} /> Đăng Facebook
+          </button>
           {onReset && (
             <button type="button" className="btn-g" onClick={onReset}>
               <Trash2 size={14} /> Bắt đầu lại
@@ -191,6 +216,15 @@ export function VideoResultCard({
           </div>
         )}
       </div>
+
+      {/* ── Facebook Publish Modal ── */}
+      {showPublishModal && (
+        <FacebookPublishModal
+          jobId={jobId}
+          caption={caption}
+          onClose={() => setShowPublishModal(false)}
+        />
+      )}
     </div>
   )
 }

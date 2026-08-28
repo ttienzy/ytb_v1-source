@@ -36,6 +36,13 @@ def get_tasks(account_id: str):
     return service.list_account_tasks(account_id)
 
 
+@router.get("/all-tasks")
+def get_all_tasks():
+    """Lấy danh sách tất cả các bài đăng đã lên lịch trên toàn bộ tài khoản Pippit."""
+    return service.list_all_saved_accounts_tasks()
+
+
+
 @router.post("/publish", response_model=PippitPublishResponse)
 def publish_video(payload: PippitPublishRequest):
     """Upload video 5 bước lên Pippit Cloud và lên lịch đăng bài cho Facebook Page."""

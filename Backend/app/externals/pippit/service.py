@@ -1,9 +1,12 @@
+import json
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import HTTPException
 
+from app.core.config import TOOLS_DIR
 from app.core.storage import read_config, write_config
 from app.externals.pippit import client
 from app.externals.pippit.client import PippitAuthError, PippitClient, PippitError
@@ -15,6 +18,35 @@ from app.externals.pippit.schemas import (
     PippitPublishResponse,
     PippitScheduleTaskOut,
 )
+
+PIPPIT_TASKS_FILE = TOOLS_DIR / "Backend" / "Data" / "pippit_tasks.json"
+
+
+def _get_saved_tasks() -> list[dict]:
+    """Đọc lịch sử các task đã đăng/lên lịch từ pippit_tasks.json."""
+    if not PIPPIT_TASKS_FILE.exists():
+        return []
+    try:
+        return json.loads(PIPPIT_TASKS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_task_record(task_data: dict) -> None:
+    """Lưu 1 task bài đăng vào pippit_tasks.json."""
+    tasks = _get_saved_tasks()
+    tid = task_data.get("task_id")
+    idx = next((i for i, t in enumerate(tasks) if t.get("task_id") == tid), -1) if tid else -1
+    if idx >= 0:
+        tasks[idx].update(task_data)
+    else:
+        tasks.insert(0, task_data)
+    try:
+        PIPPIT_TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PIPPIT_TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"[Pippit] Không thể lưu task record: {exc}")
+
 
 
 def get_saved_pippit_accounts() -> list[dict]:
@@ -215,17 +247,51 @@ def publish_video_to_page(payload: PippitPublishRequest) -> PippitPublishRespons
     minutes = max(1, payload.when_minutes_ahead)
     schedule_time_ms = int(time.time() * 1000) + (minutes * 60 * 1000)
 
-    # 3. Lên lịch bài đăng Facebook Page
+    # 3. Gộp Tiêu đề vào đầu Caption (Facebook post video hiển thị description làm nội dung bài viết chính)
+    title_clean = (payload.title or "").strip()
+    caption_clean = (payload.caption or "").strip()
+
+    if title_clean:
+        if not caption_clean.startswith(title_clean):
+            final_caption = f"{title_clean}\n\n{caption_clean}" if caption_clean else title_clean
+        else:
+            final_caption = caption_clean
+    else:
+        final_caption = caption_clean
+
+    # 4. Lên lịch bài đăng Facebook Page
     try:
         task_id = c.schedule_facebook(
             asset_id=asset_id,
             platform_user_id=payload.page_id,
             schedule_time_ms=schedule_time_ms,
-            description=payload.caption,
-            title=payload.title,
+            description=final_caption,
+            title=title_clean,
         )
     except PippitError as exc:
         raise HTTPException(status_code=500, detail=f"Lên lịch đăng bài thất bại: {exc}") from exc
+
+    # 5. Lưu lại task vào lịch sử cục bộ
+    page_name = ""
+    for p in acc.get("facebook_pages", []):
+        if str(p.get("page_id")) == str(payload.page_id):
+            page_name = p.get("page_name", "")
+            break
+
+    _save_task_record({
+        "task_id": task_id,
+        "asset_id": asset_id,
+        "account_id": payload.account_id,
+        "account_email": acc.get("email", ""),
+        "page_id": str(payload.page_id),
+        "page_name": page_name or f"Page {payload.page_id}",
+        "title": title_clean,
+        "description": final_caption,
+        "schedule_time_ms": schedule_time_ms,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": 1,
+        "published": False,
+    })
 
     return PippitPublishResponse(
         ok=True,
@@ -249,6 +315,70 @@ def list_account_tasks(account_id: str) -> list[PippitScheduleTaskOut]:
         return [PippitScheduleTaskOut(**t) for t in tasks]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Lấy danh sách tasks thất bại: {exc}") from exc
+
+
+def list_all_saved_accounts_tasks() -> list[dict]:
+    """Lấy toàn bộ tasks đã lên lịch từ local cache + live sync từ Pippit."""
+    local_tasks = _get_saved_tasks()
+    accounts = get_saved_pippit_accounts()
+
+    # Quét live từ các tài khoản Pippit
+    live_tasks_map = {}
+    for acc in accounts:
+        cookies = acc.get("cookies", "")
+        if not cookies:
+            continue
+        try:
+            c = PippitClient(
+                cookies=cookies,
+                workspace_id=acc.get("workspace_id", ""),
+                proxy=acc.get("proxy", ""),
+            )
+            fetched = c.list_schedule_tasks()
+            for t in fetched:
+                tid = t.get("task_id")
+                if tid:
+                    t["account_id"] = acc.get("id")
+                    t["account_email"] = acc.get("email")
+                    live_tasks_map[tid] = t
+        except Exception:
+            pass
+
+    # Merge live status vào local tasks
+    now_ms = int(time.time() * 1000)
+    merged = []
+    seen_ids = set()
+
+    for lt in local_tasks:
+        tid = lt.get("task_id")
+        if tid:
+            seen_ids.add(tid)
+        if tid and tid in live_tasks_map:
+            live = live_tasks_map[tid]
+            lt["status"] = live.get("status", lt.get("status"))
+            lt["published"] = live.get("published", lt.get("published"))
+            if live.get("post_url"):
+                lt["post_url"] = live.get("post_url")
+            if live.get("failed_reason"):
+                lt["failed_reason"] = live.get("failed_reason")
+        else:
+            # Nếu đã quá giờ hẹn và không có lỗi, đánh dấu status published
+            sched_ms = lt.get("schedule_time_ms") or 0
+            if sched_ms > 0 and sched_ms <= now_ms and not lt.get("failed_reason"):
+                lt["published"] = True
+                lt["status"] = 3
+        merged.append(lt)
+
+    # Thêm các task mới lấy được từ live API mà chưa có trong local
+    for tid, live in live_tasks_map.items():
+        if tid not in seen_ids:
+            merged.append(live)
+
+    # Sắp xếp mới nhất lên đầu theo schedule_time_ms desc
+    merged.sort(key=lambda x: x.get("schedule_time_ms") or 0, reverse=True)
+    return merged
+
+
 
 
 def delete_pippit_account(account_id: str) -> dict:

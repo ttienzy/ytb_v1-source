@@ -19,6 +19,7 @@ import asyncio
 import io
 import json
 import re
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -226,6 +227,17 @@ def list_disk_jobs() -> list[str]:
         if p.is_dir() and (p / "recap.json").exists() and p.name not in state._JOBS:
             out.append(p.name)
     return out
+
+
+def delete_job_data(job_id: str) -> bool:
+    """Xóa job khỏi memory state và xóa toàn bộ thư mục Downloads/{job_id}/."""
+    state.delete_job(job_id)
+    jdir = job_dir_of(job_id)
+    if jdir.exists() and jdir.is_dir():
+        shutil.rmtree(jdir, ignore_errors=True)
+        return True
+    return False
+
 
 
 # ── Phase B: cut (per-phase gate + progress) ─────────────────────────────────
@@ -639,3 +651,37 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
             state.update_job(job_id, polish_status="error", error=f"pipeline: {exc}")
         except KeyError:
             pass
+
+
+def publish_job_to_facebook(job_id: str, payload) -> dict:
+    """Upload video đã tạo của job lên Pippit Cloud và lên lịch đăng bài cho Facebook Page."""
+    from app.externals.pippit import service as pippit_service
+    from app.externals.pippit.schemas import PippitPublishRequest
+
+    p_studio = final_studio_path(job_id)
+    p_recap = final_path(job_id)
+
+    video_file: Path | None = None
+    if p_studio.exists() and p_studio.stat().st_size > 0:
+        video_file = p_studio
+    elif p_recap.exists() and p_recap.stat().st_size > 0:
+        video_file = p_recap
+
+    if not video_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Job này chưa có video thành phẩm (chưa có final_studio.mp4 hoặc final_recap.mp4).",
+        )
+
+    req = PippitPublishRequest(
+        account_id=payload.account_id,
+        page_id=payload.page_id,
+        video_path=str(video_file),
+        caption=payload.caption,
+        title=payload.title,
+        when_minutes_ahead=payload.when_minutes_ahead,
+    )
+    res = pippit_service.publish_video_to_page(req)
+    return res.model_dump() if hasattr(res, "model_dump") else res.dict()
+
+
