@@ -51,6 +51,16 @@ def _gemini_config() -> dict:
     }
 
 
+def _auto_refresh_cookies() -> dict:
+    """Tự động mở Chrome profile để refresh cookies Gemini và lưu vào config.json."""
+    from app.ai.gemini.service import login_and_save_cookie
+    print("[Gemini] Đang tự động làm mới cookie Gemini qua Chrome profile...")
+    res = login_and_save_cookie()
+    if not res.get("has_cookie"):
+        raise RuntimeError("Không lấy được cookie Gemini sau khi mở Chrome.")
+    return _gemini_config()
+
+
 def _fresh_tokens(client: httpx.Client, cookies: str, ua: str) -> tuple[str, str, str]:
     """GET /app → regex token fresh (at/bl/f.sid). Raise nếu cookie hết hạn."""
     r = client.get("https://gemini.google.com/app", headers={"User-Agent": ua, "Cookie": cookies})
@@ -125,11 +135,20 @@ def _parse_stream_frames(raw: str) -> list:
     return payloads
 
 
+def _normalize_recap_dict(data: dict) -> dict:
+    """Chuẩn hóa recap dict: làm sạch link markdown [url](url) nếu có."""
+    if "video_url" in data and isinstance(data["video_url"], str):
+        m = re.search(r"https?://[^\s\)\]]+", data["video_url"])
+        if m:
+            data["video_url"] = m.group(0)
+    return data
+
+
 def _extract_recap_json(raw: str) -> dict | None:
     """Trích recap dict từ response Gemini.
 
     Ưu tiên khối JSON được bọc trong code-fence json; nếu Gemini tuân theo prompt
-    (không bọc fence) thì parse trực tiếp chunk JSON thô. Lấy candidate đầy đủ nhất.
+    (không bọc fence) thì parse trực tiếp chunk JSON thô hoặc tự động phục hồi cấu trúc JSON bị ngắt.
     """
     payloads = _parse_stream_frames(raw)
     candidates: list[str] = []
@@ -145,24 +164,71 @@ def _extract_recap_json(raw: str) -> dict | None:
                 txt = rc[1][0]
                 if isinstance(txt, str) and len(txt) > 10:
                     candidates.append(txt)
-    # 1) khối ```json ... ```
+
+    if not candidates:
+        return None
+
+    # Ghi đè candidate dài nhất ra response.txt (KHÔNG chạm vào raw.txt)
+    longest = max(candidates, key=len)
+    try:
+        from app.core.config import TOOLS_DIR
+        (TOOLS_DIR / "response.txt").write_text(longest, encoding="utf-8")
+    except OSError:
+        pass
+
+    # 1) khối ```json ... ``` hoặc ``` ... ```
     for txt in sorted(candidates, key=len, reverse=True):
         if "```json" in txt:
             start = txt.find("```json")
             end = txt.rfind("```")
             if start != -1 and end > start:
                 try:
-                    return json.loads(txt[start + len("```json"):end].strip())
+                    return _normalize_recap_dict(json.loads(txt[start + len("```json"):end].strip()))
                 except json.JSONDecodeError:
-                    continue
-    # 2) fallback: JSON thô (không fence)
+                    pass
+        if "```" in txt:
+            start = txt.find("```")
+            end = txt.rfind("```")
+            if start != -1 and end > start:
+                try:
+                    content = txt[start + 3:end].strip()
+                    if content.startswith("json"):
+                        content = content[4:].strip()
+                    return _normalize_recap_dict(json.loads(content))
+                except json.JSONDecodeError:
+                    pass
+
+    # 2) Quét tất cả điểm bắt đầu JSON và tự động sửa các lỗi ngắt quãng / mất closing bracket
     for txt in sorted(candidates, key=len, reverse=True):
-        stripped = txt.strip()
-        if stripped.startswith("{") and '"scenes"' in stripped:
-            try:
-                return json.loads(stripped)
-            except json.JSONDecodeError:
-                continue
+        start_indices = [m.start() for m in re.finditer(r'\{\s*\"(video_url|scenes|developer_note)', txt)]
+        if not start_indices:
+            idx = txt.find("{")
+            if idx != -1:
+                start_indices = [idx]
+
+        for s_idx in reversed(start_indices):
+            chunk = txt[s_idx:]
+            e_idx = chunk.rfind("}")
+            if e_idx != -1:
+                sub = chunk[:e_idx + 1]
+                try:
+                    data = json.loads(sub)
+                    if isinstance(data, dict) and ("scenes" in data or "video_url" in data):
+                        return _normalize_recap_dict(data)
+                except json.JSONDecodeError:
+                    pass
+
+            last_positions = [m.start() for m in re.finditer(r"\}", chunk)]
+            for end_pos in reversed(last_positions[-20:]):
+                candidate = chunk[:end_pos + 1]
+                for suffix in ["", "\n  ]\n}", "\n}", "\n]"]:
+                    try:
+                        data = json.loads(candidate + suffix)
+                        if isinstance(data, dict) and ("scenes" in data or "video_url" in data) and len(data.get("scenes", [])) > 0:
+                            return _normalize_recap_dict(data)
+                    except json.JSONDecodeError:
+                        pass
+
     return None
 
 
@@ -173,14 +239,70 @@ def generate_recap(
     prompt_bytes: bytes,
     prompt_name: str,
 ) -> dict:
-    """Tạo recap dict từ YouTube URL + transcript + system prompt (HTTP thuần, sync)."""
+    """Tạo recap dict từ YouTube URL + transcript + system prompt (HTTP thuần, sync, auto-refresh cookie)."""
+    return _do_generate_recap(
+        youtube_url=youtube_url,
+        raw_bytes=raw_bytes,
+        raw_name=raw_name,
+        prompt_bytes=prompt_bytes,
+        prompt_name=prompt_name,
+        allow_refresh=True,
+    )
+
+
+def _do_generate_recap(
+    youtube_url: str,
+    raw_bytes: bytes,
+    raw_name: str,
+    prompt_bytes: bytes,
+    prompt_name: str,
+    allow_refresh: bool = True,
+) -> dict:
     cfg = _gemini_config()
     cookies, inner_template, ua = cfg["cookies"], cfg["inner_template"], cfg["user_agent"]
-    with httpx.Client(http2=False, timeout=180, follow_redirects=True) as client:
-        at_val, bl_val, fsid_val = _fresh_tokens(client, cookies, ua)
 
-        gcs_raw = _upload_file(client, raw_bytes, raw_name, cookies, ua)
-        gcs_prompt = _upload_file(client, prompt_bytes, prompt_name, cookies, ua)
+    with httpx.Client(http2=False, timeout=180, follow_redirects=True) as client:
+        try:
+            at_val, bl_val, fsid_val = _fresh_tokens(client, cookies, ua)
+        except Exception as exc:
+            if allow_refresh:
+                print(f"[Gemini] Không lấy được token fresh ({exc}). Tự động làm mới cookie...")
+                try:
+                    _auto_refresh_cookies()
+                    return _do_generate_recap(
+                        youtube_url=youtube_url,
+                        raw_bytes=raw_bytes,
+                        raw_name=raw_name,
+                        prompt_bytes=prompt_bytes,
+                        prompt_name=prompt_name,
+                        allow_refresh=False,
+                    )
+                except Exception as refresh_err:
+                    raise RuntimeError(
+                        f"Tự động làm mới cookie Gemini thất bại ({refresh_err}). Hãy vào Cài đặt -> Đăng nhập Gemini (Chrome)."
+                    ) from refresh_err
+            raise
+
+        try:
+            gcs_raw = _upload_file(client, raw_bytes, raw_name, cookies, ua)
+            gcs_prompt = _upload_file(client, prompt_bytes, prompt_name, cookies, ua)
+        except Exception as exc:
+            if allow_refresh and ("401" in str(exc) or "403" in str(exc) or "upload start fail" in str(exc)):
+                print(f"[Gemini] Upload file auth fail ({exc}). Tự động làm mới cookie...")
+                try:
+                    _auto_refresh_cookies()
+                    return _do_generate_recap(
+                        youtube_url=youtube_url,
+                        raw_bytes=raw_bytes,
+                        raw_name=raw_name,
+                        prompt_bytes=prompt_bytes,
+                        prompt_name=prompt_name,
+                        allow_refresh=False,
+                    )
+                except Exception:
+                    pass
+            raise
+
         attachments = [
             [[gcs_raw, 3, None, "text/plain"], raw_name, None, None, None, None, None, None, [0]],
             [[gcs_prompt, 3, None, "text/plain"], prompt_name, None, None, None, None, None, None, [0]],
@@ -214,7 +336,29 @@ def generate_recap(
             timeout=300,
         )
         if rr.status_code != 200 or '"er"' in rr.text[:200]:
+            if allow_refresh and (rr.status_code in (401, 403) or "unauthenticated" in rr.text.lower()):
+                print(f"[Gemini] StreamGenerate auth fail (HTTP {rr.status_code}). Tự động làm mới cookie...")
+                try:
+                    _auto_refresh_cookies()
+                    return _do_generate_recap(
+                        youtube_url=youtube_url,
+                        raw_bytes=raw_bytes,
+                        raw_name=raw_name,
+                        prompt_bytes=prompt_bytes,
+                        prompt_name=prompt_name,
+                        allow_refresh=False,
+                    )
+                except Exception:
+                    pass
             raise RuntimeError(f"Gemini StreamGenerate fail: HTTP {rr.status_code} — {rr.text[:300]}")
+
+        # Ghi raw response text ra file response.txt để kiểm tra
+        try:
+            from app.core.config import TOOLS_DIR
+            (TOOLS_DIR / "response.txt").write_text(rr.text, encoding="utf-8")
+        except OSError:
+            pass
+
         recap = _extract_recap_json(rr.text)
         if recap is None:
             raise RuntimeError("Không trích được khối JSON recap từ response Gemini (có thể Gemini đổi format).")

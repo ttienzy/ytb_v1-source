@@ -104,6 +104,11 @@ async def generate(youtube_url: str, raw_bytes: bytes, raw_name: str) -> JobStat
     if not PROMPT_PATH.exists():
         raise HTTPException(status_code=500, detail=f"Không tìm thấy system prompt: {PROMPT_PATH}")
 
+    try:
+        (TOOLS_DIR / "raw.txt").write_bytes(raw_bytes)
+    except OSError:
+        pass
+
     job = state.create_job(youtube_url, raw_bytes=raw_bytes, raw_name=raw_name)
     state.update_job(job.job_id, recap_status="running")
     await _generate_for_job(job.job_id)
@@ -451,8 +456,35 @@ def _do_polish(job: JobState, bgm_paths: list[Path], credits: str, volume: float
     if not src.exists() or not src.stat().st_size:
         raise RuntimeError("final_recap.mp4 chưa có — chạy merge trước.")
     out = final_studio_path(job.job_id)
+
+    # Xóa file output rỗng/corrupt từ lần chạy trước bị kill giữa chừng.
+    # (FFmpeg ghi header trước rồi mới ghi data → nếu killed sẽ để lại file rỗng ~48 bytes)
+    if out.exists() and out.stat().st_size < 10_000:
+        try:
+            out.unlink()
+        except OSError:
+            pass
+
     work = polish_dir(job.job_id)
-    polish_final(src, out, bgm_paths=bgm_paths or None, volume=volume, work_dir=work)
+
+    def _on_progress(done_sec: float, total_sec: float) -> None:
+        state.update_job(
+            job.job_id,
+            progress_polish={
+                "done": round(done_sec, 1),
+                "total": max(1.0, round(total_sec, 1)),
+                "step": "mix",
+            },
+        )
+
+    polish_final(
+        src,
+        out,
+        bgm_paths=bgm_paths or None,
+        volume=volume,
+        work_dir=work,
+        progress_cb=_on_progress,
+    )
     # Polish xong → xoá final_recap (chỉ còn final_studio). Bỏ qua nếu xoá lỗi (không fatal).
     if out.exists() and out.stat().st_size:
         try:
@@ -479,21 +511,25 @@ async def polish(job_id: str, opts: dict) -> JobState:
     if not bgm_paths:
         raise HTTPException(status_code=400, detail="polish: cần ít nhất 1 BGM track.")
     credits = opts.get("credits", "") or ""
-    volume = float(opts.get("volume", 0.15))
+    volume = float(opts.get("volume", 0.10))
 
     state.update_job(
         job_id,
         polish_status="running",
-        progress_polish={"done": 0, "total": 1, "step": "encode"},
+        progress_polish={"done": 0, "total": 0, "step": "mix"},
         polish_opts=opts,
         credits=credits or None,
     )
     try:
         await run_in_threadpool(_do_polish, job, bgm_paths, credits, volume)
-    except RuntimeError as error:
+    except Exception as error:
         state.update_job(job_id, polish_status="error", error=f"polish: {error}")
         raise HTTPException(status_code=502, detail=str(error)) from error
-    state.update_job(job_id, polish_status="done", progress_polish={"done": 1, "total": 1, "step": "done"})
+    state.update_job(
+        job_id,
+        polish_status="done",
+        progress_polish={"done": 1, "total": 1, "step": "done"},
+    )
     return state.get_job(job_id)
 
 
@@ -547,14 +583,20 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
                     error=f"transcript: {exc}",
                 )
                 return
-            # Extract text sạch '[MM:SS] caption' (thay dump JSON 47KB) — payload nhỏ,
-            # deterministic, prompt chấp nhận text + MM:SS. Fallback JSON nếu không parse được.
-            raw_bytes = transcript_to_text(transcript).encode("utf-8")
+            # Giữ nguyên 100% JSON thô gốc từ YouTube get_panel (không trích text)
+            # raw_bytes = transcript_to_text(transcript).encode("utf-8")
+            raw_bytes = json.dumps(transcript, ensure_ascii=False, indent=2).encode("utf-8")
             state.update_job(job_id, raw_bytes=raw_bytes, raw_name="raw.txt")
         else:
             # Raw do user đính kèm/dán thủ công → GIỮ NGUYÊN (user controls content, không
             # normalize/mangle). Chỉ ghi ra file raw.txt rồi upload file đó đi.
             raw_bytes = job.raw_bytes
+
+        # Ghi đè vào root raw.txt (TOOLS_DIR / "raw.txt") để sẵn sàng cho bước tiếp theo / inspect.
+        try:
+            (TOOLS_DIR / "raw.txt").write_bytes(raw_bytes)
+        except OSError:
+            pass
 
         # Persist raw ra file Downloads/{job_id}/raw.txt — upload file này đi (không giữ
         # raw lớn trong memory), user có thể inspect lại raw thật sự gửi đi.
@@ -593,6 +635,6 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
     except Exception as exc:  # noqa: BLE001
         # Unexpected error thoát ra ngoài gather
         try:
-            state.update_job(job_id, merge_status="error", error=f"pipeline: {exc}")
+            state.update_job(job_id, polish_status="error", error=f"pipeline: {exc}")
         except KeyError:
             pass

@@ -12,6 +12,7 @@ nghe mượt). R4 merge dùng ``ffprobe_duration`` lấy voice_dur thật → re
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 
 TIMEOUT = 120  # mỗi đoạn — stream-copy rất nhanh; atempo re-encode audio WAV cũng chỉ vài giây.
@@ -137,17 +138,17 @@ def polish_final(
     src: Path,
     out: Path,
     bgm_paths: list[Path] | None = None,
-    volume: float = 0.15,
+    volume: float = 0.10,
     work_dir: Path | None = None,
+    progress_cb: Callable[[float, float], None] | None = None,
 ) -> Path:
-    """Phase R5 — polish final_recap → final_studio.mp4 (mix BGM ducked dưới VO).
+    """Hậu xử lý R5 (Polish): amix BGM dưới VO (ducked) + copy video stream (nhanh).
 
-    Chỉ động tới audio: BGM ``amix`` + ``-c:v copy`` (KHÔNG re-encode video) → rất
-    nhanh (~3s cho 1080p 221s). Watermark/drawtext đã bỏ (burn-in text bắt buộc re-encode
-    toàn frame video, chậm — user quyết định không cần). Xem memory [[recap-polish-encoder]].
-
-    BGM: >1 track → pre-concat (concat demuxer copy) → ``bgm_chain``. ``-stream_loop -1``
-    (lặp vô tận) + ``amix duration=first`` + ``-shortest`` → BGM phủ kín final.
+    Xử lý:
+    1. Nếu có nhiều track BGM: concat trước thành ``bgm_chain.mp3`` (stream-copy, nhanh).
+    2. Mix pass: ``-i src.mp4 -stream_loop -1 -i bgm.mp3`` + ``-c:v copy`` (không re-encode
+       video) + ``-filter_complex [1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first[a]``
+       (lặp vô tận) + ``amix duration=first`` + ``-shortest`` → BGM phủ kín final.
 
     Idempotent: skip nếu ``out`` đã có + size>0.
     """
@@ -187,6 +188,8 @@ def polish_final(
     else:
         bgm_input = bgm_paths[0]
 
+    total_dur = ffprobe_duration(src)
+
     # 2. Mix pass: video copy + audio amix (BGM ducked dưới VO).
     filter_complex = (
         f"[1:a]volume={volume:.3f}[bg];"
@@ -199,10 +202,54 @@ def polish_final(
         "-filter_complex", filter_complex,
         "-map", "0:v", "-map", "[a]",
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+        "-progress", "pipe:1",
+        "-nostats",
         str(out),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=TIMEOUT_POLISH)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    # Drain stderr trong thread riêng để tránh deadlock khi pipe buffer đầy.
+    # (for loop đọc hết stdout rồi mới gọi proc.wait() — nếu stderr không được drain
+    # thì ffmpeg block khi ghi stderr → toàn bộ treo vĩnh viễn).
+    stderr_lines: list[str] = []
+    def _drain_stderr() -> None:
+        if proc.stderr:
+            for ln in proc.stderr:
+                stderr_lines.append(ln)
+    t_err = threading.Thread(target=_drain_stderr, daemon=True)
+    t_err.start()
+
+    last_update = 0.0
+    if proc.stdout:
+        for line in proc.stdout:
+            line = line.strip()
+            if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+                try:
+                    us_val = int(line.split("=")[1])
+                    cur_sec = us_val / 1_000_000 if line.startswith("out_time_us=") else us_val / 1_000
+                    if progress_cb and total_dur > 0:
+                        if abs(cur_sec - last_update) >= 0.25:
+                            last_update = cur_sec
+                            progress_cb(min(cur_sec, total_dur), total_dur)
+                except (ValueError, IndexError):
+                    pass
+
+    # Chờ FFmpeg thoát và thread drain stderr xong.
+    proc.wait(timeout=TIMEOUT_POLISH)
+    t_err.join(timeout=5)
+    stderr_text = "".join(stderr_lines)
+
     if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
-        raise RuntimeError(f"ffmpeg polish thất bại: {(proc.stderr or '')[-500:]}")
+        raise RuntimeError(f"ffmpeg polish thất bại: {stderr_text[-500:]}")
+
+    if progress_cb and total_dur > 0:
+        progress_cb(total_dur, total_dur)
+
     return out

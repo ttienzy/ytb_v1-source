@@ -851,12 +851,25 @@ function PipelineDiagram({ job, voiceId, polishEnabled }: { job: JobOut; voiceId
   const subCut = cutState === 'running' && p.cut.total > 0 ? `Đang cắt ${p.cut.done}/${p.cut.total}` : cutState === 'done' ? `${p.cut.total} clip` : undefined
   const subVoice = voiceState === 'running' ? (p.voice.phase === 'unpack' ? `Giải nén ${p.voice.done}/${p.voice.total}` : `TTS đang tổng hợp…`) : voiceState === 'done' ? `${p.voice.total} VO` : undefined
   const subMerge = mergeState === 'running' && p.merge.total > 0 ? `Mux ${p.merge.done}/${p.merge.total}` : mergeState === 'done' ? 'final_recap.mp4' : undefined
-  const subPolish = polishState === 'running' ? 'Đang mix BGM…' : polishState === 'done' ? 'final_studio.mp4' : polishState === 'skipped' ? 'Không dùng' : undefined
+  const subPolish = polishState === 'running'
+    ? (p.polish && p.polish.total > 0
+        ? `Mix BGM ${Math.round((p.polish.done / p.polish.total) * 100)}% (${Math.round(p.polish.done)}s/${Math.round(p.polish.total)}s)`
+        : 'Đang mix BGM…')
+    : polishState === 'done'
+      ? 'final_studio.mp4'
+      : polishState === 'skipped'
+        ? 'Không dùng'
+        : undefined
 
   const statusText = (() => {
     if (job.overall === 'error') return `Lỗi: ${job.error ?? 'không xác định'}`
     if (polishState === 'done') return '✅ Hoàn tất — final_studio.mp4 sẵn sàng tải về'
-    if (polishState === 'running') return 'Polish — đang mix nhạc nền dưới VO…'
+    if (polishState === 'running') {
+      const pct = p.polish && p.polish.total > 0 ? Math.round((p.polish.done / p.polish.total) * 100) : null
+      return pct !== null
+        ? `Polish — đang hòa âm nhạc nền BGM (${pct}% — ${Math.round(p.polish?.done ?? 0)}s/${Math.round(p.polish?.total ?? 0)}s)…`
+        : 'Polish — đang mix nhạc nền dưới VO…'
+    }
     if (mergeState === 'done') return '✅ Hoàn tất — final_recap.mp4 sẵn sàng tải về'
     if (mergeState === 'running') return 'Ghép video — mux clip + VO → concat final…'
     if (cutState === 'running' || voiceState === 'running') return 'Cut & Voice đang chạy song song…'
@@ -897,7 +910,13 @@ function PipelineDiagram({ job, voiceId, polishEnabled }: { job: JobOut; voiceId
       <div className={connCls(bothDone, mergeDone)} />
       <PipelineNode label="Ghép video" state={mergeState} icon={Film} subLabel={subMerge} progress={mergeState === 'running' ? p.merge : undefined} />
       <div className={connCls(mergeDone, polishState !== 'idle' && polishState !== 'skipped')} />
-      <PipelineNode label="Polish" state={polishState} icon={Music} subLabel={subPolish} />
+      <PipelineNode
+        label="Polish"
+        state={polishState}
+        icon={Music}
+        subLabel={subPolish}
+        progress={polishState === 'running' && p.polish && p.polish.total > 0 ? p.polish : undefined}
+      />
     </div>
     <div className="sbar">
       <span className={dotCls} />
@@ -973,9 +992,9 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
   const [voiceId, setVoiceId] = useState('')
   const [clonedVoices, setClonedVoices] = useState<Voice[]>([])
   const [bgmList, setBgmList] = useState<BgmOut[]>([])
-  const [bgmEnabled, setBgmEnabled] = useState(false)
+  const [bgmEnabled, setBgmEnabled] = useState(true)
   const [bgmIds, setBgmIds] = useState<string[]>([])
-  const [bgmVolume, setBgmVolume] = useState(0.15)
+  const [bgmVolume, setBgmVolume] = useState(0.10)
   const [jobId, setJobId] = useState<string | null>(null)
   const [job, setJob] = useState<JobOut | null>(null)
   const [submitError, setSubmitError] = useState('')
@@ -992,7 +1011,13 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
       .catch(() => { })
     fetch(`${API_URL}/api/bgm`)
       .then(r => r.ok ? r.json() : Promise.reject())
-      .then((d: BgmOut[]) => setBgmList(d))
+      .then((d: BgmOut[]) => {
+        const list = d ?? []
+        setBgmList(list)
+        if (list.length > 0) {
+          setBgmIds(list.map(t => t.track_id))
+        }
+      })
       .catch(() => { })
   }, []) // eslint-disable-line
 
@@ -1049,6 +1074,8 @@ function StudioPage({ setActivePage }: { setActivePage: (p: string) => void }) {
     audioRef.current?.pause(); audioRef.current = null; setPlayingVo(null)
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     setJobId(null); setJob(null); setSubmitError(''); setRawText(''); setRawFile(null); setYoutubeUrl('')
+    setBgmEnabled(true); setBgmVolume(0.10)
+    if (bgmList.length > 0) setBgmIds(bgmList.map(t => t.track_id))
   }
 
   function stopVo() { audioRef.current?.pause(); audioRef.current = null; setPlayingVo(null) }

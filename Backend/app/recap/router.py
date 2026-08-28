@@ -27,16 +27,21 @@ router = APIRouter(prefix="/api/recap", tags=["Recap"])
 
 
 def _overall(job: state.JobState) -> str:
-    """Tính overall status theo precedence."""
+    """Tính overall status theo precedence.
+
+    Thứ tự quan trọng: running phải kiểm tra TRƯỚC merged/polished.
+    Nếu polish đang running mà merge đã done → phải trả "running"
+    để FE tiếp tục poll (không dừng sớm khi thấy merged).
+    """
     phases = [job.recap_status, job.cut_status, job.voice_status, job.merge_status, job.polish_status]
     if any(p == "error" for p in phases):
         return "error"
+    if any(p == "running" for p in phases):
+        return "running"
     if job.polish_status == "done":
         return "polished"
     if job.merge_status == "done":
         return "merged"
-    if any(p == "running" for p in phases):
-        return "running"
     if job.recap_status == "done":
         return "recap_done"
     return "idle"
@@ -88,7 +93,7 @@ class MergeRequest(BaseModel):
 
 class PolishRequest(BaseModel):
     bgm_ids: list[str] = []
-    volume: float = 0.15
+    volume: float = 0.10
 
 
 # ── 1-button run endpoint (Phase C) ─────────────────────────────────────────
@@ -99,7 +104,7 @@ async def run_pipeline(
     youtube_url: str = Form(...),
     voice_id: str = Form(...),
     bgm_ids: str = Form(""),
-    bgm_volume: float = Form(0.15),
+    bgm_volume: float = Form(0.10),
     raw_file: UploadFile | None = File(None),
     raw_text: str = Form(""),
     db: Session = Depends(get_db),
