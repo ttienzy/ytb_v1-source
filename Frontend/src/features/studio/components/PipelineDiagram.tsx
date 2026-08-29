@@ -90,7 +90,7 @@ export function PipelineDiagram({
   const recapState: NodeState =
     job.recap_status === 'done'
       ? 'done'
-      : job.recap_status === 'running'
+      : job.recap_status === 'running' || job.recap_status === 'refreshing_cookie'
       ? 'running'
       : job.recap_status === 'error'
       ? 'error'
@@ -143,6 +143,8 @@ export function PipelineDiagram({
   const subRecap =
     recapState === 'done'
       ? `${segs} đoạn · ${job.recap?.scenes?.length ?? 0} cảnh`
+      : job.recap_status === 'refreshing_cookie'
+      ? 'Làm mới cookie Gemini…'
       : undefined
   const subCut =
     cutState === 'running' && p.cut.total > 0
@@ -200,6 +202,8 @@ export function PipelineDiagram({
       return 'Ghép video — mux clip + VO → concat final…'
     if (cutState === 'running' || voiceState === 'running')
       return 'Cut & Voice đang chạy song song…'
+    if (job.recap_status === 'refreshing_cookie')
+      return '🔄 Cookie Gemini hết hạn — đang tự động làm mới (Chrome)…'
     if (recapState === 'running')
       return 'Recap — đang lấy & phân tích transcript (YouTube → Gemini)…'
     return 'Đang khởi động pipeline…'

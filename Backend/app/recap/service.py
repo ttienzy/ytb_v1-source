@@ -27,7 +27,7 @@ from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 
 from app.core.config import TOOLS_DIR
-from app.ai.gemini.recap import RecapConfigError, generate_recap
+from app.ai.gemini.recap import RecapConfigError, generate_recap, _auto_refresh_cookies, _gemini_config
 from app.recap import state
 from app.recap.ffmpeg import concat_segments, cut_segment, ffprobe_duration, mux_segment, polish_final
 from app.recap.paths import (
@@ -53,6 +53,75 @@ from app.recap.ytdlp import download_video
 from app.voices import voice_client
 
 PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "System Prompt Food Review Recap.txt"
+
+
+# ── Cookie pre-check helper ───────────────────────────────────────────────────
+
+def _ensure_gemini_cookie(job_id: str) -> bool:
+    """Kiểm tra cookie Gemini còn hạn bằng cách GET /app. Nếu fail → tự động refresh.
+
+    Cập nhật ``recap_status="refreshing_cookie"`` trong job state để FE hiển thị
+    trạng thái rõ ràng (“Đang làm mới cookie...”) thay vì bị chặn im lặng.
+    Trả ``True`` nếu cookie OK (hoặc refresh thành công), ``False`` nếu refresh thất bại
+    (khi đó ``recap_status`` được set “error” kèm message rõ).
+
+    Gọ vào _run_pipeline TRƯỚC bước generate Gemini để phát hiện sớm cookie hết hạn,
+    tránh lãng phí thời gian yt-dlp đang tải video rồi mới báo lỗi recap.
+    """
+    import httpx
+    import re as _re
+
+    try:
+        cfg = _gemini_config()
+    except Exception as exc:
+        # Chưa có cookie / inner_template → báo rõ thay vì khởng chết
+        state.update_job(job_id, recap_status="error", error=str(exc))
+        return False
+
+    cookies = cfg["cookies"]
+    ua = cfg["user_agent"]
+    cookie_ok = False
+    try:
+        with httpx.Client(http2=False, timeout=20, follow_redirects=True) as client:
+            r = client.get("https://gemini.google.com/app", headers={"User-Agent": ua, "Cookie": cookies})
+            at_val = _re.search(r'"SNlM0e":"(.*?)"', r.text)
+            cookie_ok = bool(at_val)
+    except Exception:
+        cookie_ok = False
+
+    if cookie_ok:
+        return True
+
+    # Cookie không hợp lệ → cập nhật trạng thái và tự động refresh
+    state.update_job(
+        job_id,
+        recap_status="refreshing_cookie",
+        error=None,
+    )
+    _log = print  # fallback nếu không import
+    try:
+        from app.ai.gemini.recap import _log as _gemini_log
+        _log = _gemini_log
+    except Exception:
+        pass
+
+    _log("[Gemini] Cookie không hợp lệ (pre-check). Tự động làm mới trước pipeline...")
+    try:
+        _auto_refresh_cookies()
+        _log("[Gemini] Làm mới cookie thành công. Tiếp tục pipeline...")
+        # Đặt lại trạng thái → running (generate bước sau sẽ set đúng)
+        state.update_job(job_id, recap_status="running")
+        return True
+    except Exception as refresh_err:
+        state.update_job(
+            job_id,
+            recap_status="error",
+            error=(
+                f"Cookie Gemini hết hạn và tự động làm mới thất bại: {refresh_err}. "
+                f"Vào Cài đặt → Đăng nhập Gemini (Chrome) rồi thử lại."
+            ),
+        )
+        return False
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -620,7 +689,15 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
         except OSError:
             pass  # ghi file fail không fatal — vẫn upload raw_bytes
 
-        # 2) Generate (Gemini) — recap_status error đã set bên trong nếu lỗi.
+        # 2a) Pre-check cookie Gemini (nhanh, ~1-2s) — phát hiện sớm cookie hết hạn TRƯỚC
+        #     khi gọi Gemini thật sự. Nếu cookie hỏng → tự động refresh Chrome profile.
+        #     _ensure_gemini_cookie set recap_status="refreshing_cookie" khi đang refresh
+        #     để FE hiển thị rõ "Đang làm mới cookie Gemini..." thay vì treo im lặng.
+        cookie_ok = await run_in_threadpool(_ensure_gemini_cookie, job_id)
+        if not cookie_ok:
+            return  # recap_status đã = error (refresh thất bại)
+
+        # 2b) Generate (Gemini) — recap_status error đã set bên trong nếu lỗi.
         try:
             await _generate_for_job(job_id)
         except HTTPException:

@@ -316,7 +316,16 @@ def _do_generate_recap(
             gcs_raw = _upload_file(client, raw_bytes, raw_name, cookies, ua)
             gcs_prompt = _upload_file(client, prompt_bytes, prompt_name, cookies, ua)
         except Exception as exc:
-            if allow_refresh and ("401" in str(exc) or "403" in str(exc) or "upload start fail" in str(exc)):
+            # Bắt HTTP 401/403 + redirect 302 + "upload start fail" (bất kỳ lý do auth).
+            exc_str = str(exc)
+            is_auth_fail = (
+                "401" in exc_str
+                or "403" in exc_str
+                or "302" in exc_str  # redirect to login page
+                or "upload start fail" in exc_str
+                or "upload finalize fail" in exc_str
+            )
+            if allow_refresh and is_auth_fail:
                 _log(f"[Gemini] Upload file auth fail ({exc}). Tự động làm mới cookie...")
                 try:
                     _auto_refresh_cookies()
@@ -328,8 +337,12 @@ def _do_generate_recap(
                         prompt_name=prompt_name,
                         allow_refresh=False,
                     )
-                except Exception:
-                    pass
+                except Exception as refresh_err:
+                    # Raise lỗi refresh thay vì nuốt và raise lỗi upload gốc
+                    raise RuntimeError(
+                        f"Tự động làm mới cookie Gemini thất bại ({refresh_err}). "
+                        f"Hãy vào Cài đặt → Đăng nhập Gemini (Chrome)."
+                    ) from refresh_err
             raise
 
         attachments = [
@@ -364,9 +377,30 @@ def _do_generate_recap(
             },
             timeout=300,
         )
-        if rr.status_code != 200 or '"er"' in rr.text[:200]:
-            if allow_refresh and (rr.status_code in (401, 403) or "unauthenticated" in rr.text.lower()):
-                _log(f"[Gemini] StreamGenerate auth fail (HTTP {rr.status_code}). Tự động làm mới cookie...")
+        # Phát hiện auth fail theo nhiều dạng:
+        # - HTTP 401/403 (rõ ràng)
+        # - HTTP 200 nhưng body có dấu hiệu session/cookie hết hạn (silent fail)
+        # - '"er"' trong 200 bytes đầu (Gemini error frame)
+        rr_text_lower = rr.text[:500].lower()
+        _SILENT_AUTH_MARKERS = (
+            "unauthenticated",
+            "sign in to continue",
+            "please sign in",
+            "session expired",
+            "login required",
+            "quota exceeded",
+        )
+        is_auth_fail_silent = any(m in rr_text_lower for m in _SILENT_AUTH_MARKERS)
+        is_http_auth_fail = rr.status_code in (401, 403)
+        has_error_frame = '"er"' in rr.text[:200]
+
+        if rr.status_code != 200 or has_error_frame or is_auth_fail_silent:
+            if allow_refresh and (is_http_auth_fail or is_auth_fail_silent):
+                _log(
+                    f"[Gemini] StreamGenerate auth fail "
+                    f"(HTTP {rr.status_code}, silent={is_auth_fail_silent}). "
+                    f"Tự động làm mới cookie..."
+                )
                 try:
                     _auto_refresh_cookies()
                     return _do_generate_recap(
@@ -377,8 +411,11 @@ def _do_generate_recap(
                         prompt_name=prompt_name,
                         allow_refresh=False,
                     )
-                except Exception:
-                    pass
+                except Exception as refresh_err:
+                    raise RuntimeError(
+                        f"Tự động làm mới cookie Gemini thất bại ({refresh_err}). "
+                        f"Hãy vào Cài đặt → Đăng nhập Gemini (Chrome)."
+                    ) from refresh_err
             raise RuntimeError(f"Gemini StreamGenerate fail: HTTP {rr.status_code} — {rr.text[:300]}")
 
         # Ghi raw response text ra file response.txt để kiểm tra
