@@ -256,9 +256,68 @@ def download_all_files(job_id: str):
     )
 
 
+import threading
+
+_SYNCING_JOBS: set[str] = set()
+_SYNC_LOCK = threading.Lock()
+
+
+def _bg_sync_job_to_drive(job_id: str, target_folder_id: str | None, force: bool = False) -> None:
+    from app.externals.gdrive import service as gdrive_service
+
+    client = gdrive_service.get_client()
+    if not client:
+        logger.warning("[GDrive Sync] Không tìm thấy client Google Drive.")
+        with _SYNC_LOCK:
+            _SYNCING_JOBS.discard(job_id)
+        return
+
+    try:
+        job = wstate.get_job(job_id)
+        if not job:
+            return
+
+        if force:
+            wstate.reset_job_drive_status(job_id)
+            job = wstate.get_job(job_id)
+
+        for v in job.videos:
+            if v.status == "done" and v.output_path and Path(v.output_path).exists():
+                v.drive_status = "uploading"
+                try:
+                    wstate.update_job(job_id)
+                except KeyError:
+                    pass
+
+                try:
+                    res = client.upload_file_resumable(
+                        file_path=v.output_path,
+                        folder_id=target_folder_id,
+                        custom_name=v.output_name or v.name,
+                    )
+                    v.drive_status = "done"
+                    v.drive_file_id = res.get("file_id")
+                    v.drive_url = res.get("web_view_link")
+                    v.drive_error = None
+                except Exception as exc:
+                    logger.error("[GDrive] Lỗi upload thủ công %s: %s", v.name, exc)
+                    v.drive_status = "error"
+                    v.drive_error = str(exc)
+
+                try:
+                    wstate.update_job(job_id)
+                except KeyError:
+                    pass
+    except Exception as exc:
+        logger.error("[GDrive Sync] Lỗi trong luồng sync job %s: %s", job_id, exc)
+    finally:
+        with _SYNC_LOCK:
+            _SYNCING_JOBS.discard(job_id)
+
+
 @router.post("/jobs/{job_id}/sync-drive", response_model=BatchJob)
-def sync_job_to_drive(job_id: str):
-    """Đẩy thủ công toàn bộ video đã xử lý sạch trong job lên Google Drive."""
+def sync_job_to_drive(job_id: str, force: bool = False):
+    """Bắt đầu đẩy toàn bộ video đã xử lý sạch trong job lên Google Drive dưới nền."""
     from app.externals.gdrive import service as gdrive_service
 
     client = gdrive_service.get_client()
@@ -272,36 +331,26 @@ def sync_job_to_drive(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Không tìm thấy job.")
 
-    cfg = gdrive_service.get_gdrive_config()
-    target_folder_id = cfg.get("folder_id")
+    with _SYNC_LOCK:
+        if job_id not in _SYNCING_JOBS:
+            _SYNCING_JOBS.add(job_id)
+            cfg = gdrive_service.get_gdrive_config()
+            target_folder_id = cfg.get("folder_id")
+            threading.Thread(
+                target=_bg_sync_job_to_drive,
+                args=(job_id, target_folder_id, force),
+                daemon=True,
+            ).start()
 
-    for v in job.videos:
-        if v.status == "done" and v.output_path and Path(v.output_path).exists():
-            v.drive_status = "uploading"
-            try:
-                wstate.update_job(job_id)
-            except KeyError:
-                pass
+    return _job_out(job)
 
-            try:
-                res = client.upload_file_resumable(
-                    file_path=v.output_path,
-                    folder_id=target_folder_id,
-                    custom_name=v.output_name or v.name,
-                )
-                v.drive_status = "done"
-                v.drive_file_id = res.get("file_id")
-                v.drive_url = res.get("web_view_link")
-            except Exception as exc:
-                logger.error("[GDrive] Lỗi upload thủ công %s: %s", v.name, exc)
-                v.drive_status = "error"
-                v.drive_error = str(exc)
 
-    try:
-        wstate.update_job(job_id)
-    except KeyError:
-        pass
-
+@router.post("/jobs/{job_id}/reset-drive-sync", response_model=BatchJob)
+def reset_job_drive_sync(job_id: str):
+    """Đặt lại trạng thái upload Google Drive về idle cho tất cả video trong job."""
+    job = wstate.reset_job_drive_status(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
     return _job_out(job)
 
 

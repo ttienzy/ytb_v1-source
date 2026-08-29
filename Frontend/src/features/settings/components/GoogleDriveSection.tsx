@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  Folder,
   FolderPlus,
   FolderSymlink,
   HardDrive,
@@ -228,7 +229,7 @@ export function GoogleDriveSection() {
 
   async function handleSaveFolder() {
     if (!customFolder.trim()) {
-      setError('Vui lòng nhập Folder ID hoặc Link Google Drive.')
+      setError('Vui lòng nhập Folder ID hoặc Link Google Drive có sẵn.')
       return
     }
     setFolderSaving(true)
@@ -247,29 +248,36 @@ export function GoogleDriveSection() {
         throw new Error(data.detail || 'Không thể lưu thư mục.')
       }
       setStatus(data)
-      setMessage(`Đã cập nhật thư mục lưu trữ: ${data.folder_name}`)
+      setMessage(`Đã kết nối thư mục lưu trữ: ${data.folder_name}`)
     } catch (err: any) {
-      setError(err.message || 'Cập nhật thư mục thất bại.')
+      setError(err.message || 'Cập nhật thư mục thất bại. Hãy kiểm tra lại link/ID hoặc dùng nút "+ Tạo thư mục này trên Drive".')
     } finally {
       setFolderSaving(false)
     }
   }
 
-  async function handleCreateDefaultFolder() {
+  async function handleCreateFolder(nameToCreate?: string) {
+    const targetName = (nameToCreate || customFolder || 'AI_Clean_Videos').trim()
     setFolderSaving(true)
     setError('')
     setMessage('')
     try {
-      const res = await fetch(`${API_URL}/api/gdrive/folder/create?folder_name=AI_Clean_Videos`, {
+      const res = await fetch(`${API_URL}/api/gdrive/folder/create`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folder_name: targetName || 'AI_Clean_Videos',
+        }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Tạo thư mục thất bại.')
+      }
       setStatus(data)
-      setCustomFolder(data.folder_id)
-      setMessage('Đã tạo thư mục "AI_Clean_Videos" trên Google Drive của bạn!')
-    } catch {
-      setError('Tạo thư mục thất bại.')
+      setCustomFolder('')
+      setMessage(`Đã tạo và đặt thư mục "${data.folder_name}" làm thư mục lưu trữ mặc định thành công!`)
+    } catch (err: any) {
+      setError(err.message || 'Tạo thư mục thất bại.')
     } finally {
       setFolderSaving(false)
     }
@@ -539,71 +547,95 @@ export function GoogleDriveSection() {
             </div>
 
             {/* Folder Configuration */}
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                Thư mục lưu trữ video trên Google Drive
-              </label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input
-                  value={customFolder}
-                  onChange={e => setCustomFolder(e.target.value)}
-                  placeholder="Dán link hoặc Folder ID trên Google Drive..."
-                  style={{ flex: 1, minWidth: 260, height: 38, fontSize: 12.5 }}
-                />
-                <button
-                  type="button"
-                  className="btn-p"
-                  onClick={handleSaveFolder}
-                  disabled={folderSaving}
-                  style={{ height: 38, padding: '0 14px', fontSize: 12, background: '#0f172a' }}
-                >
-                  {folderSaving ? <Loader2 size={13} className="spin" /> : <Save size={13} />} Lưu thư mục
-                </button>
-                <button
-                  type="button"
-                  className="btn-cancel"
-                  onClick={handleCreateDefaultFolder}
-                  disabled={folderSaving}
-                  title="Tạo thư mục mặc định AI_Clean_Videos"
-                  style={{ height: 38, padding: '0 12px', fontSize: 12 }}
-                >
-                  <FolderPlus size={13} /> Tạo thư mục mặc định
-                </button>
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '16px' }}>
+              {/* Current Active Folder Banner */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>
+                    <Folder size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      Thư mục lưu video mặc định: <span style={{ color: '#4f46e5', fontSize: 14 }}>{status.folder_name || 'Chưa đặt'}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}>
+                        Đang sử dụng
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                      Tất cả video đã xóa watermark sẽ tự động tải vào thư mục này. (Google Drive ID: <code>{status.folder_id || 'chưa có'}</code>)
+                    </div>
+                  </div>
+                </div>
+
+                {status.folder_url && (
+                  <a
+                    href={status.folder_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      color: '#4f46e5',
+                      background: '#fff',
+                      border: '1px solid #c7d2fe',
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Mở xem trên Google Drive <ExternalLink size={12} />
+                  </a>
+                )}
               </div>
 
-              {status.folder_name && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: 11.5,
-                    color: '#64748b',
-                  }}
-                >
-                  <div>
-                    Đang lưu vào thư mục: <strong>{status.folder_name}</strong> (ID: <code>{status.folder_id}</code>)
-                  </div>
-                  {status.folder_url && (
-                    <a
-                      href={status.folder_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        color: '#0284c7',
-                        fontWeight: 600,
-                        textDecoration: 'none',
-                      }}
-                    >
-                      Mở trên Google Drive <ExternalLink size={11} />
-                    </a>
-                  )}
+              {/* Input & Actions */}
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, display: 'block', color: '#334155' }}>
+                  Đổi hoặc tạo thư mục lưu trữ mới
+                </label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    value={customFolder}
+                    onChange={e => setCustomFolder(e.target.value)}
+                    placeholder="Nhập tên thư mục mới (VD: fl_V1, Review_Video) hoặc dán Link/ID thư mục có sẵn..."
+                    style={{ flex: 1, minWidth: 280, height: 40, fontSize: 12.5 }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && customFolder.trim()) {
+                        e.preventDefault()
+                        handleCreateFolder(customFolder)
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-p"
+                    onClick={() => handleCreateFolder(customFolder)}
+                    disabled={folderSaving || !customFolder.trim()}
+                    title="Tạo mới thư mục với tên vừa nhập và đặt làm mặc định"
+                    style={{ height: 40, padding: '0 16px', fontSize: 12, background: '#4f46e5', gap: 6 }}
+                  >
+                    {folderSaving ? <Loader2 size={13} className="spin" /> : <FolderPlus size={14} />}
+                    + Tạo và đặt làm mặc định
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-g"
+                    onClick={handleSaveFolder}
+                    disabled={folderSaving || !customFolder.trim()}
+                    title="Nếu bạn vừa dán Link hoặc Folder ID có sẵn trên Drive"
+                    style={{ height: 40, padding: '0 14px', fontSize: 12, gap: 6 }}
+                  >
+                    <Save size={13} /> Lưu Link/ID có sẵn
+                  </button>
                 </div>
-              )}
+
+                <p style={{ fontSize: 11.5, color: '#64748b', marginTop: 8, marginBottom: 0 }}>
+                  💡 <strong>Cách đổi thư mục:</strong> Gõ tên thư mục bạn muốn (ví dụ <code>fl_V1</code>) rồi bấm <strong>"+ Tạo và đặt làm mặc định"</strong>. Thư mục sẽ được tạo mới ngay trên Drive của bạn và hệ thống sẽ tự động chuyển sang lưu vào đó.
+                </p>
+              </div>
             </div>
 
             {/* Auto-upload setting toggle */}

@@ -39,6 +39,10 @@ class GDriveFolderUpdateRequest(BaseModel):
     folder_name: str = Field(default="", description="Tên hiển thị của thư mục")
 
 
+class GDriveFolderCreateRequest(BaseModel):
+    folder_name: str = Field(default="AI_Clean_Videos", description="Tên thư mục mới muốn tạo trên Google Drive")
+
+
 class GDriveSettingsUpdateRequest(BaseModel):
     auto_upload: bool = Field(default=True, description="Tự động upload sau khi xóa watermark")
     client_id: str | None = None

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   Clock3,
+  Layers,
   Loader2,
   Music,
   Play,
@@ -11,6 +12,7 @@ import {
 import { API_URL } from '../../shared/constants'
 import type { BgmOut } from '../bgm/types'
 import type { Voice } from '../voices/types'
+import { BatchQueuePanel } from './components/BatchQueuePanel'
 import { PipelineDiagram } from './components/PipelineDiagram'
 import { VideoResultCard } from './components/VideoResultCard'
 import type { JobOut } from './types'
@@ -33,6 +35,7 @@ export function StudioPage({
   const [job, setJob] = useState<JobOut | null>(null)
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [mode, setMode] = useState<'single' | 'batch'>('single')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Load voices + bgm on mount
@@ -166,269 +169,420 @@ export function StudioPage({
 
       {/* ── Input form ── */}
       <div className="settings-card" id="formCard">
-        <div className="fsection">
-          <p className="foverline">NGUỒN</p>
-          <div className="fgrid">
-            <div className="field">
-              <label>Link YouTube</label>
-              <input
-                value={youtubeUrl}
-                onChange={e => setYoutubeUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
-                disabled={Boolean(jobId)}
-              />
-            </div>
-            <div className="field field-full">
-              <label>
-                Raw transcript{' '}
-                <span>
-                  (tùy chọn — đính kèm file hoặc dán text khi YouTube chặn tự
-                  lấy; để trống → tự fetch)
-                </span>
-              </label>
-              <div className="raw-row">
-                <label
-                  className="file-trig"
-                  style={{
-                    opacity: jobId ? 0.5 : 1,
-                    pointerEvents: jobId ? 'none' : 'auto',
-                  }}
-                >
-                  <Upload size={15} />
-                  <span className="fname">
-                    {rawFile ? rawFile.name : 'Đính kèm raw.txt'}
-                  </span>
-                  {rawFile && (
-                    <span className="fsize">
-                      · {(rawFile.size / 1024).toFixed(0)} KB
-                    </span>
-                  )}
-                  <input
-                    type="file"
-                    accept=".txt,.json"
-                    style={{ display: 'none' }}
-                    onChange={e => setRawFile(e.target.files?.[0] ?? null)}
-                  />
-                  <span
-                    style={{
-                      marginLeft: 'auto',
-                      fontSize: 11,
-                      color: 'var(--indigo2)',
-                    }}
-                  >
-                    {rawFile ? 'Đổi ↑' : 'File ↑'}
-                  </span>
-                </label>
-                {rawFile && (
-                  <button
-                    type="button"
-                    className="raw-clear"
-                    onClick={() => setRawFile(null)}
-                  >
-                    ✕ huỷ file
-                  </button>
-                )}
-              </div>
-              <textarea
-                className="raw-input"
-                value={rawText}
-                onChange={e => setRawText(e.target.value)}
-                placeholder={
-                  rawFile
-                    ? 'Đã đính kèm file — text ở đây bị bỏ qua'
-                    : 'Hoặc dán transcript tại đây (mỗi dòng [MM:SS] caption). Bỏ trống cả 2 → tự lấy từ YouTube.'
-                }
-                rows={3}
-                disabled={Boolean(jobId) || Boolean(rawFile)}
-              />
-              {(rawFile || rawText.trim()) && (
-                <span className="raw-hint">
-                  {rawFile
-                    ? `file ${rawFile.name} (${(
-                        rawFile.size / 1024
-                      ).toFixed(0)} KB)`
-                    : `${rawText.length.toLocaleString()} ký tự`}{' '}
-                  · sẽ skip auto-fetch
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="fsection">
-          <p className="foverline">GIỌNG &amp; NHẠC</p>
-          <div className="fgrid">
-            <div className="field">
-              <label>Voice</label>
-              {clonedVoices.length === 0 ? (
-                <p className="settings-message" style={{ marginTop: 4 }}>
-                  Chưa có giọng — tạo ở Voices trước.
-                </p>
-              ) : (
-                <select
-                  value={voiceId}
-                  onChange={e => setVoiceId(e.target.value)}
-                  disabled={Boolean(jobId)}
-                  style={{
-                    width: '100%',
-                    height: 44,
-                    padding: '0 12px',
-                    background: 'var(--bg3)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 9,
-                    color: 'var(--text)',
-                    fontSize: 13,
-                  }}
-                >
-                  {clonedVoices.map(v => (
-                    <option key={v.voice_id} value={v.voice_id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <div className="field field-full">
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  cursor: 'pointer',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={bgmEnabled}
-                  onChange={e => setBgmEnabled(e.target.checked)}
-                  disabled={Boolean(jobId)}
-                  style={{ width: 16, height: 16 }}
-                />
-                <Music size={15} /> Nhạc nền (BGM){' '}
-                <span style={{ fontWeight: 400, color: 'var(--text2)' }}>
-                  — mix dưới VO; chọn nhiều → tự nối theo thứ tự, video dài hơn
-                  sẽ lặp
-                </span>
-              </label>
-              {bgmEnabled && (
-                <div className="bgm-body">
-                  {bgmList.length === 0 ? (
-                    <p className="bgm-empty">
-                      Chưa có track — thêm ở “Thư viện nhạc”.
-                    </p>
-                  ) : (
-                    <div className="chips">
-                      {bgmList.map(t => {
-                        const order = bgmIds.indexOf(t.track_id)
-                        const on = order >= 0
-                        return (
-                          <button
-                            key={t.track_id}
-                            type="button"
-                            className={`chip${on ? ' chip-active' : ''}`}
-                            disabled={Boolean(jobId)}
-                            onClick={() =>
-                              setBgmIds(prev =>
-                                on
-                                  ? prev.filter(x => x !== t.track_id)
-                                  : [...prev, t.track_id]
-                              )
-                            }
-                          >
-                            {on && (
-                              <span className="chip-order">{order + 1}. </span>
-                            )}
-                            {t.name}
-                            {t.duration_sec
-                              ? ` · ${t.duration_sec.toFixed(0)}s`
-                              : ''}
-                            {t.needs_attribution ? ' · CC' : ''}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                  <label className="bgm-vol">
-                    <span className="bgm-vol-label">
-                      Volume: {(bgmVolume * 100).toFixed(0)}%
-                    </span>
-                    <input
-                      type="range"
-                      className="bgm-range"
-                      min={0}
-                      max={0.5}
-                      step={0.01}
-                      value={bgmVolume}
-                      onChange={e => setBgmVolume(parseFloat(e.target.value))}
-                      disabled={Boolean(jobId)}
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="ff">
-          {!jobId ? (
-            <button
-              type="button"
-              className="btn-p"
-              onClick={startPipeline}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <Loader2 size={15} className="spin" />
-              ) : (
-                <Play size={15} />
-              )}
-              {submitting ? 'Đang khởi động…' : 'Tạo recap video'}
-            </button>
-          ) : (
-            <button type="button" className="btn-g" onClick={reset}>
-              <Trash2 size={14} /> Bắt đầu lại
-            </button>
-          )}
+        {/* Tab toggle: Đơn lẻ / Hàng loạt */}
+        <div className="batch-tab-group">
           <button
             type="button"
-            className="btn-g"
-            onClick={() => setActivePage('Lịch sử')}
-            style={{ gap: 6 }}
+            id="tab-single"
+            className={`batch-tab-btn ${mode === 'single' ? 'active' : ''}`}
+            onClick={() => setMode('single')}
           >
-            <Clock3 size={14} /> Xem Lịch sử
+            <Play size={13} />
+            Đơn lẻ (1 video)
           </button>
-          {submitError && (
-            <span style={{ color: '#dc2626', fontSize: 12 }}>
-              <AlertCircle
-                size={13}
-                style={{ display: 'inline', marginRight: 4 }}
-              />
-              {submitError}
-            </span>
-          )}
-          {job && !submitting && (
-            <span
-              className="hint"
-              style={{
-                marginLeft: 'auto',
-                color:
-                  job.overall === 'error'
-                    ? '#dc2626'
-                    : job.overall === 'merged' || job.overall === 'polished'
-                    ? '#16a34a'
-                    : '#6366f1',
-              }}
-            >
-              {job.overall === 'polished'
-                ? '✅ Hoàn tất (có BGM)'
-                : job.overall === 'merged'
-                ? '✅ Hoàn tất'
-                : job.overall === 'error'
-                ? '❌ Có lỗi'
-                : '⟳ Đang chạy…'}
-            </span>
-          )}
+          <button
+            type="button"
+            id="tab-batch"
+            className={`batch-tab-btn ${mode === 'batch' ? 'active' : ''}`}
+            onClick={() => setMode('batch')}
+          >
+            <Layers size={13} />
+            Hàng loạt (Queue tối đa 10)
+          </button>
         </div>
+
+        {mode === 'single' ? (
+          <>
+            {/* NGUỒN (Đơn lẻ) */}
+            <div className="fsection">
+              <p className="foverline">NGUỒN</p>
+              <div className="fgrid">
+                <div className="field">
+                  <label>Link YouTube</label>
+                  <input
+                    value={youtubeUrl}
+                    onChange={e => setYoutubeUrl(e.target.value)}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    disabled={Boolean(jobId)}
+                  />
+                </div>
+                <div className="field field-full">
+                  <label>
+                    Raw transcript{' '}
+                    <span>
+                      (tùy chọn — đính kèm file hoặc dán text khi YouTube chặn tự
+                      lấy; để trống → tự fetch)
+                    </span>
+                  </label>
+                  <div className="raw-row">
+                    <label
+                      className="file-trig"
+                      style={{
+                        opacity: jobId ? 0.5 : 1,
+                        pointerEvents: jobId ? 'none' : 'auto',
+                      }}
+                    >
+                      <Upload size={15} />
+                      <span className="fname">
+                        {rawFile ? rawFile.name : 'Đính kèm raw.txt'}
+                      </span>
+                      {rawFile && (
+                        <span className="fsize">
+                          · {(rawFile.size / 1024).toFixed(0)} KB
+                        </span>
+                      )}
+                      <input
+                        type="file"
+                        accept=".txt,.json"
+                        style={{ display: 'none' }}
+                        onChange={e => setRawFile(e.target.files?.[0] ?? null)}
+                      />
+                      <span
+                        style={{
+                          marginLeft: 'auto',
+                          fontSize: 11,
+                          color: 'var(--indigo2)',
+                        }}
+                      >
+                        {rawFile ? 'Đổi ↑' : 'File ↑'}
+                      </span>
+                    </label>
+                    {rawFile && (
+                      <button
+                        type="button"
+                        className="raw-clear"
+                        onClick={() => setRawFile(null)}
+                      >
+                        ✕ huỷ file
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    className="raw-input"
+                    value={rawText}
+                    onChange={e => setRawText(e.target.value)}
+                    placeholder={
+                      rawFile
+                        ? 'Đã đính kèm file — text ở đây bị bỏ qua'
+                        : 'Hoặc dán transcript tại đây (mỗi dòng [MM:SS] caption). Bỏ trống cả 2 → tự lấy từ YouTube.'
+                    }
+                    rows={3}
+                    disabled={Boolean(jobId) || Boolean(rawFile)}
+                  />
+                  {(rawFile || rawText.trim()) && (
+                    <span className="raw-hint">
+                      {rawFile
+                        ? `file ${rawFile.name} (${(
+                            rawFile.size / 1024
+                          ).toFixed(0)} KB)`
+                        : `${rawText.length.toLocaleString()} ký tự`}{' '}
+                      · sẽ skip auto-fetch
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* GIỌNG & NHẠC (Đơn lẻ) */}
+            <div className="fsection">
+              <p className="foverline">GIỌNG &amp; NHẠC</p>
+              <div className="fgrid">
+                <div className="field">
+                  <label>Voice</label>
+                  {clonedVoices.length === 0 ? (
+                    <p className="settings-message" style={{ marginTop: 4 }}>
+                      Chưa có giọng — tạo ở Voices trước.
+                    </p>
+                  ) : (
+                    <select
+                      value={voiceId}
+                      onChange={e => setVoiceId(e.target.value)}
+                      disabled={Boolean(jobId)}
+                      style={{
+                        width: '100%',
+                        height: 44,
+                        padding: '0 12px',
+                        background: 'var(--bg3)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 9,
+                        color: 'var(--text)',
+                        fontSize: 13,
+                      }}
+                    >
+                      {clonedVoices.map(v => (
+                        <option key={v.voice_id} value={v.voice_id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="field field-full">
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={bgmEnabled}
+                      onChange={e => setBgmEnabled(e.target.checked)}
+                      disabled={Boolean(jobId)}
+                      style={{ width: 16, height: 16 }}
+                    />
+                    <Music size={15} /> Nhạc nền (BGM){' '}
+                    <span style={{ fontWeight: 400, color: 'var(--text2)' }}>
+                      — mix dưới VO; chọn nhiều → tự nối theo thứ tự, video dài hơn
+                      sẽ lặp
+                    </span>
+                  </label>
+                  {bgmEnabled && (
+                    <div className="bgm-body">
+                      {bgmList.length === 0 ? (
+                        <p className="bgm-empty">
+                          Chưa có track — thêm ở “Thư viện nhạc”.
+                        </p>
+                      ) : (
+                        <div className="chips">
+                          {bgmList.map(t => {
+                            const order = bgmIds.indexOf(t.track_id)
+                            const on = order >= 0
+                            return (
+                              <button
+                                key={t.track_id}
+                                type="button"
+                                className={`chip${on ? ' chip-active' : ''}`}
+                                disabled={Boolean(jobId)}
+                                onClick={() =>
+                                  setBgmIds(prev =>
+                                    on
+                                      ? prev.filter(x => x !== t.track_id)
+                                      : [...prev, t.track_id]
+                                  )
+                                }
+                              >
+                                {on && (
+                                  <span className="chip-order">{order + 1}. </span>
+                                )}
+                                {t.name}
+                                {t.duration_sec
+                                  ? ` · ${t.duration_sec.toFixed(0)}s`
+                                  : ''}
+                                {t.needs_attribution ? ' · CC' : ''}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <label className="bgm-vol">
+                        <span className="bgm-vol-label">
+                          Volume: {(bgmVolume * 100).toFixed(0)}%
+                        </span>
+                        <input
+                          type="range"
+                          className="bgm-range"
+                          min={0}
+                          max={0.5}
+                          step={0.01}
+                          value={bgmVolume}
+                          onChange={e => setBgmVolume(parseFloat(e.target.value))}
+                          disabled={Boolean(jobId)}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer buttons (Đơn lẻ) */}
+            <div className="ff">
+              {!jobId ? (
+                <button
+                  type="button"
+                  className="btn-p"
+                  onClick={startPipeline}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <Loader2 size={15} className="spin" />
+                  ) : (
+                    <Play size={15} />
+                  )}
+                  {submitting ? 'Đang khởi động…' : 'Tạo recap video'}
+                </button>
+              ) : (
+                <button type="button" className="btn-g" onClick={reset}>
+                  <Trash2 size={14} /> Bắt đầu lại
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-g"
+                onClick={() => setActivePage('Lịch sử')}
+                style={{ gap: 6 }}
+              >
+                <Clock3 size={14} /> Xem Lịch sử
+              </button>
+              {submitError && (
+                <span style={{ color: '#dc2626', fontSize: 12 }}>
+                  <AlertCircle
+                    size={13}
+                    style={{ display: 'inline', marginRight: 4 }}
+                  />
+                  {submitError}
+                </span>
+              )}
+              {job && !submitting && (
+                <span
+                  className="hint"
+                  style={{
+                    marginLeft: 'auto',
+                    color:
+                      job.overall === 'error'
+                        ? '#dc2626'
+                        : job.overall === 'merged' || job.overall === 'polished'
+                        ? '#16a34a'
+                        : '#6366f1',
+                  }}
+                >
+                  {job.overall === 'polished'
+                    ? '✅ Hoàn tất (có BGM)'
+                    : job.overall === 'merged'
+                    ? '✅ Hoàn tất'
+                    : job.overall === 'error'
+                    ? '❌ Có lỗi'
+                    : '⟳ Đang chạy…'}
+                </span>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* GIỌNG & NHẠC (Batch) */}
+            <div className="fsection">
+              <p className="foverline">GIỌNG &amp; NHẠC (DÙNG CHUNG BATCH)</p>
+              <div className="fgrid">
+                <div className="field">
+                  <label>Voice</label>
+                  {clonedVoices.length === 0 ? (
+                    <p className="settings-message" style={{ marginTop: 4 }}>
+                      Chưa có giọng — tạo ở Voices trước.
+                    </p>
+                  ) : (
+                    <select
+                      value={voiceId}
+                      onChange={e => setVoiceId(e.target.value)}
+                      style={{
+                        width: '100%',
+                        height: 44,
+                        padding: '0 12px',
+                        background: 'var(--bg3)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 9,
+                        color: 'var(--text)',
+                        fontSize: 13,
+                      }}
+                    >
+                      {clonedVoices.map(v => (
+                        <option key={v.voice_id} value={v.voice_id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="field field-full">
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={bgmEnabled}
+                      onChange={e => setBgmEnabled(e.target.checked)}
+                      style={{ width: 16, height: 16 }}
+                    />
+                    <Music size={15} /> Nhạc nền (BGM){' '}
+                    <span style={{ fontWeight: 400, color: 'var(--text2)' }}>
+                      — mix dưới VO; chọn nhiều → tự nối theo thứ tự
+                    </span>
+                  </label>
+                  {bgmEnabled && (
+                    <div className="bgm-body">
+                      {bgmList.length === 0 ? (
+                        <p className="bgm-empty">
+                          Chưa có track — thêm ở “Thư viện nhạc”.
+                        </p>
+                      ) : (
+                        <div className="chips">
+                          {bgmList.map(t => {
+                            const order = bgmIds.indexOf(t.track_id)
+                            const on = order >= 0
+                            return (
+                              <button
+                                key={t.track_id}
+                                type="button"
+                                className={`chip${on ? ' chip-active' : ''}`}
+                                onClick={() =>
+                                  setBgmIds(prev =>
+                                    on
+                                      ? prev.filter(x => x !== t.track_id)
+                                      : [...prev, t.track_id]
+                                  )
+                                }
+                              >
+                                {on && (
+                                  <span className="chip-order">{order + 1}. </span>
+                                )}
+                                {t.name}
+                                {t.duration_sec
+                                  ? ` · ${t.duration_sec.toFixed(0)}s`
+                                  : ''}
+                                {t.needs_attribution ? ' · CC' : ''}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <label className="bgm-vol">
+                        <span className="bgm-vol-label">
+                          Volume: {(bgmVolume * 100).toFixed(0)}%
+                        </span>
+                        <input
+                          type="range"
+                          className="bgm-range"
+                          min={0}
+                          max={0.5}
+                          step={0.01}
+                          value={bgmVolume}
+                          onChange={e => setBgmVolume(parseFloat(e.target.value))}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Batch Panel (Textarea danh sách link + Nút chạy + Status list) */}
+            <BatchQueuePanel
+              voiceId={voiceId}
+              bgmEnabled={bgmEnabled}
+              bgmIds={bgmIds}
+              bgmVolume={bgmVolume}
+              disabled={false}
+              setActivePage={setActivePage}
+            />
+          </>
+        )}
       </div>
 
       {/* ── Pipeline diagram ── */}

@@ -40,3 +40,37 @@ class JobPublishFacebookRequest(BaseModel):
     caption: str = ""
     when_minutes_ahead: int = 1
 
+
+# ── Batch Queue Schemas ───────────────────────────────────────────────────────
+
+class BatchRunRequest(BaseModel):
+    """Input cho POST /api/recap/batch."""
+    urls: list[str]                  # 1–10 YouTube URLs
+    voice_id: str
+    bgm_ids: list[str] | None = None
+    bgm_volume: float | None = None
+    bgm_fade_out: bool | None = None
+
+
+class BatchItemOut(BaseModel):
+    """Trạng thái của 1 URL trong batch (dùng để FE poll)."""
+    url: str
+    job_id: str | None = None
+    status: str                      # pending | running | done | error | skipped
+    error: str | None = None
+    retry_count: int = 0
+
+
+class BatchOut(BaseModel):
+    """Trạng thái đầy đủ của 1 batch (trả về từ GET /api/recap/batch/{id})."""
+    batch_id: str
+    status: str                      # idle | running | stopped | done
+    current_index: int
+    items: list[BatchItemOut]
+    voice_id: str
+    total: int
+    done_count: int
+    error_count: int
+    pending_count: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

@@ -219,7 +219,7 @@ class GDriveClient:
         for f in res.get("files", []):
             vmeta = f.get("videoMediaMetadata") or {}
             dur_ms = vmeta.get("durationMillis")
-            dur_sec = int(int(dur_ms) / 1000) if dur_ms else 10 # Default 10s if not processed yet
+            dur_sec = max(1, round(float(dur_ms) / 1000)) if dur_ms else 10  # Làm tròn chuẩn xác (9.6s-9.9s -> 10s)
 
             out.append({
                 "id": f.get("id", ""),
@@ -312,21 +312,35 @@ class GDriveClient:
             resumable=True,
         )
 
-        request = self.service.files().create(
-            body=meta,
-            media_body=media,
-            fields="id, name, webViewLink, size",
-        )
+        try:
+            request = self.service.files().create(
+                body=meta,
+                media_body=media,
+                fields="id, name, webViewLink, size",
+            )
 
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-            if status and progress_callback:
-                progress_callback(int(status.resumable_progress), int(status.total_size or file_size))
+            response = None
+            while response is None:
+                status, response = request.next_chunk()
+                if status and progress_callback:
+                    progress_callback(int(status.resumable_progress), int(status.total_size or file_size))
 
-        return {
-            "file_id": response.get("id", ""),
-            "file_name": response.get("name", file_name),
-            "web_view_link": response.get("webViewLink", f"https://drive.google.com/file/d/{response.get('id')}/view"),
-            "size_bytes": int(response.get("size", file_size)),
-        }
+            return {
+                "file_id": response.get("id", ""),
+                "file_name": response.get("name", file_name),
+                "web_view_link": response.get("webViewLink", f"https://drive.google.com/file/d/{response.get('id')}/view"),
+                "size_bytes": int(response.get("size", file_size)),
+            }
+        except Exception as exc:
+            # Nếu thư mục cha bị xóa/không tìm thấy (404), tự động tạo lại thư mục mặc định và upload lại
+            if folder_id and ("File not found" in str(exc) or "notFound" in str(exc) or "404" in str(exc)):
+                logger.warning("[GDrive] Folder ID '%s' không tồn tại trên Drive. Đang tự tạo lại thư mục mới...", folder_id)
+                new_folder = self.create_folder("AI_Clean_Videos")
+                return self.upload_file_resumable(
+                    file_path=file_path,
+                    folder_id=new_folder["id"],
+                    custom_name=custom_name,
+                    progress_callback=progress_callback,
+                    skip_if_exists=False,
+                )
+            raise

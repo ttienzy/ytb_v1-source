@@ -5,6 +5,7 @@ from app.externals.gdrive.schemas import (
     GDriveAuthUrlResponse,
     GDriveCredentialsInput,
     GDriveExchangeCodeRequest,
+    GDriveFolderCreateRequest,
     GDriveFolderItem,
     GDriveFolderUpdateRequest,
     GDriveSettingsUpdateRequest,
@@ -66,9 +67,13 @@ def update_folder(payload: GDriveFolderUpdateRequest):
 
 
 @router.post("/folder/create", response_model=GDriveStatusOut)
-def create_folder(folder_name: str = "AI_Clean_Videos"):
-    """Tạo mới một thư mục lưu trữ trên Google Drive."""
-    return service.create_new_folder(folder_name)
+def create_folder(
+    folder_name: str | None = None,
+    payload: GDriveFolderCreateRequest | None = None,
+):
+    """Tạo mới một thư mục lưu trữ trên Google Drive với tên tùy chọn."""
+    name = (payload.folder_name if payload and payload.folder_name else folder_name) or "AI_Clean_Videos"
+    return service.create_new_folder(name)
 
 
 @router.put("/settings", response_model=GDriveStatusOut)

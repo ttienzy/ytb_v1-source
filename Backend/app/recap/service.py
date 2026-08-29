@@ -762,3 +762,158 @@ def publish_job_to_facebook(job_id: str, payload) -> dict:
     return res.model_dump() if hasattr(res, "model_dump") else res.dict()
 
 
+# ── Batch Queue ───────────────────────────────────────────────────────────────
+
+def _batch_overall(job: state.JobState) -> str:
+    """Tính overall cho 1 job trong batch — xem job đã hoàn tất chưa."""
+    phases = [job.recap_status, job.cut_status, job.voice_status, job.merge_status, job.polish_status]
+    if any(p == "error" for p in phases):
+        return "error"
+    if any(p == "running" for p in phases):
+        return "running"
+    if job.polish_status == "done":
+        return "polished"
+    if job.merge_status == "done":
+        return "merged"
+    return "idle"
+
+
+async def _run_one_batch_job(
+    url: str,
+    voice_id: str,
+    polish_opts: dict | None,
+    batch_id: str | None = None,
+    item_index: int | None = None,
+) -> tuple[str, str]:
+    """Tạo job mới và await pipeline đến khi xong (khác run() là không create_task).
+
+    Trả tuple(job_id, overall) với overall ∈ "merged" | "polished" | "error" | "idle".
+    """
+    url = url.strip()
+    job = state.create_job(url)
+    state.update_job(job.job_id, recap_status="running", polish_opts=polish_opts)
+    if batch_id and item_index is not None:
+        try:
+            state.update_batch_item(batch_id, item_index, job_id=job.job_id, status="running")
+        except KeyError:
+            pass
+
+    # AWAIT trực tiếp (không asyncio.create_task) — đảm bảo sequential trong batch
+    await _run_pipeline(job.job_id, voice_id, polish_opts)
+
+    job_final = state.get_job(job.job_id)
+    if job_final is None:
+        return job.job_id, "error"
+    return job.job_id, _batch_overall(job_final)
+
+
+async def _run_batch_worker(batch_id: str) -> None:
+    """Background worker: chạy từng item trong batch tuần tự.
+
+    Logic retry: mỗi item được thử tối đa 2 lần (lần đầu + 1 retry).
+    Nếu item vẫn lỗi sau retry → set batch status="stopped", dừng queue.
+    Nếu user gọi DELETE /batch/{id} → stop_requested=True → dừng sau job hiện tại.
+    """
+    batch = state.get_batch(batch_id)
+    if batch is None:
+        return
+
+    state.update_batch(batch_id, status="running")
+
+    for i, item in enumerate(batch.items):
+        # Kiểm tra soft-cancel từ user
+        batch = state.get_batch(batch_id)
+        if batch is None or batch.stop_requested:
+            # Đánh dấu các item còn lại là skipped
+            for j in range(i, len(batch.items if batch else [])):
+                state.update_batch_item(batch_id, j, status="skipped")
+            state.update_batch(batch_id, status="stopped")
+            return
+
+        state.update_batch(batch_id, current_index=i)
+        state.update_batch_item(batch_id, i, status="running")
+
+        # Lần 1
+        job_id, overall = await _run_one_batch_job(
+            url=item.url,
+            voice_id=batch.voice_id,
+            polish_opts=batch.polish_opts,
+            batch_id=batch_id,
+            item_index=i,
+        )
+
+        if overall in ("merged", "polished"):
+            state.update_batch_item(batch_id, i, status="done", job_id=job_id)
+            continue
+
+        # Lỗi lần 1 → retry
+        job_fail = state.get_job(job_id)
+        err_msg = (job_fail.error if job_fail else None) or "Pipeline error"
+        print(f"[Batch {batch_id}] Item {i} lỗi lần 1 ({err_msg}). Đang retry...")
+        state.update_batch_item(batch_id, i, retry_count=1, status="running", error=None)
+
+        job_id, overall = await _run_one_batch_job(
+            url=item.url,
+            voice_id=batch.voice_id,
+            polish_opts=batch.polish_opts,
+            batch_id=batch_id,
+            item_index=i,
+        )
+
+        if overall in ("merged", "polished"):
+            state.update_batch_item(batch_id, i, status="done", job_id=job_id)
+            continue
+
+        # Lỗi lần 2 → dừng queue
+        job_fail = state.get_job(job_id)
+        err_msg = (job_fail.error if job_fail else None) or "Pipeline error (retry)"
+        print(f"[Batch {batch_id}] Item {i} lỗi sau retry. Dừng queue.")
+        state.update_batch_item(
+            batch_id, i,
+            status="error",
+            job_id=job_id,
+            error=err_msg,
+        )
+        # Đánh dấu các item còn lại là skipped
+        for j in range(i + 1, len(batch.items)):
+            state.update_batch_item(batch_id, j, status="skipped")
+        state.update_batch(batch_id, status="stopped")
+        return
+
+    # Đã xử lý hết tất cả item mà không bị dừng
+    state.update_batch(batch_id, status="done")
+
+
+async def run_batch(
+    urls: list[str],
+    voice_id: str,
+    polish_opts: dict | None = None,
+) -> str:
+    """Tạo batch queue và kick off worker. Trả batch_id ngay (HTTP 202).
+
+    - urls: tối thiểu 1, tối đa 10 YouTube URLs
+    - voice_id: voice dùng cho TTS toàn bộ batch
+    - polish_opts: cấu hình BGM (dùng chung cho tất cả job trong batch)
+    """
+    if not urls:
+        raise HTTPException(status_code=400, detail="Cần ít nhất 1 URL.")
+    if len(urls) > 10:
+        raise HTTPException(status_code=400, detail="Batch tối đa 10 URL.")
+    if not voice_id.strip():
+        raise HTTPException(status_code=400, detail="voice_id rỗng.")
+
+    # Loại bỏ URL rỗng và duplicate, giữ thứ tự
+    seen: set[str] = set()
+    clean_urls: list[str] = []
+    for url in urls:
+        url = url.strip()
+        if url and url not in seen:
+            clean_urls.append(url)
+            seen.add(url)
+
+    if not clean_urls:
+        raise HTTPException(status_code=400, detail="Không có URL hợp lệ nào.")
+
+    batch = state.create_batch(clean_urls, voice_id.strip(), polish_opts)
+    asyncio.create_task(_run_batch_worker(batch.batch_id))
+    return batch.batch_id

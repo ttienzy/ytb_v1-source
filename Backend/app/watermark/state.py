@@ -140,3 +140,19 @@ def update_job(job_id: str, **fields) -> BatchJobState:
 def list_jobs() -> list[BatchJobState]:
     _ensure_init()
     return list(_JOBS.values())
+
+
+def reset_job_drive_status(job_id: str) -> BatchJobState | None:
+    """Reset trạng thái upload Google Drive của toàn bộ video trong job về idle."""
+    _ensure_init()
+    job = _JOBS.get(job_id)
+    if not job:
+        return None
+    for v in job.videos:
+        v.drive_status = "idle"
+        v.drive_file_id = None
+        v.drive_url = None
+        v.drive_error = None
+    job.updated_at = datetime.now(timezone.utc)
+    _save_jobs_to_disk()
+    return job

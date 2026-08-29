@@ -20,7 +20,7 @@ from app.db import get_db
 from app.media.service import resolve_for_polish
 from app.recap import service, state
 from app.recap.paths import final_path, final_studio_path, voice_path
-from app.recap.schemas import JobOut, JobPublishFacebookRequest
+from app.recap.schemas import BatchOut, BatchRunRequest, JobOut, JobPublishFacebookRequest
 from app.recap.ytdlp import login_youtube, yt_login_status
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
@@ -324,3 +324,96 @@ def yt_login_status_endpoint() -> dict:
 def yt_login_endpoint() -> dict:
     """Mở Chrome tới youtube.com để user login Google → xuất cookies cho yt-dlp."""
     return login_youtube()
+
+
+# ── Batch Queue ───────────────────────────────────────────────────────────────
+
+def _batch_to_out(batch: state.BatchState) -> BatchOut:
+    """Chuyển BatchState → BatchOut để serialize ra JSON."""
+    items_out = [
+        {
+            "url": item.url,
+            "job_id": item.job_id,
+            "status": item.status,
+            "error": item.error,
+            "retry_count": item.retry_count,
+        }
+        for item in batch.items
+    ]
+    done_count = sum(1 for it in batch.items if it.status == "done")
+    error_count = sum(1 for it in batch.items if it.status == "error")
+    pending_count = sum(1 for it in batch.items if it.status in ("pending", "skipped"))
+    return BatchOut(
+        batch_id=batch.batch_id,
+        status=batch.status,
+        current_index=batch.current_index,
+        items=items_out,
+        voice_id=batch.voice_id,
+        total=len(batch.items),
+        done_count=done_count,
+        error_count=error_count,
+        pending_count=pending_count,
+        created_at=batch.created_at,
+        updated_at=batch.updated_at,
+    )
+
+
+@router.post("/batch", status_code=202)
+async def create_batch(
+    body: BatchRunRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Tạo batch queue: xếp hàng 1-10 YouTube URLs, chạy tuần tự.
+
+    - Mỗi job dùng chung voice_id + bgm settings
+    - Nếu 1 job lỗi → retry 1 lần → còn lỗi → dừng queue
+    - Poll tiến trình qua GET /api/recap/batch/{batch_id}
+    """
+    # Resolve BGM ids → paths + credits qua database
+    polish_opts: dict | None = None
+    if body.bgm_ids and len(body.bgm_ids) > 0:
+        bgm_paths, credits = resolve_for_polish(db, body.bgm_ids)
+        polish_opts = {
+            "bgm_paths": [str(p) for p in bgm_paths],
+            "credits": credits,
+            "volume": body.bgm_volume if body.bgm_volume is not None else 0.10,
+        }
+
+    batch_id = await service.run_batch(
+        urls=body.urls,
+        voice_id=body.voice_id,
+        polish_opts=polish_opts,
+    )
+    return {"batch_id": batch_id, "total": len(body.urls)}
+
+
+@router.get("/batch", response_model=list[BatchOut])
+def list_batches() -> list[BatchOut]:
+    """Trả danh sách tất cả batch (theo thứ tự tạo mới nhất)."""
+    batches = state.list_batches()
+    batches_sorted = sorted(batches, key=lambda b: b.created_at, reverse=True)
+    return [_batch_to_out(b) for b in batches_sorted]
+
+
+@router.get("/batch/{batch_id}", response_model=BatchOut)
+def get_batch(batch_id: str) -> BatchOut:
+    """Poll trạng thái của 1 batch. FE poll mỗi 3s cho đến khi status='done'|'stopped'."""
+    batch = state.get_batch(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch không tồn tại.")
+    return _batch_to_out(batch)
+
+
+@router.delete("/batch/{batch_id}")
+def stop_batch(batch_id: str) -> dict:
+    """Soft cancel batch: đánh dấu stop_requested=True.
+
+    Worker sẽ dừng sau khi job hiện tại hoàn tất (không kill cứng).
+    """
+    batch = state.get_batch(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch không tồn tại.")
+    if batch.status in ("done", "stopped"):
+        return {"ok": True, "message": f"Batch đã ở trạng thái '{batch.status}', không cần dừng."}
+    state.update_batch(batch_id, stop_requested=True)
+    return {"ok": True, "message": "Đã gửi lệnh dừng. Batch sẽ dừng sau khi job hiện tại xong."}

@@ -58,3 +58,27 @@ export type JobOut = {
 }
 
 export type NodeState = 'idle' | 'running' | 'done' | 'error' | 'skipped'
+
+// ── Batch Queue Types ─────────────────────────────────────────────────────────
+
+export type BatchItemOut = {
+  url: string
+  job_id: string | null
+  status: 'pending' | 'running' | 'done' | 'error' | 'skipped'
+  error: string | null
+  retry_count: number
+}
+
+export type BatchOut = {
+  batch_id: string
+  status: 'idle' | 'running' | 'stopped' | 'done'
+  current_index: number
+  items: BatchItemOut[]
+  voice_id: string
+  total: number
+  done_count: number
+  error_count: number
+  pending_count: number
+  created_at?: string
+  updated_at?: string
+}

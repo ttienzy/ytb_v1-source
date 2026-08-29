@@ -76,7 +76,7 @@ export function WatermarkPage() {
   useEffect(() => {
     if (
       !currentJob ||
-      currentJob.status === 'done' ||
+      (currentJob.status === 'done' && !currentJob.videos.some(v => v.drive_status === 'uploading')) ||
       currentJob.status === 'error'
     ) {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
@@ -90,7 +90,10 @@ export function WatermarkPage() {
         .then(r => (r.ok ? r.json() : Promise.reject()))
         .then((updated: WatermarkBatchJob) => {
           setCurrentJob(updated)
-          if (updated.status === 'done' || updated.status === 'error') {
+          if (
+            (updated.status === 'done' || updated.status === 'error') &&
+            !updated.videos.some(v => v.drive_status === 'uploading')
+          ) {
             clearInterval(pollTimerRef.current)
             setIsProcessing(false)
             loadHistory()
@@ -103,6 +106,27 @@ export function WatermarkPage() {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
     }
   }, [currentJob?.job_id, currentJob?.status, loadHistory])
+
+  // Polling Real-time Drive Sync Status across history
+  useEffect(() => {
+    const isAnySyncing =
+      syncingDriveJobId !== null ||
+      historyJobs.some(j => j.videos.some(v => v.drive_status === 'uploading'))
+
+    if (!isAnySyncing) return
+
+    const timer = setInterval(() => {
+      loadHistory()
+      if (currentJob?.job_id) {
+        fetch(`${API_URL}/api/watermark/jobs/${currentJob.job_id}`)
+          .then(r => (r.ok ? r.json() : Promise.reject()))
+          .then(updated => setCurrentJob(updated))
+          .catch(() => {})
+      }
+    }, 1200)
+
+    return () => clearInterval(timer)
+  }, [syncingDriveJobId, historyJobs, currentJob?.job_id, loadHistory])
 
   // Helper lấy đường dẫn native từ Electron Desktop
   function getNativeFilePath(f: File): string {
@@ -241,11 +265,11 @@ export function WatermarkPage() {
     }
   }
 
-  async function handleSyncBatchToDrive(jobId: string) {
+  async function handleSyncBatchToDrive(jobId: string, force = true) {
     setSyncingDriveJobId(jobId)
     setErrorMsg('')
     try {
-      const res = await fetch(`${API_URL}/api/watermark/jobs/${jobId}/sync-drive`, {
+      const res = await fetch(`${API_URL}/api/watermark/jobs/${jobId}/sync-drive?force=${force}`, {
         method: 'POST',
       })
       const data = await res.json()
@@ -501,6 +525,48 @@ export function WatermarkPage() {
               : 0}
             %)
           </div>
+
+          {/* Real-time Google Drive Sync Progress Banner */}
+          {(() => {
+            const driveDone = currentJob.videos.filter(v => v.status === 'done' && v.drive_status === 'done').length
+            const driveUploading = currentJob.videos.filter(v => v.drive_status === 'uploading').length
+            const totalClean = currentJob.videos.filter(v => v.status === 'done').length
+            const isSyncing = driveUploading > 0 || syncingDriveJobId === currentJob.job_id
+            const pct = totalClean > 0 ? Math.round((driveDone / totalClean) * 100) : 0
+
+            if (!isSyncing && driveDone === 0) return null
+
+            return (
+              <div
+                style={{
+                  marginTop: 12,
+                  background: isSyncing ? '#f0f9ff' : '#f0fdf4',
+                  border: `1px solid ${isSyncing ? '#bae6fd' : '#bbf7d0'}`,
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 12, fontWeight: 700, color: isSyncing ? '#0369a1' : '#15803d' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {isSyncing ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
+                    {isSyncing ? 'Đang đồng bộ video lên Google Drive...' : 'Đã đồng bộ lên Google Drive'}
+                  </span>
+                  <span>{driveDone}/{totalClean} video ({pct}%)</span>
+                </div>
+                <div style={{ width: '100%', height: 7, background: isSyncing ? '#e0f2fe' : '#dcfce7', borderRadius: 999, overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      background: isSyncing ? '#0284c7' : '#16a34a',
+                      borderRadius: 999,
+                      transition: 'width 0.4s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Videos in this job */}
           <div className="wm-list" style={{ marginTop: 14 }}>
@@ -798,17 +864,59 @@ export function WatermarkPage() {
                   </span>
                 </div>
                 {(() => {
-                  const jobPending = job.videos.filter(
-                    v => v.status === 'done' && v.drive_status !== 'done'
+                  const driveDone = job.videos.filter(
+                    v => v.status === 'done' && v.drive_status === 'done'
                   ).length
-                  const allJobDone = job.done > 0 && jobPending === 0
+                  const driveUploading = job.videos.filter(
+                    v => v.drive_status === 'uploading'
+                  ).length
+                  const totalClean = job.videos.filter(
+                    v => v.status === 'done'
+                  ).length
+                  const isSyncing = driveUploading > 0 || syncingDriveJobId === job.job_id
+                  const allJobDone = totalClean > 0 && driveDone === totalClean
+                  const syncPct = totalClean > 0 ? Math.round((driveDone / totalClean) * 100) : 0
 
                   return (
                     <div className="voice-item-actions">
-                      {driveStatus?.connected && job.done > 0 && (
-                        allJobDone ? (
-                          <span
+                      {driveStatus?.connected && totalClean > 0 && (
+                        isSyncing ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 4,
+                              minWidth: 185,
+                              background: '#f0f9ff',
+                              border: '1px solid #bae6fd',
+                              borderRadius: 8,
+                              padding: '5px 10px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, fontWeight: 700, color: '#0284c7' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <Loader2 size={11} className="spin" /> Đang đẩy Drive...
+                              </span>
+                              <span>{driveDone}/{totalClean} ({syncPct}%)</span>
+                            </div>
+                            <div style={{ width: '100%', height: 5, background: '#e0f2fe', borderRadius: 999, overflow: 'hidden' }}>
+                              <div
+                                style={{
+                                  width: `${syncPct}%`,
+                                  height: '100%',
+                                  background: '#0284c7',
+                                  borderRadius: 999,
+                                  transition: 'width 0.3s ease',
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ) : allJobDone ? (
+                          <button
+                            type="button"
                             className="chrome-button"
+                            onClick={() => handleSyncBatchToDrive(job.job_id, true)}
+                            disabled={syncingDriveJobId === job.job_id}
                             style={{
                               height: 32,
                               padding: '0 10px',
@@ -820,15 +928,17 @@ export function WatermarkPage() {
                               alignItems: 'center',
                               gap: 5,
                               fontWeight: 600,
+                              cursor: 'pointer',
                             }}
+                            title="Bấm nếu bạn muốn đẩy lại toàn bộ video sang thư mục Google Drive mới"
                           >
-                            <CheckCircle2 size={12} /> Drive ({job.done})
-                          </span>
+                            <CheckCircle2 size={12} /> Drive ({driveDone}/{totalClean}) · Đồng bộ lại
+                          </button>
                         ) : (
                           <button
                             type="button"
                             className="chrome-button"
-                            onClick={() => handleSyncBatchToDrive(job.job_id)}
+                            onClick={() => handleSyncBatchToDrive(job.job_id, true)}
                             disabled={syncingDriveJobId === job.job_id}
                             style={{
                               height: 32,
@@ -841,15 +951,11 @@ export function WatermarkPage() {
                               alignItems: 'center',
                               gap: 5,
                               fontWeight: 600,
+                              cursor: 'pointer',
                             }}
-                            title="Đẩy toàn bộ file sạch còn lại lên Google Drive"
+                            title="Bấm để tải toàn bộ video sạch lên thư mục Google Drive hiện tại"
                           >
-                            {syncingDriveJobId === job.job_id ? (
-                              <Loader2 size={12} className="spin" />
-                            ) : (
-                              <UploadCloud size={12} />
-                            )}
-                            Drive ({jobPending})
+                            <UploadCloud size={12} /> Đẩy lên Drive ({totalClean - driveDone} còn lại)
                           </button>
                         )
                       )}
