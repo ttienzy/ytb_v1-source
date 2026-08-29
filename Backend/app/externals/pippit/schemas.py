@@ -64,3 +64,38 @@ class PippitScheduleTaskOut(BaseModel):
     title: str = ""
     description: str = ""
     failed_reason: str = ""
+
+
+class PippitBulkScheduleItem(BaseModel):
+    file_id: str | None = Field(default=None, description="Google Drive file ID nếu lấy từ Drive")
+    file_path: str | None = Field(default=None, description="Đường dẫn file local nếu có sẵn")
+    file_name: str = Field(..., description="Tên hiển thị của file video")
+    title: str = Field(default="", description="Tiêu đề video")
+    caption: str = Field(default="", description="Caption / mô tả bài viết")
+    schedule_time_ms: int = Field(..., description="Timestamp thời gian hẹn giờ đăng (ms)")
+    page_id: str = Field(..., description="ID Facebook Fanpage đích")
+
+
+class PippitBulkScheduleRequest(BaseModel):
+    account_id: str = Field(default="", description="ID tài khoản Pippit trong config (tùy chọn)")
+    items: list[PippitBulkScheduleItem] = Field(..., description="Danh sách các video và lịch hẹn cần đăng")
+
+
+class PippitBulkScheduleResultItem(BaseModel):
+    file_name: str
+    page_id: str
+    page_name: str = ""
+    task_id: str = ""
+    asset_id: str = ""
+    schedule_time_ms: int = 0
+    ok: bool = True
+    error: str = ""
+
+
+class PippitBulkScheduleResponse(BaseModel):
+    ok: bool = True
+    total: int = 0
+    success_count: int = 0
+    failed_count: int = 0
+    results: list[PippitBulkScheduleResultItem] = []
+    message: str = ""

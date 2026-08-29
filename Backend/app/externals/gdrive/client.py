@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ import requests
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,106 @@ class GDriveClient:
 
         return self.create_folder(folder_name)
 
+    def list_folders(
+        self,
+        parent_id: str = "root",
+        search: str = "",
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Lấy danh sách thư mục trong một cấp cha (mặc định là thư mục gốc 'root' của Drive)."""
+        self._ensure_valid_token()
+        clauses = [
+            "mimeType = 'application/vnd.google-apps.folder'",
+            "trashed = false",
+        ]
+        if parent_id and parent_id.strip():
+            clauses.append(f"'{parent_id.strip()}' in parents")
+            if parent_id.strip() == "root":
+                clauses.append("'me' in owners")
+        if search and search.strip():
+            clean = search.strip().replace("'", "\\'")
+            clauses.append(f"name contains '{clean}'")
+
+        query = " and ".join(clauses)
+        res = self.service.files().list(
+            q=query,
+            spaces="drive",
+            fields="files(id, name, webViewLink, modifiedTime, parents)",
+            pageSize=page_size,
+            orderBy="name",
+        ).execute()
+
+        out = []
+        for f in res.get("files", []):
+            name = f.get("name", "")
+            if not search and (name.startswith(".") or "node_modules" in name or ".git" in name):
+                continue
+            out.append({
+                "id": f.get("id", ""),
+                "name": name,
+                "url": f.get("webViewLink", f"https://drive.google.com/drive/folders/{f.get('id')}"),
+                "modified_time": f.get("modifiedTime", ""),
+            })
+        return out
+
+    def list_videos(
+        self,
+        folder_id: str | None = None,
+        search: str = "",
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Lấy danh sách file video trong một thư mục Google Drive."""
+        self._ensure_valid_token()
+        clauses = ["trashed = false", "(mimeType contains 'video/' or name contains '.mp4')"]
+        if folder_id:
+            clauses.append(f"'{folder_id}' in parents")
+        if search and search.strip():
+            clean_search = search.strip().replace("'", "\\'")
+            clauses.append(f"name contains '{clean_search}'")
+
+        query = " and ".join(clauses)
+        res = self.service.files().list(
+            q=query,
+            spaces="drive",
+            fields="files(id, name, size, mimeType, webViewLink, thumbnailLink, createdTime, videoMediaMetadata)",
+            pageSize=page_size,
+            orderBy="createdTime desc",
+        ).execute()
+
+        out = []
+        for f in res.get("files", []):
+            vmeta = f.get("videoMediaMetadata") or {}
+            dur_ms = vmeta.get("durationMillis")
+            dur_sec = int(int(dur_ms) / 1000) if dur_ms else 10 # Default 10s if not processed yet
+
+            out.append({
+                "id": f.get("id", ""),
+                "name": f.get("name", ""),
+                "size_bytes": int(f.get("size", 0)),
+                "mime_type": f.get("mimeType", "video/mp4"),
+                "web_view_link": f.get("webViewLink", f"https://drive.google.com/file/d/{f.get('id')}/view"),
+                "thumbnail_link": f.get("thumbnailLink", ""),
+                "created_time": f.get("createdTime", ""),
+                "duration_seconds": dur_sec,
+                "width": vmeta.get("width"),
+                "height": vmeta.get("height"),
+            })
+        return out
+
+    def download_file(self, file_id: str, dest_path: str | Path) -> Path:
+        """Tải một file từ Google Drive về đường dẫn local."""
+        self._ensure_valid_token()
+        dest = Path(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        request = self.service.files().get_media(fileId=file_id)
+        with open(dest, "wb") as fh:
+            downloader = MediaIoBaseDownload(fh, request, chunksize=10 * 1024 * 1024)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+        return dest
+
     def find_file_in_folder(self, file_name: str, folder_id: str | None = None) -> dict[str, Any] | None:
         """Tìm xem file đã tồn tại trong folder Google Drive hay chưa."""
         self._ensure_valid_token()
@@ -201,7 +302,6 @@ class GDriveClient:
         meta: dict[str, Any] = {"name": file_name}
         if folder_id:
             meta["parents"] = [folder_id]
-
 
         # 10MB chunk size
         chunk_size = 10 * 1024 * 1024

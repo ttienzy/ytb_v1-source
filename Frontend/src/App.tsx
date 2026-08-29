@@ -3,6 +3,7 @@ import { Search } from 'lucide-react'
 import { Sidebar } from './components/layout/Sidebar'
 import { BgmPage } from './features/bgm/BgmPage'
 import { HistoryPage } from './features/history/HistoryPage'
+import { PublisherPage } from './features/publisher/PublisherPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { StudioPage } from './features/studio/StudioPage'
 import { VoicesPage } from './features/voices/VoicesPage'
@@ -41,6 +42,8 @@ export function App() {
             <BgmPage />
           ) : activePage === 'Xóa Watermark' ? (
             <WatermarkPage />
+          ) : activePage === 'Lên lịch Pippit' ? (
+            <PublisherPage />
           ) : activePage === 'Studio' ? (
             <StudioPage setActivePage={setActivePage} />
           ) : activePage === 'Lịch sử' ? (

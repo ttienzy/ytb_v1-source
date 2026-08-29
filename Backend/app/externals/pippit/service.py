@@ -13,6 +13,10 @@ from app.externals.pippit.client import PippitAuthError, PippitClient, PippitErr
 from app.externals.pippit.schemas import (
     FacebookPageSlot,
     PippitAccountOut,
+    PippitBulkScheduleItem,
+    PippitBulkScheduleRequest,
+    PippitBulkScheduleResponse,
+    PippitBulkScheduleResultItem,
     PippitLoginSyncRequest,
     PippitPublishRequest,
     PippitPublishResponse,
@@ -397,3 +401,158 @@ def delete_pippit_account(account_id: str) -> dict:
     new_accounts = [a for a in accounts if a.get("id") != account_id]
     _save_pippit_accounts(new_accounts)
     return {"ok": True, "message": f"Đã xóa tài khoản Pippit {acc.get('email')}"}
+
+
+def get_all_active_facebook_pages() -> list[dict]:
+    """Lấy danh sách tất cả các Facebook Page đang active (đã liên kết) trên toàn bộ tài khoản Pippit."""
+    accounts = get_saved_pippit_accounts()
+    active_pages = []
+    seen_ids = set()
+    for acc in accounts:
+        for p in acc.get("facebook_pages", []):
+            pid = str(p.get("page_id") or "").strip()
+            pname = p.get("page_name", "")
+            if pid and pid not in seen_ids and not pname.startswith("Slot "):
+                seen_ids.add(pid)
+                active_pages.append({
+                    "page_id": pid,
+                    "page_name": pname or f"Page {pid}",
+                    "avatar_url": p.get("avatar_url", ""),
+                    "status": p.get("status", "connected"),
+                    "account_id": acc.get("id", ""),
+                    "account_email": acc.get("email", ""),
+                    "un_expired": p.get("un_expired", True),
+                })
+    return active_pages
+
+
+def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkScheduleResponse:
+    """Lên lịch hàng loạt video ngắn từ Google Drive lên Facebook Page qua Pippit."""
+    accounts = get_saved_pippit_accounts()
+    if not accounts:
+        raise HTTPException(status_code=400, detail="Chưa có tài khoản Pippit nào được cấu hình.")
+
+    clients_by_account: dict[str, PippitClient] = {}
+    page_to_account: dict[str, dict] = {}
+    page_name_map: dict[str, str] = {}
+
+    for a in accounts:
+        for p in a.get("facebook_pages", []):
+            pid = str(p.get("page_id") or "").strip()
+            if pid:
+                page_to_account[pid] = a
+                page_name_map[pid] = p.get("page_name", f"Page {pid}")
+
+    default_acc = next((a for a in accounts if a["id"] == payload.account_id), accounts[0])
+
+    def _get_client_for_page(page_id: str) -> tuple[PippitClient, dict]:
+        target_acc = page_to_account.get(str(page_id)) or default_acc
+        acc_id = target_acc.get("id", "default")
+        if acc_id not in clients_by_account:
+            cookies = target_acc.get("cookies", "")
+            if not cookies:
+                raise ValueError(f"Tài khoản {target_acc.get('email')} thiếu cookie đăng nhập.")
+            clients_by_account[acc_id] = PippitClient(cookies=cookies)
+        return clients_by_account[acc_id], target_acc
+
+    results: list[PippitBulkScheduleResultItem] = []
+    success_count = 0
+    failed_count = 0
+
+    from app.externals.gdrive import service as gdrive_service
+
+    for item in payload.items:
+        res_item = PippitBulkScheduleResultItem(
+            file_name=item.file_name,
+            page_id=str(item.page_id),
+            page_name=page_name_map.get(str(item.page_id), f"Page {item.page_id}"),
+            schedule_time_ms=item.schedule_time_ms,
+        )
+
+        local_file: Path | None = None
+        is_temp = False
+
+        try:
+            c, acc = _get_client_for_page(str(item.page_id))
+
+            # 1. Xác định đường dẫn file video
+            if item.file_path and os.path.exists(item.file_path):
+                local_file = Path(item.file_path)
+            elif item.file_id:
+                # Tải từ Google Drive về thư mục tạm
+                local_file = gdrive_service.download_video_temp(item.file_id, custom_name=item.file_name)
+                is_temp = True
+            else:
+                raise ValueError("Thiếu file_id hoặc file_path hợp lệ.")
+
+            if not local_file or not local_file.exists() or local_file.stat().st_size == 0:
+                raise ValueError(f"Không thể đọc file video: {item.file_name}")
+
+            # 2. Upload video lên Pippit Cloud
+            upload_res = c.upload(str(local_file))
+            asset_id = upload_res["asset_id"]
+            res_item.asset_id = asset_id
+
+            # 3. Chuẩn bị caption & title
+            title_clean = (item.title or "").strip()
+            caption_clean = (item.caption or "").strip()
+            if title_clean:
+                if not caption_clean.startswith(title_clean):
+                    final_caption = f"{title_clean}\n\n{caption_clean}" if caption_clean else title_clean
+                else:
+                    final_caption = caption_clean
+            else:
+                final_caption = caption_clean
+
+            # 4. Hẹn giờ đăng Facebook Page
+            task_id = c.schedule_facebook(
+                asset_id=asset_id,
+                platform_user_id=str(item.page_id),
+                schedule_time_ms=item.schedule_time_ms,
+                description=final_caption,
+                title=title_clean,
+            )
+            res_item.task_id = task_id
+            res_item.ok = True
+            success_count += 1
+
+            # 5. Lưu record vào pippit_tasks.json
+            _save_task_record({
+                "task_id": task_id,
+                "asset_id": asset_id,
+                "job_id": None,
+                "account_id": payload.account_id,
+                "account_email": acc.get("email", ""),
+                "page_id": str(item.page_id),
+                "page_name": res_item.page_name,
+                "title": title_clean,
+                "description": final_caption,
+                "schedule_time_ms": item.schedule_time_ms,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "status": 1,
+                "published": False,
+                "source": "gdrive_bulk",
+            })
+
+        except Exception as exc:
+            failed_count += 1
+            res_item.ok = False
+            res_item.error = str(exc)
+        finally:
+            # Dọn dẹp file tạm sau khi upload xong
+            if is_temp and local_file and local_file.exists():
+                try:
+                    os.remove(local_file)
+                except Exception:
+                    pass
+
+        results.append(res_item)
+
+    return PippitBulkScheduleResponse(
+        ok=failed_count == 0,
+        total=len(payload.items),
+        success_count=success_count,
+        failed_count=failed_count,
+        results=results,
+        message=f"Đã lên lịch thành công {success_count}/{len(payload.items)} video!",
+    )

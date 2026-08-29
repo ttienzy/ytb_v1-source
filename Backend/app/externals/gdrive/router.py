@@ -5,11 +5,13 @@ from app.externals.gdrive.schemas import (
     GDriveAuthUrlResponse,
     GDriveCredentialsInput,
     GDriveExchangeCodeRequest,
+    GDriveFolderItem,
     GDriveFolderUpdateRequest,
     GDriveSettingsUpdateRequest,
     GDriveStatusOut,
     GDriveUploadRequest,
     GDriveUploadResponse,
+    GDriveVideoListResponse,
 )
 
 router = APIRouter(prefix="/api/gdrive", tags=["Google Drive"])
@@ -19,6 +21,18 @@ router = APIRouter(prefix="/api/gdrive", tags=["Google Drive"])
 def get_status():
     """Lấy trạng thái kết nối, thông tin tài khoản và thư mục Google Drive."""
     return service.get_status()
+
+
+@router.get("/folders", response_model=list[GDriveFolderItem])
+def list_folders(parent_id: str = "root", q: str = ""):
+    """Lấy danh sách các thư mục trên Google Drive (mặc định các thư mục gốc 'root')."""
+    return service.list_folders(parent_id=parent_id, search=q)
+
+
+@router.get("/videos", response_model=GDriveVideoListResponse)
+def list_videos(folder_id: str | None = None, q: str = ""):
+    """Lấy danh sách video từ thư mục Google Drive."""
+    return service.list_videos(folder_id=folder_id, search=q)
 
 
 @router.post("/credentials", response_model=GDriveStatusOut)

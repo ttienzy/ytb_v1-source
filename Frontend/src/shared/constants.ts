@@ -1,4 +1,5 @@
 import {
+  CalendarClock,
   Clock3,
   Eraser,
   LayoutDashboard,
@@ -21,6 +22,7 @@ export const navigation: NavItem[] = [
   { label: 'Voices', icon: Mic },
   { label: 'Thư viện nhạc', icon: Music },
   { label: 'Xóa Watermark', icon: Eraser },
+  { label: 'Lên lịch Pippit', icon: CalendarClock },
   { label: 'Lịch sử', icon: Clock3 },
   { label: 'Cài đặt', icon: Settings },
 ]

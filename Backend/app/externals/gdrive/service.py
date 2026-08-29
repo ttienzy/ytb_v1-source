@@ -16,11 +16,14 @@ from app.externals.gdrive.schemas import (
     GDriveAuthUrlResponse,
     GDriveCredentialsInput,
     GDriveExchangeCodeRequest,
+    GDriveFolderItem,
     GDriveFolderUpdateRequest,
     GDriveSettingsUpdateRequest,
     GDriveStatusOut,
     GDriveUploadRequest,
     GDriveUploadResponse,
+    GDriveVideoItem,
+    GDriveVideoListResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -435,3 +438,64 @@ def upload_clean_video(payload: GDriveUploadRequest) -> GDriveUploadResponse:
             status_code=500,
             detail=f"Upload lên Google Drive thất bại: {exc}",
         ) from exc
+
+
+def list_folders(parent_id: str = "root", search: str = "") -> list[GDriveFolderItem]:
+    """Lấy danh sách các thư mục trên Google Drive của user theo thư mục cha (mặc định là 'root')."""
+    client = get_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
+
+    clean_parent = parse_folder_id(parent_id) if parent_id and parent_id != "root" else parent_id
+
+    try:
+        raw_folders = client.list_folders(parent_id=clean_parent, search=search)
+        return [GDriveFolderItem(**f) for f in raw_folders]
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lấy danh sách thư mục thất bại: {exc}") from exc
+
+
+def list_videos(folder_id: str | None = None, search: str = "") -> GDriveVideoListResponse:
+    """Lấy danh sách video từ thư mục Google Drive (hỗ trợ cả Folder ID lẫn full link Drive)."""
+    client = get_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
+
+    cfg = get_gdrive_config()
+    raw_id = folder_id or cfg.get("folder_id") or ""
+    target_id = parse_folder_id(raw_id)
+    folder_name = cfg.get("folder_name", "Thư mục Drive")
+
+    if target_id:
+        try:
+            info = client.get_folder_info(target_id)
+            if info:
+                folder_name = info.get("name", "Thư mục Drive")
+        except Exception:
+            pass
+
+    try:
+        raw_videos = client.list_videos(folder_id=target_id if target_id else None, search=search)
+        video_items = [GDriveVideoItem(**v) for v in raw_videos]
+        return GDriveVideoListResponse(
+            folder_id=target_id,
+            folder_name=folder_name,
+            videos=video_items,
+            total=len(video_items),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lấy danh sách video từ Drive thất bại: {exc}") from exc
+
+
+def download_video_temp(file_id: str, custom_name: str | None = None) -> Path:
+    """Tải một file video từ Drive về thư mục tạm và trả về đường dẫn file local."""
+    client = get_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
+
+    temp_dir = Path("Data") / "temp_gdrive"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    fname = custom_name or f"gdrive_{file_id}.mp4"
+    dest = temp_dir / fname
+    return client.download_file(file_id, dest)

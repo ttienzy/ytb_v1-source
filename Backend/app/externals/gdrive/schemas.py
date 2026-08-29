@@ -58,3 +58,30 @@ class GDriveUploadResponse(BaseModel):
     web_view_link: str
     size_bytes: int = 0
     message: str = ""
+
+
+class GDriveFolderItem(BaseModel):
+    id: str
+    name: str
+    url: str = ""
+    modified_time: str = ""
+
+
+class GDriveVideoItem(BaseModel):
+    id: str
+    name: str
+    size_bytes: int = 0
+    mime_type: str = "video/mp4"
+    web_view_link: str = ""
+    thumbnail_link: str = ""
+    created_time: str = ""
+    duration_seconds: int = 10
+    width: int | None = None
+    height: int | None = None
+
+
+class GDriveVideoListResponse(BaseModel):
+    folder_id: str
+    folder_name: str = ""
+    videos: list[GDriveVideoItem] = []
+    total: int = 0
