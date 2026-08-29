@@ -347,11 +347,12 @@ def post_id_from_link(link: str) -> str:
 # PippitClient Class
 # ===========================================================================
 class PippitClient:
-    def __init__(self, cookies: str, workspace_id: str = "", proxy: str = ""):
+    def __init__(self, cookies: str, workspace_id: str = "", proxy: str = "", user_id: str = ""):
         self.cookies = cookies
         self._workspace_id = workspace_id
         self.proxy = proxy
         self._proxies = as_proxies(proxy)
+        self.user_id = str(user_id) if user_id else ""
 
     @property
     def workspace_id(self) -> str:
@@ -378,7 +379,7 @@ class PippitClient:
             "sign": make_sign(path, dt, p["appvr"]),
             "sign-ver": "1",
             "user-agent": UA,
-            "x-capcut-channel": "release-commerce@1.1810.5-1.0.3.588",
+            "x-capcut-channel": "release-commerce@1.1850.6-1.0.3.5815",
             "x-idc-region": "sg1",
             "x-subject-appid": "578071",
             "cookie": self.cookies,
@@ -488,23 +489,20 @@ class PippitClient:
         title: str = "",
     ) -> str:
         fb_param = {
-            "title": title,
-            "urls": [],
+            "title": "",
             "description": description,
-            "anchors": [],
             "media_type": 1,
-            "asset_id_list": [asset_id],
-            "schedule_time": schedule_time_ms,
         }
-        extra = json.dumps(
-            {
-                "item_type": "video",
-                "enter_from": "schedule_post",
-                "tab_name": "publishing",
-                "video_unique_id": asset_id,
-            },
-            separators=(",", ":"),
-        )
+        extra_dict = {
+            "item_type": "video",
+            "enter_from": "calendar",
+            "tab_name": "publishing",
+            "video_unique_id": asset_id,
+        }
+        if self.user_id:
+            extra_dict["consumer_uid"] = str(self.user_id)
+
+        extra = json.dumps(extra_dict, separators=(",", ":"))
         media_param = {
             "extra": extra,
             "platform_type": 301,
@@ -522,24 +520,43 @@ class PippitClient:
         if j.get("ret") != "0":
             raise PippitError(f"schedule_facebook thất bại: {j}")
 
-        results = (j.get("data") or {}).get("results") or []
-        if not results:
-            return ""
-        first = results[0]
-        if first.get("error_code") and first.get("error_code") != 0:
-            raise PippitError(f"Lỗi tạo schedule task: {first.get('error_message')}")
-        return str(first.get("id") or "")
+        data = j.get("data") or {}
+        # Parse theo chuẩn responses của Pippit API
+        responses = data.get("responses") or []
+        if responses:
+            first = responses[0]
+            if first.get("ret") != "0" and first.get("errmsg"):
+                raise PippitError(f"Lỗi tạo schedule task: {first.get('errmsg')}")
+            return str((first.get("data") or {}).get("id") or first.get("id") or "")
+
+        results = data.get("results") or []
+        if results:
+            first = results[0]
+            if first.get("error_code") and first.get("error_code") != 0:
+                raise PippitError(f"Lỗi tạo schedule task: {first.get('error_message')}")
+            return str(first.get("id") or "")
+
+        return ""
 
     # -- Tra cứu lịch bài đăng --------------------------------------------
-    def list_schedule_tasks(self, limit: int = 100) -> list[dict]:
+    def list_schedule_tasks(self, page_ids: list[str] | None = None, limit: int = 100) -> list[dict]:
         now_ms = int(time.time() * 1000)
+        p_ids = page_ids or []
+        if not p_ids:
+            try:
+                accs = self.facebook_accounts()
+                p_ids = [str(a.get("platform_user_id")) for a in accs if a.get("platform_user_id")]
+            except Exception:
+                p_ids = []
+
         # Quét lịch trong khoảng 180 ngày trước và 180 ngày tới
         body = {
             "cursor": "0",
             "count": limit,
-            "platform_type_list": [301],
             "start_time": now_ms - (180 * 86400 * 1000),
             "end_time": now_ms + (180 * 86400 * 1000),
+            "status_list": [1, 2, 3, 4, 6],
+            "platform_user_ids": {"301": p_ids},
         }
         j = self.post("/api/biz/v1/publish/list_schedule_task", body, "publish")
         if j.get("ret") != "0":
@@ -551,7 +568,7 @@ class PippitClient:
             link = t.get("platform_item_link") or ""
             out.append(
                 {
-                    "task_id": t.get("id"),
+                    "task_id": str(t.get("id") or ""),
                     "status": t.get("status"),
                     "published": t.get("status") == PIPPIT_STATUS_PUBLISHED,
                     "post_id": post_id_from_link(link),

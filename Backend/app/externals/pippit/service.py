@@ -229,11 +229,12 @@ def publish_video_to_page(payload: PippitPublishRequest) -> PippitPublishRespons
     cookies = acc.get("cookies", "")
     workspace_id = acc.get("workspace_id", "")
     proxy = acc.get("proxy", "")
+    user_id = acc.get("user_id", "")
 
     if not cookies:
         raise HTTPException(status_code=400, detail="Tài khoản Pippit chưa có session cookies hợp lệ.")
 
-    c = PippitClient(cookies=cookies, workspace_id=workspace_id, proxy=proxy)
+    c = PippitClient(cookies=cookies, workspace_id=workspace_id, proxy=proxy, user_id=user_id)
 
     # 1. Upload video 5 bước
     try:
@@ -243,9 +244,11 @@ def publish_video_to_page(payload: PippitPublishRequest) -> PippitPublishRespons
 
     asset_id = upload_res["asset_id"]
 
-    # 2. Tính thời gian hẹn giờ (ms)
+    # 2. Tính thời gian hẹn giờ (ms) làm tròn theo phút chẵn
     minutes = max(1, payload.when_minutes_ahead)
-    schedule_time_ms = int(time.time() * 1000) + (minutes * 60 * 1000)
+    now_sec = int(time.time())
+    schedule_time_sec = ((now_sec // 60) + minutes) * 60
+    schedule_time_ms = schedule_time_sec * 1000
 
     # 3. Gộp Tiêu đề vào đầu Caption (Facebook post video hiển thị description làm nội dung bài viết chính)
     title_clean = (payload.title or "").strip()
@@ -311,9 +314,15 @@ def list_account_tasks(account_id: str) -> list[PippitScheduleTaskOut]:
     if not acc:
         raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Pippit.")
 
-    c = PippitClient(cookies=acc.get("cookies", ""), workspace_id=acc.get("workspace_id", ""), proxy=acc.get("proxy", ""))
+    page_ids = [str(p.get("page_id")) for p in acc.get("facebook_pages", []) if p.get("page_id")]
+    c = PippitClient(
+        cookies=acc.get("cookies", ""),
+        workspace_id=acc.get("workspace_id", ""),
+        proxy=acc.get("proxy", ""),
+        user_id=acc.get("user_id", ""),
+    )
     try:
-        tasks = c.list_schedule_tasks()
+        tasks = c.list_schedule_tasks(page_ids=page_ids)
         return [PippitScheduleTaskOut(**t) for t in tasks]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Lấy danh sách tasks thất bại: {exc}") from exc
@@ -330,13 +339,15 @@ def list_all_saved_accounts_tasks() -> list[dict]:
         cookies = acc.get("cookies", "")
         if not cookies:
             continue
+        page_ids = [str(p.get("page_id")) for p in acc.get("facebook_pages", []) if p.get("page_id")]
         try:
             c = PippitClient(
                 cookies=cookies,
                 workspace_id=acc.get("workspace_id", ""),
                 proxy=acc.get("proxy", ""),
+                user_id=acc.get("user_id", ""),
             )
-            fetched = c.list_schedule_tasks()
+            fetched = c.list_schedule_tasks(page_ids=page_ids)
             for t in fetched:
                 tid = t.get("task_id")
                 if tid:
@@ -347,7 +358,6 @@ def list_all_saved_accounts_tasks() -> list[dict]:
             pass
 
     # Merge live status vào local tasks
-    now_ms = int(time.time() * 1000)
     merged = []
     seen_ids = set()
 
@@ -363,12 +373,6 @@ def list_all_saved_accounts_tasks() -> list[dict]:
                 lt["post_url"] = live.get("post_url")
             if live.get("failed_reason"):
                 lt["failed_reason"] = live.get("failed_reason")
-        else:
-            # Nếu đã quá giờ hẹn và không có lỗi, đánh dấu status published
-            sched_ms = lt.get("schedule_time_ms") or 0
-            if sched_ms > 0 and sched_ms <= now_ms and not lt.get("failed_reason"):
-                lt["published"] = True
-                lt["status"] = 3
         merged.append(lt)
 
     # Thêm các task mới lấy được từ live API mà chưa có trong local
