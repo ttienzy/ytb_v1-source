@@ -83,6 +83,7 @@ def _to_out(job: state.JobState) -> JobOut:
         polish_status=job.polish_status,
         overall=_overall(job),
         progress={
+            "recap": job.progress_recap,
             "cut": job.progress_cut,
             "voice": job.progress_voice,
             "merge": job.progress_merge,

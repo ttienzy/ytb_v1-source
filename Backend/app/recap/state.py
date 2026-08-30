@@ -27,6 +27,7 @@ class JobState:
     merge_status: str = "idle"
     polish_status: str = "idle"  # Phase R5 (BGM/watermark hậu xử lý)
     # ── Per-phase progress ──
+    progress_recap: dict = field(default_factory=lambda: {"done": 0, "total": 0, "phase": "chunk_llm"})
     progress_cut: dict = field(default_factory=lambda: {"done": 0, "total": 0})
     progress_voice: dict = field(default_factory=lambda: {"done": 0, "total": 0, "phase": "tts"})
     progress_merge: dict = field(default_factory=lambda: {"done": 0, "total": 0})
@@ -61,6 +62,7 @@ def create_job(youtube_url: str, raw_bytes: bytes | None = None, raw_name: str |
         voice_status="idle",
         merge_status="idle",
         polish_status="idle",
+        progress_recap={"done": 0, "total": 0, "phase": "chunk_llm"},
         progress_cut={"done": 0, "total": 0},
         progress_voice={"done": 0, "total": 0, "phase": "tts"},
         progress_merge={"done": 0, "total": 0},

@@ -11,6 +11,7 @@ nghe mượt). R4 merge dùng ``ffprobe_duration`` lấy voice_dur thật → re
 """
 from __future__ import annotations
 
+import random
 import subprocess
 import threading
 from pathlib import Path
@@ -46,7 +47,7 @@ def ffprobe_duration(path: Path) -> float:
 
 
 def cut_segment(video: Path, start_sec: float, end_sec: float, out: Path) -> Path:
-    """Cắt [start, end] giây từ video → out (mp4, stream-copy). Skip nếu đã có."""
+    """Cắt [start, end] giây từ video → out (mp4, frame-accurate libx264). Skip nếu đã có."""
     if out.exists() and out.stat().st_size:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +57,9 @@ def cut_segment(video: Path, start_sec: float, end_sec: float, out: Path) -> Pat
         "-ss", f"{start_sec:.3f}",
         "-i", str(video),
         "-t", f"{dur:.3f}",
-        "-c", "copy",
+        "-vf", "setpts=PTS-STARTPTS",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-an",
         str(out),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
@@ -83,25 +86,56 @@ def _atempo_chain(factor: float) -> list[float]:
 def mux_segment(clip: Path, voice: Path, out: Path) -> Path:
     """Ghép clip (video-only) + VO (wav) → mp4 có cả video+audio (R4).
 
-    Video stream-copy (giữ avc1), audio encode aac (PCM wav không vào mp4 trực tiếp).
-    ``-shortest`` cắt video theo độ dài VO (đã sync chính xác) → VO phủ kín cả đoạn.
-    KHÔNG dùng ``-avoid_negative_ts make_zero``: nó phồng video stream (17s → 18s). Idempotent.
+    Audio encode aac, tự động pad audio (apad) nếu clip dài hơn VO để giữ trọn vẹn cảnh quay.
     """
     if out.exists() and out.stat().st_size:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
+    clip_dur = ffprobe_duration(clip)
     cmd = [
         "ffmpeg", "-y",
         "-i", str(clip), "-i", str(voice),
         "-map", "0:v:0", "-map", "1:a:0",
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-        "-shortest",
+        "-af", "apad",
+        "-t", f"{clip_dur:.3f}",
         str(out),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_MUX)
     if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
         raise RuntimeError(f"ffmpeg mux thất bại [{out.name}]: {(proc.stderr or '')[-400:]}")
     return out
+
+
+def cut_and_mux_segment(
+    source_video: Path,
+    start_sec: float,
+    end_sec: float,
+    voice_wav: Path,
+    out_seg: Path,
+) -> Path:
+    """Cắt trực tiếp từ source video theo [start, end] và mux với voice_wav (Frame-accurate, 1 pass duy nhất)."""
+    if out_seg.exists() and out_seg.stat().st_size:
+        return out_seg
+    out_seg.parent.mkdir(parents=True, exist_ok=True)
+    dur = max(0.1, end_sec - start_sec)
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{start_sec:.3f}",
+        "-i", str(source_video),
+        "-i", str(voice_wav),
+        "-t", f"{dur:.3f}",
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-vf", "setpts=PTS-STARTPTS",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        "-af", "apad",
+        str(out_seg),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_MUX)
+    if proc.returncode != 0 or not out_seg.exists() or not out_seg.stat().st_size:
+        raise RuntimeError(f"ffmpeg cut_and_mux thất bại [{out_seg.name}]: {(proc.stderr or '')[-400:]}")
+    return out_seg
 
 
 def concat_segments(segments: list[Path], out: Path, work_dir: Path) -> Path:
@@ -134,6 +168,68 @@ def concat_segments(segments: list[Path], out: Path, work_dir: Path) -> Path:
     return out
 
 
+def build_smart_bgm_chain(
+    bgm_paths: list[Path],
+    target_duration: float,
+    out_chain: Path,
+    work_dir: Path,
+) -> Path:
+    """Xây dựng chuỗi BGM phủ kín target_duration từ danh sách bgm_paths do user chọn.
+
+    Nếu tổng thời lượng các bài đã chọn < target_duration:
+      - Bắt đầu chuỗi bằng danh sách user chọn theo thứ tự.
+      - Tiếp tục switch ngẫu nhiên (chọn từ pool bgm_paths, tránh lặp bài liền kề nếu >1 bài)
+        cho đến khi tổng thời lượng chuỗi >= target_duration + 10s.
+      - Concat lại thành 1 file out_chain (mp3, stream-copy).
+    """
+    if not bgm_paths:
+        raise ValueError("bgm_paths không được rỗng.")
+
+    if out_chain.exists() and out_chain.stat().st_size > 0:
+        return out_chain
+
+    # Đo thời lượng từng bài
+    track_durs = {p: ffprobe_duration(p) for p in bgm_paths}
+
+    # Bắt đầu chuỗi với danh sách ban đầu
+    playlist = list(bgm_paths)
+    current_dur = sum(track_durs.get(p, 0.0) for p in playlist)
+
+    if len(bgm_paths) > 1 and current_dur < target_duration + 10.0:
+        while current_dur < target_duration + 10.0:
+            # Chọn ngẫu nhiên trong pool bgm_paths, ưu tiên bài khác bài vừa phát
+            candidates = [p for p in bgm_paths if p != playlist[-1]] or bgm_paths
+            next_p = random.choice(candidates)
+            playlist.append(next_p)
+            current_dur += track_durs.get(next_p, 0.0)
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    out_chain.parent.mkdir(parents=True, exist_ok=True)
+
+    lst = work_dir / "bgm_concat_list.txt"
+    lines = [f"file '{p.as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'" for p in playlist]
+    lst.write_text("\n".join(lines), encoding="utf-8")
+
+    cmd_chain = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(lst),
+        "-c", "copy",
+        str(out_chain),
+    ]
+    proc = subprocess.run(
+        cmd_chain,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=TIMEOUT_CONCAT,
+    )
+    if proc.returncode != 0 or not out_chain.exists() or not out_chain.stat().st_size:
+        raise RuntimeError(f"ffmpeg BGM concat thất bại: {(proc.stderr or '')[-400:]}")
+    return out_chain
+
+
 def polish_final(
     src: Path,
     out: Path,
@@ -145,12 +241,9 @@ def polish_final(
     """Hậu xử lý R5 (Polish): amix BGM dưới VO (ducked) + copy video stream (nhanh).
 
     Xử lý:
-    1. Nếu có nhiều track BGM: concat trước thành ``bgm_chain.mp3`` (stream-copy, nhanh).
-    2. Mix pass: ``-i src.mp4 -stream_loop -1 -i bgm.mp3`` + ``-c:v copy`` (không re-encode
-       video) + ``-filter_complex [1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first[a]``
-       (lặp vô tận) + ``amix duration=first`` + ``-shortest`` → BGM phủ kín final.
-
-    Idempotent: skip nếu ``out`` đã có + size>0.
+    1. Nếu có >1 track BGM: xây dựng chuỗi BGM thông minh tự switch ngẫu nhiên (build_smart_bgm_chain).
+    2. Nếu 1 track BGM: loop liên tục bài đó qua -stream_loop -1.
+    3. Mix pass: amix BGM (volume=0.10) dưới VO + copy video stream -> final_studio.mp4.
     """
     if out.exists() and out.stat().st_size:
         return out
@@ -165,30 +258,14 @@ def polish_final(
         work_dir.mkdir(parents=True, exist_ok=True)
     wd = work_dir or out.parent
 
-    # 1. Pre-concat BGM chain (nếu >1 track)
+    total_dur = ffprobe_duration(src)
+
+    # 1. Pre-concat / Smart switch BGM chain
     if len(bgm_paths) > 1:
         bgm_chain = wd / "bgm_chain.mp3"
-        if not (bgm_chain.exists() and bgm_chain.stat().st_size):
-            lst = wd / "bgm_concat_list.txt"
-            lines = [f"file '{p.as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'"
-                     for p in bgm_paths]
-            lst.write_text("\n".join(lines), encoding="utf-8")
-            cmd_chain = [
-                "ffmpeg", "-y",
-                "-f", "concat", "-safe", "0",
-                "-i", str(lst),
-                "-c", "copy",
-                str(bgm_chain),
-            ]
-            proc = subprocess.run(cmd_chain, capture_output=True, text=True,
-                                  encoding="utf-8", errors="replace", timeout=TIMEOUT_CONCAT)
-            if proc.returncode != 0 or not bgm_chain.exists():
-                raise RuntimeError(f"ffmpeg BGM concat thất bại: {(proc.stderr or '')[-400:]}")
-        bgm_input = bgm_chain
+        bgm_input = build_smart_bgm_chain(bgm_paths, total_dur, bgm_chain, wd)
     else:
         bgm_input = bgm_paths[0]
-
-    total_dur = ffprobe_duration(src)
 
     # 2. Mix pass: video copy + audio amix (BGM ducked dưới VO).
     filter_complex = (

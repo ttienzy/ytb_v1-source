@@ -29,7 +29,14 @@ from fastapi.concurrency import run_in_threadpool
 from app.core.config import TOOLS_DIR
 from app.ai.gemini.recap import RecapConfigError, generate_recap, _auto_refresh_cookies, _gemini_config
 from app.recap import state
-from app.recap.ffmpeg import concat_segments, cut_segment, ffprobe_duration, mux_segment, polish_final
+from app.recap.ffmpeg import (
+    concat_segments,
+    cut_and_mux_segment,
+    cut_segment,
+    ffprobe_duration,
+    mux_segment,
+    polish_final,
+)
 from app.recap.paths import (
     DOWNLOADS_DIR,
     clip_path,
@@ -52,7 +59,7 @@ from app.recap.transcript import fetch_transcript_raw, transcript_to_text
 from app.recap.ytdlp import download_video
 from app.voices import voice_client
 
-PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "System Prompt Food Review Recap.txt"
+PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "recap" / "food_review_chunk.prompt.txt"
 
 
 # ── Cookie pre-check helper ───────────────────────────────────────────────────
@@ -141,8 +148,7 @@ def _status_from_disk(job_id: str, n_segs: int) -> dict:
     Không cascaded: voice có thể done dù cut idle (chạy song song → khả năng partial).
     missing output = idle (re-runnable sau restart).
     """
-    clips = [f"clip_{i}.mp4" for i in range(n_segs)] if (clips_dir(job_id) / "clip_0.mp4").exists() else []
-    has_clips = bool(clips)
+    has_source = video_path(job_id).exists() and video_path(job_id).stat().st_size > 0
     has_voice = (voice_dir(job_id) / "voice_0.wav").exists()
     fp = final_path(job_id)
     has_final = fp.exists() and fp.stat().st_size > 0
@@ -151,11 +157,11 @@ def _status_from_disk(job_id: str, n_segs: int) -> dict:
 
     return {
         "recap_status": "done",   # recap.json tồn tại nên luôn done
-        "cut_status": "done" if has_clips else "idle",
+        "cut_status": "done" if has_source else "idle",
         "voice_status": "done" if has_voice else "idle",
         "merge_status": "done" if (has_final or has_studio) else "idle",
         "polish_status": "done" if has_studio else "idle",
-        "clips": clips if has_clips else [],
+        "clips": [],
         "final": "final_recap.mp4" if has_final else None,
         "final_studio": "final_studio.mp4" if has_studio else None,
     }
@@ -197,15 +203,20 @@ async def _generate_for_job(job_id: str) -> None:
     if not job.raw_bytes:
         raise HTTPException(status_code=400, detail="Thiếu transcript (raw_bytes) cho job.")
 
-    prompt_bytes = PROMPT_PATH.read_bytes()
+    def on_progress(done: int, total: int) -> None:
+        state.update_job(
+            job_id,
+            progress_recap={"done": done, "total": total, "phase": "chunk_llm"},
+        )
+
     try:
         recap = await run_in_threadpool(
             generate_recap,
             job.youtube_url,
             job.raw_bytes,
             job.raw_name or "raw.txt",
-            prompt_bytes,
-            PROMPT_PATH.name,
+            prompt_template_path=PROMPT_PATH,
+            progress_callback=on_progress,
         )
     except RecapConfigError as error:
         state.update_job(job_id, recap_status="error", error=str(error))
@@ -312,31 +323,13 @@ def delete_job_data(job_id: str) -> bool:
 # ── Phase B: cut (per-phase gate + progress) ─────────────────────────────────
 
 def _do_cut(job: JobState) -> None:
-    """Sync: tải video → cut từng segment → giữ source. Progress tracking per segment."""
-    recap = job.recap or {}
-    segs = _segments_flat(recap)
-    if not segs:
-        raise RuntimeError("Recap không có segment nào để cắt.")
-
+    """Sync: tải video gốc (1080p source) về source/video.mp4 (chạy song song với voice)."""
     jdir = job_dir_of(job.job_id)
     jdir.mkdir(parents=True, exist_ok=True)
 
-    # Init progress
-    state.update_job(job.job_id, progress_cut={"done": 0, "total": len(segs)})
-
+    state.update_job(job.job_id, progress_cut={"done": 0, "total": 1})
     video = download_video(job.youtube_url, source_dir(job.job_id))
-
-    clips: list[str] = []
-    for i, seg in enumerate(segs):
-        start = float(seg.get("start_time_sec", 0.0))
-        end = float(seg.get("end_time_sec", start))
-        out = clip_path(job.job_id, i)
-        cut_segment(video, start, end, out)
-        clips.append(out.name)
-        # Bump progress sau mỗi clip
-        state.update_job(job.job_id, progress_cut={"done": i + 1, "total": len(segs)})
-
-    state.update_job(job.job_id, job_dir=str(jdir), clips=clips)
+    state.update_job(job.job_id, job_dir=str(jdir), progress_cut={"done": 1, "total": 1})
 
 
 async def cut(job_id: str) -> JobState:
@@ -450,10 +443,7 @@ async def voice(job_id: str, voice_id: str) -> JobState:
 # ── Phase B: merge (gate: cut_done AND voice_done) ───────────────────────────
 
 def _do_merge(job: JobState, segs: list[dict]) -> None:
-    """Sync: VO drives duration — re-cut clip_i theo voice_dur → mux → concat.
-
-    Progress tracking per segment.
-    """
+    """Sync: Frame-Accurate Cut & Smart Visual Sync (1 pass duy nhất) -> Concat final_recap.mp4."""
     mdir = merge_dir(job.job_id)
     mdir.mkdir(parents=True, exist_ok=True)
 
@@ -472,21 +462,13 @@ def _do_merge(job: JobState, segs: list[dict]) -> None:
         vo = voice_path(job.job_id, i)
         if not vo.exists() or not vo.stat().st_size:
             raise RuntimeError(f"voice/voice_{i}.wav chưa có — chạy voice trước.")
-        voice_dur = ffprobe_duration(vo)
-        if voice_dur <= 0:
-            raise RuntimeError(f"Không đo được duration voice_{i}.wav.")
 
         start = max(0.0, float(seg.get("start_time_sec", 0.0) or 0.0))
-        end = min(start + voice_dur, source_dur)
-        clip = clip_path(job.job_id, i)
-        if clip.exists():
-            clip.unlink()
-        cut_segment(source, start, end, clip)
-        if not clip.exists() or not clip.stat().st_size:
-            raise RuntimeError(f"re-cut clip_{i}.mp4 thất bại.")
+        end = min(max(start + 0.1, float(seg.get("end_time_sec", start) or start)), source_dur)
 
         out = segment_path(job.job_id, i)
-        mux_segment(clip, vo, out)
+        # Sử dụng cut_and_mux_segment: Frame-Accurate, Smart Sync, 1 pass duy nhất
+        cut_and_mux_segment(source, start, end, vo, out)
         segments.append(out)
 
         # Bump progress

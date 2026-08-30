@@ -145,12 +145,14 @@ export function PipelineDiagram({
       ? `${segs} đoạn · ${job.recap?.scenes?.length ?? 0} cảnh`
       : job.recap_status === 'refreshing_cookie'
       ? 'Làm mới cookie Gemini…'
+      : p.recap && p.recap.total > 0
+      ? `Chunk ${p.recap.done}/${p.recap.total}`
       : undefined
   const subCut =
-    cutState === 'running' && p.cut.total > 0
-      ? `Đang cắt ${p.cut.done}/${p.cut.total}`
+    cutState === 'running'
+      ? 'Đang tải 1080p…'
       : cutState === 'done'
-      ? `${p.cut.total} clip`
+      ? '1080p sẵn sàng'
       : undefined
   const subVoice =
     voiceState === 'running'
@@ -246,17 +248,18 @@ export function PipelineDiagram({
       </div>
       <div className="flow">
         <PipelineNode
-          label="Recap"
+          label="Recap LLM"
           state={recapState}
           icon={Sparkles}
           subLabel={subRecap}
+          progress={recapState === 'running' ? p.recap : undefined}
         />
         <div className={connCls(afterRecapDone, afterRecapDone)} />
         <div className={forkCls(afterRecapDone, bothDone)} />
         <div className="pcol">
           <span className="pbadge">↕ song song</span>
           <PipelineNode
-            label="Cắt video"
+            label="Tải video"
             state={cutState}
             icon={Scissors}
             subLabel={subCut}

@@ -33,6 +33,7 @@ export type JobOut = {
   merge_status: string
   polish_status: string // idle | running | done | error (Phase R5)
   progress: {
+    recap?: { done: number; total: number; phase?: string }
     cut: { done: number; total: number }
     voice: { done: number; total: number; phase?: string }
     merge: { done: number; total: number }

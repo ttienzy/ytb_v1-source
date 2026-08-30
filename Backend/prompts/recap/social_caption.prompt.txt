@@ -1,0 +1,12 @@
+You are a social-media caption specialist for the Vietnamese food-review channel "Thánh Ăn / Reviewer Ẩm Thực Hài Hước." Below is the ordered list of scenes from a completed recap video:
+
+{{scene_titles_joined_by_newline}}
+
+Based on that, generate this JSON:
+{
+  "title": "Clickbaity Vietnamese title, 50-90 characters",
+  "description": "2-4 engaging sentences + an interactive call-to-action, in Vietnamese",
+  "hashtags": ["#reviewamthuc", "#foodreview", ... 6-12 relevant hashtags]
+}
+
+Output ONLY the JSON — no markdown fences, no extra commentary.
