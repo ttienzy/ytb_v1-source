@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Search } from 'lucide-react'
 import { Sidebar } from './components/layout/Sidebar'
 import { BgmPage } from './features/bgm/BgmPage'
+import { DiscoverPage } from './features/discover/DiscoverPage'
 import { HistoryPage } from './features/history/HistoryPage'
 import { PublisherPage } from './features/publisher/PublisherPage'
 import { SettingsPage } from './features/settings/SettingsPage'
@@ -11,8 +12,14 @@ import { WatermarkPage } from './features/watermark/WatermarkPage'
 import { YouTubePublisherPage } from './features/youtube-publisher/YouTubePublisherPage'
 
 export function App() {
-  const [activePage, setActivePage] = useState('Studio')
+  const [activePage, setActivePage] = useState('Khám Phá Kênh')
   const [collapsed, setCollapsed] = useState(false)
+  const [studioBatchUrls, setStudioBatchUrls] = useState<string[]>([])
+
+  const handleSendToStudioBatch = (urls: string[]) => {
+    setStudioBatchUrls(urls)
+    setActivePage('Studio')
+  }
 
   return (
     <div className="app-shell">
@@ -35,7 +42,12 @@ export function App() {
         </header>
 
         <div className="content-wrap">
-          {activePage === 'Cài đặt' ? (
+          {activePage === 'Khám Phá Kênh' ? (
+            <DiscoverPage
+              onSendToStudioBatch={handleSendToStudioBatch}
+              setActivePage={setActivePage}
+            />
+          ) : activePage === 'Cài đặt' ? (
             <SettingsPage />
           ) : activePage === 'Voices' ? (
             <VoicesPage />
@@ -48,7 +60,10 @@ export function App() {
           ) : activePage === 'Lên lịch Youtube' ? (
             <YouTubePublisherPage setActivePage={setActivePage} />
           ) : activePage === 'Studio' ? (
-            <StudioPage setActivePage={setActivePage} />
+            <StudioPage
+              setActivePage={setActivePage}
+              initialUrls={studioBatchUrls}
+            />
           ) : activePage === 'Lịch sử' ? (
             <HistoryPage />
           ) : (

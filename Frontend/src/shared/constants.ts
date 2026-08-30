@@ -1,6 +1,7 @@
 import {
   CalendarClock,
   Clock3,
+  Compass,
   Eraser,
   LayoutDashboard,
   Mic,
@@ -19,6 +20,7 @@ export type NavItem = {
 
 export const navigation: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard },
+  { label: 'Khám Phá Kênh', icon: Compass },
   { label: 'Studio', icon: PlaySquare },
   { label: 'Voices', icon: Mic },
   { label: 'Thư viện nhạc', icon: Music },

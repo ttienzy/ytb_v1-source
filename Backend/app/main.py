@@ -19,6 +19,7 @@ from app.externals.gdrive.router import router as gdrive_router
 from app.externals.mailtm.router import router as mailtm_router
 from app.externals.pippit.router import router as pippit_router
 from app.externals.youtube.router import router as youtube_router
+from app.discover.router import router as discover_router
 from app.media.router import router as media_router
 from app.recap.router import router as recap_router
 from app.routers.health import router as health_router
@@ -34,6 +35,7 @@ app.include_router(gemini_router)
 app.include_router(voices_router)
 app.include_router(media_router)
 app.include_router(recap_router)
+app.include_router(discover_router)
 app.include_router(watermark_router)
 app.include_router(mailtm_router)
 app.include_router(pippit_router)

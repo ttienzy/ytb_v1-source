@@ -42,6 +42,7 @@ interface Props {
   bgmVolume: number
   disabled?: boolean
   setActivePage?: (page: string) => void
+  initialUrls?: string[]
 }
 
 export function BatchQueuePanel({
@@ -51,6 +52,7 @@ export function BatchQueuePanel({
   bgmVolume,
   disabled,
   setActivePage,
+  initialUrls,
 }: Props) {
   const [urlsText, setUrlsText] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -58,6 +60,12 @@ export function BatchQueuePanel({
   const [batchId, setBatchId] = useState<string | null>(null)
   const [batch, setBatch] = useState<BatchOut | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (initialUrls && initialUrls.length > 0) {
+      setUrlsText(initialUrls.join('\n'))
+    }
+  }, [initialUrls])
 
   // YouTube Bot-Wall Login State
   const [ytLoggingIn, setYtLoggingIn] = useState(false)

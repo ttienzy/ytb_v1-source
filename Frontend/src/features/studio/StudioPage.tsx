@@ -24,8 +24,10 @@ import type { JobOut } from './types'
 
 export function StudioPage({
   setActivePage,
+  initialUrls,
 }: {
   setActivePage: (p: string) => void
+  initialUrls?: string[]
 }) {
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [rawText, setRawText] = useState('')
@@ -40,8 +42,14 @@ export function StudioPage({
   const [job, setJob] = useState<JobOut | null>(null)
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [mode, setMode] = useState<'single' | 'batch'>('single')
+  const [mode, setMode] = useState<'single' | 'batch'>(initialUrls && initialUrls.length > 0 ? 'batch' : 'single')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (initialUrls && initialUrls.length > 0) {
+      setMode('batch')
+    }
+  }, [initialUrls])
 
   // YouTube Bot-Wall Login State
   const [ytLoggingIn, setYtLoggingIn] = useState(false)
@@ -644,6 +652,7 @@ export function StudioPage({
               bgmVolume={bgmVolume}
               disabled={false}
               setActivePage={setActivePage}
+              initialUrls={initialUrls}
             />
           </>
         )}

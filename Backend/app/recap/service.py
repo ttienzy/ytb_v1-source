@@ -28,6 +28,13 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core.config import TOOLS_DIR
 from app.ai.gemini.recap import RecapConfigError, generate_recap, _auto_refresh_cookies, _gemini_config
+from app.discover.history import (
+    mark_disk_cleaned,
+    record_job_completed,
+    record_job_failed,
+    record_job_metadata,
+    record_job_start,
+)
 from app.recap import state
 from app.recap.ffmpeg import (
     concat_segments,
@@ -236,6 +243,18 @@ async def _generate_for_job(job_id: str) -> None:
 
     state.update_job(job_id, recap_status="done", recap=recap, caption=recap.get("caption"))
 
+    try:
+        cap = recap.get("caption") or {}
+        recap_title = cap.get("title") or recap.get("title") or ""
+        record_job_metadata(
+            job_id,
+            title=recap_title,
+            scenes_count=len(recap.get("scenes", [])),
+            caption=cap,
+        )
+    except Exception:
+        pass
+
     # Persist recap ra disk → rehydrate được sau restart.
     # Ghi thêm youtube_url + created_at để rehydrate đầy đủ.
     try:
@@ -319,8 +338,12 @@ def list_disk_jobs() -> list[str]:
 
 
 def delete_job_data(job_id: str) -> bool:
-    """Xóa job khỏi memory state và xóa toàn bộ thư mục Downloads/{job_id}/."""
+    """Xóa job khỏi memory state và xóa toàn bộ thư mục Downloads/{job_id}/ (DB lịch sử vẫn giữ nguyên)."""
     state.delete_job(job_id)
+    try:
+        mark_disk_cleaned(job_id)
+    except Exception:
+        pass
     jdir = job_dir_of(job_id)
     if jdir.exists() and jdir.is_dir():
         shutil.rmtree(jdir, ignore_errors=True)
@@ -630,6 +653,12 @@ async def run(
 
     job = state.create_job(youtube_url, raw_bytes=raw_bytes, raw_name=raw_name)
     state.update_job(job.job_id, recap_status="running", polish_opts=polish_opts)
+
+    try:
+        record_job_start(youtube_url, job.job_id, title=raw_name)
+    except Exception:
+        pass
+
     asyncio.create_task(_run_pipeline(job.job_id, voice_id, polish_opts))
     return job.job_id
 
@@ -655,6 +684,10 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
                     recap_status="error",
                     error=f"transcript: {exc}",
                 )
+                try:
+                    record_job_failed(job_id, f"transcript: {exc}")
+                except Exception:
+                    pass
                 return
             # Giữ nguyên 100% JSON thô gốc từ YouTube get_panel (không trích text)
             # raw_bytes = transcript_to_text(transcript).encode("utf-8")
@@ -686,12 +719,20 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
         #     để FE hiển thị rõ "Đang làm mới cookie Gemini..." thay vì treo im lặng.
         cookie_ok = await run_in_threadpool(_ensure_gemini_cookie, job_id)
         if not cookie_ok:
+            try:
+                record_job_failed(job_id, "Gemini cookie auth fail")
+            except Exception:
+                pass
             return  # recap_status đã = error (refresh thất bại)
 
         # 2b) Generate (Gemini) — recap_status error đã set bên trong nếu lỗi.
         try:
             await _generate_for_job(job_id)
-        except HTTPException:
+        except HTTPException as exc:
+            try:
+                record_job_failed(job_id, str(exc.detail))
+            except Exception:
+                pass
             return  # recap_status đã = error
 
         # 3) Cut + Voice song song (gather return_exceptions → không huỷ sibling).
@@ -704,6 +745,11 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
         voice_ok = not isinstance(results[1], Exception)
         if not cut_ok or not voice_ok:
             # Ít nhất 1 phase fail → không merge; phase đã set error status.
+            err_msg = str(results[0]) if not cut_ok else str(results[1])
+            try:
+                record_job_failed(job_id, err_msg)
+            except Exception:
+                pass
             return
 
         # 4) Cả 2 thành công → merge.
@@ -713,11 +759,19 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
         if polish_opts:
             await polish(job_id, polish_opts)
 
+        # 6) Đánh dấu thành công trong History DB
+        try:
+            out_video = final_studio_path(job_id) if polish_opts else final_path(job_id)
+            record_job_completed(job_id, str(out_video))
+        except Exception:
+            pass
+
     except Exception as exc:  # noqa: BLE001
         # Unexpected error thoát ra ngoài gather
         try:
             state.update_job(job_id, polish_status="error", error=f"pipeline: {exc}")
-        except KeyError:
+            record_job_failed(job_id, f"pipeline: {exc}")
+        except Exception:
             pass
 
 
