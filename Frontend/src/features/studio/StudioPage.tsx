@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
+  AlertTriangle,
   Clock3,
+  ExternalLink,
+  KeyRound,
   Layers,
   Loader2,
   Music,
   Play,
+  RotateCcw,
+  Settings,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -37,6 +42,65 @@ export function StudioPage({
   const [submitting, setSubmitting] = useState(false)
   const [mode, setMode] = useState<'single' | 'batch'>('single')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // YouTube Bot-Wall Login State
+  const [ytLoggingIn, setYtLoggingIn] = useState(false)
+  const [ytLoginMsg, setYtLoginMsg] = useState('')
+  const [resumingJob, setResumingJob] = useState(false)
+
+  function isYouTubeBotWallError(errorStr?: string): boolean {
+    if (!errorStr) return false
+    const low = errorStr.toLowerCase()
+    return (
+      low.includes('sign in to confirm') ||
+      low.includes('not a bot') ||
+      low.includes('exporting-youtube-cookies') ||
+      low.includes('--cookies') ||
+      low.includes('cookies-from-browser') ||
+      low.includes('bot-wall')
+    )
+  }
+
+  async function handleLoginYouTube() {
+    setYtLoggingIn(true)
+    setYtLoginMsg('Đang mở Chrome để bạn đăng nhập YouTube... Vui lòng đăng nhập trên cửa sổ Chrome vừa mở.')
+    try {
+      const response = await fetch(`${API_URL}/api/recap/yt/login`, {
+        method: 'POST',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
+      setYtLoginMsg('✅ Đã đăng nhập và lưu Cookie YouTube thành công! Đang tự động tiếp tục tiến trình...')
+      if (job?.job_id) {
+        setTimeout(() => handleResumeJob(), 1200)
+      }
+    } catch (error: any) {
+      setYtLoginMsg(`❌ ${error instanceof Error ? error.message : 'Đăng nhập thất bại.'}`)
+    } finally {
+      setYtLoggingIn(false)
+    }
+  }
+
+  async function handleResumeJob() {
+    if (!job?.job_id) return
+    setResumingJob(true)
+    try {
+      const response = await fetch(`${API_URL}/api/recap/jobs/${job.job_id}/resume`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const err = await response.json()
+        throw new Error(err.detail || 'Lỗi khi tiếp tục tiến trình')
+      }
+      if (pollRef.current) clearInterval(pollRef.current)
+      pollRef.current = setInterval(() => pollJob(job.job_id), 1500)
+      pollJob(job.job_id)
+    } catch (error: any) {
+      alert(error instanceof Error ? error.message : 'Lỗi khi thử lại tiến trình.')
+    } finally {
+      setResumingJob(false)
+    }
+  }
 
   // Load voices + bgm on mount
   useEffect(() => {
@@ -596,10 +660,89 @@ export function StudioPage({
 
           {/* Error detail */}
           {job.overall === 'error' && job.error && (
-            <div className="err-block">
-              <AlertCircle size={15} style={{ flexShrink: 0 }} />
-              <span>{job.error}</span>
-            </div>
+            isYouTubeBotWallError(job.error) ? (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 16,
+                  background: '#fff1f2',
+                  border: '1.5px solid #fecdd3',
+                  borderRadius: 12,
+                  color: '#9f1239',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14 }}>
+                  <AlertTriangle size={18} color="#e11d48" />
+                  <span>YouTube yêu cầu xác thực tài khoản (Bot-Wall)</span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12.5, color: '#475569', lineHeight: 1.5 }}>
+                  YouTube phát hiện lưu lượng tải video tự động và chặn bằng yêu cầu <em>"Sign in to confirm you're not a bot"</em>. Bạn cần đăng nhập tài khoản YouTube để cập nhật Cookie.
+                </div>
+
+                {ytLoginMsg && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      background: ytLoginMsg.startsWith('✅') ? '#f0fdf4' : '#fff',
+                      border: '1px solid',
+                      borderColor: ytLoginMsg.startsWith('✅') ? '#bbf7d0' : '#fecdd3',
+                      fontSize: 12,
+                      color: ytLoginMsg.startsWith('✅') ? '#166534' : '#be123c',
+                    }}
+                  >
+                    {ytLoginMsg}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-p"
+                    onClick={handleLoginYouTube}
+                    disabled={ytLoggingIn}
+                    style={{
+                      background: '#e11d48',
+                      height: 36,
+                      padding: '0 14px',
+                      fontSize: 12.5,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    {ytLoggingIn ? <Loader2 size={14} className="spin" /> : <KeyRound size={14} />}
+                    {ytLoggingIn ? 'Đang mở Chrome…' : 'Đăng nhập YouTube qua Chrome'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={() => setActivePage('Cài đặt')}
+                    style={{ height: 36, padding: '0 12px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Settings size={14} /> Chuyển đến trang Cài đặt
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={handleResumeJob}
+                    disabled={resumingJob || ytLoggingIn}
+                    style={{ height: 36, padding: '0 12px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  >
+                    {resumingJob ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}
+                    Thử lại tiến trình
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="err-block">
+                <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                <span>{job.error}</span>
+              </div>
+            )
           )}
 
           {/* Final block — polished (BGM) */}

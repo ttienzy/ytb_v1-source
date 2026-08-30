@@ -254,8 +254,15 @@ def _call_gemini_stream(
     filename: str,
     query_url: str,
     allow_refresh: bool = True,
+    status_callback: Callable[[str], None] | None = None,
+    backoff_sec: int = 30,
 ) -> str:
-    """Gọi Gemini StreamGenerate qua giao thức HTTP thuần."""
+    """Upload prompt text lên Gemini GCS và gọi StreamGenerate lấy response stream thô.
+
+    Tự động xử lý:
+    1. HTTP 429 / Rate Limit: Tạm dừng 30–45s, thông báo qua status_callback và retry êm ái.
+    2. HTTP 401/403 hoặc Auth hết hạn ngầm: Tự động refresh cookies và retry.
+    """
     cfg = _gemini_config()
     cookies, inner_template, ua = cfg["cookies"], cfg["inner_template"], cfg["user_agent"]
 
@@ -265,8 +272,14 @@ def _call_gemini_stream(
         except Exception as exc:
             if allow_refresh:
                 _log(f"[Gemini] Refreshing cookies: {exc}")
+                if status_callback:
+                    status_callback("refreshing_cookie")
                 _auto_refresh_cookies()
-                return _call_gemini_stream(prompt_text, filename, query_url, allow_refresh=False)
+                if status_callback:
+                    status_callback("running")
+                return _call_gemini_stream(
+                    prompt_text, filename, query_url, allow_refresh=False, status_callback=status_callback
+                )
             raise
 
         prompt_bytes = prompt_text.encode("utf-8")
@@ -275,8 +288,14 @@ def _call_gemini_stream(
         except Exception as exc:
             if allow_refresh:
                 _log(f"[Gemini] Upload file auth fail ({exc}). Refreshing cookies...")
+                if status_callback:
+                    status_callback("refreshing_cookie")
                 _auto_refresh_cookies()
-                return _call_gemini_stream(prompt_text, filename, query_url, allow_refresh=False)
+                if status_callback:
+                    status_callback("running")
+                return _call_gemini_stream(
+                    prompt_text, filename, query_url, allow_refresh=False, status_callback=status_callback
+                )
             raise
 
         attachments = [
@@ -313,13 +332,36 @@ def _call_gemini_stream(
         )
 
         rr_text_lower = resp.text[:500].lower()
+        _RATE_LIMIT_MARKERS = (
+            "rate limit",
+            "too many requests",
+            "resource exhausted",
+            "quota exceeded",
+        )
+        is_rate_limit = (resp.status_code == 429) or any(m in rr_text_lower for m in _RATE_LIMIT_MARKERS)
+
+        if is_rate_limit:
+            _log(f"[Gemini] Quá tải / Rate Limit (HTTP {resp.status_code}). Tự động tạm dừng {backoff_sec}s rồi thử lại...")
+            if status_callback:
+                status_callback(f"rate_limited:{backoff_sec}")
+            time.sleep(backoff_sec)
+            if status_callback:
+                status_callback("running")
+            return _call_gemini_stream(
+                prompt_text,
+                filename,
+                query_url,
+                allow_refresh=allow_refresh,
+                status_callback=status_callback,
+                backoff_sec=min(backoff_sec + 15, 60),
+            )
+
         _SILENT_AUTH_MARKERS = (
             "unauthenticated",
             "sign in to continue",
             "please sign in",
             "session expired",
             "login required",
-            "quota exceeded",
         )
         is_auth_fail_silent = any(m in rr_text_lower for m in _SILENT_AUTH_MARKERS)
         is_http_auth_fail = resp.status_code in (401, 403)
@@ -328,8 +370,14 @@ def _call_gemini_stream(
         if resp.status_code != 200 or has_error_frame or is_auth_fail_silent:
             if allow_refresh and (is_http_auth_fail or is_auth_fail_silent):
                 _log(f"[Gemini] StreamGenerate auth fail ({resp.status_code}). Refreshing...")
+                if status_callback:
+                    status_callback("refreshing_cookie")
                 _auto_refresh_cookies()
-                return _call_gemini_stream(prompt_text, filename, query_url, allow_refresh=False)
+                if status_callback:
+                    status_callback("running")
+                return _call_gemini_stream(
+                    prompt_text, filename, query_url, allow_refresh=False, status_callback=status_callback
+                )
             raise RuntimeError(f"Gemini StreamGenerate fail: HTTP {resp.status_code} — {resp.text[:300]}")
 
         return resp.text
@@ -368,6 +416,7 @@ def generate_recap(
     prompt_template_path: Path | None = None,
     caption_template_path: Path | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    status_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Tạo recap hoàn chỉnh qua kiến trúc phân chunk động đa giai đoạn (Step 0 -> Step 1 -> Step 2 -> Step 2b).
 
@@ -438,6 +487,7 @@ def generate_recap(
                     prompt_text=filled_prompt,
                     filename=f"chunk_{c_idx}_prompt.txt",
                     query_url=c["video_url"],
+                    status_callback=status_callback,
                 )
                 chunk_json = _parse_gemini_response(resp_text)
                 if chunk_json and chunk_json.get("scenes"):
@@ -463,7 +513,7 @@ def generate_recap(
                 pass
 
         if idx < total_chunks - 1:
-            time.sleep(1)
+            time.sleep(2)
 
     # 3. Step 2: Merge All Chunks
     _log("\n[Recap Engine] Bắt đầu Step 2: Ghép nối các scenes và kiểm tra tính liên tục...")
@@ -488,6 +538,7 @@ def generate_recap(
                     prompt_text=caption_prompt,
                     filename="caption_prompt.txt",
                     query_url=youtube_url,
+                    status_callback=status_callback,
                 )
                 cap_parsed = _parse_gemini_response(cap_resp)
                 if cap_parsed and isinstance(cap_parsed, dict):

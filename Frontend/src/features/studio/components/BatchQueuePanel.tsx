@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   Clock3,
+  KeyRound,
   Loader2,
+  Settings,
   SkipForward,
   Square,
   XCircle,
@@ -55,6 +58,40 @@ export function BatchQueuePanel({
   const [batchId, setBatchId] = useState<string | null>(null)
   const [batch, setBatch] = useState<BatchOut | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // YouTube Bot-Wall Login State
+  const [ytLoggingIn, setYtLoggingIn] = useState(false)
+  const [ytLoginMsg, setYtLoginMsg] = useState('')
+
+  function isYouTubeBotWallError(errorStr?: string): boolean {
+    if (!errorStr) return false
+    const low = errorStr.toLowerCase()
+    return (
+      low.includes('sign in to confirm') ||
+      low.includes('not a bot') ||
+      low.includes('exporting-youtube-cookies') ||
+      low.includes('--cookies') ||
+      low.includes('cookies-from-browser') ||
+      low.includes('bot-wall')
+    )
+  }
+
+  async function handleLoginYouTube() {
+    setYtLoggingIn(true)
+    setYtLoginMsg('Đang mở Chrome để bạn đăng nhập YouTube...')
+    try {
+      const response = await fetch(`${API_URL}/api/recap/yt/login`, {
+        method: 'POST',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
+      setYtLoginMsg('✅ Đã đăng nhập và lưu Cookie YouTube thành công!')
+    } catch (error: any) {
+      setYtLoginMsg(`❌ ${error instanceof Error ? error.message : 'Đăng nhập thất bại.'}`)
+    } finally {
+      setYtLoggingIn(false)
+    }
+  }
 
   const parsedUrls = urlsText
     .split('\n')
@@ -292,6 +329,77 @@ export function BatchQueuePanel({
             </div>
           </div>
 
+          {/* YouTube Bot-Wall Alert Banner */}
+          {batch.items.some(it => it.status === 'error' && isYouTubeBotWallError(it.error)) && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: '12px 14px',
+                background: '#fff1f2',
+                border: '1.5px solid #fecdd3',
+                borderRadius: 10,
+                color: '#9f1239',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13 }}>
+                <AlertTriangle size={16} color="#e11d48" />
+                <span>Phát hiện video bị chặn bởi YouTube Bot-Wall</span>
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: '#475569', lineHeight: 1.4 }}>
+                Một số video trong hàng đợi bị YouTube chặn với yêu cầu <em>"Sign in to confirm you're not a bot"</em>. Vui lòng đăng nhập YouTube để cập nhật Cookie.
+              </div>
+
+              {ytLoginMsg && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    background: ytLoginMsg.startsWith('✅') ? '#f0fdf4' : '#fff',
+                    border: '1px solid',
+                    borderColor: ytLoginMsg.startsWith('✅') ? '#bbf7d0' : '#fecdd3',
+                    fontSize: 11.5,
+                    color: ytLoginMsg.startsWith('✅') ? '#166534' : '#be123c',
+                  }}
+                >
+                  {ytLoginMsg}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn-p"
+                  onClick={handleLoginYouTube}
+                  disabled={ytLoggingIn}
+                  style={{
+                    background: '#e11d48',
+                    height: 32,
+                    padding: '0 12px',
+                    fontSize: 12,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  {ytLoggingIn ? <Loader2 size={13} className="spin" /> : <KeyRound size={13} />}
+                  {ytLoggingIn ? 'Đang mở Chrome…' : 'Đăng nhập YouTube qua Chrome'}
+                </button>
+
+                {setActivePage && (
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={() => setActivePage('Cài đặt')}
+                    style={{ height: 32, padding: '0 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Settings size={13} /> Trang Cài đặt
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="batch-item-list">
             {batch.items.map((item, idx) => (
               <div key={idx} className={`batch-item batch-item--${item.status}`}>
@@ -302,7 +410,11 @@ export function BatchQueuePanel({
                     {truncateUrl(item.url)}
                   </span>
                   {item.status === 'error' && item.error && (
-                    <span className="batch-item-error">{item.error}</span>
+                    <span className="batch-item-error">
+                      {isYouTubeBotWallError(item.error)
+                        ? '🔴 Lỗi YouTube Bot-Wall: Cần đăng nhập tài khoản YouTube để xác thực'
+                        : item.error}
+                    </span>
                   )}
                   {item.status === 'running' && item.retry_count > 0 && (
                     <span className="batch-item-retry">⟳ Đang retry lần {item.retry_count}…</span>
@@ -311,6 +423,26 @@ export function BatchQueuePanel({
                     <span style={{ fontSize: '11px', color: '#16a34a' }}>✓ Hoàn tất sau retry</span>
                   )}
                 </div>
+                {item.status === 'error' && isYouTubeBotWallError(item.error) && (
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={handleLoginYouTube}
+                    disabled={ytLoggingIn}
+                    title="Đăng nhập YouTube để vượt qua Bot-Wall"
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: 11,
+                      color: '#e11d48',
+                      borderColor: '#fca5a5',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <KeyRound size={11} /> Login YT
+                  </button>
+                )}
                 {item.job_id && item.status === 'done' && setActivePage && (
                   <button
                     type="button"

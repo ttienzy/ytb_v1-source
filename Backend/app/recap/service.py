@@ -209,6 +209,14 @@ async def _generate_for_job(job_id: str) -> None:
             progress_recap={"done": done, "total": total, "phase": "chunk_llm"},
         )
 
+    def on_status(status_msg: str) -> None:
+        if status_msg.startswith("rate_limited"):
+            state.update_job(job_id, recap_status="rate_limited")
+        elif status_msg == "refreshing_cookie":
+            state.update_job(job_id, recap_status="refreshing_cookie")
+        else:
+            state.update_job(job_id, recap_status="running")
+
     try:
         recap = await run_in_threadpool(
             generate_recap,
@@ -217,6 +225,7 @@ async def _generate_for_job(job_id: str) -> None:
             job.raw_name or "raw.txt",
             prompt_template_path=PROMPT_PATH,
             progress_callback=on_progress,
+            status_callback=on_status,
         )
     except RecapConfigError as error:
         state.update_job(job_id, recap_status="error", error=str(error))
@@ -712,6 +721,52 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
             pass
 
 
+async def resume_pipeline(job_id: str) -> JobState:
+    """Tiếp tục pipeline cho job bị gián đoạn hoặc lỗi ở bước Cut / Voice / Merge / Polish."""
+    job = state.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
+
+    state.update_job(job_id, error=None)
+
+    async def _do_resume():
+        j = state.get_job(job_id)
+        if not j:
+            return
+
+        # 1. Nếu Cut lỗi -> Thử tải lại video
+        if j.cut_status == "error":
+            try:
+                await cut(job_id)
+            except Exception:
+                return
+
+        # 2. Cập nhật state sau khi Cut xong
+        j = state.get_job(job_id)
+        if not j:
+            return
+
+        # 3. Nếu cả Cut và Voice đều xong mà Merge chưa xong -> Tiếp tục Merge
+        if j.cut_status == "done" and j.voice_status == "done" and j.merge_status != "done":
+            try:
+                await merge(job_id)
+            except Exception:
+                return
+
+        # 4. Nếu Merge xong và có Polish opts -> Tiếp tục Polish
+        j = state.get_job(job_id)
+        if not j:
+            return
+        if j.merge_status == "done" and j.polish_opts and j.polish_status != "done":
+            try:
+                await polish(job_id, j.polish_opts)
+            except Exception:
+                return
+
+    asyncio.create_task(_do_resume())
+    return state.get_job(job_id)
+
+
 def publish_job_to_facebook(job_id: str, payload) -> dict:
     """Upload video đã tạo của job lên Pippit Cloud và lên lịch đăng bài cho Facebook Page."""
     from app.externals.pippit import service as pippit_service
@@ -826,12 +881,16 @@ async def _run_batch_worker(batch_id: str) -> None:
 
         if overall in ("merged", "polished"):
             state.update_batch_item(batch_id, i, status="done", job_id=job_id)
+            if i < len(batch.items) - 1 and not batch.stop_requested:
+                print(f"[Batch {batch_id}] Item {i+1}/{len(batch.items)} hoàn tất. Nghỉ an toàn 10s trước video kế tiếp...")
+                await asyncio.sleep(10)
             continue
 
-        # Lỗi lần 1 → retry
+        # Lỗi lần 1 → nghỉ 15s trước khi retry
         job_fail = state.get_job(job_id)
         err_msg = (job_fail.error if job_fail else None) or "Pipeline error"
-        print(f"[Batch {batch_id}] Item {i} lỗi lần 1 ({err_msg}). Đang retry...")
+        print(f"[Batch {batch_id}] Item {i} lỗi lần 1 ({err_msg}). Tạm dừng 15s trước khi retry...")
+        await asyncio.sleep(15)
         state.update_batch_item(batch_id, i, retry_count=1, status="running", error=None)
 
         job_id, overall = await _run_one_batch_job(
@@ -844,6 +903,9 @@ async def _run_batch_worker(batch_id: str) -> None:
 
         if overall in ("merged", "polished"):
             state.update_batch_item(batch_id, i, status="done", job_id=job_id)
+            if i < len(batch.items) - 1 and not batch.stop_requested:
+                print(f"[Batch {batch_id}] Item {i+1}/{len(batch.items)} hoàn tất sau retry. Nghỉ an toàn 10s trước video kế tiếp...")
+                await asyncio.sleep(10)
             continue
 
         # Lỗi lần 2 → dừng queue

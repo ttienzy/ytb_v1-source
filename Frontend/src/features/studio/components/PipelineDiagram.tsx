@@ -90,7 +90,9 @@ export function PipelineDiagram({
   const recapState: NodeState =
     job.recap_status === 'done'
       ? 'done'
-      : job.recap_status === 'running' || job.recap_status === 'refreshing_cookie'
+      : job.recap_status === 'running' ||
+        job.recap_status === 'refreshing_cookie' ||
+        job.recap_status === 'rate_limited'
       ? 'running'
       : job.recap_status === 'error'
       ? 'error'
@@ -143,16 +145,29 @@ export function PipelineDiagram({
   const subRecap =
     recapState === 'done'
       ? `${segs} đoạn · ${job.recap?.scenes?.length ?? 0} cảnh`
+      : job.recap_status === 'rate_limited'
+      ? '⏳ Quá tải 429 — tạm nghỉ 30s…'
       : job.recap_status === 'refreshing_cookie'
       ? 'Làm mới cookie Gemini…'
       : p.recap && p.recap.total > 0
       ? `Chunk ${p.recap.done}/${p.recap.total}`
       : undefined
+
+  const isBotWall =
+    !!job.error &&
+    (job.error.toLowerCase().includes('sign in to confirm') ||
+      job.error.toLowerCase().includes('not a bot') ||
+      job.error.toLowerCase().includes('exporting-youtube-cookies') ||
+      job.error.toLowerCase().includes('--cookies') ||
+      job.error.toLowerCase().includes('bot-wall'))
+
   const subCut =
     cutState === 'running'
       ? 'Đang tải 1080p…'
       : cutState === 'done'
       ? '1080p sẵn sàng'
+      : cutState === 'error' && isBotWall
+      ? '🔒 Cần Login YouTube'
       : undefined
   const subVoice =
     voiceState === 'running'
@@ -204,6 +219,8 @@ export function PipelineDiagram({
       return 'Ghép video — mux clip + VO → concat final…'
     if (cutState === 'running' || voiceState === 'running')
       return 'Cut & Voice đang chạy song song…'
+    if (job.recap_status === 'rate_limited')
+      return '⏳ Gemini đang giới hạn tốc độ (429 Rate Limit) — tự động tạm nghỉ 30s trước khi tiếp tục…'
     if (job.recap_status === 'refreshing_cookie')
       return '🔄 Cookie Gemini hết hạn — đang tự động làm mới (Chrome)…'
     if (recapState === 'running')

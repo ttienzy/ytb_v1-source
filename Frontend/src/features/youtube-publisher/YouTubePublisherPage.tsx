@@ -5,6 +5,8 @@ import {
   CalendarClock,
   Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Copy,
   ExternalLink,
@@ -87,6 +89,18 @@ export const GOLDEN_PRESETS: Record<string, { label: string; desc: string; slots
       { id: 'evening', time: '19:45', label: 'Tối' },
     ],
   },
+}
+
+function cleanVideoTitle(filename: string): string {
+  if (!filename) return ''
+  return filename
+    .replace(/\.[^/.]+$/, '') // Bỏ phần mở rộng file (.mp4, .mov, .mkv...)
+    .replace(/[_-]?(clean|final|studio|recap|watermark_removed)[_-]?/gi, ' ') // Bỏ các hậu tố xử lý
+    .replace(/[_\s-]+[0-9]{6,14}$/, '') // Bỏ chuỗi số ngày giờ ở cuối (vd: 202608290107)
+    .replace(/[_\s-]+[0-9]{4,8}[_\s-]+[0-9]{4,8}$/, '') // Bỏ định dạng ngày_giờ kép
+    .replace(/_/g, ' ') // Đổi gạch dưới thành khoảng trắng
+    .replace(/\s+/g, ' ') // Gộp khoảng trắng liên tiếp
+    .trim()
 }
 
 function formatDriveDate(dateStr?: string): string {
@@ -191,6 +205,22 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
   const [loadingTasks, setLoadingTasks] = useState(false)
   const [taskFilter, setTaskFilter] = useState<'all' | 'published' | 'scheduled' | 'failed'>('all')
   const [taskSearch, setTaskSearch] = useState('')
+  const [selectedTaskForDetail, setSelectedTaskForDetail] = useState<YouTubeTask | null>(null)
+  const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null)
+
+  // Pagination State
+  const [taskPage, setTaskPage] = useState<number>(1)
+  const [taskPageSize, setTaskPageSize] = useState<number>(10)
+  const [slotPage, setSlotPage] = useState<number>(1)
+  const [slotPageSize, setSlotPageSize] = useState<number>(10)
+
+  useEffect(() => {
+    setTaskPage(1)
+  }, [taskFilter, taskSearch, taskPageSize])
+
+  useEffect(() => {
+    setSlotPage(1)
+  }, [slots.length, slotPageSize])
 
   // Notifications
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -289,7 +319,7 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
     if (selectedVideos.length === 0) return
 
     const newSlots: YouTubeScheduleSlot[] = selectedVideos.map(v => {
-      const cleanName = v.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ')
+      const cleanName = cleanVideoTitle(v.name)
       return {
         id: `slot_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
         source_type: 'gdrive',
@@ -317,7 +347,7 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
     if (!files || files.length === 0) return
 
     const newSlots: YouTubeScheduleSlot[] = Array.from(files).map(file => {
-      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ')
+      const cleanName = cleanVideoTitle(file.name)
       // Electron / Browser File object has .path in desktop environment
       const filePath = (file as any).path || ''
       return {
@@ -348,13 +378,22 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
     if (scheduleMode === 'golden') {
       const preset = GOLDEN_PRESETS[goldenPreset] || GOLDEN_PRESETS['3_per_day']
       const goldenSlots = preset.slots
-      let currentDay = new Date(startDateStr)
-      let slotIndex = 0
+      const slotsPerDay = goldenSlots.length
+
+      let currentDayOffset = 0
+      const baseDate = new Date(startDateStr)
 
       for (let i = 0; i < updated.length; i++) {
-        const gSlot = goldenSlots[slotIndex]
-        const [hh, mm] = gSlot.time.split(':').map(Number)
-        const d = new Date(currentDay)
+        const slotIndexInDay = i % slotsPerDay
+        if (i > 0 && slotIndexInDay === 0) {
+          currentDayOffset++
+        }
+
+        const slotTimeStr = goldenSlots[slotIndexInDay].time // e.g. "07:15"
+        const [hh, mm] = slotTimeStr.split(':').map(Number)
+
+        const d = new Date(baseDate)
+        d.setDate(d.getDate() + currentDayOffset)
         d.setHours(hh, mm, 0, 0)
 
         updated[i] = {
@@ -362,18 +401,13 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
           privacy_status: 'scheduled',
           publish_at: d.toISOString(),
         }
-
-        slotIndex++
-        if (slotIndex >= goldenSlots.length) {
-          slotIndex = 0
-          currentDay.setDate(currentDay.getDate() + 1)
-        }
       }
     } else {
-      // Interval mode
-      let startTime = new Date(customStartDateTime).getTime()
+      // Fixed Interval Mode
+      let currentTime = new Date(customStartDateTime).getTime()
+
       for (let i = 0; i < updated.length; i++) {
-        const d = new Date(startTime + i * customInterval * 60 * 1000)
+        const d = new Date(currentTime + i * customInterval * 60 * 1000)
         updated[i] = {
           ...updated[i],
           privacy_status: 'scheduled',
@@ -392,7 +426,8 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
 
     setSlots(prev =>
       prev.map((slot, idx) => {
-        let newTitle = slot.title
+        let baseTitle = cleanVideoTitle(slot.title || slot.file_name)
+        let newTitle = baseTitle
         if (bulkPrefix) newTitle = `${bulkPrefix} ${newTitle}`
         if (bulkSuffix) newTitle = `${newTitle} ${bulkSuffix}`
 
@@ -492,21 +527,177 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
     }
   }
 
+  // Task Counts
+  const publishedCount = useMemo(
+    () => tasks.filter(t => t.status === 'published' || t.status === 'public').length,
+    [tasks]
+  )
+  const scheduledCount = useMemo(
+    () => tasks.filter(t => t.status === 'scheduled').length,
+    [tasks]
+  )
+  const failedCount = useMemo(
+    () =>
+      tasks.filter(
+        t =>
+          t.status === 'failed' ||
+          (t.status !== 'published' && t.status !== 'public' && t.status !== 'scheduled')
+      ).length,
+    [tasks]
+  )
+
   // Filtered Tasks
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
-      if (taskFilter !== 'all' && t.status !== taskFilter) return false
+      if (taskFilter === 'published' && !(t.status === 'published' || t.status === 'public')) return false
+      if (taskFilter === 'scheduled' && t.status !== 'scheduled') return false
+      if (taskFilter === 'failed' && (t.status === 'published' || t.status === 'public' || t.status === 'scheduled')) return false
       if (taskSearch.trim()) {
         const q = taskSearch.toLowerCase()
         return (
           t.title?.toLowerCase().includes(q) ||
           t.file_name?.toLowerCase().includes(q) ||
-          t.video_id?.toLowerCase().includes(q)
+          t.video_id?.toLowerCase().includes(q) ||
+          t.error_message?.toLowerCase().includes(q)
         )
       }
       return true
     })
   }, [tasks, taskFilter, taskSearch])
+
+  // Pagination Computations for Tasks
+  const totalTaskPages = Math.max(1, Math.ceil(filteredTasks.length / taskPageSize))
+  const currentTaskPage = Math.min(taskPage, totalTaskPages)
+  const paginatedTasks = useMemo(() => {
+    const start = (currentTaskPage - 1) * taskPageSize
+    return filteredTasks.slice(start, start + taskPageSize)
+  }, [filteredTasks, currentTaskPage, taskPageSize])
+
+  // Pagination Computations for Slots
+  const totalSlotPages = Math.max(1, Math.ceil(slots.length / slotPageSize))
+  const currentSlotPage = Math.min(slotPage, totalSlotPages)
+  const paginatedSlots = useMemo(() => {
+    const start = (currentSlotPage - 1) * slotPageSize
+    return slots.slice(start, start + slotPageSize)
+  }, [slots, currentSlotPage, slotPageSize])
+
+  function getPageNumbers(currentPage: number, totalPages: number): (number | string)[] {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1)
+    }
+    if (currentPage <= 4) {
+      return [1, 2, 3, 4, 5, '...', totalPages]
+    }
+    if (currentPage >= totalPages - 3) {
+      return [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
+    }
+    return [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages]
+  }
+
+  // Convert a history task back to a schedule slot
+  function taskToSlot(task: YouTubeTask): YouTubeScheduleSlot {
+    const isDrive =
+      !!task.drive_file_id ||
+      (!task.file_path &&
+        task.file_name &&
+        !task.file_name.includes('\\') &&
+        !task.file_name.includes('/'))
+    return {
+      id: `slot_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      source_type: (task.source_type as any) || (isDrive ? 'gdrive' : 'local'),
+      drive_file_id: task.drive_file_id || (isDrive ? task.file_name : undefined),
+      file_path: task.file_path || (!isDrive ? task.file_name : undefined),
+      file_name: task.file_name,
+      title: cleanVideoTitle(task.title || task.file_name),
+      description: task.description || ytStatus?.default_tags || '',
+      tags: task.tags || ytStatus?.default_tags || '',
+      category_id: task.category_id || '24',
+      privacy_status: (task.privacy_status as any) || 'scheduled',
+      publish_at: task.publish_at,
+      thumbnail_url: task.thumbnail_url,
+    }
+  }
+
+  // Retry a single failed task
+  async function handleRetrySingleTask(task: YouTubeTask) {
+    setRetryingTaskId(task.task_id)
+    const slot = taskToSlot(task)
+    showToast(`Đang thử đăng lại video "${slot.title}"...`, 'success')
+    try {
+      await api.publishSingleVideo(slot)
+      showToast(`Đã đăng lại video "${slot.title}" thành công!`, 'success')
+      if (selectedTaskForDetail?.task_id === task.task_id) {
+        setSelectedTaskForDetail(null)
+      }
+      await loadTasks()
+    } catch (err: any) {
+      showToast(err.message || 'Đăng lại thất bại', 'error')
+      await loadTasks()
+    } finally {
+      setRetryingTaskId(null)
+    }
+  }
+
+  // Requeue failed tasks back to Tab 1 (Bulk scheduler)
+  function handleRequeueFailedTasks(specificTask?: YouTubeTask) {
+    const targetTasks = specificTask
+      ? [specificTask]
+      : tasks.filter(
+          t =>
+            t.status === 'failed' ||
+            (t.status !== 'published' && t.status !== 'public' && t.status !== 'scheduled')
+        )
+
+    if (targetTasks.length === 0) {
+      showToast('Không có video lỗi nào để đưa vào hàng chờ.', 'error')
+      return
+    }
+
+    const newSlots = targetTasks.map(taskToSlot)
+    setSlots(prev => [...prev, ...newSlots])
+    if (selectedTaskForDetail) {
+      setSelectedTaskForDetail(null)
+    }
+    setActiveTab('bulk')
+    showToast(`Đã nạp ${newSlots.length} video thất bại vào Hàng chờ Lên lịch!`, 'success')
+  }
+
+  // Friendly error analysis helper
+  function getFriendlyError(errMsg?: string): { title: string; desc: string; advice: string } {
+    if (!errMsg)
+      return {
+        title: 'Lỗi không xác định',
+        desc: 'Không nhận được mã lỗi chi tiết từ máy chủ.',
+        advice: 'Hãy thử lại sau vài phút.',
+      }
+    if (errMsg.includes('uploadLimitExceeded') || errMsg.includes('exceeded the number of videos')) {
+      return {
+        title: 'Vượt quá giới hạn tải lên hàng ngày của Kênh (24h Limit)',
+        desc: 'YouTube giới hạn số lượng video/Shorts được phép đăng trong vòng 24 giờ đối với kênh của bạn.',
+        advice:
+          '1) Vào YouTube Studio xác minh "Tính năng nâng cao" bằng CCCD/khuôn mặt để mở rộng hạn mức lên 100+ video/ngày. 2) Hoặc đưa video vào hàng chờ và hẹn đăng giãn cách các ngày tới (3-5 video/ngày).',
+      }
+    }
+    if (errMsg.includes('quotaExceeded') || errMsg.includes('quota')) {
+      return {
+        title: 'Hết hạn mức Quota API của Google Cloud (10.000 units)',
+        desc: 'Dự án Google Cloud đã dùng hết 10.000 điểm quota hôm nay (1 video tốn 1.600 units).',
+        advice: 'Hạn mức sẽ tự động được làm mới lại vào lúc 14:00 chiều mai.',
+      }
+    }
+    if (errMsg.includes('invalid_grant') || errMsg.includes('Token') || errMsg.includes('auth')) {
+      return {
+        title: 'Phiên xác thực YouTube hết hạn',
+        desc: 'Token tài khoản YouTube đã hết hạn hoặc bị thu hồi.',
+        advice: 'Vui lòng kết nối lại tài khoản YouTube ở mục Kênh YouTube.',
+      }
+    }
+    return {
+      title: 'Lỗi từ YouTube API',
+      desc: errMsg,
+      advice: 'Kiểm tra lại định dạng file hoặc thông tin kết nối tài khoản.',
+    }
+  }
 
   async function handleDeleteTask(taskId: string) {
     if (!window.confirm('Bạn có muốn xóa bản ghi tác vụ này khỏi lịch sử?')) return
@@ -1229,127 +1420,221 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {slots.map((slot, index) => (
-                    <div
-                      key={slot.id}
-                      style={{
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 10,
-                        padding: 12,
-                        background: '#f8fafc',
-                        display: 'flex',
-                        gap: 14,
-                        alignItems: 'flex-start',
-                      }}
-                    >
+                  {paginatedSlots.map((slot, index) => {
+                    const realIndex = (currentSlotPage - 1) * slotPageSize + index + 1
+                    return (
                       <div
+                        key={slot.id}
                         style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: 999,
-                          background: '#e2e8f0',
-                          color: '#475569',
-                          fontSize: 11,
-                          fontWeight: 800,
-                          display: 'grid',
-                          placeItems: 'center',
-                          flexShrink: 0,
-                          marginTop: 4,
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 10,
+                          padding: 12,
+                          background: '#f8fafc',
+                          display: 'flex',
+                          gap: 14,
+                          alignItems: 'flex-start',
                         }}
                       >
-                        {index + 1}
-                      </div>
+                        <div
+                          style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: 999,
+                            background: '#e2e8f0',
+                            color: '#475569',
+                            fontSize: 11,
+                            fontWeight: 800,
+                            display: 'grid',
+                            placeItems: 'center',
+                            flexShrink: 0,
+                            marginTop: 4,
+                          }}
+                        >
+                          {realIndex}
+                        </div>
 
-                      {/* Thumbnail */}
-                      <div style={{ width: 90, height: 56, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: '#0f172a' }}>
-                        {slot.thumbnail_url ? (
-                          <img src={slot.thumbnail_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: '#94a3b8' }}>
-                            <FileVideo size={20} />
+                        {/* Thumbnail */}
+                        <div style={{ width: 90, height: 56, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: '#0f172a' }}>
+                          {slot.thumbnail_url ? (
+                            <img src={slot.thumbnail_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: '#94a3b8' }}>
+                              <FileVideo size={20} />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Slot Inputs */}
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <input
+                              value={slot.title}
+                              onChange={e => {
+                                const val = e.target.value
+                                setSlots(prev => prev.map(s => (s.id === slot.id ? { ...s, title: val } : s)))
+                              }}
+                              placeholder="Tiêu đề video YouTube..."
+                              style={{ flex: 1, height: 34, fontSize: 12.5, fontWeight: 600 }}
+                            />
+
+                            <select
+                              value={slot.privacy_status}
+                              onChange={e => {
+                                const val = e.target.value as any
+                                setSlots(prev => prev.map(s => (s.id === slot.id ? { ...s, privacy_status: val } : s)))
+                              }}
+                              style={{ width: 140, height: 34, fontSize: 12, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 6px' }}
+                            >
+                              <option value="public">🌐 Công khai</option>
+                              <option value="unlisted">🔗 Không công khai</option>
+                              <option value="private">🔒 Riêng tư</option>
+                              <option value="scheduled">⏰ Hẹn giờ</option>
+                            </select>
                           </div>
-                        )}
-                      </div>
 
-                      {/* Slot Inputs */}
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <input
-                            value={slot.title}
-                            onChange={e => {
-                              const val = e.target.value
-                              setSlots(prev => prev.map(s => (s.id === slot.id ? { ...s, title: val } : s)))
-                            }}
-                            placeholder="Tiêu đề video YouTube..."
-                            style={{ flex: 1, height: 34, fontSize: 12.5, fontWeight: 600 }}
-                          />
+                          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 8 }}>
+                            <input
+                              value={slot.tags}
+                              onChange={e => {
+                                const val = e.target.value
+                                setSlots(prev => prev.map(s => (s.id === slot.id ? { ...s, tags: val } : s)))
+                              }}
+                              placeholder="Tags phân cách dấu phẩy..."
+                              style={{ height: 32, fontSize: 11.5 }}
+                            />
 
-                          <select
-                            value={slot.privacy_status}
-                            onChange={e => {
-                              const val = e.target.value as any
-                              setSlots(prev => prev.map(s => (s.id === slot.id ? { ...s, privacy_status: val } : s)))
-                            }}
-                            style={{ width: 140, height: 34, fontSize: 12, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 6px' }}
-                          >
-                            <option value="public">🌐 Công khai</option>
-                            <option value="unlisted">🔗 Không công khai</option>
-                            <option value="private">🔒 Riêng tư</option>
-                            <option value="scheduled">⏰ Hẹn giờ</option>
-                          </select>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 8 }}>
-                          <input
-                            value={slot.tags}
-                            onChange={e => {
-                              const val = e.target.value
-                              setSlots(prev => prev.map(s => (s.id === slot.id ? { ...s, tags: val } : s)))
-                            }}
-                            placeholder="Tags phân cách dấu phẩy..."
-                            style={{ height: 32, fontSize: 11.5 }}
-                          />
-
-                          <input
-                            type="datetime-local"
-                            value={slot.publish_at ? toLocalDatetimeInput(new Date(slot.publish_at).getTime()) : ''}
-                            onChange={e => {
-                              const iso = e.target.value ? new Date(e.target.value).toISOString() : undefined
-                              setSlots(prev =>
-                                prev.map(s =>
-                                  s.id === slot.id ? { ...s, publish_at: iso, privacy_status: 'scheduled' } : s
+                            <input
+                              type="datetime-local"
+                              value={slot.publish_at ? toLocalDatetimeInput(new Date(slot.publish_at).getTime()) : ''}
+                              onChange={e => {
+                                const iso = e.target.value ? new Date(e.target.value).toISOString() : undefined
+                                setSlots(prev =>
+                                  prev.map(s =>
+                                    s.id === slot.id ? { ...s, publish_at: iso, privacy_status: 'scheduled' } : s
+                                  )
                                 )
-                              )
-                            }}
-                            style={{ height: 32, fontSize: 11.5, borderRadius: 6, border: '1px solid #cbd5e1', padding: '0 6px' }}
-                          />
+                              }}
+                              style={{ height: 32, fontSize: 11.5, borderRadius: 6, border: '1px solid #cbd5e1', padding: '0 6px' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn-p"
+                            onClick={() => handlePublishSingle(slot)}
+                            title="Đăng tải ngay video này lên YouTube"
+                            style={{ height: 32, padding: '0 10px', fontSize: 11.5, background: '#dc2626' }}
+                          >
+                            <Send size={12} /> Đăng ngay
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-cancel"
+                            onClick={() => removeSlot(slot.id)}
+                            title="Xóa video khỏi danh sách"
+                            style={{ height: 32, padding: '0 8px', color: '#dc2626' }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         </div>
                       </div>
-
-                      {/* Actions */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <button
-                          type="button"
-                          className="btn-p"
-                          onClick={() => handlePublishSingle(slot)}
-                          title="Đăng tải ngay video này lên YouTube"
-                          style={{ height: 32, padding: '0 10px', fontSize: 11.5, background: '#dc2626' }}
-                        >
-                          <Send size={12} /> Đăng ngay
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-cancel"
-                          onClick={() => removeSlot(slot.id)}
-                          title="Xóa video khỏi danh sách"
-                          style={{ height: 32, padding: '0 8px', color: '#dc2626' }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
+
+                {/* Pagination Controls for Slots */}
+                {totalSlotPages > 1 && (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderTop: '1px solid #e2e8f0',
+                      marginTop: 14,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, color: '#64748b' }}>
+                        Hiển thị <strong>{(currentSlotPage - 1) * slotPageSize + 1}</strong>–
+                        <strong>{Math.min(currentSlotPage * slotPageSize, slots.length)}</strong> trên{' '}
+                        <strong>{slots.length}</strong> video
+                      </span>
+                      <select
+                        value={slotPageSize}
+                        onChange={e => setSlotPageSize(Number(e.target.value))}
+                        style={{
+                          height: 28,
+                          fontSize: 11.5,
+                          padding: '0 6px',
+                          borderRadius: 6,
+                          border: '1px solid #cbd5e1',
+                          background: '#fff',
+                        }}
+                      >
+                        <option value={10}>10 / trang</option>
+                        <option value={20}>20 / trang</option>
+                        <option value={50}>50 / trang</option>
+                        <option value={slots.length}>Tất cả ({slots.length})</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <button
+                        type="button"
+                        className="btn-cancel"
+                        disabled={currentSlotPage <= 1}
+                        onClick={() => setSlotPage(p => Math.max(1, p - 1))}
+                        style={{ height: 28, padding: '0 8px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <ChevronLeft size={13} /> Trước
+                      </button>
+
+                      {getPageNumbers(currentSlotPage, totalSlotPages).map((p, idx) =>
+                        typeof p === 'number' ? (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setSlotPage(p)}
+                            style={{
+                              minWidth: 28,
+                              height: 28,
+                              padding: '0 6px',
+                              borderRadius: 6,
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              border: currentSlotPage === p ? 'none' : '1px solid #e2e8f0',
+                              background: currentSlotPage === p ? '#0f172a' : '#fff',
+                              color: currentSlotPage === p ? '#fff' : '#475569',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {p}
+                          </button>
+                        ) : (
+                          <span key={idx} style={{ padding: '0 4px', color: '#94a3b8', fontSize: 11 }}>
+                            ...
+                          </span>
+                        )
+                      )}
+
+                      <button
+                        type="button"
+                        className="btn-cancel"
+                        disabled={currentSlotPage >= totalSlotPages}
+                        onClick={() => setSlotPage(p => Math.min(totalSlotPages, p + 1))}
+                        style={{ height: 28, padding: '0 8px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        Tiếp <ChevronRight size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Final Big Action Button */}
                 <div
@@ -1407,9 +1692,56 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
       {/* Tab 2: History View */}
       {activeTab === 'history' && (
         <div className="card" style={{ padding: 20, background: '#fff', borderRadius: 14 }}>
+          {/* Action banner when failed tasks exist */}
+          {failedCount > 0 && (
+            <div
+              style={{
+                padding: '12px 16px',
+                borderRadius: 10,
+                background: '#fff1f2',
+                border: '1px solid #fecdd3',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AlertCircle size={18} color="#e11d48" />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#9f1239' }}>
+                    Có {failedCount} video chưa thể tải lên YouTube
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#be123c' }}>
+                    Chủ yếu do kênh chạm trần tải lên 24h hoặc quota. Bạn có thể xem chi tiết từng video hoặc nạp lại vào hàng chờ.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-p"
+                onClick={() => handleRequeueFailedTasks()}
+                style={{
+                  height: 34,
+                  padding: '0 14px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: '#e11d48',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <RotateCcw size={13} /> Nạp tất cả ({failedCount}) video lỗi vào Hàng chờ
+              </button>
+            </div>
+          )}
+
           {/* Filters & Search */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {(['all', 'published', 'scheduled', 'failed'] as const).map(f => (
                 <button
                   key={f}
@@ -1417,22 +1749,37 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                   onClick={() => setTaskFilter(f)}
                   style={{
                     border: 'none',
-                    background: taskFilter === f ? '#0f172a' : '#f1f5f9',
-                    color: taskFilter === f ? '#fff' : '#475569',
+                    background:
+                      taskFilter === f
+                        ? f === 'failed'
+                          ? '#dc2626'
+                          : '#0f172a'
+                        : f === 'failed' && failedCount > 0
+                        ? '#fee2e2'
+                        : '#f1f5f9',
+                    color:
+                      taskFilter === f
+                        ? '#fff'
+                        : f === 'failed' && failedCount > 0
+                        ? '#b91c1c'
+                        : '#475569',
                     padding: '6px 14px',
                     borderRadius: 8,
                     fontSize: 12,
                     fontWeight: 700,
                     cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
                   }}
                 >
                   {f === 'all'
                     ? `Tất cả (${tasks.length})`
                     : f === 'published'
-                    ? 'Đã đăng'
+                    ? `Đã đăng (${publishedCount})`
                     : f === 'scheduled'
-                    ? 'Đã hẹn giờ'
-                    : 'Thất bại'}
+                    ? `Đã hẹn giờ (${scheduledCount})`
+                    : `Thất bại (${failedCount})`}
                 </button>
               ))}
             </div>
@@ -1477,12 +1824,12 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
                     <th style={{ padding: '10px 12px', textAlign: 'left' }}>Video / Tiêu đề</th>
                     <th style={{ padding: '10px 12px', textAlign: 'center', width: 110 }}>Trạng thái</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', width: 130 }}>Thời gian đăng/hẹn</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', width: 140 }}>Thao tác</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', width: 120 }}>Thời gian đăng/hẹn</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'right', width: 230 }}>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTasks.map(t => (
+                  {paginatedTasks.map(t => (
                     <tr key={t.task_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '10px 12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1497,11 +1844,39 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                               <FileVideo size={16} color="#64748b" />
                             </div>
                           )}
-                          <div>
-                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{t.title}</div>
-                            <div style={{ fontSize: 11, color: '#64748b' }}>{t.file_name}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{ fontWeight: 700, color: '#0f172a', cursor: 'pointer' }}
+                              onClick={() => setSelectedTaskForDetail(t)}
+                              title="Bấm để xem chi tiết"
+                            >
+                              {t.title}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>{t.file_name}</div>
                             {t.error_message && (
-                              <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{t.error_message}</div>
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  marginTop: 3,
+                                  fontSize: 10.5,
+                                  fontWeight: 600,
+                                  color: '#b91c1c',
+                                  background: '#fee2e2',
+                                  padding: '1px 6px',
+                                  borderRadius: 4,
+                                  maxWidth: '100%',
+                                  cursor: 'pointer',
+                                }}
+                                onClick={() => setSelectedTaskForDetail(t)}
+                                title="Bấm để xem chi tiết lỗi"
+                              >
+                                <AlertCircle size={10} color="#dc2626" />
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {getFriendlyError(t.error_message).title}
+                                </span>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -1551,8 +1926,55 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                         {t.publish_at ? formatDriveDate(t.publish_at) : formatDriveDate(t.created_at)}
                       </td>
 
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flexWrap: 'nowrap' }}>
+                          <button
+                            type="button"
+                            className="btn-cancel"
+                            title="Xem chi tiết nội dung video và lỗi"
+                            onClick={() => setSelectedTaskForDetail(t)}
+                            style={{
+                              height: 28,
+                              padding: '0 8px',
+                              fontSize: 11,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            <Eye size={12} /> Chi tiết
+                          </button>
+
+                          {(t.status === 'failed' || (!t.youtube_url && t.status !== 'published' && t.status !== 'scheduled')) && (
+                            <button
+                              type="button"
+                              className="btn-cancel"
+                              title="Thử đăng lại ngay video này"
+                              disabled={retryingTaskId === t.task_id}
+                              onClick={() => handleRetrySingleTask(t)}
+                              style={{
+                                height: 28,
+                                padding: '0 8px',
+                                fontSize: 11,
+                                color: '#dc2626',
+                                borderColor: '#fca5a5',
+                                background: '#fff',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {retryingTaskId === t.task_id ? (
+                                <Loader2 size={12} className="spin" />
+                              ) : (
+                                <RotateCcw size={12} />
+                              )}
+                              Đăng lại
+                            </button>
+                          )}
+
                           {t.youtube_url && (
                             <>
                               <a
@@ -1561,7 +1983,16 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                                 rel="noreferrer"
                                 className="btn-cancel"
                                 title="Mở xem trên YouTube"
-                                style={{ textDecoration: 'none', padding: '4px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                style={{
+                                  height: 28,
+                                  padding: '0 8px',
+                                  fontSize: 11,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  textDecoration: 'none',
+                                  whiteSpace: 'nowrap',
+                                }}
                               >
                                 <ExternalLink size={12} /> Xem
                               </a>
@@ -1573,7 +2004,7 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                                   navigator.clipboard.writeText(t.youtube_url || '')
                                   showToast('Đã sao chép link YouTube!')
                                 }}
-                                style={{ padding: '4px 8px' }}
+                                style={{ height: 28, padding: '0 6px', display: 'inline-flex', alignItems: 'center' }}
                               >
                                 <Copy size={12} />
                               </button>
@@ -1585,7 +2016,7 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                             className="btn-cancel"
                             title="Xóa bản ghi khỏi lịch sử"
                             onClick={() => handleDeleteTask(t.task_id)}
-                            style={{ padding: '4px 8px', color: '#dc2626' }}
+                            style={{ height: 28, padding: '0 6px', color: '#dc2626', display: 'inline-flex', alignItems: 'center' }}
                           >
                             <Trash2 size={12} />
                           </button>
@@ -1595,8 +2026,382 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                   ))}
                 </tbody>
               </table>
+
+              {/* Pagination Controls for Tasks */}
+              {totalTaskPages > 1 && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderTop: '1px solid #e2e8f0',
+                    background: '#f8fafc',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>
+                      Hiển thị <strong>{(currentTaskPage - 1) * taskPageSize + 1}</strong>–
+                      <strong>{Math.min(currentTaskPage * taskPageSize, filteredTasks.length)}</strong> trên{' '}
+                      <strong>{filteredTasks.length}</strong> tác vụ
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 11.5, color: '#94a3b8' }}>Hiển thị:</span>
+                      <select
+                        value={taskPageSize}
+                        onChange={e => setTaskPageSize(Number(e.target.value))}
+                        style={{
+                          height: 28,
+                          fontSize: 11.5,
+                          padding: '0 6px',
+                          borderRadius: 6,
+                          border: '1px solid #cbd5e1',
+                          background: '#fff',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <option value={10}>10 / trang</option>
+                        <option value={20}>20 / trang</option>
+                        <option value={50}>50 / trang</option>
+                        <option value={100}>100 / trang</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button
+                      type="button"
+                      className="btn-cancel"
+                      disabled={currentTaskPage <= 1}
+                      onClick={() => setTaskPage(p => Math.max(1, p - 1))}
+                      style={{ height: 28, padding: '0 8px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      title="Trang trước"
+                    >
+                      <ChevronLeft size={13} /> Trước
+                    </button>
+
+                    {getPageNumbers(currentTaskPage, totalTaskPages).map((p, idx) =>
+                      typeof p === 'number' ? (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setTaskPage(p)}
+                          style={{
+                            minWidth: 28,
+                            height: 28,
+                            padding: '0 6px',
+                            borderRadius: 6,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            border: currentTaskPage === p ? 'none' : '1px solid #e2e8f0',
+                            background: currentTaskPage === p ? '#0f172a' : '#fff',
+                            color: currentTaskPage === p ? '#fff' : '#475569',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {p}
+                        </button>
+                      ) : (
+                        <span key={idx} style={{ padding: '0 4px', color: '#94a3b8', fontSize: 11 }}>
+                          ...
+                        </span>
+                      )
+                    )}
+
+                    <button
+                      type="button"
+                      className="btn-cancel"
+                      disabled={currentTaskPage >= totalTaskPages}
+                      onClick={() => setTaskPage(p => Math.min(totalTaskPages, p + 1))}
+                      style={{ height: 28, padding: '0 8px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      title="Trang tiếp"
+                    >
+                      Tiếp <ChevronRight size={13} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Task Detail Modal */}
+      {selectedTaskForDetail && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 16,
+          }}
+          onClick={() => setSelectedTaskForDetail(null)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 16,
+              width: '100%',
+              maxWidth: 620,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background:
+                      selectedTaskForDetail.status === 'published' || selectedTaskForDetail.status === 'public'
+                        ? '#dcfce7'
+                        : selectedTaskForDetail.status === 'scheduled'
+                        ? '#e0e7ff'
+                        : '#fee2e2',
+                    display: 'grid',
+                    placeItems: 'center',
+                  }}
+                >
+                  <YouTubeBrandIcon size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
+                    Chi tiết tác vụ YouTube
+                  </h3>
+                  <div style={{ fontSize: 11.5, color: '#64748b' }}>
+                    ID: {selectedTaskForDetail.task_id}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={() => setSelectedTaskForDetail(null)}
+                style={{ padding: '6px 8px', borderRadius: 8 }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Error Box if failed */}
+              {(selectedTaskForDetail.status === 'failed' || selectedTaskForDetail.error_message) && (
+                <div
+                  style={{
+                    background: '#fff1f2',
+                    border: '1px solid #fecdd3',
+                    borderRadius: 12,
+                    padding: 14,
+                  }}
+                >
+                  {(() => {
+                    const info = getFriendlyError(selectedTaskForDetail.error_message)
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9f1239', fontWeight: 800, fontSize: 13 }}>
+                          <AlertCircle size={16} color="#e11d48" /> {info.title}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#be123c', lineHeight: 1.5 }}>
+                          {info.desc}
+                        </div>
+                        {info.advice && (
+                          <div style={{ marginTop: 4, padding: '8px 10px', background: '#ffe4e6', borderRadius: 8, fontSize: 11.5, color: '#881337' }}>
+                            💡 <strong>Gợi ý:</strong> {info.advice}
+                          </div>
+                        )}
+                        {selectedTaskForDetail.error_message && (
+                          <div style={{ marginTop: 6, fontSize: 10.5, color: '#94a3b8', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                            Chi tiết raw: {selectedTaskForDetail.error_message}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+
+              {/* Video Title */}
+              <div>
+                <label style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                  Tiêu đề Video
+                </label>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>
+                  {selectedTaskForDetail.title}
+                </div>
+              </div>
+
+              {/* Key metadata badges */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 11, color: '#64748b' }}>Trạng thái</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>
+                    {selectedTaskForDetail.status === 'published' || selectedTaskForDetail.status === 'public'
+                      ? 'Đã xuất bản'
+                      : selectedTaskForDetail.status === 'scheduled'
+                      ? 'Đã lên lịch'
+                      : 'Thất bại'}
+                  </div>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 11, color: '#64748b' }}>Lịch phát hành</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>
+                    {selectedTaskForDetail.publish_at
+                      ? formatDriveDate(selectedTaskForDetail.publish_at)
+                      : 'Đăng ngay'}
+                  </div>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 11, color: '#64748b' }}>Chế độ riêng tư</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginTop: 2, textTransform: 'capitalize' }}>
+                    {selectedTaskForDetail.privacy_status || 'public'}
+                  </div>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 11, color: '#64748b' }}>Tên file / Nguồn</div>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: '#334155', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedTaskForDetail.file_name}>
+                    {selectedTaskForDetail.file_name}
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              {selectedTaskForDetail.description && (
+                <div>
+                  <label style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                    Nội dung mô tả (Description)
+                  </label>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      padding: 10,
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      color: '#334155',
+                      whiteSpace: 'pre-wrap',
+                      maxHeight: 120,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {selectedTaskForDetail.description}
+                  </div>
+                </div>
+              )}
+
+              {/* Tags */}
+              {selectedTaskForDetail.tags && (
+                <div>
+                  <label style={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                    Tags & Hashtags
+                  </label>
+                  <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {selectedTaskForDetail.tags.split(',').map((t, idx) => {
+                      const tag = t.trim()
+                      if (!tag) return null
+                      return (
+                        <span
+                          key={idx}
+                          style={{
+                            padding: '3px 8px',
+                            background: '#eff6ff',
+                            color: '#1d4ed8',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '14px 20px',
+                borderTop: '1px solid #e2e8f0',
+                background: '#f8fafc',
+                borderBottomLeftRadius: 16,
+                borderBottomRightRadius: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: 10,
+              }}
+            >
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={() => setSelectedTaskForDetail(null)}
+                style={{ height: 36, fontSize: 12 }}
+              >
+                Đóng
+              </button>
+
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={() => handleRequeueFailedTasks(selectedTaskForDetail)}
+                style={{ height: 36, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={13} /> Nạp vào hàng chờ lên lịch
+              </button>
+
+              <button
+                type="button"
+                className="btn-p"
+                disabled={retryingTaskId === selectedTaskForDetail.task_id}
+                onClick={() => handleRetrySingleTask(selectedTaskForDetail)}
+                style={{
+                  height: 36,
+                  padding: '0 16px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: '#dc2626',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {retryingTaskId === selectedTaskForDetail.task_id ? (
+                  <Loader2 size={13} className="spin" />
+                ) : (
+                  <RotateCcw size={13} />
+                )}
+                Đăng lại ngay
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

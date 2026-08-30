@@ -234,6 +234,13 @@ async def polish_job(req: PolishRequest, job_id: str, db: Session = Depends(get_
     return _to_out(job)
 
 
+@router.post("/jobs/{job_id}/resume", response_model=JobOut)
+async def resume_job(job_id: str) -> JobOut:
+    """Tiếp tục/Thử lại pipeline từ bước bị lỗi (Cut, Voice, Merge hoặc Polish)."""
+    job = await service.resume_pipeline(job_id)
+    return _to_out(job)
+
+
 # ── Poll + serve ─────────────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}", response_model=JobOut)

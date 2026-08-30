@@ -421,7 +421,16 @@ class PippitClient:
             raise PippitError(f"prepare_upload_cloud thất bại: {j}")
         return j["data"]
 
-    def create_cloud_asset(self, owner: str, vid: str, meta: dict, filename: str, upload_id: str) -> str:
+    def create_cloud_asset(
+        self,
+        owner: str,
+        vid: str,
+        meta: dict,
+        filename: str,
+        upload_id: str,
+        file_md5: str = "",
+        file_size: int = 0,
+    ) -> str:
         asset_meta = json.dumps(
             {
                 "uploadSource": {
@@ -434,11 +443,14 @@ class PippitClient:
             },
             separators=(",", ":"),
         )
+        uri = meta.get("Uri") or meta.get("uri") or ""
+        size = meta.get("Size") or meta.get("size") or file_size
+        md5 = meta.get("Md5") or meta.get("MD5") or meta.get("md5") or file_md5
         body = {
             "everphoto_id": owner,
             "asset": {
-                "uri": meta["Uri"],
-                "size": meta["Size"],
+                "uri": uri,
+                "size": size,
                 "workspace_id": self.workspace_id,
                 "filename": filename,
                 "upload_id": upload_id,
@@ -448,7 +460,7 @@ class PippitClient:
                 "file_type": "video",
                 "folder_id": "-1",
                 "meta": asset_meta,
-                "md5": meta["Md5"],
+                "md5": md5,
             },
             "is_web_user": True,
         }
@@ -462,20 +474,21 @@ class PippitClient:
 
     def upload(self, file_path: str) -> dict:
         """Thực hiện trọn gói quy trình 5 bước upload file video lên Pippit Cloud."""
+        file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
             data = f.read()
-        md5, size = hashlib.md5(data).hexdigest(), len(data)
-        prep = self.prepare_upload_cloud(md5, size)
+        md5 = hashlib.md5(data).hexdigest()
+        prep = self.prepare_upload_cloud(md5, file_size)
         sts, domain = prep["security_token"], prep["upload_domain"]
         owner = prep["everphoto_user_id"]
-        node = apply_upload_inner(sts, domain, size)
+        node = apply_upload_inner(sts, domain, file_size)
         tos_upload(node, file_path, owner)
         res = commit_upload_inner(sts, domain, node["SessionKey"])
-        vid, meta = res.get("Vid"), res.get("VideoMeta")
-        if not vid or not meta:
-            raise PippitError(f"Pippit nhận file nhưng không trả thông tin video: {str(res)[:300]}")
+        vid, meta = res.get("Vid"), res.get("VideoMeta") or {}
+        if not vid:
+            raise PippitError(f"Pippit nhận file nhưng không trả thông tin vid: {str(res)[:300]}")
         asset_id = self.create_cloud_asset(
-            owner, vid, meta, os.path.basename(file_path), prep["upload_id"]
+            owner, vid, meta, os.path.basename(file_path), prep["upload_id"], file_md5=md5, file_size=file_size
         )
         return {"asset_id": asset_id, "vid": vid, "meta": meta}
 

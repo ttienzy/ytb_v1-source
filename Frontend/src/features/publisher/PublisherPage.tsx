@@ -588,11 +588,14 @@ export function PublisherPage() {
 
   // Format filename to clean human-readable title
   const cleanTitleFromName = (filename: string) => {
+    if (!filename) return ''
     return filename
-      .replace(/\.mp4$/i, '')
-      .replace(/_clean$/i, '')
-      .replace(/_[0-9]{8,14}$/, '')
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[_-]?(clean|final|studio|recap|watermark_removed)[_-]?/gi, ' ')
+      .replace(/[_\s-]+[0-9]{6,14}$/, '')
+      .replace(/[_\s-]+[0-9]{4,8}[_\s-]+[0-9]{4,8}$/, '')
       .replace(/_/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim()
   }
 
