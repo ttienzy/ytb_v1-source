@@ -290,19 +290,36 @@ def login_oauth_flow() -> GDriveStatusOut:
         }
     }
 
-    try:
-        flow = InstalledAppFlow.from_client_config(client_config, scopes=SCOPES)
-        creds = flow.run_local_server(
-            port=8080,
-            authorization_prompt_message="Đang mở trình duyệt để đăng nhập Google Drive...",
-            success_message="Đăng nhập Google Drive thành công! Bạn có thể đóng tab này và quay lại ứng dụng.",
-            open_browser=True,
-        )
-    except Exception as exc:
+    flow = InstalledAppFlow.from_client_config(client_config, scopes=SCOPES)
+    creds = None
+    last_exc = None
+    candidate_ports = [8080, 8085, 0]
+
+    for p in candidate_ports:
+        try:
+            creds = flow.run_local_server(
+                port=p,
+                authorization_prompt_message="Đang mở trình duyệt để đăng nhập Google Drive...",
+                success_message="Đăng nhập Google Drive thành công! Bạn có thể đóng tab này và quay lại ứng dụng.",
+                open_browser=True,
+                timeout_seconds=90,
+            )
+            if creds:
+                break
+        except OSError as sock_err:
+            last_exc = sock_err
+            logger.warning("[GDrive] Cổng %s bị bận (%s), thử cổng tiếp theo...", p, sock_err)
+            continue
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("[GDrive] Quá trình xác thực bị hủy hoặc quá hạn: %s", exc)
+            break
+
+    if not creds:
         raise HTTPException(
             status_code=500,
-            detail=f"Quá trình xác thực Google OAuth thất bại: {exc}",
-        ) from exc
+            detail=f"Quá trình xác thực Google OAuth thất bại: {last_exc}. Hãy thử lại hoặc dùng cách Đăng nhập thủ công qua liên kết bên dưới.",
+        ) from last_exc
 
     tokens = {
         "token": creds.token,

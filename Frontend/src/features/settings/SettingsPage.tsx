@@ -3,20 +3,21 @@ import {
   Bot,
   CheckCircle2,
   Film,
+  HardDrive,
   Mail,
   Save,
   Sparkles,
 } from 'lucide-react'
-import { HardDrive } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
 import { GoogleDriveSection } from './components/GoogleDriveSection'
 import { MailTmSection } from './components/MailTmSection'
 import { PippitSection } from './components/PippitSection'
+import { YouTubeBrandIcon, YouTubeSection } from './components/YouTubeSection'
 import type { GeminiState, YtState } from './types'
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<
-    'gemini_yt' | 'mailtm' | 'pippit' | 'gdrive'
+    'gemini_yt' | 'mailtm' | 'pippit' | 'gdrive' | 'youtube'
   >('gemini_yt')
 
 
@@ -171,6 +172,17 @@ export function SettingsPage() {
         >
           <HardDrive size={16} />
           <span>Google Drive</span>
+        </button>
+
+        <button
+          type="button"
+          className={`settings-tab-btn ${
+            activeTab === 'youtube' ? 'active' : ''
+          }`}
+          onClick={() => setActiveTab('youtube')}
+        >
+          <YouTubeBrandIcon size={16} />
+          <span>YouTube</span>
         </button>
       </div>
 
@@ -331,6 +343,13 @@ export function SettingsPage() {
       {activeTab === 'gdrive' && (
         <div className="tab-fade-in">
           <GoogleDriveSection />
+        </div>
+      )}
+
+      {/* ── Tab 5: YouTube ── */}
+      {activeTab === 'youtube' && (
+        <div className="tab-fade-in">
+          <YouTubeSection />
         </div>
       )}
     </section>

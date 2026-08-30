@@ -8,6 +8,7 @@ import { SettingsPage } from './features/settings/SettingsPage'
 import { StudioPage } from './features/studio/StudioPage'
 import { VoicesPage } from './features/voices/VoicesPage'
 import { WatermarkPage } from './features/watermark/WatermarkPage'
+import { YouTubePublisherPage } from './features/youtube-publisher/YouTubePublisherPage'
 
 export function App() {
   const [activePage, setActivePage] = useState('Studio')
@@ -44,6 +45,8 @@ export function App() {
             <WatermarkPage />
           ) : activePage === 'Lên lịch Pippit' ? (
             <PublisherPage />
+          ) : activePage === 'Lên lịch Youtube' ? (
+            <YouTubePublisherPage setActivePage={setActivePage} />
           ) : activePage === 'Studio' ? (
             <StudioPage setActivePage={setActivePage} />
           ) : activePage === 'Lịch sử' ? (
