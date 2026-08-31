@@ -342,18 +342,19 @@ export function HistoryPage() {
                           className="badge"
                           style={{
                             background: '#e0f2fe',
-                            color: '#0369a1',
+                            color: '#1877f2',
                             borderColor: '#bae6fd',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 3,
-                            padding: '2px 6px',
-                            fontSize: 10,
-                            fontWeight: 700,
+                            justifyContent: 'center',
+                            width: 20,
+                            height: 20,
+                            padding: 0,
+                            borderRadius: 4,
                           }}
                           title={`Đã lên lịch/đăng Facebook (${jFbTasks.length} lần): ${jFbTasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
                         >
-                          <FacebookIcon size={10} /> FB
+                          <FacebookIcon size={12} />
                         </span>
                       )}
                       {jTtTasks.length > 0 && (
@@ -365,14 +366,15 @@ export function HistoryPage() {
                             borderColor: '#cbd5e1',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 3,
-                            padding: '2px 6px',
-                            fontSize: 10,
-                            fontWeight: 700,
+                            justifyContent: 'center',
+                            width: 20,
+                            height: 20,
+                            padding: 0,
+                            borderRadius: 4,
                           }}
                           title={`Đã lên lịch/đăng TikTok (${jTtTasks.length} lần): ${jTtTasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
                         >
-                          <TikTokIcon size={10} /> TikTok
+                          <TikTokIcon size={12} />
                         </span>
                       )}
                       {jYtTasks.length > 0 && (
@@ -384,14 +386,15 @@ export function HistoryPage() {
                             borderColor: '#fecaca',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 3,
-                            padding: '2px 6px',
-                            fontSize: 10,
-                            fontWeight: 700,
+                            justifyContent: 'center',
+                            width: 20,
+                            height: 20,
+                            padding: 0,
+                            borderRadius: 4,
                           }}
                           title={`Đã tải lên YouTube (${jYtTasks.length} lần): ${jYtTasks.map((t: any) => t.title || t.video_id).join(', ')}`}
                         >
-                          <YouTubeBrandIcon size={10} /> YouTube
+                          <YouTubeBrandIcon size={12} />
                         </span>
                       )}
                       <span className={`badge ${overallBadge[j.overall] ?? 'b-idle'}`}>

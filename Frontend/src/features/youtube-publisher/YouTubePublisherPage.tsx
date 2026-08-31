@@ -662,6 +662,30 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
     showToast(`Đã nạp ${newSlots.length} video thất bại vào Hàng chờ Lên lịch!`, 'success')
   }
 
+  // Clear all failed tasks from history
+  async function handleClearAllFailedTasks() {
+    const failedList = tasks.filter(
+      t =>
+        t.status === 'failed' ||
+        (t.status !== 'published' && t.status !== 'public' && t.status !== 'scheduled')
+    )
+    if (failedList.length === 0) return
+    if (!window.confirm(`Bạn có chắc muốn xóa toàn bộ ${failedList.length} bản ghi tác vụ lỗi này khỏi lịch sử?`)) return
+
+    try {
+      await Promise.all(failedList.map(t => api.deleteYouTubeTask(t.task_id)))
+      setTasks(prev =>
+        prev.filter(
+          t => t.status === 'published' || t.status === 'public' || t.status === 'scheduled'
+        )
+      )
+      showToast(`Đã dọn dẹp ${failedList.length} bản ghi tác vụ lỗi.`, 'success')
+    } catch (err: any) {
+      showToast('Lỗi khi xóa bản ghi: ' + err.message, 'error')
+      await loadTasks()
+    }
+  }
+
   // Friendly error analysis helper
   function getFriendlyError(errMsg?: string): { title: string; desc: string; advice: string } {
     if (!errMsg)
@@ -1719,23 +1743,46 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn-p"
-                onClick={() => handleRequeueFailedTasks()}
-                style={{
-                  height: 34,
-                  padding: '0 14px',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  background: '#e11d48',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <RotateCcw size={13} /> Nạp tất cả ({failedCount}) video lỗi vào Hàng chờ
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-p"
+                  onClick={() => handleRequeueFailedTasks()}
+                  style={{
+                    height: 34,
+                    padding: '0 14px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: '#e11d48',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <RotateCcw size={13} /> Nạp tất cả ({failedCount}) video lỗi vào Hàng chờ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleClearAllFailedTasks()}
+                  style={{
+                    height: 34,
+                    padding: '0 12px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: '#fff',
+                    color: '#e11d48',
+                    border: '1px solid #fecdd3',
+                    borderRadius: 8,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: 'pointer',
+                  }}
+                  title="Xóa các bản ghi tác vụ lỗi cũ khỏi danh sách lịch sử"
+                >
+                  <Trash2 size={13} /> Dọn dẹp tác vụ lỗi ({failedCount})
+                </button>
+              </div>
             </div>
           )}
 
