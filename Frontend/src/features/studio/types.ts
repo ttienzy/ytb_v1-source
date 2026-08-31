@@ -51,6 +51,7 @@ export type JobOut = {
   final_studio?: string | null
   credits?: string | null
   pippit_tasks?: any[]
+  youtube_tasks?: any[]
   // legacy compat
   detail?: string
 

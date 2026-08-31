@@ -45,9 +45,30 @@ export async function fetchPippitAccounts(): Promise<PippitAccount[]> {
 }
 
 export async function fetchActiveFacebookPages(): Promise<ActiveFacebookPage[]> {
-  const r = await fetch(`${API_URL}/api/pippit/active-pages`)
-  if (!r.ok) throw new Error('Không thể lấy danh sách Facebook Fanpage active')
-  return r.json()
+  try {
+    const [fbRes, ttRes] = await Promise.all([
+      fetch(`${API_URL}/api/pippit/active-pages`),
+      fetch(`${API_URL}/api/pippit/active-tiktok-channels`),
+    ])
+    const fbPages = fbRes.ok ? await fbRes.json() : []
+    const ttChannels = ttRes.ok ? await ttRes.json() : []
+
+    const mappedTT: ActiveFacebookPage[] = (ttChannels || []).map((t: any) => ({
+      page_id: t.channel_id,
+      page_name: `[TikTok] ${t.nickname}${t.handle ? ` (@${t.handle})` : ''}`,
+      avatar_url: t.avatar_url,
+      status: t.status,
+      account_id: t.account_id,
+      account_email: t.account_email,
+      un_expired: t.un_expired,
+      platform: 'tiktok',
+    }))
+    return [...fbPages, ...mappedTT]
+  } catch {
+    const r = await fetch(`${API_URL}/api/pippit/active-pages`)
+    if (!r.ok) throw new Error('Không thể lấy danh sách Facebook Fanpage active')
+    return r.json()
+  }
 }
 
 export async function fetchPippitAllTasks(): Promise<PippitScheduleTask[]> {
@@ -64,6 +85,7 @@ export async function submitBulkSchedule(
     account_id: accountId,
     items: slots.map(s => ({
       file_id: s.file_id,
+      file_path: (s as any).file_path || null,
       file_name: s.file_name,
       title: s.title,
       caption: s.caption,

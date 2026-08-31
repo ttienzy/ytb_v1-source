@@ -9,6 +9,15 @@ class FacebookPageSlot(BaseModel):
     un_expired: bool = Field(default=True, description="Token ủy quyền còn hạn hay không")
 
 
+class TikTokChannelSlot(BaseModel):
+    channel_id: str = Field(default="", description="ID của kênh TikTok (platform_user_id)")
+    nickname: str = Field(default="", description="Tên hiển thị của kênh TikTok")
+    handle: str = Field(default="", description="Handle/username TikTok (nếu có)")
+    avatar_url: str = Field(default="", description="Avatar của kênh TikTok")
+    status: str = Field(default="empty", description="Trạng thái: connected | empty | expired")
+    un_expired: bool = Field(default=True, description="Token ủy quyền còn hạn hay không")
+
+
 class PippitAccountOut(BaseModel):
     id: str
     mailtm_id: str | None = None
@@ -20,6 +29,7 @@ class PippitAccountOut(BaseModel):
     status: str = "active"
     created_at: str
     facebook_pages: list[FacebookPageSlot] = Field(default_factory=list)
+    tiktok_channels: list[TikTokChannelSlot] = Field(default_factory=list)
 
 
 class PippitLoginSyncRequest(BaseModel):
@@ -35,13 +45,18 @@ class PippitUpdateFbPagesRequest(BaseModel):
 
 class PippitPublishRequest(BaseModel):
     account_id: str = Field(..., description="ID tài khoản Pippit trong config")
-    page_id: str = Field(..., description="ID Facebook Page (platform_user_id)")
+    page_id: str = Field(..., description="ID Facebook Page hoặc TikTok Channel (platform_user_id)")
+    platform: str = Field(default="facebook", description="Nền tảng đăng: 'facebook' (301) hoặc 'tiktok' (1)")
     video_path: str = Field(..., description="Đường dẫn file video local cần upload và đăng")
     caption: str = Field(default="", description="Nội dung mô tả bài viết")
     title: str = Field(default="", description="Tiêu đề bài viết (tùy chọn)")
     when_minutes_ahead: int = Field(default=1, description="Hẹn giờ đăng sau bao nhiêu phút (tối thiểu 1)")
     job_id: str | None = Field(default=None, description="ID của Video Studio Job liên kết nếu có")
-
+    # TikTok specific
+    privacy_level: int = Field(default=1, description="Mức độ riêng tư TikTok: 1 (Công khai/Public), 2 (Bạn bè), 3 (Riêng tư)")
+    allow_comment: bool = Field(default=True, description="Cho phép bình luận trên TikTok")
+    allow_duet: bool = Field(default=True, description="Cho phép Duet trên TikTok")
+    allow_stitch: bool = Field(default=True, description="Cho phép Stitch trên TikTok")
 
 
 class PippitPublishResponse(BaseModel):
@@ -49,6 +64,7 @@ class PippitPublishResponse(BaseModel):
     task_id: str
     asset_id: str
     schedule_time_ms: int
+    platform: str = "facebook"
     message: str
 
 
@@ -56,6 +72,7 @@ class PippitScheduleTaskOut(BaseModel):
     task_id: str | None = None
     status: int | None = None
     published: bool = False
+    platform: str = "facebook"
     post_id: str = ""
     post_url: str = ""
     page_id: str = ""
@@ -73,7 +90,8 @@ class PippitBulkScheduleItem(BaseModel):
     title: str = Field(default="", description="Tiêu đề video")
     caption: str = Field(default="", description="Caption / mô tả bài viết")
     schedule_time_ms: int = Field(..., description="Timestamp thời gian hẹn giờ đăng (ms)")
-    page_id: str = Field(..., description="ID Facebook Fanpage đích")
+    page_id: str = Field(..., description="ID Facebook Fanpage hoặc TikTok Channel đích")
+    platform: str = Field(default="facebook", description="Nền tảng đích: facebook | tiktok")
 
 
 class PippitBulkScheduleRequest(BaseModel):
@@ -85,6 +103,7 @@ class PippitBulkScheduleResultItem(BaseModel):
     file_name: str
     page_id: str
     page_name: str = ""
+    platform: str = "facebook"
     task_id: str = ""
     asset_id: str = ""
     schedule_time_ms: int = 0

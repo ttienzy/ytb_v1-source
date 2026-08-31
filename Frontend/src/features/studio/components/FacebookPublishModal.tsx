@@ -61,6 +61,8 @@ interface ConnectedPageOption {
   pageName: string
   avatarUrl: string
   unExpired: boolean
+  platform: 'facebook' | 'tiktok'
+  handle?: string
 }
 
 export function FacebookPublishModal({
@@ -191,6 +193,22 @@ export function FacebookPublishModal({
                 pageName: String(p.page_name || `Page ${pid}`),
                 avatarUrl: String(p.avatar_url || ''),
                 unExpired: Boolean(p.un_expired),
+                platform: 'facebook',
+              })
+            }
+          }
+          for (const t of acc?.tiktok_channels || []) {
+            const cid = t?.channel_id ? String(t.channel_id).trim() : ''
+            if (cid !== '') {
+              list.push({
+                accountId: String(acc.id || ''),
+                accountEmail: String(acc.email || ''),
+                pageId: cid,
+                pageName: String(t.nickname || `TikTok ${cid}`),
+                handle: t.handle,
+                avatarUrl: String(t.avatar_url || ''),
+                unExpired: Boolean(t.un_expired),
+                platform: 'tiktok',
               })
             }
           }
@@ -200,7 +218,7 @@ export function FacebookPublishModal({
           setSelectedKey(`${list[0].accountId}::${list[0].pageId}`)
         }
       } catch (err: any) {
-        setError(err?.message || 'Lỗi tải danh sách Facebook Pages.')
+        setError(err?.message || 'Lỗi tải danh sách tài khoản Pippit.')
       } finally {
         setLoadingPages(false)
       }
@@ -219,6 +237,7 @@ export function FacebookPublishModal({
       return
     }
     const [accountId, pageId] = selectedKey.split('::')
+    const selectedOption = pages.find(p => p.accountId === accountId && p.pageId === pageId)
     const finalMinutes = timing === 'soon' ? 1 : Math.max(1, minutesUntilTarget)
 
     setPublishing(true)
@@ -232,6 +251,7 @@ export function FacebookPublishModal({
           body: JSON.stringify({
             account_id: accountId,
             page_id: pageId,
+            platform: selectedOption?.platform || 'facebook',
             title: title.trim(),
             caption: description.trim(),
             when_minutes_ahead: finalMinutes,
@@ -240,7 +260,7 @@ export function FacebookPublishModal({
       )
       const data = await res.json()
       if (!res.ok) {
-        throw new Error(data?.detail || 'Đăng bài lên Facebook thất bại.')
+        throw new Error(data?.detail || 'Đăng bài thất bại.')
       }
       setSuccess(true)
       setResultData(data)
@@ -432,10 +452,10 @@ export function FacebookPublishModal({
               </div>
             )}
 
-            {/* Step 1: Chọn Page */}
+            {/* Step 1: Chọn Page / Kênh đích */}
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                Chọn Facebook Fanpage đích <span style={{ color: '#dc2626' }}>*</span>
+                Chọn Kênh / Trang đích (Facebook Fanpage hoặc TikTok) <span style={{ color: '#dc2626' }}>*</span>
               </label>
               {loadingPages ? (
                 <div
@@ -449,7 +469,7 @@ export function FacebookPublishModal({
                   }}
                 >
                   <Loader2 size={14} className="spin" /> Đang tải danh sách
-                  Pages...
+                  kênh liên kết...
                 </div>
               ) : pages.length === 0 ? (
                 <div
@@ -462,9 +482,9 @@ export function FacebookPublishModal({
                     color: '#991b1b',
                   }}
                 >
-                  Chưa có Fanpage nào được liên kết trong Cài đặt Pippit. Vui
+                  Chưa có Fanpage hay kênh TikTok nào được liên kết trong Cài đặt Pippit. Vui
                   lòng vào <strong>Cài đặt → Pippit</strong> để kết nối
-                  Fanpage trước!
+                  kênh trước!
                 </div>
               ) : (
                 <select
@@ -488,6 +508,7 @@ export function FacebookPublishModal({
                       key={`${p.accountId}::${p.pageId}`}
                       value={`${p.accountId}::${p.pageId}`}
                     >
+                      {p.platform === 'tiktok' ? '🎵 [TikTok] ' : '📘 [Facebook] '}
                       {p.pageName} (ID: {p.pageId}) — {p.accountEmail}
                     </option>
                   ))}

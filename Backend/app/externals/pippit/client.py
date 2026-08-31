@@ -395,16 +395,28 @@ class PippitClient:
         )
         return r.json()
 
-    # -- Kéo Real Facebook Pages (platform_type = 301) --------------------
-    def facebook_accounts(self) -> list[dict]:
-        """Lấy danh sách các Facebook Pages thật đã liên kết với tài khoản Pippit."""
-        body = {"platform_type": [301], "tt_creator": True}
+    # -- Kéo Real Accounts (Facebook 301 & TikTok 1) ----------------------
+    def bound_accounts(self) -> dict[str, list[dict]]:
+        """Lấy danh sách các tài khoản liên kết (Facebook Pages, TikTok Channels) từ Pippit."""
+        body = {"platform_type": [1, 101, 201, 301, 401, 1001], "tt_creator": True}
         j = self.post("/api/account/v1/get_bind_account_list", body)
         if j.get("ret") != "0":
             if str(j.get("ret")) == "1017":
                 raise PippitAuthError("Cookie Pippit đã hết hạn - Cần đăng nhập lại.")
             raise PippitError(f"get_bind_account_list thất bại: {j}")
-        return ((j.get("data") or {}).get("platform_user_info") or {}).get("301", []) or []
+        p_info = (j.get("data") or {}).get("platform_user_info") or {}
+        
+        fb = p_info.get("301", []) or []
+        tt = (p_info.get("1", []) or []) + (p_info.get("101", []) or []) + (p_info.get("1001", []) or [])
+        return {"facebook": fb, "tiktok": tt}
+
+    def facebook_accounts(self) -> list[dict]:
+        """Lấy danh sách các Facebook Pages thật đã liên kết với tài khoản Pippit."""
+        return self.bound_accounts().get("facebook", [])
+
+    def tiktok_accounts(self) -> list[dict]:
+        """Lấy danh sách các TikTok Channels thật đã liên kết với tài khoản Pippit."""
+        return self.bound_accounts().get("tiktok", [])
 
     # -- Upload Video Pipeline --------------------------------------------
     def prepare_upload_cloud(self, md5: str, size: int, file_type: str = "video") -> dict:
@@ -547,6 +559,72 @@ class PippitClient:
             first = results[0]
             if first.get("error_code") and first.get("error_code") != 0:
                 raise PippitError(f"Lỗi tạo schedule task: {first.get('error_message')}")
+            return str(first.get("id") or "")
+
+        return ""
+
+    # -- Lên lịch đăng TikTok (platform_type = 1) -------------------------
+    def schedule_tiktok(
+        self,
+        asset_id: str,
+        platform_user_id: str,
+        schedule_time_ms: int,
+        description: str = "",
+        title: str = "",
+        privacy_level: int = 1,
+        allow_comment: bool = True,
+        allow_duet: bool = True,
+        allow_stitch: bool = True,
+    ) -> str:
+        tt_param = {
+            "title": title or description[:100],
+            "description": description,
+            "media_type": 1,
+            "privacy_level": privacy_level,
+            "allow_comment": allow_comment,
+            "allow_duet": allow_duet,
+            "allow_stitch": allow_stitch,
+        }
+        extra_dict = {
+            "item_type": "video",
+            "enter_from": "calendar",
+            "tab_name": "publishing",
+            "video_unique_id": asset_id,
+        }
+        if self.user_id:
+            extra_dict["consumer_uid"] = str(self.user_id)
+
+        extra = json.dumps(extra_dict, separators=(",", ":"))
+        media_param = {
+            "extra": extra,
+            "platform_type": 1,
+            "publish_type": 2,
+            "platform_user_ids": [platform_user_id],
+            "file_type": 1,
+            "schedule_time": schedule_time_ms,
+            "action_type": 2,
+            "asset_id_list": [asset_id],
+            "action_from": 0,
+            "publish_tiktok_param": tt_param,
+        }
+        body = {"requests": [{"id": "", "task_type": 1, "publish_media_param": media_param}]}
+        j = self.post("/api/biz/v1/publish/batchcreate_schedule_task", body, "publish")
+        if j.get("ret") != "0":
+            raise PippitError(f"schedule_tiktok thất bại: {j}")
+
+        data = j.get("data") or {}
+        responses = data.get("responses") or []
+        if responses:
+            first = responses[0]
+            if first.get("ret") != "0" and first.get("errmsg"):
+                raise PippitError(f"Lỗi tạo schedule task TikTok: {first.get('errmsg')}")
+            return str((first.get("data") or {}).get("id") or first.get("id") or "")
+
+        results = data.get("results") or []
+        if results:
+            first = results[0]
+            if first.get("error_code") and first.get("error_code") != 0:
+                raise PippitError(f"Lỗi tạo schedule task TikTok: {first.get('error_message')}")
             return str(first.get("id") or "")
 
         return ""

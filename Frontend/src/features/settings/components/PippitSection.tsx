@@ -5,10 +5,12 @@ import {
   Clock3,
   ExternalLink,
   Loader2,
+  Music,
   Plus,
   RefreshCw,
   Share2,
   Trash2,
+  Video,
   X,
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
@@ -377,6 +379,82 @@ export function PippitSection() {
                       </div>
                     )
                   })}
+                </div>
+              </div>
+
+              {/* Real TikTok Channels Management */}
+              <div className="pip-fb-container" style={{ marginTop: 10 }}>
+                <div className="pip-fb-hdr">
+                  <span className="pip-fb-title" style={{ color: '#0f172a' }}>
+                    <Music size={13} style={{ color: '#ec4899' }} /> Kênh TikTok Đã Liên Kết (platform_type=1)
+                  </span>
+                  <span className="mtm-badge" style={{ background: '#fdf2f8', color: '#db2777' }}>
+                    {acc.tiktok_channels?.filter(t => t.channel_id).length || 0} kênh
+                  </span>
+                </div>
+
+                <div className="pip-fb-slots">
+                  {(!acc.tiktok_channels || acc.tiktok_channels.filter(t => t.channel_id).length === 0) ? (
+                    <div
+                      style={{
+                        gridColumn: '1 / -1',
+                        padding: '10px 14px',
+                        background: '#fafafa',
+                        borderRadius: 8,
+                        fontSize: 11,
+                        color: '#94a3b8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Music size={12} style={{ opacity: 0.5 }} /> Chưa có kênh TikTok nào được ủy quyền cho tài khoản Pippit này.
+                    </div>
+                  ) : (
+                    acc.tiktok_channels.filter(t => t.channel_id).map((tt, tIdx) => (
+                      <div
+                        key={tIdx}
+                        className="pip-slot-card connected"
+                        style={{ borderLeft: '3px solid #ec4899' }}
+                      >
+                        {tt.avatar_url ? (
+                          <img
+                            src={tt.avatar_url}
+                            alt=""
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: '50%',
+                              objectFit: 'cover',
+                              flexShrink: 0,
+                            }}
+                          />
+                        ) : (
+                          <span className="pip-slot-num" style={{ background: '#fdf2f8', color: '#db2777' }}>
+                            {tIdx + 1}
+                          </span>
+                        )}
+                        <div className="pip-slot-info">
+                          <strong style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {tt.nickname} {tt.handle && <span style={{ fontWeight: 400, color: '#64748b', fontSize: 11 }}>@{tt.handle}</span>}
+                          </strong>
+                          <span>ID: {tt.channel_id}</span>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: tt.un_expired ? '#16a34a' : '#d97706',
+                            background: tt.un_expired ? '#dcfce7' : '#fef3c7',
+                            padding: '2px 6px',
+                            borderRadius: 6,
+                          }}
+                        >
+                          {tt.un_expired ? 'Sẵn sàng' : 'Hết hạn'}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

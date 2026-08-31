@@ -38,9 +38,9 @@ const TARGETS = [
     name: 'BACKEND',
     color: '\x1b[34m', // blue
     cmd: PY,
-    args: ['-m', 'uvicorn', 'app.main:app', '--reload', '--app-dir',
+    args: ['-m', 'uvicorn', 'app.main:app', '--reload', '--reload-dir', path.join(ROOT, 'Backend'), '--app-dir',
            path.join(ROOT, 'Backend'), '--host', '127.0.0.1', '--port', '8000'],
-    opts: { cwd: DESKTOP },
+    opts: { cwd: path.join(ROOT, 'Backend') },
   },
   {
     name: 'VOICE',

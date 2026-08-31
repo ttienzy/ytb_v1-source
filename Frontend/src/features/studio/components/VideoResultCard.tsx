@@ -14,11 +14,28 @@ import {
 import { API_URL } from '../../../shared/constants'
 import type { BackendCaption } from '../types'
 import { FacebookPublishModal } from './FacebookPublishModal'
+import { YouTubePublishModal } from './YouTubePublishModal'
 
 function FacebookIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
       <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  )
+}
+
+function TikTokIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.298-.002.595.042.88.13V9.4a6.33 6.33 0 0 0-1-.08A6.34 6.34 0 0 0 3 15.66a6.34 6.34 0 0 0 10.82 4.5 6.31 6.31 0 0 0 1.86-4.49V8.62a8.16 8.16 0 0 0 4.91 1.63v-3.56z"/>
+    </svg>
+  )
+}
+
+function YouTubeIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
     </svg>
   )
 }
@@ -34,6 +51,7 @@ export function VideoResultCard({
   credits,
   caption,
   pippitTasks,
+  youtubeTasks,
   onReset,
   compact,
 }: {
@@ -45,6 +63,7 @@ export function VideoResultCard({
   credits?: string | null
   caption?: BackendCaption | null
   pippitTasks?: any[]
+  youtubeTasks?: any[]
   onReset?: () => void
   compact?: boolean
 }) {
@@ -52,6 +71,7 @@ export function VideoResultCard({
   const [copiedAll, setCopiedAll] = useState(false)
   const [copiedTitle, setCopiedTitle] = useState(false)
   const [showPublishModal, setShowPublishModal] = useState(false)
+  const [showYouTubeModal, setShowYouTubeModal] = useState(false)
 
 
   const polished = variant === 'polished'
@@ -62,6 +82,10 @@ export function VideoResultCard({
     ? `${segments} đoạn · ${scenes} cảnh · 1080p · VO Việt + BGM`
     : `${segments} đoạn · ${scenes} cảnh · 1080p · VO Việt`
   const src = `${API_URL}/api/recap/jobs/${jobId}/${endpoint}`
+
+  const fbTasks = (pippitTasks || []).filter((t: any) => t.platform !== 'tiktok')
+  const ttTasks = (pippitTasks || []).filter((t: any) => t.platform === 'tiktok')
+  const ytTasks = youtubeTasks || []
 
   const hasCaption = Boolean(
     caption &&
@@ -137,7 +161,9 @@ export function VideoResultCard({
             dể nghe thử
           </p>
         )}
-        {pippitTasks && pippitTasks.length > 0 && (
+
+        {/* ── Status Banners for Multi-Platform Publishing ── */}
+        {fbTasks.length > 0 && (
           <div
             style={{
               display: 'flex',
@@ -154,31 +180,132 @@ export function VideoResultCard({
           >
             <FacebookIcon size={14} />
             <span>
-              Đã đăng FB ({pippitTasks.length} lần): <strong>{pippitTasks.map(t => t.page_name || t.page_id).join(', ')}</strong>
+              Đã đăng Facebook ({fbTasks.length} lần): <strong>{fbTasks.map(t => t.page_name || t.page_id).join(', ')}</strong>
             </span>
           </div>
         )}
-        <div className="vrc-actions">
+
+        {ttTasks.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              background: '#f8fafc',
+              color: '#0f172a',
+              border: '1px solid #cbd5e1',
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <TikTokIcon size={14} />
+            <span>
+              Đã đăng TikTok ({ttTasks.length} lần): <strong>{ttTasks.map(t => t.page_name || t.page_id).join(', ')}</strong>
+            </span>
+          </div>
+        )}
+
+        {ytTasks.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              background: '#fee2e2',
+              color: '#dc2626',
+              border: '1px solid #fecaca',
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <YouTubeIcon size={14} />
+            <span>
+              Đã đăng YouTube ({ytTasks.length} lần): <strong>{ytTasks.map(t => t.channel_title || t.title || t.video_id).join(', ')}</strong>
+            </span>
+          </div>
+        )}
+
+        <div className="vrc-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <a className="btn-p vrc-dl" href={src} download={filename}>
             <Download size={14} /> Tải về
           </a>
+
+          {/* Đăng Facebook */}
           <button
             type="button"
             className="btn-fb-publish"
             onClick={() => setShowPublishModal(true)}
-            style={
-              pippitTasks && pippitTasks.length > 0
-                ? { background: '#f8fafc', color: '#1877f2', border: '1px solid #94a3b8' }
-                : undefined
-            }
-            title={
-              pippitTasks && pippitTasks.length > 0
-                ? `Video này đã được đăng lên: ${pippitTasks.map(t => t.page_name || t.page_id).join(', ')}. Bấm nếu muốn đăng tiếp lên Page khác.`
-                : 'Đăng video trực tiếp lên Facebook Fanpage qua Pippit'
-            }
+            style={{
+              background: '#1877f2',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '0 12px',
+              minHeight: 34,
+              fontSize: 12,
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+            }}
+            title="Đăng video lên Facebook Fanpage qua Pippit"
           >
-            <FacebookIcon size={14} /> {pippitTasks && pippitTasks.length > 0 ? 'Đã đăng FB (Đăng thêm)' : 'Đăng Facebook'}
+            <FacebookIcon size={14} /> {fbTasks.length > 0 ? `Đã đăng FB (${fbTasks.length})` : 'Đăng Facebook'}
           </button>
+
+          {/* Đăng TikTok */}
+          <button
+            type="button"
+            className="btn-tiktok-publish"
+            onClick={() => setShowPublishModal(true)}
+            style={{
+              background: '#0f172a',
+              color: '#fff',
+              border: '1px solid #334155',
+              borderRadius: 8,
+              padding: '0 12px',
+              minHeight: 34,
+              fontSize: 12,
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+            }}
+            title="Đăng video lên kênh TikTok qua Pippit"
+          >
+            <TikTokIcon size={14} /> {ttTasks.length > 0 ? `Đã đăng TikTok (${ttTasks.length})` : 'Đăng TikTok'}
+          </button>
+
+          {/* Đăng YouTube */}
+          <button
+            type="button"
+            className="btn-yt-publish"
+            onClick={() => setShowYouTubeModal(true)}
+            style={{
+              background: '#dc2626',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '0 12px',
+              minHeight: 34,
+              fontSize: 12,
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+            }}
+            title="Tải video lên kênh YouTube (Google OAuth)"
+          >
+            <YouTubeIcon size={14} /> {ytTasks.length > 0 ? `Đã đăng YT (${ytTasks.length})` : 'Đăng YouTube'}
+          </button>
+
           {onReset && (
             <button type="button" className="btn-g" onClick={onReset}>
               <Trash2 size={14} /> Bắt đầu lại
@@ -251,13 +378,22 @@ export function VideoResultCard({
         )}
       </div>
 
-      {/* ── Facebook Publish Modal ── */}
+      {/* ── Facebook / TikTok Publish Modal (Pippit) ── */}
       {showPublishModal && (
         <FacebookPublishModal
           jobId={jobId}
           caption={caption}
           pippitTasks={pippitTasks}
           onClose={() => setShowPublishModal(false)}
+        />
+      )}
+
+      {/* ── YouTube Publish Modal ── */}
+      {showYouTubeModal && (
+        <YouTubePublishModal
+          jobId={jobId}
+          caption={caption}
+          onClose={() => setShowYouTubeModal(false)}
         />
       )}
     </div>

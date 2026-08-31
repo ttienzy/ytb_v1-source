@@ -30,15 +30,26 @@ class JobOut(BaseModel):
     final_studio: str | None = None
     credits: str | None = None
     pippit_tasks: list[dict] = []
-
+    youtube_tasks: list[dict] = []
 
 
 class JobPublishFacebookRequest(BaseModel):
     account_id: str
     page_id: str
+    platform: str = "facebook"
     title: str = ""
     caption: str = ""
     when_minutes_ahead: int = 1
+
+
+class JobPublishYouTubeRequest(BaseModel):
+    title: str = ""
+    description: str = ""
+    tags: str = ""
+    privacy_status: str = "public"
+    category_id: str = "22"
+    when_minutes_ahead: int = 0
+    schedule_time_iso: str | None = None
 
 
 # ── Batch Queue Schemas ───────────────────────────────────────────────────────

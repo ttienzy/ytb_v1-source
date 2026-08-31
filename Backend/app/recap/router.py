@@ -20,8 +20,13 @@ from app.db import get_db
 from app.media.service import resolve_for_polish
 from app.recap import service, state
 from app.recap.paths import final_path, final_studio_path, voice_path
-from app.recap.schemas import BatchOut, BatchRunRequest, JobOut, JobPublishFacebookRequest
-from app.recap.ytdlp import login_youtube, yt_login_status
+from app.recap.schemas import (
+    BatchOut,
+    BatchRunRequest,
+    JobOut,
+    JobPublishFacebookRequest,
+    JobPublishYouTubeRequest,
+)
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
 
@@ -48,7 +53,7 @@ def _overall(job: state.JobState) -> str:
 
 
 def _find_job_pippit_tasks(job_id: str, title: str | None = None) -> list[dict]:
-    """Tìm các bài đăng Facebook qua Pippit đã liên kết với job này."""
+    """Tìm các bài đăng Facebook / TikTok qua Pippit đã liên kết với job này."""
     try:
         from app.externals.pippit.service import _get_saved_tasks
         all_tasks = _get_saved_tasks()
@@ -66,12 +71,32 @@ def _find_job_pippit_tasks(job_id: str, title: str | None = None) -> list[dict]:
         return []
 
 
+def _find_job_youtube_tasks(job_id: str, title: str | None = None) -> list[dict]:
+    """Tìm các bài đăng YouTube đã liên kết với job này."""
+    try:
+        from app.externals.youtube.service import get_saved_tasks
+        all_tasks = get_saved_tasks()
+        matched = []
+        clean_title = (title or "").strip().lower()
+        for t in all_tasks:
+            t_file = t.get("file_name") or ""
+            t_title = (t.get("title") or "").strip().lower()
+            if job_id in t_file:
+                matched.append(t)
+            elif clean_title and t_title and len(clean_title) >= 10 and (clean_title in t_title or t_title in clean_title):
+                matched.append(t)
+        return matched
+    except Exception:
+        return []
+
+
 def _to_out(job: state.JobState) -> JobOut:
     caption_obj = job.caption or (job.recap.get("caption") if job.recap else None)
     job_title = None
     if caption_obj and isinstance(caption_obj, dict):
         job_title = caption_obj.get("title")
     pippit_tasks = _find_job_pippit_tasks(job.job_id, job_title)
+    youtube_tasks = _find_job_youtube_tasks(job.job_id, job_title)
 
     return JobOut(
         job_id=job.job_id,
@@ -101,6 +126,7 @@ def _to_out(job: state.JobState) -> JobOut:
         final_studio=job.final_studio,
         credits=job.credits,
         pippit_tasks=pippit_tasks,
+        youtube_tasks=youtube_tasks,
     )
 
 
@@ -314,8 +340,14 @@ def delete_job_endpoint(job_id: str) -> dict:
 
 @router.post("/jobs/{job_id}/publish-facebook")
 def publish_facebook_endpoint(job_id: str, payload: JobPublishFacebookRequest):
-    """Upload video của job lên Pippit và lên lịch đăng bài cho Facebook Page."""
+    """Upload video của job lên Pippit và lên lịch đăng bài cho Facebook Page hoặc TikTok."""
     return service.publish_job_to_facebook(job_id, payload)
+
+
+@router.post("/jobs/{job_id}/publish-youtube")
+def publish_youtube_endpoint(job_id: str, payload: JobPublishYouTubeRequest):
+    """Upload video của job lên kênh YouTube kết nối."""
+    return service.publish_job_to_youtube(job_id, payload)
 
 
 

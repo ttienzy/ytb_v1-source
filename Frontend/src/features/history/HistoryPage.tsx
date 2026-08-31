@@ -25,6 +25,8 @@ import { API_URL } from '../../shared/constants'
 import { fmtTime, fmtTs } from '../../shared/utils/formatters'
 import { VideoResultCard } from '../studio/components/VideoResultCard'
 import { PippitHistoryTab } from './components/PippitHistoryTab'
+import { YouTubeHistoryTab } from './components/YouTubeHistoryTab'
+import { YouTubeBrandIcon } from '../settings/components/YouTubeSection'
 import type { JobOut } from '../studio/types'
 
 function FacebookIcon({ size = 12 }: { size?: number }) {
@@ -35,41 +37,50 @@ function FacebookIcon({ size = 12 }: { size?: number }) {
   )
 }
 
+function TikTokIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.298-.002.595.042.88.13V9.4a6.33 6.33 0 0 0-1-.08A6.34 6.34 0 0 0 3 15.66a6.34 6.34 0 0 0 10.82 4.5 6.31 6.31 0 0 0 1.86-4.49V8.62a8.16 8.16 0 0 0 4.91 1.63v-3.56z"/>
+    </svg>
+  )
+}
+
 export function HistoryPage() {
 
-  const [historyTab, setHistoryTab] = useState<'studio' | 'pippit'>('studio')
+  const [historyTab, setHistoryTab] = useState<'studio' | 'pippit' | 'youtube'>('studio')
   const [jobs, setJobs] = useState<JobOut[]>([])
 
   const [loading, setLoading] = useState(true)
+  const [deleting, setDeleting] = useState(false)
+  const [jobToDelete, setJobToDelete] = useState<JobOut | null>(null)
   const [search, setSearch] = useState('')
   const [sel, setSel] = useState<JobOut | null>(null)
-  const [playingVo, setPlayingVo] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'recap' | 'media'>('recap')
   const [selectedScene, setSelectedScene] = useState<number | 'all'>('all')
   const [page, setPage] = useState(1)
-  const [jobToDelete, setJobToDelete] = useState<JobOut | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const PAGE_SIZE = 6
-
+  const [playingVo, setPlayingVo] = useState<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const PAGE_SIZE = 6
 
   async function loadJobs() {
     setLoading(true)
     try {
-      const r = await fetch(`${API_URL}/api/recap/jobs`)
-      const data: JobOut[] = r.ok ? await r.json() : []
-      setJobs(Array.isArray(data) ? data : [])
-      if (data.length) {
-        if (!sel || !data.some(d => d.job_id === sel.job_id)) {
-          setSel(data[0])
-        } else {
-          // Cập nhật lại job đang chọn nếu có dữ liệu mới
-          const updated = data.find(d => d.job_id === sel.job_id)
-          if (updated) setSel(updated)
-        }
+      const res = await fetch(`${API_URL}/api/recap/jobs`)
+      if (!res.ok) throw new Error('Không thể tải danh sách jobs')
+      const data: JobOut[] = await res.json()
+      setJobs(data)
+      if (data.length > 0) {
+        setSel(prev => {
+          if (!prev) return data[0]
+          return data.find(j => j.job_id === prev.job_id) || data[0]
+        })
+      } else {
+        setSel(null)
       }
     } catch {
       setJobs([])
+      setSel(null)
     } finally {
       setLoading(false)
     }
@@ -244,7 +255,14 @@ export function HistoryPage() {
               className={`htab-btn ${historyTab === 'pippit' ? 'active' : ''}`}
               onClick={() => setHistoryTab('pippit')}
             >
-              <Share2 size={13} /> Đăng Facebook (Pippit)
+              <Share2 size={13} /> Đăng FB &amp; TikTok (Pippit)
+            </button>
+            <button
+              type="button"
+              className={`htab-btn ${historyTab === 'youtube' ? 'active' : ''}`}
+              onClick={() => setHistoryTab('youtube')}
+            >
+              <YouTubeBrandIcon size={13} /> Đăng YouTube
             </button>
           </div>
           {historyTab === 'studio' && completedCount > 0 && (
@@ -269,6 +287,8 @@ export function HistoryPage() {
 
       {historyTab === 'pippit' ? (
         <PippitHistoryTab />
+      ) : historyTab === 'youtube' ? (
+        <YouTubeHistoryTab />
       ) : (
         <div className="history-layout">
           <div>
@@ -294,6 +314,9 @@ export function HistoryPage() {
               const title = getJobTitle(j)
               const segCount = segsOf(j).length
               const isSelected = sel?.job_id === j.job_id
+              const jFbTasks = (j.pippit_tasks || []).filter((t: any) => t.platform !== 'tiktok')
+              const jTtTasks = (j.pippit_tasks || []).filter((t: any) => t.platform === 'tiktok')
+              const jYtTasks = j.youtube_tasks || []
               return (
                 <div
                   key={j.job_id}
@@ -314,7 +337,7 @@ export function HistoryPage() {
                   </div>
                   <div className="hright">
                     <div className="hitem-actions">
-                      {j.pippit_tasks && j.pippit_tasks.length > 0 && (
+                      {jFbTasks.length > 0 && (
                         <span
                           className="badge"
                           style={{
@@ -323,14 +346,52 @@ export function HistoryPage() {
                             borderColor: '#bae6fd',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 4,
-                            padding: '2px 7px',
+                            gap: 3,
+                            padding: '2px 6px',
                             fontSize: 10,
                             fontWeight: 700,
                           }}
-                          title={`Đã lên lịch/đăng Facebook lên Fanpage: ${j.pippit_tasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
+                          title={`Đã lên lịch/đăng Facebook (${jFbTasks.length} lần): ${jFbTasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
                         >
-                          <FacebookIcon size={10} /> Đã đăng FB
+                          <FacebookIcon size={10} /> FB
+                        </span>
+                      )}
+                      {jTtTasks.length > 0 && (
+                        <span
+                          className="badge"
+                          style={{
+                            background: '#f8fafc',
+                            color: '#0f172a',
+                            borderColor: '#cbd5e1',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3,
+                            padding: '2px 6px',
+                            fontSize: 10,
+                            fontWeight: 700,
+                          }}
+                          title={`Đã lên lịch/đăng TikTok (${jTtTasks.length} lần): ${jTtTasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
+                        >
+                          <TikTokIcon size={10} /> TikTok
+                        </span>
+                      )}
+                      {jYtTasks.length > 0 && (
+                        <span
+                          className="badge"
+                          style={{
+                            background: '#fee2e2',
+                            color: '#dc2626',
+                            borderColor: '#fecaca',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3,
+                            padding: '2px 6px',
+                            fontSize: 10,
+                            fontWeight: 700,
+                          }}
+                          title={`Đã tải lên YouTube (${jYtTasks.length} lần): ${jYtTasks.map((t: any) => t.title || t.video_id).join(', ')}`}
+                        >
+                          <YouTubeBrandIcon size={10} /> YouTube
                         </span>
                       )}
                       <span className={`badge ${overallBadge[j.overall] ?? 'b-idle'}`}>
@@ -413,7 +474,7 @@ export function HistoryPage() {
                   <span className="hmeta-pill">
                     <Calendar size={11} /> {fmtTs(sel.created_at)}
                   </span>
-                  {sel.pippit_tasks && sel.pippit_tasks.length > 0 && (
+                  {(sel.pippit_tasks || []).filter((t: any) => t.platform !== 'tiktok').length > 0 && (
                     <span
                       className="hmeta-pill"
                       style={{
@@ -422,9 +483,37 @@ export function HistoryPage() {
                         borderColor: '#bae6fd',
                         fontWeight: 600,
                       }}
-                      title={`Đã lên lịch/đăng lên: ${sel.pippit_tasks.map((t: any) => t.page_name || t.page_id).join(', ')}`}
+                      title={`Đã lên lịch/đăng Facebook: ${(sel.pippit_tasks || []).filter((t: any) => t.platform !== 'tiktok').map((t: any) => t.page_name || t.page_id).join(', ')}`}
                     >
-                      <FacebookIcon size={12} /> Đã đăng FB ({sel.pippit_tasks.length} lần: <strong>{sel.pippit_tasks.map((t: any) => t.page_name || t.page_id).join(', ')}</strong>)
+                      <FacebookIcon size={12} /> Đã đăng FB ({(sel.pippit_tasks || []).filter((t: any) => t.platform !== 'tiktok').length} lần: <strong>{(sel.pippit_tasks || []).filter((t: any) => t.platform !== 'tiktok').map((t: any) => t.page_name || t.page_id).join(', ')}</strong>)
+                    </span>
+                  )}
+                  {(sel.pippit_tasks || []).filter((t: any) => t.platform === 'tiktok').length > 0 && (
+                    <span
+                      className="hmeta-pill"
+                      style={{
+                        background: '#f8fafc',
+                        color: '#0f172a',
+                        borderColor: '#cbd5e1',
+                        fontWeight: 600,
+                      }}
+                      title={`Đã lên lịch/đăng TikTok: ${(sel.pippit_tasks || []).filter((t: any) => t.platform === 'tiktok').map((t: any) => t.page_name || t.page_id).join(', ')}`}
+                    >
+                      <TikTokIcon size={12} /> Đã đăng TikTok ({(sel.pippit_tasks || []).filter((t: any) => t.platform === 'tiktok').length} lần: <strong>{(sel.pippit_tasks || []).filter((t: any) => t.platform === 'tiktok').map((t: any) => t.page_name || t.page_id).join(', ')}</strong>)
+                    </span>
+                  )}
+                  {(sel.youtube_tasks || []).length > 0 && (
+                    <span
+                      className="hmeta-pill"
+                      style={{
+                        background: '#fee2e2',
+                        color: '#dc2626',
+                        borderColor: '#fecaca',
+                        fontWeight: 600,
+                      }}
+                      title={`Đã tải lên YouTube: ${(sel.youtube_tasks || []).map((t: any) => t.title || t.video_id).join(', ')}`}
+                    >
+                      <YouTubeBrandIcon size={12} /> Đã đăng YouTube ({(sel.youtube_tasks || []).length} lần: <strong>{(sel.youtube_tasks || []).map((t: any) => t.channel_title || t.video_id || 'YouTube').join(', ')}</strong>)
                     </span>
                   )}
                 </div>
@@ -448,6 +537,7 @@ export function HistoryPage() {
                     credits={sel.final_studio ? sel.credits : null}
                     caption={sel.caption || sel.recap?.caption}
                     pippitTasks={sel.pippit_tasks}
+                    youtubeTasks={sel.youtube_tasks}
                     compact
                   />
                 ) : sel.recap ? (

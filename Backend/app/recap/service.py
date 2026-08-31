@@ -21,6 +21,7 @@ import json
 import re
 import shutil
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -30,6 +31,7 @@ from app.core.config import TOOLS_DIR
 from app.ai.gemini.recap import RecapConfigError, generate_recap, _auto_refresh_cookies, _gemini_config
 from app.discover.history import (
     mark_disk_cleaned,
+    record_batch_queue,
     record_job_completed,
     record_job_failed,
     record_job_metadata,
@@ -762,7 +764,10 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
         # 6) Đánh dấu thành công trong History DB
         try:
             out_video = final_studio_path(job_id) if polish_opts else final_path(job_id)
-            record_job_completed(job_id, str(out_video))
+            recap_title = None
+            if job.recap:
+                recap_title = (job.recap.get("caption") or {}).get("title") or job.recap.get("title")
+            record_job_completed(job_id, str(out_video), youtube_url=job.youtube_url, title=recap_title)
         except Exception:
             pass
 
@@ -844,12 +849,55 @@ def publish_job_to_facebook(job_id: str, payload) -> dict:
     req = PippitPublishRequest(
         account_id=payload.account_id,
         page_id=payload.page_id,
+        platform=getattr(payload, "platform", "facebook") or "facebook",
         video_path=str(video_file),
         caption=payload.caption,
         title=payload.title,
         when_minutes_ahead=payload.when_minutes_ahead,
+        job_id=job_id,
     )
     res = pippit_service.publish_video_to_page(req)
+    return res.model_dump() if hasattr(res, "model_dump") else res.dict()
+
+
+def publish_job_to_youtube(job_id: str, payload) -> dict:
+    """Upload video đã tạo của job lên YouTube Channel."""
+    from app.externals.youtube import service as yt_service
+    from app.externals.youtube.schemas import YouTubePublishRequest
+
+    p_studio = final_studio_path(job_id)
+    p_recap = final_path(job_id)
+
+    video_file: Path | None = None
+    if p_studio.exists() and p_studio.stat().st_size > 0:
+        video_file = p_studio
+    elif p_recap.exists() and p_recap.stat().st_size > 0:
+        video_file = p_recap
+
+    if not video_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Job này chưa có video thành phẩm (chưa có final_studio.mp4 hoặc final_recap.mp4).",
+        )
+
+    schedule_iso = getattr(payload, "schedule_time_iso", None)
+    mins = getattr(payload, "when_minutes_ahead", 0) or 0
+    if not schedule_iso and mins > 0:
+        now_dt = datetime.now(timezone.utc)
+        sched_dt = now_dt + timedelta(minutes=mins)
+        schedule_iso = sched_dt.isoformat()
+
+    req = YouTubePublishRequest(
+        file_path=str(video_file),
+        file_name=f"{job_id}_{video_file.name}",
+        title=payload.title or f"Video Recap {job_id}",
+        description=payload.description or "",
+        tags=getattr(payload, "tags", "") or "",
+        privacy_status=getattr(payload, "privacy_status", "public") or "public",
+        category_id=getattr(payload, "category_id", "22") or "22",
+        schedule_time_iso=schedule_iso,
+    )
+    res = yt_service.publish_single_video(req)
     return res.model_dump() if hasattr(res, "model_dump") else res.dict()
 
 
@@ -883,6 +931,10 @@ async def _run_one_batch_job(
     url = url.strip()
     job = state.create_job(url)
     state.update_job(job.job_id, recap_status="running", polish_opts=polish_opts)
+    try:
+        record_job_start(url, job.job_id)
+    except Exception:
+        pass
     if batch_id and item_index is not None:
         try:
             state.update_batch_item(batch_id, item_index, job_id=job.job_id, status="running")
@@ -1013,5 +1065,9 @@ async def run_batch(
         raise HTTPException(status_code=400, detail="Không có URL hợp lệ nào.")
 
     batch = state.create_batch(clean_urls, voice_id.strip(), polish_opts)
+    try:
+        record_batch_queue(clean_urls)
+    except Exception:
+        pass
     asyncio.create_task(_run_batch_worker(batch.batch_id))
     return batch.batch_id

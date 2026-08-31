@@ -8,7 +8,9 @@ Key guarantees:
      the record in processed_history.json is KEPT (marked with is_disk_cleaned: true).
   2. Robust Identification: Extracts standard 11-char YouTube video_id from any URL format
      (watch?v=, youtu.be/, shorts/, embed/).
-  3. O(1) Quick Lookup for Discover / Studio checking.
+  3. Batch Queue Integration: Immediately tracks all URLs in batch queue as processing/queued.
+  4. Auto-Rehydrate: Automatically discovers completed jobs from disk if not yet in registry.
+  5. O(1) Quick Lookup for Discover / Studio checking.
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ from typing import Any
 from app.core.config import TOOLS_DIR
 
 PROCESSED_HISTORY_FILE = TOOLS_DIR / "Backend" / "Data" / "processed_history.json"
+DOWNLOADS_DIR = TOOLS_DIR / "Backend" / "Data" / "Downloads"
 
 
 def extract_youtube_video_id(url_or_id: str) -> str:
@@ -90,6 +93,44 @@ def format_relative_time(iso_str: str | None) -> str:
         return ""
 
 
+def sync_history_from_disk() -> dict[str, dict[str, Any]]:
+    """Tự động quét Downloads/ để đảm bảo mọi job đã hoàn thành trên đĩa đều có trong DB."""
+    history = _read_history()
+    updated = False
+    if DOWNLOADS_DIR.exists():
+        for jdir in DOWNLOADS_DIR.iterdir():
+            if jdir.is_dir():
+                rp = jdir / "recap.json"
+                if rp.exists():
+                    try:
+                        data = json.loads(rp.read_text(encoding="utf-8"))
+                        y_url = data.get("youtube_url")
+                        if y_url:
+                            vid = extract_youtube_video_id(y_url)
+                            if vid and (vid not in history or history[vid].get("status") != "completed"):
+                                title = (data.get("caption") or {}).get("title") or data.get("title") or jdir.name
+                                has_final = (jdir / "final_studio.mp4").exists() or (jdir / "final_recap.mp4").exists() or (jdir / "merge" / "final.mp4").exists()
+                                if has_final:
+                                    history[vid] = {
+                                        **history.get(vid, {}),
+                                        "video_id": vid,
+                                        "url": y_url,
+                                        "title": title,
+                                        "job_id": jdir.name,
+                                        "status": "completed",
+                                        "created_at": data.get("created_at") or history.get(vid, {}).get("created_at") or datetime.now(timezone.utc).isoformat(),
+                                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                                        "is_disk_cleaned": False,
+                                    }
+                                    updated = True
+                    except Exception:
+                        pass
+
+    if updated:
+        _write_history(history)
+    return history
+
+
 # ── Core Lifecycle Hooks ─────────────────────────────────────────────────────
 
 def record_job_start(youtube_url: str, job_id: str, title: str | None = None) -> None:
@@ -116,6 +157,36 @@ def record_job_start(youtube_url: str, job_id: str, title: str | None = None) ->
     _write_history(history)
 
 
+def record_batch_queue(urls: list[str]) -> None:
+    """Ghi nhận danh sách URL vừa được thêm vào Batch Queue."""
+    if not urls:
+        return
+    history = _read_history()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    updated = False
+
+    for url in urls:
+        vid = extract_youtube_video_id(url)
+        if vid:
+            existing = history.get(vid, {})
+            # Chỉ set processing nếu chưa completed
+            if existing.get("status") != "completed":
+                history[vid] = {
+                    **existing,
+                    "video_id": vid,
+                    "url": url,
+                    "title": existing.get("title") or f"YouTube Video ({vid})",
+                    "status": "processing",
+                    "created_at": existing.get("created_at") or now_iso,
+                    "updated_at": now_iso,
+                    "is_disk_cleaned": False,
+                }
+                updated = True
+
+    if updated:
+        _write_history(history)
+
+
 def record_job_metadata(job_id: str, title: str, scenes_count: int = 0, caption: dict | None = None) -> None:
     """Cập nhật tiêu đề và tóm tắt sau khi Gemini hoàn thành kịch bản."""
     history = _read_history()
@@ -133,11 +204,13 @@ def record_job_metadata(job_id: str, title: str, scenes_count: int = 0, caption:
         _write_history(history)
 
 
-def record_job_completed(job_id: str, video_path: str | None = None) -> None:
+def record_job_completed(job_id: str, video_path: str | None = None, youtube_url: str | None = None, title: str | None = None) -> None:
     """Đánh dấu video đã hoàn tất thành phẩm (status: completed)."""
     history = _read_history()
     updated = False
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Match by job_id
     for vid, item in history.items():
         if item.get("job_id") == job_id:
             item["status"] = "completed"
@@ -145,8 +218,31 @@ def record_job_completed(job_id: str, video_path: str | None = None) -> None:
             item["updated_at"] = now_iso
             if video_path:
                 item["output_video_path"] = str(video_path)
+            if title:
+                item["title"] = title
             updated = True
             break
+
+    # Fallback if job_id was not yet in history
+    if not updated and youtube_url:
+        vid = extract_youtube_video_id(youtube_url)
+        if vid:
+            existing = history.get(vid, {})
+            history[vid] = {
+                **existing,
+                "video_id": vid,
+                "url": youtube_url,
+                "title": title or existing.get("title") or f"YouTube Video ({vid})",
+                "job_id": job_id,
+                "status": "completed",
+                "completed_at": now_iso,
+                "created_at": existing.get("created_at") or now_iso,
+                "updated_at": now_iso,
+                "output_video_path": str(video_path) if video_path else None,
+                "is_disk_cleaned": False,
+            }
+            updated = True
+
     if updated:
         _write_history(history)
 
@@ -194,8 +290,8 @@ def remove_from_history(video_id_or_url: str) -> bool:
 
 
 def get_processed_video_map() -> dict[str, dict[str, Any]]:
-    """Lấy map video_id -> thông tin xử lý (cho phép tra cứu tức thì O(1))."""
-    raw = _read_history()
+    """Lấy map video_id -> thông tin xử lý (kèm auto-sync từ đĩa)."""
+    raw = sync_history_from_disk()
     result = {}
     for vid, item in raw.items():
         created_at = item.get("completed_at") or item.get("created_at")

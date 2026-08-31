@@ -26,6 +26,18 @@ def get_active_pages():
     return service.get_all_active_facebook_pages()
 
 
+@router.get("/active-tiktok-channels")
+def get_active_tiktok_channels():
+    """Lấy danh sách tất cả các TikTok Channel đang active trên toàn bộ tài khoản Pippit."""
+    return service.get_all_active_tiktok_channels()
+
+
+@router.get("/active-channels")
+def get_active_channels():
+    """Lấy danh sách tất cả kênh (Facebook + TikTok) đã kết nối trên Pippit."""
+    return service.get_all_active_channels()
+
+
 @router.post("/accounts/login-sync", response_model=PippitAccountOut)
 def login_and_sync(payload: PippitLoginSyncRequest):
     """Đăng nhập Pure HTTP bằng email + mật khẩu và tự động kéo toàn bộ Real Facebook Pages về."""

@@ -58,6 +58,15 @@ export type FacebookPageSlot = {
   un_expired?: boolean
 }
 
+export type TikTokChannelSlot = {
+  channel_id: string
+  nickname: string
+  handle?: string
+  avatar_url?: string
+  status: string
+  un_expired?: boolean
+}
+
 export type PippitAccount = {
   id: string
   mailtm_id?: string
@@ -69,12 +78,14 @@ export type PippitAccount = {
   status: string
   created_at: string
   facebook_pages: FacebookPageSlot[]
+  tiktok_channels?: TikTokChannelSlot[]
 }
 
 export type PippitTask = {
   task_id?: string
   status?: number
   published: boolean
+  platform?: 'facebook' | 'tiktok'
   post_id: string
   post_url: string
   page_id: string
