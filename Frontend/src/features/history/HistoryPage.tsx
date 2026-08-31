@@ -25,6 +25,7 @@ import { API_URL } from '../../shared/constants'
 import { fmtTime, fmtTs } from '../../shared/utils/formatters'
 import { VideoResultCard } from '../studio/components/VideoResultCard'
 import { PippitHistoryTab } from './components/PippitHistoryTab'
+import { PublishingCalendarTab } from './components/PublishingCalendarTab'
 import { YouTubeHistoryTab } from './components/YouTubeHistoryTab'
 import { YouTubeBrandIcon } from '../settings/components/YouTubeSection'
 import type { JobOut } from '../studio/types'
@@ -47,7 +48,7 @@ function TikTokIcon({ size = 12 }: { size?: number }) {
 
 export function HistoryPage() {
 
-  const [historyTab, setHistoryTab] = useState<'studio' | 'pippit' | 'youtube'>('studio')
+  const [historyTab, setHistoryTab] = useState<'calendar' | 'studio' | 'pippit' | 'youtube'>('calendar')
   const [jobs, setJobs] = useState<JobOut[]>([])
 
   const [loading, setLoading] = useState(true)
@@ -245,6 +246,13 @@ export function HistoryPage() {
           <div className="history-tab-group">
             <button
               type="button"
+              className={`htab-btn ${historyTab === 'calendar' ? 'active' : ''}`}
+              onClick={() => setHistoryTab('calendar')}
+            >
+              <Calendar size={13} /> Lịch phát sóng
+            </button>
+            <button
+              type="button"
               className={`htab-btn ${historyTab === 'studio' ? 'active' : ''}`}
               onClick={() => setHistoryTab('studio')}
             >
@@ -285,7 +293,9 @@ export function HistoryPage() {
         </div>
       </div>
 
-      {historyTab === 'pippit' ? (
+      {historyTab === 'calendar' ? (
+        <PublishingCalendarTab />
+      ) : historyTab === 'pippit' ? (
         <PippitHistoryTab />
       ) : historyTab === 'youtube' ? (
         <YouTubeHistoryTab />

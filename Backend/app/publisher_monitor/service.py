@@ -14,7 +14,12 @@ from app.externals.youtube.service import (
     get_saved_tasks as get_youtube_saved_tasks,
     get_status as get_youtube_status,
 )
-from app.publisher_monitor.schemas import ChannelDailyStatus, PublisherDailySummaryResponse
+from app.publisher_monitor.schemas import (
+    CalendarEvent,
+    CalendarEventsResponse,
+    ChannelDailyStatus,
+    PublisherDailySummaryResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -311,4 +316,167 @@ def get_daily_publishing_summary(force_sync: bool = False) -> PublisherDailySumm
         warning_count=warning_count,
         healthy_count=healthy_count,
         channels=channels_status,
+    )
+
+
+def get_calendar_events(month: str | None = None, force_sync: bool = False) -> CalendarEventsResponse:
+    """Tổng hợp toàn bộ sự kiện lịch phát sóng từ TikTok, Facebook, YouTube và Studio."""
+    if force_sync:
+        try:
+            pippit_tasks = list_all_saved_accounts_tasks()
+            PIPPIT_TASKS_FILE.write_text(json.dumps(pippit_tasks, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pippit_tasks = get_pippit_saved_tasks()
+    else:
+        pippit_tasks = get_pippit_saved_tasks()
+        if not pippit_tasks:
+            try:
+                pippit_tasks = list_all_saved_accounts_tasks()
+                PIPPIT_TASKS_FILE.write_text(json.dumps(pippit_tasks, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+    yt_tasks = get_youtube_saved_tasks()
+    yt_status = get_youtube_status()
+    default_yt_channel_name = getattr(yt_status, "channel_title", None) or "YouTube"
+
+    now_vn = datetime.now(VN_TZ)
+    all_events: list[CalendarEvent] = []
+    seen_channels: dict[str, dict] = {}
+
+    # 1. Pippit Tasks (TikTok + Facebook)
+    for t in pippit_tasks:
+        raw_time = t.get("schedule_time_ms") or t.get("publish_at") or t.get("created_at") or t.get("create_time_ms")
+        d_str, dt_vn = _parse_to_vn_date(raw_time)
+        if not d_str:
+            continue
+
+        plat = t.get("platform") or "facebook"
+        if plat not in ["tiktok", "facebook"]:
+            plat = "facebook"
+        pname = t.get("page_name") or t.get("page_id") or ("TikTok" if plat == "tiktok" else "Facebook Fanpage")
+        pid = str(t.get("page_id") or t.get("channel_id") or "")
+        tid = str(t.get("task_id") or id(t))
+
+        # Status normalizer (có kiểm tra mốc thời gian thực hiện tại theo giờ VN)
+        if t.get("status") in [4, 6, "4", "6", "failed", "cancelled", "error"] or t.get("failed_reason"):
+            st = "failed"
+        elif dt_vn and dt_vn > now_vn:
+            st = "scheduled"
+        else:
+            if t.get("published") or t.get("status") in [3, "3", "published"]:
+                st = "published"
+            else:
+                st = "published" if t.get("status") in [1, "1"] else "scheduled"
+
+        ch_key = f"{plat}_{pname}"
+        if ch_key not in seen_channels:
+            seen_channels[ch_key] = {
+                "key": ch_key,
+                "platform": plat,
+                "name": pname,
+                "id": pid,
+            }
+
+        all_events.append(
+            CalendarEvent(
+                id=tid,
+                title=t.get("title") or t.get("file_name") or f"Video {pname}",
+                platform=plat,
+                channel_name=pname,
+                channel_id=pid,
+                account_email=t.get("account_email"),
+                publish_at=dt_vn.isoformat() if dt_vn else None,
+                date=d_str,
+                time=dt_vn.strftime("%H:%M") if dt_vn else "00:00",
+                status=st,
+                post_url=t.get("post_url"),
+                thumbnail_url=t.get("cover_url") or t.get("thumbnail_url"),
+                failed_reason=t.get("failed_reason"),
+                file_name=t.get("file_name"),
+                raw_time_ms=int(t.get("schedule_time_ms") or 0) if t.get("schedule_time_ms") else None,
+            )
+        )
+
+    # 2. YouTube Tasks
+    for t in yt_tasks:
+        raw_time = t.get("publish_at") or t.get("created_at")
+        d_str, dt_vn = _parse_to_vn_date(raw_time)
+        if not d_str:
+            continue
+
+        pname = t.get("channel_title") or default_yt_channel_name
+        tid = str(t.get("task_id") or t.get("id") or id(t))
+
+        # Status normalizer (chỉ coi là published khi mốc publish_at đã trôi qua trong quá khứ)
+        if t.get("status") in ["failed", "error"] or t.get("error"):
+            st = "failed"
+        elif dt_vn and dt_vn > now_vn:
+            st = "scheduled"
+        else:
+            st = "published"
+
+        ch_key = f"youtube_{pname}"
+        if ch_key not in seen_channels:
+            seen_channels[ch_key] = {
+                "key": ch_key,
+                "platform": "youtube",
+                "name": pname,
+                "id": str(t.get("video_id") or ""),
+            }
+
+        all_events.append(
+            CalendarEvent(
+                id=tid,
+                title=t.get("title") or t.get("file_name") or "YouTube Short Video",
+                platform="youtube",
+                channel_name=pname,
+                channel_id=str(t.get("video_id") or ""),
+                account_email=None,
+                publish_at=dt_vn.isoformat() if dt_vn else None,
+                date=d_str,
+                time=dt_vn.strftime("%H:%M") if dt_vn else "00:00",
+                status=st,
+                post_url=t.get("youtube_url"),
+                thumbnail_url=t.get("thumbnail_url"),
+                failed_reason=t.get("error"),
+                file_name=t.get("file_name"),
+                raw_time_ms=None,
+            )
+        )
+
+    # Sắp xếp và Khử trùng lặp (Deduplicate events)
+    # Khóa nhận diện trùng: (platform, channel_name, date, time, title) hoặc (platform, channel_name, video_id/task_id)
+    dedup_map: dict[str, CalendarEvent] = {}
+    for ev in all_events:
+        t_clean = ev.title.strip().lower()
+        dedup_key = f"{ev.platform}_{ev.channel_name}_{ev.date}_{ev.time}_{t_clean}"
+        if dedup_key not in dedup_map:
+            dedup_map[dedup_key] = ev
+        else:
+            # Ưu tiên scheduled/published hơn là failed
+            existing = dedup_map[dedup_key]
+            if existing.status == "failed" and ev.status != "failed":
+                dedup_map[dedup_key] = ev
+
+    clean_events = list(dedup_map.values())
+    clean_events.sort(key=lambda x: f"{x.date} {x.time}")
+
+    # Lọc theo tháng nếu có yêu cầu
+    filtered_events = clean_events
+    if month and month != "all" and len(month) == 7:
+        filtered_events = [e for e in clean_events if e.date.startswith(month)]
+
+    scheduled_count = sum(1 for e in filtered_events if e.status == "scheduled")
+    published_count = sum(1 for e in filtered_events if e.status == "published")
+    failed_count = sum(1 for e in filtered_events if e.status == "failed")
+
+    return CalendarEventsResponse(
+        month=month or "all",
+        total_events=len(filtered_events),
+        scheduled_count=scheduled_count,
+        published_count=published_count,
+        failed_count=failed_count,
+        channels_list=list(seen_channels.values()),
+        events=filtered_events,
     )
