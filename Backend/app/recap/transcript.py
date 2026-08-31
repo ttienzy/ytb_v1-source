@@ -68,16 +68,23 @@ def fetch_transcript_raw(
     headless: bool = False,
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
 ) -> dict:
-    """Trả JSON response transcript (get_panel hoặc get_transcript) — giống raw.txt.
+    """Trả JSON response transcript hoặc dict chứa text transcript.
 
-    Flow 3 mức:
+    Flow 4 mức (ưu tiên từ trên xuống):
+      0. yt-dlp subtitle download (--write-auto-sub) — nhanh, tin cậy, không cần browser.
+         Bắt cả auto-generated (asr) và manual captions, vượt attestation wall tự nhiên.
       1. Playwright headless (cookies nếu có) — bắt cả ``get_panel`` (cũ) VÀ ``get_transcript``
-         (mới). Nhanh, dùng cho video chưa bị attestation-wall.
+         (mới). Nhanh, dùng khi yt-dlp không có subtitle.
       2. Nếu ``get_transcript`` bị chặn attestation PoG (400 "Precondition check failed") →
          fallback **Chrome thật qua CDP** (browser thật tính được webResponse → pass attestation).
-      3. Nếu vẫn fail (video không có transcript / UI đổi) → raise ``TranscriptFetchError`` với
-         kind rõ, để UI gợi ý user dán raw thủ công.
+      3. Nếu vẫn fail → raise ``TranscriptFetchError`` để UI gợi ý dán raw thủ công.
     """
+    # Mức 0: yt-dlp subtitle download — đáng tin cậy nhất (không cần browser / attestation).
+    try:
+        return _fetch_via_ytdlp(url)
+    except Exception:
+        pass  # nếu không có sub → thử Playwright
+
     try:
         return _fetch_with_playwright(url, headless=headless, timeout_ms=timeout_ms)
     except TranscriptFetchError as err:
@@ -95,6 +102,136 @@ def fetch_transcript_raw(
                     kind="attestation",
                 ) from exc
         raise
+
+
+def _fetch_via_ytdlp(url: str) -> dict:
+    """Mức 0: dùng yt-dlp tải subtitle/auto-caption → trả dict {_dom_transcript: text}.
+
+    QUAN TRỌNG — Thứ tự thử:
+    1. Không cookies (client android_vr / tv) — không bị SABR experiment → không cần PO Token.
+    2. Nếu bị IP bot-wall (sign-in required) → retry với cookies (vượt IP wall).
+    Thứ tự NGƯỢC với download_video vì subtitle endpoint không bị SABR khi no-cookie + android_vr.
+    """
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path as _Path
+
+    video_id = video_id_from_url(url)
+    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+    has_cookies = settings.yt_cookies_file.exists() and settings.yt_cookies_file.stat().st_size
+
+    # Resolve yt-dlp binary từ cùng venv với Python đang chạy (tránh PATH lookup miss).
+    _scripts_dir = _Path(sys.executable).parent
+    _ytdlp_bin = _scripts_dir / "yt-dlp.exe"  # Windows
+    if not _ytdlp_bin.exists():
+        _ytdlp_bin = _scripts_dir / "yt-dlp"  # Linux/Mac
+    if not _ytdlp_bin.exists():
+        raise RuntimeError(f"yt-dlp binary không tìm thấy tại {_scripts_dir}")
+    ytdlp_cmd = str(_ytdlp_bin)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = _Path(tmp)
+        out_template = str(tmp_path / "%(id)s.%(ext)s")
+
+        # Thử mỗi tổ hợp (sub_flags, cookie_mode)
+        attempts = [
+            # Ưu tiên: no-cookies, manual sub → auto-sub (android_vr client, không bị SABR/PO Token)
+            (["--write-sub", "--sub-lang", "vi,en"], False),
+            (["--write-auto-sub", "--sub-lang", "vi,en"], False),
+            # Fallback cookies nếu IP bot-wall
+            *([(["--write-sub", "--sub-lang", "vi,en"], True),
+               (["--write-auto-sub", "--sub-lang", "vi,en"], True)] if has_cookies else []),
+        ]
+
+        for sub_flags, use_cookies in attempts:
+            cmd = [
+                ytdlp_cmd,
+                "--skip-download",
+                "--no-playlist",
+                "--convert-subs", "vtt",
+                *sub_flags,
+                "--output", out_template,
+            ]
+            if use_cookies:
+                cmd += ["--cookies", str(settings.yt_cookies_file)]
+            cmd.append(watch_url)
+
+            try:
+                subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except Exception:
+                continue
+
+            # Tìm file .vtt đã tải
+            vtt_files = list(tmp_path.glob("*.vtt"))
+            if not vtt_files:
+                continue
+
+            vtt_text = vtt_files[0].read_text(encoding="utf-8", errors="replace")
+            lines = _parse_vtt_to_lines(vtt_text)
+            if lines:
+                return {"_dom_transcript": "\n".join(lines)}
+
+
+    raise RuntimeError("yt-dlp: không tìm thấy subtitle nào cho video này")
+
+
+def _parse_vtt_to_lines(vtt: str) -> list[str]:
+    """Parse WebVTT subtitle file → list "[MM:SS] caption" lines.
+
+    Bỏ qua duplicate (YouTube auto-sub thường lặp lại dòng trước trong cue kế tiếp).
+    """
+    import re as _re
+
+    TIME_RE = _re.compile(r"(\d+):(\d{2}):(\d{2})\.\d+")
+    CLEAN_RE = _re.compile(r"<[^>]+>")  # strip VTT inline tags <c>, <b>...
+
+    lines = []
+    last_text = ""
+    cue_lines: list[str] = []
+    in_cue = False
+    current_ts = ""
+
+    for raw_line in vtt.splitlines():
+        line = raw_line.strip()
+
+        if "-->" in line:
+            # Timestamp line: 00:01:23.456 --> 00:01:26.000
+            m = TIME_RE.match(line)
+            if m:
+                h, mn, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                total_s = h * 3600 + mn * 60 + s
+                mm, ss = divmod(total_s, 60)
+                current_ts = f"{mm}:{ss:02d}"
+            in_cue = True
+            cue_lines = []
+        elif in_cue:
+            if line == "":
+                # End of cue block
+                text = " ".join(CLEAN_RE.sub("", l) for l in cue_lines).strip()
+                if text and text != last_text:
+                    lines.append(f"[{current_ts}] {text}")
+                    last_text = text
+                in_cue = False
+            else:
+                if not line.isdigit():  # bỏ sequence number
+                    cue_lines.append(line)
+
+    # xử lý cue cuối (không có blank line kết thúc)
+    if in_cue and cue_lines:
+        text = " ".join(CLEAN_RE.sub("", l) for l in cue_lines).strip()
+        if text and text != last_text:
+            lines.append(f"[{current_ts}] {text}")
+
+
+    return lines
 
 
 def _fetch_with_playwright(url: str, *, headless: bool, timeout_ms: int) -> dict:
@@ -196,16 +333,17 @@ def _detect_attestation_failure(responses) -> bool:
 def _fetch_via_real_chrome(url: str, *, timeout_ms: int) -> dict:
     """Mức 3: fallback Chrome thật qua CDP — attestation PoG pass trong browser thật.
 
-    Launch ``chrome.exe`` (profile yt_profile_dir đã login) + ``--remote-debugging-port``,
-    Playwright ``connect_over_cdp`` attach → mở transcript panel → bắt get_transcript/get_panel.
-    Phản射 pattern ``login_youtube`` (chrome.exe subprocess tránh automation-block). Xem
-    [[ytdlp-youtube-block]].
+    Chiến lược:
+    1. Launch chrome.exe (profile đã login).
+    2. Playwright connect_over_cdp, attach response listener.
+    3. Hard-reload trang (bypass Service Worker cache) → bắt toàn bộ request mới.
+    4. Mở transcript panel → poll response.
+    5. Fallback DOM scraping nếu HTTP response vẫn không bắt được (Service Worker persist).
     """
     import subprocess
     import time
     import urllib.request
 
-    from fastapi import HTTPException
     from playwright.sync_api import sync_playwright
 
     if not settings.chrome_executable.exists():
@@ -275,13 +413,20 @@ def _fetch_via_real_chrome(url: str, *, timeout_ms: int) -> dict:
 
             page.on("response", _on_response)
             try:
-                # Reload watch page SAU khi attach listener → attestation challenge embed
-                # lúc load còn tươi khi click (đợi 4s như cũ làm challenge stale → 400 attestation).
+                # QUAN TRỌNG: Attach listener TRƯỚC → rồi hard-reload (Ctrl+Shift+R / shift=True)
+                # để bypass Service Worker cache. Mọi request từ reload (gồm get_transcript mới
+                # kèm attestation PoG tươi) đều được bắt bởi listener.
                 try:
-                    page.goto(watch_url, wait_until="domcontentloaded")
+                    page.reload(wait_until="domcontentloaded")
                 except Exception:
-                    pass  # page đã ở watch_url rồi (chrome.exe launch arg) → vẫn dùng được.
-                page.wait_for_timeout(1500)  # chờ attestation JS init (ngắn để challenge chưa stale)
+                    # Nếu reload fail (page đóng, chrome crash) → thử navigate lại
+                    try:
+                        page.goto(watch_url, wait_until="domcontentloaded")
+                    except Exception:
+                        pass
+                # Chờ attestation JS và lazy sections render.
+                time.sleep(4)
+
                 try:
                     _open_transcript(page)
                 except RuntimeError as err:
@@ -290,21 +435,34 @@ def _fetch_via_real_chrome(url: str, *, timeout_ms: int) -> dict:
                         "Video có thể không có transcript. Dán raw thủ công.",
                         kind="no_transcript",
                     ) from err
+
+                # Poll HTTP response list — dùng time.sleep (KHÔNG page.wait_for_timeout → crash khi browser đóng).
                 deadline = time.time() + timeout_ms / 1000
                 _dbg_path = settings.yt_profile_dir.parent / "_debug_transcript_responses.txt"
                 while time.time() < deadline:
-                    data = _extract_transcript(captured)
+                    try:
+                        data = _extract_transcript(captured)
+                    except Exception:
+                        data = None
                     if data is not None:
                         return data
-                    # Dump mọi response transcript-endpoint ra file debug (khi fail mới xem).
                     try:
                         _dump_transcript_responses(captured, _dbg_path)
                     except Exception:
                         pass
-                    page.wait_for_timeout(300)
+                    time.sleep(0.5)
+
+                # ── Fallback: DOM scraping ────────────────────────────────────────
+                # Nếu HTTP response vẫn 0 (Service Worker persist qua reload), đọc thẳng
+                # DOM text của transcript panel mà YouTube đã render.
+                dom_text = _scrape_transcript_dom(page)
+                if dom_text:
+                    # Trả dạng dict giả để transcript_to_text / normalize_raw_input xử lý.
+                    return {"_dom_transcript": dom_text}
+
                 raise TranscriptFetchError(
-                    "Chrome thật mở transcript nhưng không bắt được response — video có thể không có "
-                    "transcript hoặc UI đã đổi. Dán raw thủ công.",
+                    "Chrome thật mở transcript nhưng không bắt được response và DOM cũng rỗng — "
+                    "video có thể không có transcript hoặc UI đã đổi. Dán raw thủ công.",
                     kind="no_transcript",
                 )
             finally:
@@ -321,6 +479,40 @@ def _fetch_via_real_chrome(url: str, *, timeout_ms: int) -> dict:
                 proc.kill()
             except Exception:
                 pass
+
+
+def _scrape_transcript_dom(page) -> str:
+    """Fallback: đọc text transcript trực tiếp từ DOM YouTube đã render.
+
+    Khi Service Worker cache không cho bắt HTTP response, YouTube vẫn render
+    transcript panel vào DOM. Lấy text từ các segment elements, format [MM:SS] text.
+    Trả chuỗi "[MM:SS] caption\\n..." hoặc "" nếu panel rỗng / chưa mở.
+    """
+    try:
+        segments = page.evaluate("""() => {
+            // Thử selector mới (ytd-transcript-segment-renderer) và cũ (ytd-transcript-body-renderer)
+            const segs = document.querySelectorAll(
+                'ytd-transcript-segment-renderer, [class*="transcript-segment"]'
+            );
+            if (!segs || segs.length === 0) return [];
+            return Array.from(segs).map(s => {
+                const ts = s.querySelector('[class*="timestamp"], .segment-timestamp')?.textContent?.trim() ?? '';
+                const txt = s.querySelector('[class*="snippet-text"], .segment-text')?.textContent?.trim()
+                         ?? s.textContent?.trim() ?? '';
+                return {ts, txt};
+            });
+        }""")
+        if not segments:
+            return ""
+        lines = []
+        for seg in segments:
+            ts = (seg.get("ts") or "0:00").strip()
+            txt = (seg.get("txt") or "").strip()
+            if txt:
+                lines.append(f"[{ts}] {txt}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _dump_transcript_responses(responses, out_path: Path) -> None:
@@ -395,8 +587,13 @@ def transcript_to_text(data: dict) -> str:
         ``simpleText`` + ``timestamp`` ("0:00"). Path sâu nhưng generic đệ quy bắt hết.
       - CŨ: ``transcriptSegments[].snippet.runs[].text`` + ``startMs`` (ms) → đổi sang MM:SS.
     Generic: đệ quy tìm mọi ``transcriptSegmentViewModel`` dict, lấy timestamp+text, sort theo thời gian.
+    Fallback DOM: nếu data chứa ``_dom_transcript`` → trả thẳng (từ _scrape_transcript_dom).
     Fallback: nếu không extract được segment nào → trả JSON dump (không mất data, Gemini vẫn xử lý được).
     """
+    # Fallback DOM scraping path (từ _scrape_transcript_dom)
+    if "_dom_transcript" in data:
+        return data["_dom_transcript"]
+
     found: list[tuple[float, str, str]] = []  # (sec, "MM:SS", text)
 
     def _mmss(sec: float) -> str:
