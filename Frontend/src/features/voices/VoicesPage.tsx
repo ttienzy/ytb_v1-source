@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Mic, Play, Plus, Trash2, Volume2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Loader2, Mic, Play, Plus, Square, Trash2, Volume2 } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
 import type { Preset, Voice } from './types'
 
@@ -10,8 +10,25 @@ export function VoicesPage() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const [previewing, setPreviewing] = useState<string | null>(null)
+  const [generatingVoiceId, setGeneratingVoiceId] = useState<string | null>(null)
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null)
   const [previewText, setPreviewText] = useState('')
+
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const currentUrlRef = useRef<string | null>(null)
+
+  function stopAudio() {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
+    }
+    if (currentUrlRef.current) {
+      URL.revokeObjectURL(currentUrlRef.current)
+      currentUrlRef.current = null
+    }
+    setPlayingVoiceId(null)
+  }
 
   useEffect(() => {
     fetch(`${API_URL}/api/voices`)
@@ -26,6 +43,10 @@ export function VoicesPage() {
       .catch(() => {
         /* preset là tuỳ chọn — không bắt buộc */
       })
+
+    return () => {
+      stopAudio()
+    }
   }, [])
 
   async function create() {
@@ -57,6 +78,9 @@ export function VoicesPage() {
   }
 
   async function remove(id: string) {
+    if (playingVoiceId === id) {
+      stopAudio()
+    }
     try {
       const r = await fetch(`${API_URL}/api/voices/${id}`, {
         method: 'DELETE',
@@ -68,8 +92,16 @@ export function VoicesPage() {
     }
   }
 
-  async function preview(id: string) {
-    setPreviewing(id)
+  async function togglePreview(id: string) {
+    // Nếu đang phát chính giọng này -> Dừng lại
+    if (playingVoiceId === id) {
+      stopAudio()
+      return
+    }
+
+    // Dừng âm thanh đang phát khác
+    stopAudio()
+    setGeneratingVoiceId(id)
     setMessage('')
     try {
       const r = await fetch(
@@ -86,13 +118,25 @@ export function VoicesPage() {
       }
       const blob = await r.blob()
       const url = URL.createObjectURL(blob)
+      currentUrlRef.current = url
+
       const audio = new Audio(url)
-      audio.onended = () => URL.revokeObjectURL(url)
+      audioRef.current = audio
+      setPlayingVoiceId(id)
+
+      audio.onended = () => {
+        stopAudio()
+      }
+      audio.onerror = () => {
+        stopAudio()
+      }
+
       await audio.play()
     } catch (error) {
+      stopAudio()
       setMessage(error instanceof Error ? error.message : 'TTS thất bại.')
     } finally {
-      setPreviewing(null)
+      setGeneratingVoiceId(null)
     }
   }
 
@@ -188,35 +232,56 @@ export function VoicesPage() {
           <p className="settings-message">Chưa có giọng nào.</p>
         ) : (
           <div className="voices-list">
-            {voices.map(v => (
-              <div key={v.voice_id} className="voice-item">
-                <div className="voice-item-info">
-                  <strong>{v.name}</strong>
-                  <span>
-                    {v.voice_id}
-                    {v.created_at ? ` · ${v.created_at}` : ''}
-                  </span>
+            {voices.map(v => {
+              const isGenerating = generatingVoiceId === v.voice_id
+              const isPlaying = playingVoiceId === v.voice_id
+              return (
+                <div key={v.voice_id} className="voice-item">
+                  <div className="voice-item-info">
+                    <strong>{v.name}</strong>
+                    <span>
+                      {v.voice_id}
+                      {v.created_at ? ` · ${v.created_at}` : ''}
+                    </span>
+                  </div>
+                  <div className="voice-item-actions">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => togglePreview(v.voice_id)}
+                      disabled={isGenerating}
+                      style={
+                        isPlaying
+                          ? { background: '#ef4444', borderColor: '#dc2626', color: '#fff' }
+                          : undefined
+                      }
+                      title={isPlaying ? 'Dừng phát âm thanh' : 'Nghe thử giọng này'}
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 size={14} className="spin" /> Đang tạo...
+                        </>
+                      ) : isPlaying ? (
+                        <>
+                          <Square size={13} fill="currentColor" /> Dừng lại
+                        </>
+                      ) : (
+                        <>
+                          <Play size={14} /> Nghe thử
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="chrome-button"
+                      onClick={() => remove(v.voice_id)}
+                    >
+                      <Trash2 size={15} /> Xoá
+                    </button>
+                  </div>
                 </div>
-                <div className="voice-item-actions">
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => preview(v.voice_id)}
-                    disabled={previewing === v.voice_id}
-                  >
-                    <Play size={15} />{' '}
-                    {previewing === v.voice_id ? 'Đang tạo...' : 'Nghe thử'}
-                  </button>
-                  <button
-                    type="button"
-                    className="chrome-button"
-                    onClick={() => remove(v.voice_id)}
-                  >
-                    <Trash2 size={15} /> Xoá
-                  </button>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -237,25 +302,46 @@ export function VoicesPage() {
           </p>
         ) : (
           <div className="voices-list">
-            {presets.map(p => (
-              <div key={p.name} className="voice-item">
-                <div className="voice-item-info">
-                  <strong>{p.name}</strong>
-                  <span>{p.description}</span>
+            {presets.map(p => {
+              const isGenerating = generatingVoiceId === p.name
+              const isPlaying = playingVoiceId === p.name
+              return (
+                <div key={p.name} className="voice-item">
+                  <div className="voice-item-info">
+                    <strong>{p.name}</strong>
+                    <span>{p.description}</span>
+                  </div>
+                  <div className="voice-item-actions">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => togglePreview(p.name)}
+                      disabled={isGenerating}
+                      style={
+                        isPlaying
+                          ? { background: '#ef4444', borderColor: '#dc2626', color: '#fff' }
+                          : undefined
+                      }
+                      title={isPlaying ? 'Dừng phát âm thanh' : 'Nghe thử giọng này'}
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 size={14} className="spin" /> Đang tạo...
+                        </>
+                      ) : isPlaying ? (
+                        <>
+                          <Square size={13} fill="currentColor" /> Dừng lại
+                        </>
+                      ) : (
+                        <>
+                          <Play size={14} /> Nghe thử
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                <div className="voice-item-actions">
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => preview(p.name)}
-                    disabled={previewing === p.name}
-                  >
-                    <Play size={15} />{' '}
-                    {previewing === p.name ? 'Đang tạo...' : 'Nghe thử'}
-                  </button>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
