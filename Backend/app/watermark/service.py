@@ -174,15 +174,22 @@ async def run_batch(job: BatchJobState) -> None:
                 job.job_id, job.done, job.failed)
 
 
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+
+
 def create_batch_job_from_paths(file_paths: list[str]) -> BatchJobState:
-    """Tạo batch job từ danh sách đường dẫn file trên disk."""
+    """Tạo batch job từ danh sách đường dẫn file trên disk (hỗ trợ cả video và ảnh)."""
     videos = []
     for p in file_paths:
         path = Path(p)
         if not path.exists():
             logger.warning("[watermark] File không tồn tại: %s", p)
             continue
-        v = VideoState(name=path.name, size_bytes=path.stat().st_size)
+        ext = path.suffix.lower()
+        mtype = "image" if ext in IMAGE_EXTENSIONS else "video"
+        v = VideoState(name=path.name, size_bytes=path.stat().st_size, media_type=mtype)
         v.input_path = str(path)   # lưu path gốc vào state
         videos.append(v)
     return wstate.create_job(videos)

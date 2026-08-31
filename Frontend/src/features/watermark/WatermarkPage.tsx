@@ -1,32 +1,48 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
-  Clock3,
+  Clock,
   Download,
-  Eraser,
   ExternalLink,
+  Eye,
+  FileImage,
   FileVideo,
-  Film,
   FolderOpen,
   HardDrive,
   Loader2,
+  Play,
   RefreshCw,
   Trash2,
-  Upload,
   UploadCloud,
+  X,
   XCircle,
 } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
 import { fmtBytes } from '../../shared/utils/formatters'
-import type { QueuedFile, WatermarkBatchJob } from './types'
+import type { QueuedFile, WatermarkBatchJob, WatermarkVideoItem } from './types'
+
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp']
+const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm']
 
 export function WatermarkPage() {
+  const [activeTab, setActiveTab] = useState<'image' | 'video'>('image')
   const [cliOk, setCliOk] = useState<boolean | null>(null)
   const [cliMsg, setCliMsg] = useState('')
   const [driveStatus, setDriveStatus] = useState<any>(null)
-  const [queue, setQueue] = useState<QueuedFile[]>([])
 
+  // Separate Queues
+  const [imageQueue, setImageQueue] = useState<QueuedFile[]>([])
+  const [videoQueue, setVideoQueue] = useState<QueuedFile[]>([])
+
+  // Modal Preview
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState<{
+    job_id: string
+    item: WatermarkVideoItem
+    previewType: 'clean' | 'orig'
+  } | null>(null)
+
+  // Jobs
   const [currentJob, setCurrentJob] = useState<WatermarkBatchJob | null>(null)
   const [historyJobs, setHistoryJobs] = useState<WatermarkBatchJob[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -34,7 +50,9 @@ export function WatermarkPage() {
   const [errorMsg, setErrorMsg] = useState('')
   const [syncingDriveJobId, setSyncingDriveJobId] = useState<string | null>(null)
   const [syncingVideoName, setSyncingVideoName] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null)
+  const videoFileInputRef = useRef<HTMLInputElement | null>(null)
   const pollTimerRef = useRef<any>(null)
 
   // Check CLI status
@@ -51,7 +69,7 @@ export function WatermarkPage() {
       })
   }, [])
 
-  // Load Job History
+  // Load History
   const loadHistory = useCallback(() => {
     fetch(`${API_URL}/api/watermark/jobs`)
       .then(r => (r.ok ? r.json() : Promise.reject()))
@@ -107,7 +125,7 @@ export function WatermarkPage() {
     }
   }, [currentJob?.job_id, currentJob?.status, loadHistory])
 
-  // Polling Real-time Drive Sync Status across history
+  // Polling Drive Sync Status
   useEffect(() => {
     const isAnySyncing =
       syncingDriveJobId !== null ||
@@ -128,7 +146,6 @@ export function WatermarkPage() {
     return () => clearInterval(timer)
   }, [syncingDriveJobId, historyJobs, currentJob?.job_id, loadHistory])
 
-  // Helper lấy đường dẫn native từ Electron Desktop
   function getNativeFilePath(f: File): string {
     try {
       if ((window as any).desktop?.getPathForFile) {
@@ -141,8 +158,13 @@ export function WatermarkPage() {
     return (f as any).path || ''
   }
 
-  // Add files to queue
-  function handleAddFiles(files: FileList | File[] | null) {
+  function detectMediaType(nameOrPath: string): 'image' | 'video' {
+    const lower = nameOrPath.toLowerCase()
+    if (IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext))) return 'image'
+    return 'video'
+  }
+
+  function handleAddImageFiles(files: FileList | File[] | null) {
     if (!files || files.length === 0) return
     setErrorMsg('')
     const newItems: QueuedFile[] = []
@@ -150,15 +172,16 @@ export function WatermarkPage() {
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
       const nativePath = getNativeFilePath(f)
-      if (
-        f.name.toLowerCase().endsWith('.mp4') ||
-        nativePath.toLowerCase().endsWith('.mp4')
-      ) {
-        if (!queue.some(q => q.name === f.name)) {
+      const targetStr = (nativePath || f.name).toLowerCase()
+      const isImage = IMAGE_EXTENSIONS.some(ext => targetStr.endsWith(ext))
+
+      if (isImage) {
+        if (!imageQueue.some(q => q.name === f.name)) {
           newItems.push({
             path: nativePath || f.name,
             name: f.name,
             size: f.size || 0,
+            media_type: 'image',
             file: f,
           })
         }
@@ -166,39 +189,85 @@ export function WatermarkPage() {
     }
 
     if (newItems.length > 0) {
-      setQueue(prev => [...prev, ...newItems])
+      setImageQueue(prev => [...prev, ...newItems])
     }
   }
 
-  // Import by direct path
-  function handleImportPath() {
+  function handleAddVideoFiles(files: FileList | File[] | null) {
+    if (!files || files.length === 0) return
+    setErrorMsg('')
+    const newItems: QueuedFile[] = []
+
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]
+      const nativePath = getNativeFilePath(f)
+      const targetStr = (nativePath || f.name).toLowerCase()
+      const isVideo = VIDEO_EXTENSIONS.some(ext => targetStr.endsWith(ext))
+
+      if (isVideo) {
+        if (!videoQueue.some(q => q.name === f.name)) {
+          newItems.push({
+            path: nativePath || f.name,
+            name: f.name,
+            size: f.size || 0,
+            media_type: 'video',
+            file: f,
+          })
+        }
+      }
+    }
+
+    if (newItems.length > 0) {
+      setVideoQueue(prev => [...prev, ...newItems])
+    }
+  }
+
+  function handleImportImagePath() {
     const entered = window.prompt(
-      'Nhập đường dẫn file MP4 hoặc thư mục chứa video:',
-      'C:\\Users\\nguye\\Videos\\fl1\\Cooking_beef_fried_rice_202608232323.mp4'
+      'Nhập đường dẫn file ảnh hoặc thư mục chứa ảnh:',
+      'C:\\Users\\nguye\\OneDrive\\Pictures\\ai_profile'
     )
     if (!entered) return
     setErrorMsg('')
-    const trimmed = entered
-      .trim()
-      .replace(/^"(.*)"$/, '$1')
-      .replace(/^'(.*)'$/, '$1')
+    const trimmed = entered.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
     if (trimmed) {
       const name = trimmed.split(/[\\/]/).pop() || trimmed
-      if (!queue.some(q => q.path === trimmed)) {
-        setQueue(prev => [...prev, { path: trimmed, name, size: 0 }])
+      if (!imageQueue.some(q => q.path === trimmed)) {
+        setImageQueue(prev => [
+          ...prev,
+          { path: trimmed, name, size: 0, media_type: 'image' },
+        ])
       }
     }
   }
 
-  // Start processing
-  async function handleStartProcess() {
-    if (queue.length === 0) return
+  function handleImportVideoPath() {
+    const entered = window.prompt(
+      'Nhập đường dẫn file video hoặc thư mục chứa video:',
+      'C:\\Users\\nguye\\Videos\\fl1'
+    )
+    if (!entered) return
+    setErrorMsg('')
+    const trimmed = entered.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
+    if (trimmed) {
+      const name = trimmed.split(/[\\/]/).pop() || trimmed
+      if (!videoQueue.some(q => q.path === trimmed)) {
+        setVideoQueue(prev => [
+          ...prev,
+          { path: trimmed, name, size: 0, media_type: 'video' },
+        ])
+      }
+    }
+  }
+
+  async function handleStartProcess(targetQueue: QueuedFile[], isImage: boolean) {
+    if (targetQueue.length === 0) return
     setErrorMsg('')
     setIsProcessing(true)
 
     try {
-      const hasFileObjects = queue.some(q => q.file)
-      const hasValidPaths = queue.some(
+      const hasFileObjects = targetQueue.some(q => q.file)
+      const hasValidPaths = targetQueue.some(
         q => q.path && q.path !== q.name && !q.path.includes(' ')
       )
 
@@ -207,7 +276,7 @@ export function WatermarkPage() {
 
       if (hasFileObjects && !hasValidPaths) {
         const formData = new FormData()
-        for (const item of queue) {
+        for (const item of targetQueue) {
           if (item.file) {
             formData.append('files', item.file)
           }
@@ -221,7 +290,7 @@ export function WatermarkPage() {
         res = await fetch(`${API_URL}/api/watermark/process`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paths: queue.map(q => q.path) }),
+          body: JSON.stringify({ paths: targetQueue.map(q => q.path) }),
         })
       }
 
@@ -232,9 +301,7 @@ export function WatermarkPage() {
 
       data = await res.json()
 
-      const jobRes = await fetch(
-        `${API_URL}/api/watermark/jobs/${data.job_id}`
-      )
+      const jobRes = await fetch(`${API_URL}/api/watermark/jobs/${data.job_id}`)
       if (jobRes.ok) {
         const jobData = await jobRes.json()
         setCurrentJob(jobData)
@@ -245,21 +312,22 @@ export function WatermarkPage() {
           total: data.total,
           done: 0,
           failed: 0,
-          videos: queue.map(q => ({
+          videos: targetQueue.map(q => ({
             name: q.name,
             size_bytes: q.size,
+            media_type: q.media_type,
             status: 'pending',
           })),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
       }
-      setQueue([])
+
+      if (isImage) setImageQueue([])
+      else setVideoQueue([])
     } catch (err) {
       setErrorMsg(
-        err instanceof Error
-          ? err.message
-          : 'Khởi động xóa watermark thất bại.'
+        err instanceof Error ? err.message : 'Khởi động xử lý thất bại.'
       )
       setIsProcessing(false)
     }
@@ -274,7 +342,7 @@ export function WatermarkPage() {
       })
       const data = await res.json()
       if (!res.ok) {
-        throw new Error(data.detail || 'Không thể đồng bộ video lên Google Drive.')
+        throw new Error(data.detail || 'Không thể đồng bộ file lên Google Drive.')
       }
       if (currentJob?.job_id === jobId) {
         setCurrentJob(data)
@@ -297,7 +365,7 @@ export function WatermarkPage() {
       )
       const data = await res.json()
       if (!res.ok) {
-        throw new Error(data.detail || 'Không thể đồng bộ video lên Google Drive.')
+        throw new Error(data.detail || 'Không thể đồng bộ file lên Google Drive.')
       }
       if (currentJob?.job_id === jobId) {
         setCurrentJob(data)
@@ -310,380 +378,477 @@ export function WatermarkPage() {
     }
   }
 
+  const isImageTab = activeTab === 'image'
+  const activeQueue = isImageTab ? imageQueue : videoQueue
+
+  const filteredHistoryJobs = useMemo(() => {
+    return historyJobs.filter(job => {
+      const isImgJob = job.videos.some(v => v.media_type === 'image' || detectMediaType(v.name) === 'image')
+      return isImageTab ? isImgJob : !isImgJob
+    })
+  }, [historyJobs, isImageTab])
+
   return (
-    <section className="settings-page wm-page">
-      <div className="settings-heading wm-heading">
+    <div style={{ maxWidth: 1200, margin: '0 auto', paddingBottom: 40 }}>
+      {/* ── Top Header ── */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 16,
+          paddingBottom: 16,
+          borderBottom: '1px solid #e2e8f0',
+          marginBottom: 20,
+        }}
+      >
         <div>
-          <p className="overline">GEMINI SYNTHID</p>
-          <h1>Xóa Watermark</h1>
-          <p className="page-subtitle">
-            Tự động phát hiện và xóa biểu tượng watermark ✦ SynthID khỏi video
-            gốc bằng AI Inpainting.
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0', letterSpacing: '-0.02em' }}>
+            Xóa Watermark
+          </h1>
+          <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+            Tự động loại bỏ dấu mờ SynthID và watermark trên hình ảnh và video.
           </p>
-          {driveStatus?.connected && (
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                background: '#e0f2fe',
-                color: '#0284c7',
-                border: '1px solid #bae6fd',
-                padding: '4px 10px',
-                borderRadius: 999,
-                fontSize: 11.5,
-                fontWeight: 700,
-                marginTop: 8,
-              }}
-            >
-              <HardDrive size={13} />
-              <span>
-                Đồng bộ Google Drive:{' '}
-                <strong>{driveStatus.folder_name || 'AI_Clean_Videos'}</strong>
-                {driveStatus.auto_upload ? ' (Tự động bật)' : ' (Thủ công)'}
-              </span>
-            </div>
-          )}
         </div>
+
+        {driveStatus?.connected && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 12px',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              fontSize: 12,
+              color: '#334155',
+              fontWeight: 500,
+            }}
+          >
+            <HardDrive size={14} color="#64748b" />
+            <span>
+              Google Drive: <strong>{driveStatus.folder_name || 'AI_Clean_Media'}</strong>
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* CLI Check Banner */}
-      {cliOk !== null && (
+      {/* ── Segmented Control Tabs ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div
-          className={`wm-cli-banner ${
-            cliOk ? 'wm-cli-ok' : 'wm-cli-error'
-          }`}
+          style={{
+            display: 'inline-flex',
+            background: '#f1f5f9',
+            padding: 3,
+            borderRadius: 8,
+            border: '1px solid #e2e8f0',
+          }}
         >
-          {cliOk ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-          <span>{cliMsg}</span>
-          {!cliOk && (
-            <span className="wm-cli-cmd">
-              npm install -g @pilio/gemini-watermark-remover
-            </span>
-          )}
+          <button
+            type="button"
+            onClick={() => setActiveTab('image')}
+            style={{
+              padding: '7px 18px',
+              borderRadius: 6,
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              background: isImageTab ? '#fff' : 'transparent',
+              color: isImageTab ? '#0f172a' : '#64748b',
+              boxShadow: isImageTab ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span>Hình ảnh</span>
+            {imageQueue.length > 0 && (
+              <span style={{ fontSize: 11, background: isImageTab ? '#f1f5f9' : '#e2e8f0', padding: '1px 6px', borderRadius: 999 }}>
+                {imageQueue.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('video')}
+            style={{
+              padding: '7px 18px',
+              borderRadius: 6,
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              background: !isImageTab ? '#fff' : 'transparent',
+              color: !isImageTab ? '#0f172a' : '#64748b',
+              boxShadow: !isImageTab ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span>Video</span>
+            {videoQueue.length > 0 && (
+              <span style={{ fontSize: 11, background: !isImageTab ? '#f1f5f9' : '#e2e8f0', padding: '1px 6px', borderRadius: 999 }}>
+                {videoQueue.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        <span style={{ fontSize: 12, color: '#94a3b8' }}>
+          {isImageTab ? 'Định dạng: PNG, JPG, JPEG, WEBP · Mọi tỷ lệ' : 'Định dạng: MP4, MOV, WEBM'}
+        </span>
+      </div>
+
+      {/* CLI Warning (Only if error) */}
+      {cliOk === false && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#b91c1c',
+            padding: '10px 14px',
+            borderRadius: 8,
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
+          <AlertCircle size={16} />
+          <span>{cliMsg || 'Công cụ xử lý watermark chưa sẵn sàng.'}</span>
+          <code style={{ marginLeft: 'auto', background: '#fee2e2', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>
+            npm install -g @pilio/gemini-watermark-remover sharp
+          </code>
         </div>
       )}
 
       {errorMsg && (
-        <div className="err-block">
-          <AlertCircle size={15} />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#b91c1c',
+            padding: '10px 14px',
+            borderRadius: 8,
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
+          <AlertCircle size={16} />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* Active Job Progress Card */}
+      {/* ── Active Job Card ── */}
       {currentJob && (
-        <div className="wm-progress-card">
-          <div className="wm-prog-header">
-            <div className="wm-queue-label">
-              <Film size={16} />
-              <span>
-                Tiến trình xử lý — Job{' '}
-                <code style={{ color: '#6366f1' }}>{currentJob.job_id}</code>
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            padding: 20,
+            marginBottom: 20,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                Tiến trình xử lý
+              </span>
+              <span style={{ fontSize: 12, color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: 4 }}>
+                Mã đợt: {currentJob.job_id}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  background:
+                    currentJob.status === 'done'
+                      ? '#ecfdf5'
+                      : currentJob.status === 'running'
+                      ? '#eff6ff'
+                      : '#fef2f2',
+                  color:
+                    currentJob.status === 'done'
+                      ? '#059669'
+                      : currentJob.status === 'running'
+                      ? '#2563eb'
+                      : '#dc2626',
+                }}
+              >
+                {currentJob.status === 'running'
+                  ? 'Đang xử lý'
+                  : currentJob.status === 'done'
+                  ? 'Hoàn thành'
+                  : 'Lỗi'}
               </span>
             </div>
-            <span className={`wm-badge wm-badge-${currentJob.status}`}>
-              {currentJob.status === 'running' && (
-                <Loader2 size={12} className="spin" />
-              )}
-              {currentJob.status === 'running'
-                ? 'Đang xử lý'
-                : currentJob.status === 'done'
-                ? 'Hoàn thành'
-                : currentJob.status === 'error'
-                ? 'Có lỗi'
-                : 'Chờ'}
-            </span>
-            {currentJob.failed > 0 && (
-              <span className="wm-prog-fail">
-                {currentJob.failed} file lỗi
-              </span>
-            )}
-            <div
-              style={{
-                marginLeft: 'auto',
-                display: 'flex',
-                gap: 8,
-                alignItems: 'center',
-              }}
-            >
-              {currentJob.done > 0 && (() => {
-                const pendingDriveCount = currentJob.videos.filter(
-                  v => v.status === 'done' && v.drive_status !== 'done'
-                ).length
-                const allDriveDone = currentJob.done > 0 && pendingDriveCount === 0
 
-                return (
-                  <>
-                    {driveStatus?.connected && (
-                      allDriveDone ? (
-                        <span
-                          style={{
-                            minHeight: 32,
-                            height: 32,
-                            fontSize: 12,
-                            padding: '0 12px',
-                            background: '#f0fdf4',
-                            color: '#16a34a',
-                            border: '1px solid #bbf7d0',
-                            borderRadius: 8,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            fontWeight: 600,
-                          }}
-                        >
-                          <CheckCircle2 size={14} /> Đã lên Drive ({currentJob.done}/{currentJob.done})
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn-p"
-                          onClick={() => handleSyncBatchToDrive(currentJob.job_id)}
-                          disabled={syncingDriveJobId === currentJob.job_id}
-                          style={{
-                            minHeight: 32,
-                            height: 32,
-                            fontSize: 12,
-                            padding: '0 12px',
-                            background: '#0284c7',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            color: '#fff',
-                            borderRadius: 8,
-                            border: 'none',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                          }}
-                          title="Tải/sao lưu toàn bộ các video sạch còn lại trong job này lên Google Drive"
-                        >
-                          {syncingDriveJobId === currentJob.job_id ? (
-                            <>
-                              <Loader2 size={13} className="spin" /> Đang tải Drive...
-                            </>
-                          ) : (
-                            <>
-                              <UploadCloud size={14} /> Đẩy lên Drive ({pendingDriveCount})
-                            </>
-                          )}
-                        </button>
-                      )
-                    )}
-                    <a
-                      href={`${API_URL}/api/watermark/download-all/${currentJob.job_id}`}
-                      download={`watermark_clean_${currentJob.job_id}.zip`}
-                      className="primary-button"
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {currentJob.done > 0 && (
+                <>
+                  {driveStatus?.connected && (
+                    <button
+                      type="button"
+                      onClick={() => handleSyncBatchToDrive(currentJob.job_id)}
+                      disabled={syncingDriveJobId === currentJob.job_id}
                       style={{
-                        minHeight: 32,
                         height: 32,
-                        fontSize: 12,
                         padding: '0 12px',
-                        textDecoration: 'none',
-                        background: '#16a34a',
+                        fontSize: 12,
+                        background: '#f8fafc',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 6,
+                        color: '#334155',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
                       }}
-                      title="Tải toàn bộ các video sạch trong job này về máy dưới dạng 1 file ZIP"
                     >
-                      <Download size={14} /> Tải tất cả ({currentJob.done} ZIP)
-                    </a>
-                  </>
-                )
-              })()}
+                      {syncingDriveJobId === currentJob.job_id ? (
+                        <Loader2 size={13} className="spin" />
+                      ) : (
+                        <UploadCloud size={13} />
+                      )}
+                      Đồng bộ Drive
+                    </button>
+                  )}
+                  <a
+                    href={`${API_URL}/api/watermark/download-all/${currentJob.job_id}`}
+                    download={`watermark_clean_${currentJob.job_id}.zip`}
+                    style={{
+                      height: 32,
+                      padding: '0 12px',
+                      fontSize: 12,
+                      background: '#0f172a',
+                      borderRadius: 6,
+                      color: '#fff',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <Download size={13} /> Tải tất cả ({currentJob.done} tệp ZIP)
+                  </a>
+                </>
+              )}
 
               <button
                 type="button"
-                className="wm-new-btn"
                 onClick={() => {
                   setCurrentJob(null)
-                  setQueue([])
+                  if (isImageTab) setImageQueue([])
+                  else setVideoQueue([])
+                }}
+                style={{
+                  height: 32,
+                  padding: '0 12px',
+                  fontSize: 12,
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#475569',
+                  fontWeight: 600,
+                  cursor: 'pointer',
                 }}
               >
-                + Mẻ mới
+                Tạo đợt mới
               </button>
             </div>
           </div>
 
-          <div className="wm-prog-bar-wrap">
+          {/* Minimal Progress Bar */}
+          <div style={{ width: '100%', height: 6, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden', marginBottom: 8 }}>
             <div
-              className="wm-prog-bar"
               style={{
                 width: `${
                   currentJob.total > 0
-                    ? ((currentJob.done + currentJob.failed) /
-                        currentJob.total) *
-                      100
+                    ? ((currentJob.done + currentJob.failed) / currentJob.total) * 100
                     : 0
                 }%`,
+                height: '100%',
+                background: currentJob.status === 'error' ? '#ef4444' : '#2563eb',
+                borderRadius: 999,
+                transition: 'width 0.3s ease',
               }}
             />
           </div>
 
-          <div className="wm-prog-pct">
-            {currentJob.done}/{currentJob.total} video hoàn thành (
-            {currentJob.total > 0
-              ? Math.round((currentJob.done / currentJob.total) * 100)
-              : 0}
-            %)
+          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+            Đã hoàn thành {currentJob.done}/{currentJob.total} tệp (
+            {currentJob.total > 0 ? Math.round((currentJob.done / currentJob.total) * 100) : 0}%)
           </div>
 
-          {/* Real-time Google Drive Sync Progress Banner */}
-          {(() => {
-            const driveDone = currentJob.videos.filter(v => v.status === 'done' && v.drive_status === 'done').length
-            const driveUploading = currentJob.videos.filter(v => v.drive_status === 'uploading').length
-            const totalClean = currentJob.videos.filter(v => v.status === 'done').length
-            const isSyncing = driveUploading > 0 || syncingDriveJobId === currentJob.job_id
-            const pct = totalClean > 0 ? Math.round((driveDone / totalClean) * 100) : 0
-
-            if (!isSyncing && driveDone === 0) return null
-
-            return (
-              <div
-                style={{
-                  marginTop: 12,
-                  background: isSyncing ? '#f0f9ff' : '#f0fdf4',
-                  border: `1px solid ${isSyncing ? '#bae6fd' : '#bbf7d0'}`,
-                  borderRadius: 10,
-                  padding: '10px 14px',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 12, fontWeight: 700, color: isSyncing ? '#0369a1' : '#15803d' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    {isSyncing ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
-                    {isSyncing ? 'Đang đồng bộ video lên Google Drive...' : 'Đã đồng bộ lên Google Drive'}
-                  </span>
-                  <span>{driveDone}/{totalClean} video ({pct}%)</span>
-                </div>
-                <div style={{ width: '100%', height: 7, background: isSyncing ? '#e0f2fe' : '#dcfce7', borderRadius: 999, overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${pct}%`,
-                      height: '100%',
-                      background: isSyncing ? '#0284c7' : '#16a34a',
-                      borderRadius: 999,
-                      transition: 'width 0.4s ease',
-                    }}
-                  />
-                </div>
-              </div>
-            )
-          })()}
-
-          {/* Videos in this job */}
-          <div className="wm-list" style={{ marginTop: 14 }}>
-            {currentJob.videos.map((v, i) => (
-              <div key={i} className={`wm-item wm-item-${v.status}`}>
-                <FileVideo size={16} className="wm-file-icon" />
-                <div className="wm-item-info">
-                  <div className="wm-item-name">{v.name}</div>
-                  <div className="wm-item-size">
-                    {fmtBytes(v.size_bytes)}
-                    {v.output_name && ` → fl1_clean/${v.output_name}`}
+          {/* Job Items List */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {currentJob.videos.map((v, i) => {
+              const isImg = v.media_type === 'image' || detectMediaType(v.name) === 'image'
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    background: '#f8fafc',
+                    borderRadius: 6,
+                    border: '1px solid #f1f5f9',
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    {isImg ? <FileImage size={16} color="#64748b" /> : <FileVideo size={16} color="#64748b" />}
+                    <span style={{ fontWeight: 500, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {v.name}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>{fmtBytes(v.size_bytes)}</span>
                   </div>
-                </div>
-                <div className="wm-item-status">
-                  {v.status === 'pending' && (
-                    <span className="wm-st wm-st-pending">Đang chờ</span>
-                  )}
-                  {v.status === 'running' && (
-                    <span className="wm-st wm-st-running">
-                      <Loader2 size={13} className="spin" />
-                      {v.processed_frames != null
-                        ? `${v.processed_frames}${
-                            v.frame_estimate
-                              ? `/${v.frame_estimate}`
-                              : ''
-                          } frames`
-                        : 'Đang xóa...'}
-                    </span>
-                  )}
-                  {v.status === 'done' && (
-                    <span className="wm-st wm-st-done">
-                      <CheckCircle2 size={13} /> Sạch 100%
-                    </span>
-                  )}
-                  {v.status === 'error' && (
-                    <span
-                      className="wm-st wm-st-error"
-                      title={v.error || 'Lỗi xử lý'}
-                    >
-                      <XCircle size={13} /> Lỗi
-                    </span>
-                  )}
-                  {v.status === 'done' && (
-                    <>
-                      {v.drive_status === 'uploading' || syncingVideoName === v.name ? (
-                        <span
-                          className="wm-st"
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {v.status === 'running' && (
+                      <span style={{ fontSize: 12, color: '#2563eb', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Loader2 size={12} className="spin" />
+                        {v.processed_frames != null ? `${v.processed_frames}/${v.frame_estimate || ''} frames` : 'Đang xử lý...'}
+                      </span>
+                    )}
+
+                    {v.status === 'done' && (
+                      <>
+                        <span style={{ fontSize: 12, color: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <CheckCircle2 size={13} /> Hoàn thành
+                        </span>
+
+                        {isImg && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedPreviewImage({
+                                job_id: currentJob.job_id,
+                                item: v,
+                                previewType: 'clean',
+                              })
+                            }
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              fontSize: 11,
+                              background: '#fff',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: 4,
+                              color: '#334155',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Eye size={12} /> So sánh
+                          </button>
+                        )}
+
+                        {v.drive_status === 'done' && v.drive_url && (
+                          <a
+                            href={v.drive_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              fontSize: 11,
+                              background: '#fff',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: 4,
+                              color: '#2563eb',
+                              textDecoration: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <ExternalLink size={11} /> Drive
+                          </a>
+                        )}
+
+                        <a
+                          href={`${API_URL}/api/watermark/download/${currentJob.job_id}/${encodeURIComponent(v.name)}`}
+                          download={v.name}
                           style={{
-                            background: '#e0f2fe',
-                            color: '#0284c7',
-                            borderColor: '#bae6fd',
+                            height: 26,
+                            padding: '0 8px',
                             fontSize: 11,
-                            padding: '3px 8px',
+                            background: '#fff',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: 4,
+                            color: '#334155',
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
                           }}
                         >
-                          <Loader2 size={12} className="spin" /> Đang tải Drive...
-                        </span>
-                      ) : v.drive_status === 'done' && v.drive_url ? (
-                        <a
-                          href={v.drive_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="wm-drive-btn"
-                          title="Mở video trên Google Drive ↗"
-                        >
-                          <ExternalLink size={12} /> Drive ↗
+                          <Download size={12} /> Tải về
                         </a>
-                      ) : driveStatus?.connected ? (
-                        <button
-                          type="button"
-                          className="wm-dl"
-                          onClick={() => handleSyncSingleToDrive(currentJob.job_id, v.name)}
-                          disabled={syncingVideoName === v.name || syncingDriveJobId === currentJob.job_id}
-                          title="Đẩy video này lên Google Drive"
-                          style={{ color: '#0284c7', background: '#f0f9ff', borderColor: '#bae6fd', cursor: 'pointer' }}
-                        >
-                          <UploadCloud size={14} />
-                        </button>
-                      ) : null}
+                      </>
+                    )}
 
-                      <a
-                        href={`${API_URL}/api/watermark/download/${
-                          currentJob.job_id
-                        }/${encodeURIComponent(v.name)}`}
-                        download={v.name}
-                        className="wm-dl"
-                        title="Tải video sạch về máy (Local)"
-                      >
-                        <Download size={14} />
-                      </a>
-                    </>
-                  )}
-
+                    {v.status === 'error' && (
+                      <span style={{ fontSize: 12, color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <XCircle size={13} /> Lỗi
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* Upload / Queue Card */}
+      {/* ── Main Input & Queue Area ── */}
       {!currentJob && (
-        <div className="settings-card">
-          <div className="integration-title">
-            <div className="gemini-icon">
-              <Eraser size={18} />
-            </div>
-            <div>
-              <h2>Chọn Video cần xóa Watermark</h2>
-              <p>Kéo thả nhiều file MP4 từ máy tính hoặc bấm để duyệt chọn.</p>
-            </div>
-          </div>
-
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            padding: 20,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+            marginBottom: 20,
+          }}
+        >
+          {/* Dropzone */}
           <div
-            className={`wm-dropzone ${
-              isDragging ? 'wm-dropzone-over' : ''
-            } ${cliOk === false ? 'wm-dropzone-disabled' : ''}`}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '36px 20px',
+              background: isDragging ? '#f8fafc' : '#fcfcfd',
+              border: `2px dashed ${isDragging ? '#94a3b8' : '#e2e8f0'}`,
+              borderRadius: 10,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
             onDragOver={e => {
               e.preventDefault()
               setIsDragging(true)
@@ -692,101 +857,170 @@ export function WatermarkPage() {
             onDrop={e => {
               e.preventDefault()
               setIsDragging(false)
-              handleAddFiles(e.dataTransfer.files)
+              if (isImageTab) handleAddImageFiles(e.dataTransfer.files)
+              else handleAddVideoFiles(e.dataTransfer.files)
             }}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (isImageTab) imageFileInputRef.current?.click()
+              else videoFileInputRef.current?.click()
+            }}
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="video/mp4"
-              multiple
-              style={{ display: 'none' }}
-              onChange={e => {
-                if (e.target.files) handleAddFiles(e.target.files)
-              }}
-            />
-            <Upload size={32} className="wm-drop-icon" />
-            <div className="wm-drop-text">
-              <strong>Kéo thả các file video MP4 vào đây</strong>
-              <span>hoặc bấm để chọn từ máy tính</span>
+            {isImageTab ? (
+              <input
+                ref={imageFileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                multiple
+                style={{ display: 'none' }}
+                onChange={e => {
+                  if (e.target.files) handleAddImageFiles(e.target.files)
+                }}
+              />
+            ) : (
+              <input
+                ref={videoFileInputRef}
+                type="file"
+                accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+                multiple
+                style={{ display: 'none' }}
+                onChange={e => {
+                  if (e.target.files) handleAddVideoFiles(e.target.files)
+                }}
+              />
+            )}
+
+            <UploadCloud size={30} color="#94a3b8" style={{ marginBottom: 10 }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', marginBottom: 4 }}>
+              Kéo thả {isImageTab ? 'hình ảnh' : 'video'} vào đây hoặc bấm để chọn tệp
+            </div>
+            <div style={{ fontSize: 12, color: '#94a3b8' }}>
+              {isImageTab
+                ? 'Hỗ trợ PNG, JPG, JPEG, WEBP · Mọi tỷ lệ 9:16, 1:1, 16:9, 3:4'
+                : 'Hỗ trợ MP4, MOV, WEBM'}
             </div>
           </div>
 
+          {/* Action Bar */}
           <div
-            className="settings-actions"
-            style={{ justifyContent: 'space-between' }}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: 16,
+              flexWrap: 'wrap',
+              gap: 10,
+            }}
           >
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 type="button"
-                className="primary-button"
-                onClick={handleStartProcess}
-                disabled={
-                  queue.length === 0 || isProcessing || cliOk === false
-                }
+                onClick={() => handleStartProcess(activeQueue, isImageTab)}
+                disabled={activeQueue.length === 0 || isProcessing || cliOk === false}
+                style={{
+                  height: 36,
+                  padding: '0 16px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  background: activeQueue.length === 0 ? '#94a3b8' : '#0f172a',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: activeQueue.length === 0 ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
               >
                 {isProcessing ? (
-                  <Loader2 size={16} className="spin" />
+                  <Loader2 size={14} className="spin" />
                 ) : (
-                  <Eraser size={16} />
+                  <Play size={13} fill="currentColor" />
                 )}
-                Bắt đầu xóa watermark ({queue.length} video)
+                Bắt đầu xử lý ({activeQueue.length} {isImageTab ? 'ảnh' : 'video'})
               </button>
+
               <button
                 type="button"
-                className="chrome-button"
-                onClick={handleImportPath}
+                onClick={isImageTab ? handleImportImagePath : handleImportVideoPath}
                 disabled={isProcessing}
+                style={{
+                  height: 36,
+                  padding: '0 14px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  background: '#fff',
+                  color: '#334155',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
               >
-                <FolderOpen size={15} /> Nhập đường dẫn file
+                <FolderOpen size={14} /> Nhập đường dẫn thư mục...
               </button>
             </div>
 
-            {queue.length > 0 && (
+            {activeQueue.length > 0 && (
               <button
                 type="button"
-                className="chrome-button"
-                onClick={() => setQueue([])}
-                style={{ color: '#ef4444' }}
+                onClick={() => (isImageTab ? setImageQueue([]) : setVideoQueue([]))}
+                style={{
+                  height: 36,
+                  padding: '0 12px',
+                  fontSize: 12,
+                  color: '#ef4444',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
               >
-                <Trash2 size={14} /> Xóa danh sách
+                <Trash2 size={13} /> Xóa danh sách
               </button>
             )}
           </div>
 
-          {/* Queue List */}
-          {queue.length > 0 && (
-            <div className="wm-queue" style={{ marginTop: 20 }}>
-              <div className="wm-queue-header">
-                <div className="wm-queue-label">
-                  <Film size={15} />
-                  <span>
-                    Danh sách chờ xóa watermark ({queue.length} video)
-                  </span>
-                </div>
+          {/* Queue Items */}
+          {activeQueue.length > 0 && (
+            <div style={{ marginTop: 16, borderTop: '1px solid #f1f5f9', paddingTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 8 }}>
+                Danh sách chờ ({activeQueue.length} tệp)
               </div>
-
-              <div className="wm-list">
-                {queue.map((q, idx) => (
-                  <div key={idx} className="wm-item">
-                    <FileVideo size={16} className="wm-file-icon" />
-                    <div className="wm-item-info">
-                      <div className="wm-item-name">{q.name}</div>
-                      <div className="wm-item-size">
-                        {q.path || '—'}{' '}
-                        {q.size > 0 ? `· ${fmtBytes(q.size)}` : ''}
-                      </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {activeQueue.map((q, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      background: '#f8fafc',
+                      borderRadius: 6,
+                      border: '1px solid #f1f5f9',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      {isImageTab ? <FileImage size={15} color="#64748b" /> : <FileVideo size={15} color="#64748b" />}
+                      <span style={{ fontSize: 13, fontWeight: 500, color: '#0f172a' }}>{q.name}</span>
+                      <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                        {q.size > 0 ? fmtBytes(q.size) : q.path}
+                      </span>
                     </div>
+
                     <button
                       type="button"
-                      className="wm-remove-btn"
-                      onClick={() =>
-                        setQueue(queue.filter((_, i) => i !== idx))
-                      }
-                      title="Bỏ file này"
+                      onClick={() => {
+                        if (isImageTab) setImageQueue(imageQueue.filter((_, i) => i !== idx))
+                        else setVideoQueue(videoQueue.filter((_, i) => i !== idx))
+                      }}
+                      style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 ))}
@@ -796,203 +1030,291 @@ export function WatermarkPage() {
         </div>
       )}
 
-      {/* History Jobs Card */}
-      {historyJobs.length > 0 && (
-        <div className="settings-card" style={{ marginTop: 22 }}>
-          <div className="integration-title">
-            <div className="gemini-icon">
-              <Clock3 size={17} />
+      {/* ── History Section ── */}
+      {filteredHistoryJobs.length > 0 && (
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            padding: 20,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={16} color="#64748b" />
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                Lịch sử xử lý {isImageTab ? 'hình ảnh' : 'video'} ({filteredHistoryJobs.length} đợt)
+              </span>
             </div>
-            <div
+
+            <button
+              type="button"
+              onClick={loadHistory}
               style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                width: '100%',
+                height: 28,
+                padding: '0 10px',
+                fontSize: 12,
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 6,
+                color: '#64748b',
+                cursor: 'pointer',
+                display: 'inline-flex',
                 alignItems: 'center',
+                gap: 4,
               }}
             >
-              <div>
-                <h2>Lịch sử các đợt xử lý ({historyJobs.length})</h2>
-                <p>Xem lại các đợt xóa watermark đã hoàn thành gần đây.</p>
-              </div>
-              <button
-                type="button"
-                className="chrome-button"
-                onClick={loadHistory}
-                style={{ height: 34, padding: '0 12px' }}
-              >
-                <RefreshCw size={13} /> Làm mới
-              </button>
-            </div>
+              <RefreshCw size={12} /> Làm mới
+            </button>
           </div>
 
-          <div className="voices-list">
-            {historyJobs.map(job => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {filteredHistoryJobs.map(job => (
               <div
                 key={job.job_id}
-                className="voice-item"
-                style={{ alignItems: 'center' }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: '#f8fafc',
+                  borderRadius: 8,
+                  border: '1px solid #f1f5f9',
+                }}
               >
-                <div className="voice-item-info">
-                  <strong>
-                    Batch {job.job_id}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>
+                      Đợt {job.job_id}
+                    </span>
                     <span
-                      className={`wm-badge wm-badge-${job.status}`}
                       style={{
-                        marginLeft: 8,
-                        fontSize: 10,
-                        padding: '2px 7px',
+                        fontSize: 11,
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                        background: job.status === 'done' ? '#ecfdf5' : '#f1f5f9',
+                        color: job.status === 'done' ? '#059669' : '#64748b',
+                        fontWeight: 500,
                       }}
                     >
-                      {job.status === 'done'
-                        ? 'Hoàn thành'
-                        : job.status === 'running'
-                        ? 'Đang chạy'
-                        : job.status}
+                      {job.status === 'done' ? 'Hoàn thành' : job.status}
                     </span>
-                  </strong>
-                  <span>
-                    {job.done}/{job.total} video xong ·{' '}
-                    {new Date(job.created_at).toLocaleString()}
-                    {job.videos.length > 0
-                      ? ` · ${job.videos[0].name}${
-                          job.videos.length > 1
-                            ? ` (+${job.videos.length - 1})`
-                            : ''
-                        }`
-                      : ''}
-                  </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>
+                    {job.done}/{job.total} tệp · {new Date(job.created_at).toLocaleString()}
+                    {job.videos.length > 0 && ` · ${job.videos[0].name}${job.videos.length > 1 ? ` (+${job.videos.length - 1})` : ''}`}
+                  </div>
                 </div>
-                {(() => {
-                  const driveDone = job.videos.filter(
-                    v => v.status === 'done' && v.drive_status === 'done'
-                  ).length
-                  const driveUploading = job.videos.filter(
-                    v => v.drive_status === 'uploading'
-                  ).length
-                  const totalClean = job.videos.filter(
-                    v => v.status === 'done'
-                  ).length
-                  const isSyncing = driveUploading > 0 || syncingDriveJobId === job.job_id
-                  const allJobDone = totalClean > 0 && driveDone === totalClean
-                  const syncPct = totalClean > 0 ? Math.round((driveDone / totalClean) * 100) : 0
 
-                  return (
-                    <div className="voice-item-actions">
-                      {driveStatus?.connected && totalClean > 0 && (
-                        isSyncing ? (
-                          <div
-                            style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 4,
-                              minWidth: 185,
-                              background: '#f0f9ff',
-                              border: '1px solid #bae6fd',
-                              borderRadius: 8,
-                              padding: '5px 10px',
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, fontWeight: 700, color: '#0284c7' }}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                <Loader2 size={11} className="spin" /> Đang đẩy Drive...
-                              </span>
-                              <span>{driveDone}/{totalClean} ({syncPct}%)</span>
-                            </div>
-                            <div style={{ width: '100%', height: 5, background: '#e0f2fe', borderRadius: 999, overflow: 'hidden' }}>
-                              <div
-                                style={{
-                                  width: `${syncPct}%`,
-                                  height: '100%',
-                                  background: '#0284c7',
-                                  borderRadius: 999,
-                                  transition: 'width 0.3s ease',
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ) : allJobDone ? (
-                          <button
-                            type="button"
-                            className="chrome-button"
-                            onClick={() => handleSyncBatchToDrive(job.job_id, true)}
-                            disabled={syncingDriveJobId === job.job_id}
-                            style={{
-                              height: 32,
-                              padding: '0 10px',
-                              fontSize: 11,
-                              color: '#16a34a',
-                              borderColor: '#bbf7d0',
-                              background: '#f0fdf4',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 5,
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                            }}
-                            title="Bấm nếu bạn muốn đẩy lại toàn bộ video sang thư mục Google Drive mới"
-                          >
-                            <CheckCircle2 size={12} /> Drive ({driveDone}/{totalClean}) · Đồng bộ lại
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="chrome-button"
-                            onClick={() => handleSyncBatchToDrive(job.job_id, true)}
-                            disabled={syncingDriveJobId === job.job_id}
-                            style={{
-                              height: 32,
-                              padding: '0 10px',
-                              fontSize: 11,
-                              color: '#0284c7',
-                              borderColor: '#bae6fd',
-                              background: '#f0f9ff',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 5,
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                            }}
-                            title="Bấm để tải toàn bộ video sạch lên thư mục Google Drive hiện tại"
-                          >
-                            <UploadCloud size={12} /> Đẩy lên Drive ({totalClean - driveDone} còn lại)
-                          </button>
-                        )
-                      )}
-                      {job.done > 0 && (
-                        <a
-                          href={`${API_URL}/api/watermark/download-all/${job.job_id}`}
-                          download={`watermark_clean_${job.job_id}.zip`}
-                          className="chrome-button"
-                          style={{
-                            height: 32,
-                            padding: '0 10px',
-                            fontSize: 11,
-                            textDecoration: 'none',
-                          }}
-                          title="Tải tất cả file sạch dạng ZIP"
-                        >
-                          <Download size={12} /> ZIP ({job.done})
-                        </a>
-                      )}
-                      <button
-                        type="button"
-                        className="primary-button"
-                        onClick={() => {
-                          setCurrentJob(job)
-                          setQueue([])
-                        }}
-                      >
-                        Xem chi tiết
-                      </button>
-                    </div>
-                  )
-                })()}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {job.done > 0 && (
+                    <a
+                      href={`${API_URL}/api/watermark/download-all/${job.job_id}`}
+                      download={`watermark_clean_${job.job_id}.zip`}
+                      style={{
+                        height: 28,
+                        padding: '0 10px',
+                        fontSize: 12,
+                        background: '#fff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 6,
+                        color: '#334155',
+                        textDecoration: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <Download size={12} /> ZIP ({job.done})
+                    </a>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentJob(job)
+                      if (isImageTab) setImageQueue([])
+                      else setVideoQueue([])
+                    }}
+                    style={{
+                      height: 28,
+                      padding: '0 10px',
+                      fontSize: 12,
+                      background: '#0f172a',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Xem chi tiết
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
-    </section>
+
+      {/* ── Before / After Modal ── */}
+      {selectedPreviewImage && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+          onClick={() => setSelectedPreviewImage(null)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 12,
+              width: '100%',
+              maxWidth: 780,
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+              overflow: 'hidden',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: '12px 18px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>
+                So sánh ảnh: {selectedPreviewImage.item.name}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <a
+                  href={`${API_URL}/api/watermark/download/${selectedPreviewImage.job_id}/${encodeURIComponent(
+                    selectedPreviewImage.item.name
+                  )}`}
+                  download={selectedPreviewImage.item.name}
+                  style={{
+                    height: 28,
+                    padding: '0 10px',
+                    fontSize: 12,
+                    background: '#0f172a',
+                    color: '#fff',
+                    borderRadius: 6,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <Download size={12} /> Tải ảnh sạch
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPreviewImage(null)}
+                  style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4 }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Toggle */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                gap: 8,
+                padding: '8px 16px',
+                background: '#f8fafc',
+                borderBottom: '1px solid #e2e8f0',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedPreviewImage(prev =>
+                    prev ? { ...prev, previewType: 'clean' } : null
+                  )
+                }
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  background: selectedPreviewImage.previewType === 'clean' ? '#0f172a' : 'transparent',
+                  color: selectedPreviewImage.previewType === 'clean' ? '#fff' : '#64748b',
+                  cursor: 'pointer',
+                }}
+              >
+                Ảnh đã làm sạch
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedPreviewImage(prev =>
+                    prev ? { ...prev, previewType: 'orig' } : null
+                  )
+                }
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  background: selectedPreviewImage.previewType === 'orig' ? '#0f172a' : 'transparent',
+                  color: selectedPreviewImage.previewType === 'orig' ? '#fff' : '#64748b',
+                  cursor: 'pointer',
+                }}
+              >
+                Ảnh gốc có watermark
+              </button>
+            </div>
+
+            {/* Preview Box */}
+            <div
+              style={{
+                padding: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#0f172a',
+                overflow: 'auto',
+                minHeight: 360,
+                maxHeight: '65vh',
+              }}
+            >
+              <img
+                src={`${API_URL}/api/watermark/preview/${selectedPreviewImage.job_id}/${encodeURIComponent(
+                  selectedPreviewImage.item.name
+                )}?type=${selectedPreviewImage.previewType}&t=${Date.now()}`}
+                alt={selectedPreviewImage.item.name}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '60vh',
+                  objectFit: 'contain',
+                  borderRadius: 4,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

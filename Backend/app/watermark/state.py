@@ -19,9 +19,10 @@ JOBS_FILE = DATA_DIR / "jobs.json"
 
 @dataclass
 class VideoState:
-    """Trạng thái xử lý 1 file video."""
+    """Trạng thái xử lý 1 file media (video hoặc ảnh)."""
     name: str                          # tên file (basename)
     size_bytes: int
+    media_type: str = "video"         # "video" | "image"
     status: str = "pending"           # pending | running | done | error
     input_path: str = ""              # đường dẫn gốc trên disk
     output_path: str | None = None    # đường dẫn file output

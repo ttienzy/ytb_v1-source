@@ -4,9 +4,10 @@ from pydantic import BaseModel
 
 
 class VideoItem(BaseModel):
-    """Thông tin 1 file video trong thư mục nguồn."""
-    name: str                       # tên file, vd: Cooking_beef_fried_rice_202608232323.mp4
+    """Thông tin 1 file media (video hoặc ảnh) trong thư mục nguồn."""
+    name: str                       # tên file, vd: image.png hoặc video.mp4
     size_bytes: int                 # kích thước gốc
+    media_type: str = "video"       # "video" | "image"
     status: str = "pending"        # pending | running | done | error
     output_name: str | None = None  # tên file output sau khi xử lý
     error: str | None = None        # thông báo lỗi nếu có

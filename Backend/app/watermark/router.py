@@ -33,10 +33,29 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+SUPPORTED_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _get_media_type(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext == ".png":
+        return "image/png"
+    elif ext in [".jpg", ".jpeg"]:
+        return "image/jpeg"
+    elif ext == ".webp":
+        return "image/webp"
+    elif ext == ".mov":
+        return "video/quicktime"
+    elif ext == ".webm":
+        return "video/webm"
+    return "video/mp4"
+
+
 def _video_item(v: wstate.VideoState) -> VideoItem:
     return VideoItem(
         name=v.name,
         size_bytes=v.size_bytes,
+        media_type=getattr(v, "media_type", "video"),
         status=v.status,
         output_name=v.output_name,
         error=v.error,
@@ -86,7 +105,7 @@ def check_cli() -> dict:
 
 @router.post("/process", status_code=202)
 async def process_paths(req: ProcessRequest) -> JSONResponse:
-    """Nhận danh sách đường dẫn file → xử lý watermark → trả job_id.
+    """Nhận danh sách đường dẫn file/thư mục → xử lý watermark (ảnh + video) → trả job_id.
 
     Electron renderer gọi endpoint này với file.path của từng file được chọn.
     Không upload — gwr đọc trực tiếp từ disk.
@@ -101,7 +120,7 @@ async def process_paths(req: ProcessRequest) -> JSONResponse:
     if not req.paths:
         raise HTTPException(status_code=400, detail="Danh sách paths rỗng.")
 
-    # Chuẩn hoá và lọc các file MP4 hợp lệ (hỗ trợ cả đường dẫn thư mục)
+    # Chuẩn hoá và lọc các file video & ảnh hợp lệ (hỗ trợ cả đường dẫn thư mục)
     valid: list[str] = []
     for raw in req.paths:
         raw_str = raw.strip().strip('"').strip("'")
@@ -110,10 +129,11 @@ async def process_paths(req: ProcessRequest) -> JSONResponse:
         p = Path(raw_str)
         if p.exists():
             if p.is_dir():
-                # Quét tất cả file MP4 trong thư mục
-                mp4s = [str(f) for f in p.glob("*.mp4") if f.is_file()]
-                valid.extend(mp4s)
-            elif p.is_file() and p.name.lower().endswith(".mp4"):
+                # Quét tất cả file video & ảnh trong thư mục
+                for f in p.iterdir():
+                    if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+                        valid.append(str(f))
+            elif p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS:
                 valid.append(str(p))
 
     # Loại bỏ phần tử trùng lặp giữ nguyên thứ tự
@@ -122,7 +142,7 @@ async def process_paths(req: ProcessRequest) -> JSONResponse:
     if not valid:
         raise HTTPException(
             status_code=400,
-            detail=f"Không tìm thấy file MP4 hợp lệ tại các đường dẫn: {req.paths}",
+            detail=f"Không tìm thấy file video/ảnh hợp lệ (.mp4, .mov, .png, .jpg, .webp) tại các đường dẫn: {req.paths}",
         )
 
     job = service.create_batch_job_from_paths(valid)
@@ -138,7 +158,7 @@ async def process_paths(req: ProcessRequest) -> JSONResponse:
 
 @router.post("/upload", status_code=202)
 async def process_upload(files: list[UploadFile] = File(...)) -> JSONResponse:
-    """Upload file MP4 → xử lý watermark → trả job_id.
+    """Upload file video hoặc ảnh → xử lý watermark → trả job_id.
     
     Dành cho web browser không có quyền truy cập filesystem.
     Lưu file vào Data/watermark/uploads/{job_id}/ rồi xử lý.
@@ -152,10 +172,13 @@ async def process_upload(files: list[UploadFile] = File(...)) -> JSONResponse:
     if not files:
         raise HTTPException(status_code=400, detail="Không có file được upload.")
     
-    # Filter MP4 only
-    mp4_files = [f for f in files if f.filename and f.filename.lower().endswith('.mp4')]
-    if not mp4_files:
-        raise HTTPException(status_code=400, detail="Không có file MP4 hợp lệ.")
+    # Filter valid video and image files
+    valid_files = [
+        f for f in files
+        if f.filename and Path(f.filename).suffix.lower() in SUPPORTED_EXTENSIONS
+    ]
+    if not valid_files:
+        raise HTTPException(status_code=400, detail="Không có file video hoặc ảnh hợp lệ (.mp4, .mov, .png, .jpg, .webp).")
     
     # Create job directory
     job_id = service._generate_job_id()
@@ -164,7 +187,7 @@ async def process_upload(files: list[UploadFile] = File(...)) -> JSONResponse:
     
     # Save uploaded files
     saved_paths: list[str] = []
-    for upload_file in mp4_files:
+    for upload_file in valid_files:
         dest = job_dir / upload_file.filename
         try:
             content = await upload_file.read()
@@ -202,6 +225,27 @@ def list_jobs() -> list[BatchJob]:
     return [_job_out(j) for j in jobs]
 
 
+@router.get("/preview/{job_id}/{filename}")
+def preview_file(job_id: str, filename: str, type: str = "clean"):
+    """Xem trước file gốc (type=orig) hoặc file đã xử lý (type=clean)."""
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Tên file không hợp lệ.")
+
+    job = wstate.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job.")
+
+    video = next((v for v in job.videos if v.name == filename), None)
+    if not video:
+        raise HTTPException(status_code=404, detail=f"{filename} không tìm thấy.")
+
+    target_path = Path(video.input_path) if type == "orig" else (Path(video.output_path) if video.output_path else None)
+    if not target_path or not target_path.exists():
+        raise HTTPException(status_code=404, detail="File không còn tồn tại trên disk.")
+
+    return FileResponse(target_path, media_type=_get_media_type(target_path.name))
+
+
 @router.get("/download/{job_id}/{filename}")
 def download_file(job_id: str, filename: str):
     """Tải file đã xử lý — tìm theo job_id + filename."""
@@ -221,7 +265,7 @@ def download_file(job_id: str, filename: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="File output không còn tồn tại.")
 
-    return FileResponse(path, media_type="video/mp4", filename=filename)
+    return FileResponse(path, media_type=_get_media_type(filename), filename=filename)
 
 
 @router.get("/download-all/{job_id}")

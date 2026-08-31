@@ -1,6 +1,7 @@
 export type WatermarkVideoItem = {
   name: string
   size_bytes: number
+  media_type?: 'video' | 'image'
   status: 'pending' | 'running' | 'done' | 'error'
   output_name?: string | null
   error?: string | null
@@ -27,5 +28,6 @@ export type QueuedFile = {
   path: string // đường dẫn native hoặc tên file
   name: string
   size: number
+  media_type?: 'video' | 'image'
   file?: File // File object từ browser (cho upload mode)
 }
