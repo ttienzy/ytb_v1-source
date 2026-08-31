@@ -153,9 +153,9 @@ def extract_transcript_entries(raw_data: bytes | str | dict | list) -> list[dict
 def build_dynamic_chunks(
     entries: list[dict[str, Any]],
     video_url: str,
-    target_chunk_dur: int = 600,
+    target_chunk_dur: int = 240,
 ) -> list[dict[str, Any]]:
-    """Chia danh sách entries thành N chunks động với quota co giãn tương ứng."""
+    """Chia danh sách entries thành N chunks động (mỗi chunk ~4 phút) với quota co giãn tương ứng."""
     if not entries:
         return []
 
@@ -163,9 +163,9 @@ def build_dynamic_chunks(
     last_sec = entries[-1]["start_sec"]
     total_duration_sec = max(last_sec + 15, 60)
 
-    # Tính số lượng chunks N (mỗi chunk ~10 phút)
+    # Tính số lượng chunks N (mỗi chunk ~4 phút / 240s)
     num_chunks = max(1, round(total_duration_sec / target_chunk_dur))
-    if num_chunks > 1 and (total_duration_sec / num_chunks) < 300:
+    if num_chunks > 1 and (total_duration_sec / num_chunks) < 180:
         num_chunks = max(1, math.floor(total_duration_sec / target_chunk_dur))
 
     chunk_window_sec = total_duration_sec / num_chunks
@@ -191,11 +191,11 @@ def build_dynamic_chunks(
         raw_text_lines = [f"[{e['start_sec']}s] {e['text']}" for e in chunk_entries]
         raw_text = "\n".join(raw_text_lines)
 
-        # Tính dynamic quota cho chunk này
+        # Tính dynamic quota cho chunk ~4 phút (nhịp 5-9s/segment -> 8-14 segments)
         chunk_dur = max(c_end - c_start, 60)
-        ratio = chunk_dur / 600.0  # Chuẩn hoá theo 10 phút
-        min_segs = max(3, round(12 * ratio))
-        max_segs = max(min_segs + 2, round(26 * ratio))
+        ratio = chunk_dur / 240.0
+        min_segs = max(4, round(8 * ratio))
+        max_segs = max(min_segs + 2, round(14 * ratio))
 
         chunks.append({
             "chunk_index": i,

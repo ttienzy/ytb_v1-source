@@ -27,6 +27,7 @@ from app.recap.schemas import (
     JobPublishFacebookRequest,
     JobPublishYouTubeRequest,
 )
+from app.recap.ytdlp import login_youtube, yt_login_status
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
 
