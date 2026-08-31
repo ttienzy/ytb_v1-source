@@ -71,6 +71,17 @@ class GDriveFolderItem(BaseModel):
     modified_time: str = ""
 
 
+class VideoPublishedChannelInfo(BaseModel):
+    platform: str  # "tiktok" | "facebook" | "youtube"
+    channel_name: str
+    channel_id: str | None = None
+    account_email: str | None = None
+    published_at: str | None = None
+    status: str = "scheduled"  # "scheduled" | "published" | "success"
+    task_id: str | None = None
+    post_url: str | None = None
+
+
 class GDriveVideoItem(BaseModel):
     id: str
     name: str
@@ -82,6 +93,7 @@ class GDriveVideoItem(BaseModel):
     duration_seconds: int = 10
     width: int | None = None
     height: int | None = None
+    published_channels: list[VideoPublishedChannelInfo] = []
 
 
 class GDriveVideoListResponse(BaseModel):

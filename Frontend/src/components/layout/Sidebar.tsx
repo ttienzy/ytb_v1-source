@@ -6,11 +6,14 @@ import {
 } from 'lucide-react'
 import { navigation } from '../../shared/constants'
 
+import type { PublisherDailySummary } from '../../features/monitor/types'
+
 type SidebarProps = {
   activePage: string
   setActivePage: (page: string) => void
   collapsed: boolean
   setCollapsed: (collapsed: boolean) => void
+  summary?: PublisherDailySummary | null
 }
 
 export function Sidebar({
@@ -18,7 +21,16 @@ export function Sidebar({
   setActivePage,
   collapsed,
   setCollapsed,
+  summary,
 }: SidebarProps) {
+  // Check if Pippit or YouTube has unposted channels
+  const unpostedPippit = summary?.channels.some(
+    c => (c.platform === 'tiktok' || c.platform === 'facebook') && c.status === 'unposted'
+  )
+  const unpostedYoutube = summary?.channels.some(
+    c => c.platform === 'youtube' && c.status === 'unposted'
+  )
+
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
       <div className="brand-row">
@@ -51,17 +63,40 @@ export function Sidebar({
 
       <nav className="nav-list">
         {!collapsed && <span className="nav-label">MENU</span>}
-        {navigation.map(({ label, icon: Icon }) => (
-          <button
-            type="button"
-            key={label}
-            className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`}
-            onClick={() => setActivePage(label)}
-          >
-            <Icon size={18} />
-            <span className={collapsed ? 'sr-only' : ''}>{label}</span>
-          </button>
-        ))}
+        {navigation.map(({ label, icon: Icon }) => {
+          const hasUnposted =
+            (label === 'Lên lịch Pippit' && unpostedPippit) ||
+            (label === 'Lên lịch Youtube' && unpostedYoutube)
+
+          return (
+            <button
+              type="button"
+              key={label}
+              className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`}
+              onClick={() => setActivePage(label)}
+              style={{ position: 'relative' }}
+            >
+              <Icon size={18} />
+              <span className={collapsed ? 'sr-only' : ''}>{label}</span>
+              {hasUnposted && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    right: collapsed ? 8 : 12,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    backgroundColor: '#e11d48',
+                    boxShadow: '0 0 0 2px #fff',
+                  }}
+                  title="Có kênh chưa đăng bài hôm nay"
+                />
+              )}
+            </button>
+          )
+        })}
       </nav>
 
       <div className="sidebar-footer">

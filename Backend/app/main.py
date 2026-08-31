@@ -25,6 +25,7 @@ from app.recap.router import router as recap_router
 from app.routers.health import router as health_router
 from app.voices.router import router as voices_router
 from app.watermark.router import router as watermark_router
+from app.publisher_monitor.router import router as monitor_router
 
 
 
@@ -41,6 +42,7 @@ app.include_router(mailtm_router)
 app.include_router(pippit_router)
 app.include_router(gdrive_router)
 app.include_router(youtube_router)
+app.include_router(monitor_router)
 
 
 

@@ -16,6 +16,13 @@ export type DriveVideo = {
   duration_seconds?: number
   width?: number
   height?: number
+  published_channels?: {
+    platform: string
+    channel_name: string
+    channel_id?: string
+    published_at?: string
+    status?: string
+  }[]
 }
 
 export type PippitFacebookPage = {

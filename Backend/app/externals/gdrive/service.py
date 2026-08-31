@@ -24,6 +24,7 @@ from app.externals.gdrive.schemas import (
     GDriveUploadResponse,
     GDriveVideoItem,
     GDriveVideoListResponse,
+    VideoPublishedChannelInfo,
 )
 
 logger = logging.getLogger(__name__)
@@ -472,8 +473,104 @@ def list_folders(parent_id: str = "root", search: str = "") -> list[GDriveFolder
         raise HTTPException(status_code=500, detail=f"Lấy danh sách thư mục thất bại: {exc}") from exc
 
 
+def _clean_video_key(s: str | None) -> str:
+    if not s:
+        return ""
+    import re
+    s = str(s).lower().strip()
+    s = re.sub(r"\.(mp4|mov|avi|mkv)$", "", s)
+    s = re.sub(r"[^a-z0-9\u00c0-\u1ef9]+", "_", s).strip("_")
+    return s
+
+
+def _is_task_matching_video(v_id: str, v_key: str, t_fid: str, t_fn: str, t_title: str) -> bool:
+    """Kiểm tra chặt chẽ xem task có khớp với video Drive không (tránh false positive khi chuỗi rỗng)."""
+    if v_id and t_fid and v_id == t_fid:
+        return True
+    if t_fn and len(t_fn) >= 6:
+        if v_key == t_fn or (len(v_key) >= 8 and (v_key in t_fn or t_fn in v_key)):
+            return True
+    if t_title and len(t_title) >= 6:
+        if v_key == t_title or (len(v_key) >= 8 and (v_key in t_title or t_title in v_key)):
+            return True
+    return False
+
+
+def enrich_videos_with_published_channels(videos: list[GDriveVideoItem]) -> None:
+    """Đối soát và gắn danh sách kênh đã đăng/lên lịch cho từng video."""
+    try:
+        from app.externals.pippit.service import _get_saved_tasks as get_pippit_tasks
+        from app.externals.youtube.service import get_saved_tasks as get_yt_tasks
+
+        pippit_tasks = get_pippit_tasks()
+        yt_tasks = get_yt_tasks()
+
+        for v in videos:
+            v_id = (v.id or "").strip()
+            v_key = _clean_video_key(v.name)
+            matched_channels: list[VideoPublishedChannelInfo] = []
+            seen = set()
+
+            # Quét Pippit tasks (Facebook + TikTok)
+            for t in pippit_tasks:
+                if t.get("status") in [4, 6, "4", "6", "failed", "cancelled", "error"]:
+                    continue
+                t_fid = (t.get("drive_file_id") or "").strip()
+                t_fn = _clean_video_key(t.get("file_name"))
+                t_title = _clean_video_key(t.get("title"))
+
+                if _is_task_matching_video(v_id, v_key, t_fid, t_fn, t_title):
+                    plat = t.get("platform") or "facebook"
+                    pname = t.get("page_name") or t.get("page_id") or "Facebook"
+                    uniq_key = f"{plat}_{pname}"
+                    if uniq_key not in seen:
+                        seen.add(uniq_key)
+                        matched_channels.append(
+                            VideoPublishedChannelInfo(
+                                platform=plat,
+                                channel_name=pname,
+                                channel_id=str(t.get("page_id") or ""),
+                                account_email=t.get("account_email"),
+                                published_at=str(t.get("publish_at") or t.get("schedule_time_ms") or t.get("created_at") or ""),
+                                status="scheduled" if t.get("status") in [1, "1", "scheduled"] else "published",
+                                task_id=t.get("task_id"),
+                                post_url=t.get("post_url"),
+                            )
+                        )
+
+            # Quét YouTube tasks
+            for t in yt_tasks:
+                if t.get("status") in ["failed", "error"]:
+                    continue
+                t_fid = (t.get("drive_file_id") or "").strip()
+                t_fn = _clean_video_key(t.get("file_name"))
+                t_title = _clean_video_key(t.get("title"))
+
+                if _is_task_matching_video(v_id, v_key, t_fid, t_fn, t_title):
+                    pname = t.get("channel_title") or "YouTube"
+                    uniq_key = f"youtube_{pname}"
+                    if uniq_key not in seen:
+                        seen.add(uniq_key)
+                        matched_channels.append(
+                            VideoPublishedChannelInfo(
+                                platform="youtube",
+                                channel_name=pname,
+                                channel_id=str(t.get("video_id") or ""),
+                                account_email=None,
+                                published_at=str(t.get("publish_at") or t.get("created_at") or ""),
+                                status="scheduled" if t.get("status") == "scheduled" else "published",
+                                task_id=t.get("task_id"),
+                                post_url=t.get("youtube_url"),
+                            )
+                        )
+
+            v.published_channels = matched_channels
+    except Exception as exc:
+        logger.warning("[GDrive] Lỗi enrich_videos_with_published_channels: %s", exc)
+
+
 def list_videos(folder_id: str | None = None, search: str = "") -> GDriveVideoListResponse:
-    """Lấy danh sách video từ thư mục Google Drive (hỗ trợ cả Folder ID lẫn full link Drive)."""
+    """Lấy danh sách video từ thư mục Google Drive (hỗ trợ cả Folder ID lẫn full link Drive) kèm trạng thái kênh đã đăng."""
     client = get_client()
     if not client:
         raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
@@ -494,6 +591,7 @@ def list_videos(folder_id: str | None = None, search: str = "") -> GDriveVideoLi
     try:
         raw_videos = client.list_videos(folder_id=target_id if target_id else None, search=search)
         video_items = [GDriveVideoItem(**v) for v in raw_videos]
+        enrich_videos_with_published_channels(video_items)
         return GDriveVideoListResponse(
             folder_id=target_id,
             folder_name=folder_name,

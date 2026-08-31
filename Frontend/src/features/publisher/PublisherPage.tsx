@@ -48,14 +48,38 @@ import type {
 
 const QUICK_HASHTAGS = [
   '#shorts',
-  '#reels',
   '#reviewamthuc',
   '#foodreview',
-  '#streetfood',
+  '#reels',
   '#monngon',
-  '#docla',
-  '#amthucthegioi',
+  '#amthuc',
+  '#streetfood',
+  '#vietnamfood',
 ]
+
+function TikTokIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.88 2.89 2.89 0 0 1-2.89-2.88 2.89 2.89 0 0 1 2.89-2.88c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3 15.67a6.34 6.34 0 0 0 6.34 6.33 6.34 6.34 0 0 0 6.34-6.33V8.89a8.28 8.28 0 0 0 4.91 1.6V7.04a4.85 4.85 0 0 1-1-.35z" />
+    </svg>
+  )
+}
+
+function FacebookIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  )
+}
+
+function YouTubeIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+    </svg>
+  )
+}
 
 const INTERVAL_PRESETS = [
   { label: '15 phút', value: 15 },
@@ -152,6 +176,7 @@ export function PublisherPage() {
   const [videos, setVideos] = useState<DriveVideo[]>([])
   const [isLoadingVideos, setIsLoadingVideos] = useState(false)
   const [videoSearch, setVideoSearch] = useState('')
+  const [videoPublishedFilter, setVideoPublishedFilter] = useState<'all' | 'unposted' | 'tiktok' | 'facebook' | 'youtube'>('all')
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(new Set())
 
   // Folder Picker Modal state
@@ -549,12 +574,79 @@ export function PublisherPage() {
     setCustomLinkInput('')
   }
 
-  // Filtered Drive videos
+  // Filtered Drive videos (Search + Published Platform filter)
   const filteredVideos = useMemo(() => {
-    if (!videoSearch.trim()) return videos
-    const s = videoSearch.toLowerCase()
-    return videos.filter(v => v.name.toLowerCase().includes(s))
-  }, [videos, videoSearch])
+    return videos.filter(v => {
+      // 1. Search query
+      if (videoSearch.trim()) {
+        const s = videoSearch.toLowerCase().trim()
+        const matchName = v.name.toLowerCase().includes(s)
+        const matchClean = cleanTitleFromName(v.name).toLowerCase().includes(s)
+        if (!matchName && !matchClean) return false
+      }
+
+      // 2. Published Channel filter
+      const pubList = v.published_channels || []
+      if (videoPublishedFilter === 'unposted') {
+        return pubList.length === 0
+      }
+      if (videoPublishedFilter === 'tiktok') {
+        return pubList.some(c => c.platform === 'tiktok')
+      }
+      if (videoPublishedFilter === 'facebook') {
+        return pubList.some(c => c.platform === 'facebook')
+      }
+      if (videoPublishedFilter === 'youtube') {
+        return pubList.some(c => c.platform === 'youtube')
+      }
+      return true
+    })
+  }, [videos, videoSearch, videoPublishedFilter])
+
+  // Computed Video Published Stats
+  const videoStats = useMemo(() => {
+    let unposted = 0
+    let tiktok = 0
+    let facebook = 0
+    let youtube = 0
+    for (const v of videos) {
+      const list = v.published_channels || []
+      if (list.length === 0) unposted++
+      if (list.some(c => c.platform === 'tiktok')) tiktok++
+      if (list.some(c => c.platform === 'facebook')) facebook++
+      if (list.some(c => c.platform === 'youtube')) youtube++
+    }
+    return {
+      total: videos.length,
+      unposted,
+      tiktok,
+      facebook,
+      youtube,
+    }
+  }, [videos])
+
+  // Smart selection: Select all videos that have not been posted to currently chosen target channel
+  const handleSelectUnpostedToCurrentChannel = () => {
+    const selectedPageList = activePages.filter(p => selectedPageIds.has(p.page_id))
+    const targetNames = new Set(selectedPageList.map(p => (p.page_name || '').toLowerCase()))
+    const targetIds = new Set(selectedPageList.map(p => String(p.page_id)))
+
+    const unpostedIds = new Set<string>()
+    for (const v of filteredVideos) {
+      const list = v.published_channels || []
+      if (targetNames.size === 0) {
+        if (list.length === 0) unpostedIds.add(v.id)
+      } else {
+        const alreadyPosted = list.some(
+          c => targetIds.has(String(c.channel_id || '')) || targetNames.has((c.channel_name || '').toLowerCase())
+        )
+        if (!alreadyPosted) {
+          unpostedIds.add(v.id)
+        }
+      }
+    }
+    setSelectedVideoIds(unpostedIds)
+  }
 
   // Select all / deselect all
   const handleToggleSelectAll = () => {
@@ -1050,8 +1142,108 @@ export function PublisherPage() {
               />
             </div>
 
+            {/* Video Published Channel Filter Pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => setVideoPublishedFilter('all')}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 14,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: videoPublishedFilter === 'all' ? '1px solid #6366f1' : '1px solid #e2e8f0',
+                  background: videoPublishedFilter === 'all' ? '#eef2ff' : '#fff',
+                  color: videoPublishedFilter === 'all' ? '#4f46e5' : '#64748b',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                Tất cả ({videoStats.total})
+              </button>
+              <button
+                type="button"
+                onClick={() => setVideoPublishedFilter('unposted')}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 14,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: videoPublishedFilter === 'unposted' ? '1px solid #10b981' : '1px solid #e2e8f0',
+                  background: videoPublishedFilter === 'unposted' ? '#ecfdf5' : '#fff',
+                  color: videoPublishedFilter === 'unposted' ? '#059669' : '#64748b',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                🆕 Chưa đăng ({videoStats.unposted})
+              </button>
+              <button
+                type="button"
+                onClick={() => setVideoPublishedFilter('tiktok')}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 14,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  border: videoPublishedFilter === 'tiktok' ? '1px solid #0f172a' : '1px solid #e2e8f0',
+                  background: videoPublishedFilter === 'tiktok' ? '#f1f5f9' : '#fff',
+                  color: videoPublishedFilter === 'tiktok' ? '#0f172a' : '#64748b',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <TikTokIcon size={10} /> TikTok ({videoStats.tiktok})
+              </button>
+              <button
+                type="button"
+                onClick={() => setVideoPublishedFilter('facebook')}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 14,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  border: videoPublishedFilter === 'facebook' ? '1px solid #0284c7' : '1px solid #e2e8f0',
+                  background: videoPublishedFilter === 'facebook' ? '#f0f9ff' : '#fff',
+                  color: videoPublishedFilter === 'facebook' ? '#0284c7' : '#64748b',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <FacebookIcon size={10} /> FB ({videoStats.facebook})
+              </button>
+              {videoStats.youtube > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setVideoPublishedFilter('youtube')}
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: 14,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    border: videoPublishedFilter === 'youtube' ? '1px solid #e11d48' : '1px solid #e2e8f0',
+                    background: videoPublishedFilter === 'youtube' ? '#fff1f2' : '#fff',
+                    color: videoPublishedFilter === 'youtube' ? '#e11d48' : '#64748b',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <YouTubeIcon size={10} /> YT ({videoStats.youtube})
+                </button>
+              )}
+            </div>
+
             {/* Select All Row */}
-            <div className="pub-select-all-row" style={{ marginTop: 10 }}>
+            <div className="pub-select-all-row" style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
               <label className="pub-checkbox-label">
                 <input
                   type="checkbox"
@@ -1062,11 +1254,35 @@ export function PublisherPage() {
                   onChange={handleToggleSelectAll}
                   disabled={filteredVideos.length === 0}
                 />
-                <span>Chọn tất cả ({filteredVideos.length} video)</span>
+                <span>Chọn tất cả ({filteredVideos.length})</span>
               </label>
-              <span className="pub-selected-pill">
-                Đã chọn: <strong>{selectedVideoIds.size}</strong>
-              </span>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={handleSelectUnpostedToCurrentChannel}
+                  title="Tự động lọc và chỉ chọn những video chưa từng đăng lên kênh đang chọn ở Bước 2"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    color: '#475569',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Sparkles size={11} color="#6366f1" />
+                  <span>Chọn video chưa đăng</span>
+                </button>
+                <span className="pub-selected-pill">
+                  Đã chọn: <strong>{selectedVideoIds.size}</strong>
+                </span>
+              </div>
             </div>
 
             {/* Video List */}
@@ -1079,12 +1295,20 @@ export function PublisherPage() {
               ) : filteredVideos.length === 0 ? (
                 <div className="pub-empty-box">
                   <FileVideo size={28} style={{ color: '#94a3b8' }} />
-                  <p style={{ marginTop: 8 }}>Không tìm thấy file video MP4 nào trong thư mục này.</p>
+                  <p style={{ marginTop: 8 }}>Không tìm thấy file video MP4 nào phù hợp với bộ lọc.</p>
                 </div>
               ) : (
                 filteredVideos.map(video => {
                   const isSelected = selectedVideoIds.has(video.id)
                   const cleanName = cleanTitleFromName(video.name)
+                  const selectedPageList = activePages.filter(p => selectedPageIds.has(p.page_id))
+                  const targetNames = new Set(selectedPageList.map(p => (p.page_name || '').toLowerCase()))
+                  const targetIds = new Set(selectedPageList.map(p => String(p.page_id)))
+                  const pubList = video.published_channels || []
+                  const isPostedToTarget = pubList.some(
+                    c => targetIds.has(String(c.channel_id || '')) || targetNames.has((c.channel_name || '').toLowerCase())
+                  )
+
                   return (
                     <div
                       key={video.id}
@@ -1108,11 +1332,129 @@ export function PublisherPage() {
                       </div>
 
                       <div className="pub-video-details">
-                        <strong className="pub-video-clean-title">{cleanName}</strong>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <strong className="pub-video-clean-title">{cleanName}</strong>
+                          {isPostedToTarget && (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: '#b45309',
+                                background: '#fef3c7',
+                                border: '1px solid #fde68a',
+                                padding: '1px 5px',
+                                borderRadius: 4,
+                                flexShrink: 0,
+                              }}
+                              title="Video này đã từng được lên lịch/đăng lên kênh đang chọn ở Bước 2"
+                            >
+                              ⚠️ Đã có trên kênh
+                            </span>
+                          )}
+                        </div>
+
                         <div className="pub-video-sub-line">
                           <span className="pub-video-raw-filename">{video.name}</span>
                           <span className="pub-dot-sep">•</span>
                           <span className="pub-video-size-txt">{fmtBytes(video.size_bytes)}</span>
+                        </div>
+
+                        {/* Published Channels Badges Row */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                          {pubList.length > 0 ? (
+                            pubList.map((c, idx) => {
+                              const isTarget =
+                                targetNames.has((c.channel_name || '').toLowerCase()) ||
+                                targetIds.has(String(c.channel_id || ''))
+                              if (c.platform === 'tiktok') {
+                                return (
+                                  <span
+                                    key={idx}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 3,
+                                      fontSize: 10,
+                                      fontWeight: 600,
+                                      padding: '1px 6px',
+                                      borderRadius: 4,
+                                      background: isTarget ? '#fef3c7' : '#f1f5f9',
+                                      color: isTarget ? '#b45309' : '#0f172a',
+                                      border: isTarget ? '1px solid #fde68a' : '1px solid #cbd5e1',
+                                    }}
+                                    title={`Đã lên lịch TikTok: ${c.channel_name}`}
+                                  >
+                                    <TikTokIcon size={10} />
+                                    <span>{c.channel_name}</span>
+                                  </span>
+                                )
+                              }
+                              if (c.platform === 'facebook') {
+                                return (
+                                  <span
+                                    key={idx}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 3,
+                                      fontSize: 10,
+                                      fontWeight: 600,
+                                      padding: '1px 6px',
+                                      borderRadius: 4,
+                                      background: isTarget ? '#fef3c7' : '#f0f9ff',
+                                      color: isTarget ? '#b45309' : '#0284c7',
+                                      border: isTarget ? '1px solid #fde68a' : '1px solid #bae6fd',
+                                    }}
+                                    title={`Đã lên lịch Facebook: ${c.channel_name}`}
+                                  >
+                                    <FacebookIcon size={10} />
+                                    <span>{c.channel_name}</span>
+                                  </span>
+                                )
+                              }
+                              return (
+                                <span
+                                  key={idx}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    background: '#fff1f2',
+                                    color: '#e11d48',
+                                    border: '1px solid #fecdd3',
+                                  }}
+                                  title={`Đã lên lịch YouTube: ${c.channel_name}`}
+                                >
+                                  <YouTubeIcon size={10} />
+                                  <span>{c.channel_name}</span>
+                                </span>
+                              )
+                            })
+                          ) : (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 2,
+                                fontSize: 9.5,
+                                fontWeight: 600,
+                                padding: '1px 5px',
+                                borderRadius: 4,
+                                background: '#ecfdf5',
+                                color: '#059669',
+                                border: '1px solid #a7f3d0',
+                              }}
+                            >
+                              🆕 Chưa đăng
+                            </span>
+                          )}
                         </div>
                       </div>
 

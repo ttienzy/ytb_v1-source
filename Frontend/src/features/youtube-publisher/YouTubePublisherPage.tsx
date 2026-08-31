@@ -1085,7 +1085,44 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                                       ) : (
                                         <FileVideo size={16} color="#64748b" />
                                       )}
-                                      <span style={{ wordBreak: 'break-all' }}>{v.name}</span>
+                                      <div>
+                                        <div style={{ wordBreak: 'break-all' }}>{v.name}</div>
+                                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3 }}>
+                                          {v.published_channels && v.published_channels.length > 0 ? (
+                                            v.published_channels.map((c, idx) => (
+                                              <span
+                                                key={idx}
+                                                style={{
+                                                  fontSize: 9.5,
+                                                  fontWeight: 700,
+                                                  padding: '0 4px',
+                                                  borderRadius: 3,
+                                                  background: c.platform === 'youtube' ? '#fee2e2' : c.platform === 'facebook' ? '#e0f2fe' : '#f1f5f9',
+                                                  color: c.platform === 'youtube' ? '#dc2626' : c.platform === 'facebook' ? '#0284c7' : '#0f172a',
+                                                  border: c.platform === 'youtube' ? '1px solid #fecaca' : c.platform === 'facebook' ? '1px solid #bae6fd' : '1px solid #cbd5e1',
+                                                }}
+                                                title={`Đã lên lịch/đăng trên ${c.platform.toUpperCase()}: ${c.channel_name}`}
+                                              >
+                                                {c.platform === 'youtube' ? '▶️ YT' : c.platform === 'facebook' ? '📘 FB' : '🎵 TT'}: {c.channel_name}
+                                              </span>
+                                            ))
+                                          ) : (
+                                            <span
+                                              style={{
+                                                fontSize: 9.5,
+                                                fontWeight: 600,
+                                                padding: '0 4px',
+                                                borderRadius: 3,
+                                                background: '#ecfdf5',
+                                                color: '#059669',
+                                                border: '1px solid #a7f3d0',
+                                              }}
+                                            >
+                                              🆕 Chưa đăng
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
                                   </td>
                                   <td style={{ padding: '8px 10px', textAlign: 'center', color: '#64748b' }}>

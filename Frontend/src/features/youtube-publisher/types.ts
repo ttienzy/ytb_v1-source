@@ -38,6 +38,13 @@ export interface DriveVideo {
   thumbnail_link: string
   created_time: string
   duration_seconds: number
+  published_channels?: {
+    platform: string
+    channel_name: string
+    channel_id?: string
+    published_at?: string
+    status?: string
+  }[]
   width?: number
   height?: number
 }
