@@ -369,7 +369,7 @@ def _call_gemini_stream(
             return _call_gemini_stream(
                 prompt_text,
                 filename,
-                query_url,
+                query_text,
                 allow_refresh=allow_refresh,
                 status_callback=status_callback,
                 backoff_sec=min(backoff_sec + 15, 60),
@@ -395,7 +395,7 @@ def _call_gemini_stream(
                 if status_callback:
                     status_callback("running")
                 return _call_gemini_stream(
-                    prompt_text, filename, query_url, allow_refresh=False, status_callback=status_callback
+                    prompt_text, filename, query_text, allow_refresh=False, status_callback=status_callback
                 )
             raise RuntimeError(f"Gemini StreamGenerate fail: HTTP {resp.status_code} — {resp.text[:300]}")
 
