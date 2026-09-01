@@ -691,9 +691,13 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
                 except Exception:
                     pass
                 return
-            # Giữ nguyên 100% JSON thô gốc từ YouTube get_panel (không trích text)
-            # raw_bytes = transcript_to_text(transcript).encode("utf-8")
-            raw_bytes = json.dumps(transcript, ensure_ascii=False, indent=2).encode("utf-8")
+            # Nếu transcript là _dom_transcript (từ yt-dlp VTT / DOM scrape) → text "[MM:SS] ..." sạch,
+            # lưu thẳng text (chunker parse text format tốt hơn JSON wrap).
+            if isinstance(transcript, dict) and "_dom_transcript" in transcript:
+                raw_bytes = transcript["_dom_transcript"].encode("utf-8")
+            else:
+                # Giữ nguyên 100% JSON thô gốc từ YouTube get_panel
+                raw_bytes = json.dumps(transcript, ensure_ascii=False, indent=2).encode("utf-8")
             state.update_job(job_id, raw_bytes=raw_bytes, raw_name="raw.txt")
         else:
             # Raw do user đính kèm/dán thủ công → GIỮ NGUYÊN (user controls content, không

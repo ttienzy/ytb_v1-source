@@ -79,11 +79,13 @@ def fetch_transcript_raw(
          fallback **Chrome thật qua CDP** (browser thật tính được webResponse → pass attestation).
       3. Nếu vẫn fail → raise ``TranscriptFetchError`` để UI gợi ý dán raw thủ công.
     """
-    # Mức 0: yt-dlp subtitle download — đáng tin cậy nhất (không cần browser / attestation).
+    # Level 0: yt-dlp subtitle download
     try:
-        return _fetch_via_ytdlp(url)
-    except Exception:
-        pass  # nếu không có sub → thử Playwright
+        result = _fetch_via_ytdlp(url)
+        print(f"[transcript] Level 0 OK: yt-dlp subtitle ({len(result.get('_dom_transcript', ''))} chars)")
+        return result
+    except Exception as e0:
+        print(f"[transcript] Level 0 fail (yt-dlp): {e0!r} -> trying Playwright...")
 
     try:
         return _fetch_with_playwright(url, headless=headless, timeout_ms=timeout_ms)
@@ -134,14 +136,24 @@ def _fetch_via_ytdlp(url: str) -> dict:
         tmp_path = _Path(tmp)
         out_template = str(tmp_path / "%(id)s.%(ext)s")
 
-        # Thử mỗi tổ hợp (sub_flags, cookie_mode)
+        # Thử mỗi tổ hợp (sub_flags, cookie_mode) theo thứ tự an toàn:
+        # Không gộp vi,en vào 1 lệnh auto-sub vì nếu sub 'vi' bị 429 translation error thì yt-dlp sẽ abort trước khi lấy 'en'.
         attempts = [
-            # Ưu tiên: no-cookies, manual sub → auto-sub (android_vr client, không bị SABR/PO Token)
+            # 1. No-cookies: manual subs (vi,en)
             (["--write-sub", "--sub-lang", "vi,en"], False),
-            (["--write-auto-sub", "--sub-lang", "vi,en"], False),
-            # Fallback cookies nếu IP bot-wall
-            *([(["--write-sub", "--sub-lang", "vi,en"], True),
-               (["--write-auto-sub", "--sub-lang", "vi,en"], True)] if has_cookies else []),
+            # 2. No-cookies: auto sub gốc tiếng Việt (nếu video Việt)
+            (["--write-auto-sub", "--sub-lang", "vi"], False),
+            # 3. No-cookies: auto sub gốc tiếng Anh (nếu video Anh/quốc tế)
+            (["--write-auto-sub", "--sub-lang", "en"], False),
+            # 4. No-cookies: auto sub bất kỳ
+            (["--write-auto-sub", "--sub-lang", "all", "--ignore-errors"], False),
+            # 5. Fallback cookies (nếu IP bị bot-wall)
+            *([
+                (["--write-sub", "--sub-lang", "vi,en"], True),
+                (["--write-auto-sub", "--sub-lang", "vi"], True),
+                (["--write-auto-sub", "--sub-lang", "en"], True),
+                (["--write-auto-sub", "--sub-lang", "all", "--ignore-errors"], True),
+            ] if has_cookies else []),
         ]
 
         for sub_flags, use_cookies in attempts:
@@ -179,31 +191,42 @@ def _fetch_via_ytdlp(url: str) -> dict:
             if lines:
                 return {"_dom_transcript": "\n".join(lines)}
 
-
-    raise RuntimeError("yt-dlp: không tìm thấy subtitle nào cho video này")
+    raise RuntimeError("yt-dlp: no subtitles found for this video")
 
 
 def _parse_vtt_to_lines(vtt: str) -> list[str]:
     """Parse WebVTT subtitle file → list "[MM:SS] caption" lines.
 
-    Bỏ qua duplicate (YouTube auto-sub thường lặp lại dòng trước trong cue kế tiếp).
+    YouTube auto-sub dùng rolling window: mỗi cue lặp lại ~nửa câu trước + thêm text mới.
+    Ví dụ:
+      Cue 1: "If you get a fresh set of yak lungs,"
+      Cue 2: "If you get a fresh set of yak lungs, fill it with a spice mixture"
+      Cue 3: "fill it with a spice mixture"
+      Cue 4: "fill it with a spice mixture and boil it"
+
+    Giữ cue CUỐI CÙNG của mỗi "chuỗi overlap" (chứa text đầy đủ nhất), bỏ cue trung gian.
     """
     import re as _re
 
     TIME_RE = _re.compile(r"(\d+):(\d{2}):(\d{2})\.\d+")
     CLEAN_RE = _re.compile(r"<[^>]+>")  # strip VTT inline tags <c>, <b>...
 
-    lines = []
-    last_text = ""
+    # Bước 1: Parse mọi cue thành (timestamp_str, clean_text)
+    raw_cues: list[tuple[str, str]] = []
     cue_lines: list[str] = []
     in_cue = False
-    current_ts = ""
+    current_ts = "0:00"
 
     for raw_line in vtt.splitlines():
         line = raw_line.strip()
 
         if "-->" in line:
-            # Timestamp line: 00:01:23.456 --> 00:01:26.000
+            # Flush cue trước (nếu có)
+            if in_cue and cue_lines:
+                text = " ".join(CLEAN_RE.sub("", l) for l in cue_lines).strip()
+                if text:
+                    raw_cues.append((current_ts, text))
+            # Parse timestamp mới
             m = TIME_RE.match(line)
             if m:
                 h, mn, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -214,22 +237,34 @@ def _parse_vtt_to_lines(vtt: str) -> list[str]:
             cue_lines = []
         elif in_cue:
             if line == "":
-                # End of cue block
                 text = " ".join(CLEAN_RE.sub("", l) for l in cue_lines).strip()
-                if text and text != last_text:
-                    lines.append(f"[{current_ts}] {text}")
-                    last_text = text
+                if text:
+                    raw_cues.append((current_ts, text))
                 in_cue = False
+                cue_lines = []
             else:
-                if not line.isdigit():  # bỏ sequence number
+                if not line.isdigit():
                     cue_lines.append(line)
 
-    # xử lý cue cuối (không có blank line kết thúc)
+    # Flush cue cuối
     if in_cue and cue_lines:
         text = " ".join(CLEAN_RE.sub("", l) for l in cue_lines).strip()
-        if text and text != last_text:
-            lines.append(f"[{current_ts}] {text}")
+        if text:
+            raw_cues.append((current_ts, text))
 
+    if not raw_cues:
+        return []
+
+    # Bước 2: Deduplicate rolling window
+    # Giữ cue khi text KHÔNG PHẢI là prefix/substring của cue kế tiếp
+    lines: list[str] = []
+    for i, (ts, text) in enumerate(raw_cues):
+        # Nếu cue tiếp theo chứa toàn bộ text hiện tại → skip (cue hiện tại là phần lặp cũ)
+        if i + 1 < len(raw_cues):
+            next_text = raw_cues[i + 1][1]
+            if text in next_text or next_text.startswith(text[:len(text)//2+5]):
+                continue
+        lines.append(f"[{ts}] {text}")
 
     return lines
 

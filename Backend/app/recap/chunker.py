@@ -50,58 +50,64 @@ def extract_transcript_entries(raw_data: bytes | str | dict | list) -> list[dict
 
     # 3. Phân tích nếu là Dictionary (YouTube get_panel hoặc custom)
     if isinstance(raw_data, dict):
-        # Trích xuất từ engagementPanelSectionListRenderer (duyệt tất cả sections)
-        sections = (
-            raw_data.get("content", {})
-            .get("engagementPanelSectionListRenderer", {})
-            .get("content", {})
-            .get("sectionListRenderer", {})
-            .get("contents", [])
-        )
-        if not sections:
-            # Thử trực tiếp nếu raw là sectionListRenderer
-            sections = raw_data.get("sectionListRenderer", {}).get("contents", [])
+        # Safety net: nếu là dict {"_dom_transcript": "[MM:SS] text\n..."} (từ yt-dlp/DOM scrape)
+        # → extract text và re-parse qua nhánh string (Step 5).
+        if "_dom_transcript" in raw_data and isinstance(raw_data["_dom_transcript"], str):
+            raw_data = raw_data["_dom_transcript"]
+        else:
+            # Trích xuất từ engagementPanelSectionListRenderer (duyệt tất cả sections)
+            sections = (
+                raw_data.get("content", {})
+                .get("engagementPanelSectionListRenderer", {})
+                .get("content", {})
+                .get("sectionListRenderer", {})
+                .get("contents", [])
+            )
+            if not sections:
+                # Thử trực tiếp nếu raw là sectionListRenderer
+                sections = raw_data.get("sectionListRenderer", {}).get("contents", [])
 
-        entries: list[dict[str, Any]] = []
-        for sec in sections:
-            items = sec.get("itemSectionRenderer", {}).get("contents", [])
-            for item in items:
-                tvm = (
-                    item.get("macroMarkersPanelItemViewModel", {})
-                    .get("item", {})
-                    .get("timelineItemViewModel")
-                )
-                if not tvm:
-                    continue
-                seg = (tvm.get("contentItems") or [{}])[0].get("transcriptSegmentViewModel")
-                if not seg:
-                    continue
+            entries: list[dict[str, Any]] = []
+            for sec in sections:
+                items = sec.get("itemSectionRenderer", {}).get("contents", [])
+                for item in items:
+                    tvm = (
+                        item.get("macroMarkersPanelItemViewModel", {})
+                        .get("item", {})
+                        .get("timelineItemViewModel")
+                    )
+                    if not tvm:
+                        continue
+                    seg = (tvm.get("contentItems") or [{}])[0].get("transcriptSegmentViewModel")
+                    if not seg:
+                        continue
 
-                watch_endpoint = (
-                    tvm.get("onTap", {})
-                    .get("innertubeCommand", {})
-                    .get("watchEndpoint", {})
-                )
-                start_sec = watch_endpoint.get("startTimeSeconds")
-                if start_sec is None:
-                    start_sec = parse_timestamp_to_sec(tvm.get("timestamp", "0:00"))
+                    watch_endpoint = (
+                        tvm.get("onTap", {})
+                        .get("innertubeCommand", {})
+                        .get("watchEndpoint", {})
+                    )
+                    start_sec = watch_endpoint.get("startTimeSeconds")
+                    if start_sec is None:
+                        start_sec = parse_timestamp_to_sec(tvm.get("timestamp", "0:00"))
 
-                text = (seg.get("simpleText") or "").strip()
-                if not text:
-                    snip = seg.get("snippet", {})
-                    if isinstance(snip, dict) and "runs" in snip:
-                        text = " ".join(
-                            r.get("text", "") for r in snip["runs"] if isinstance(r, dict)
-                        ).strip()
+                    text = (seg.get("simpleText") or "").strip()
+                    if not text:
+                        snip = seg.get("snippet", {})
+                        if isinstance(snip, dict) and "runs" in snip:
+                            text = " ".join(
+                                r.get("text", "") for r in snip["runs"] if isinstance(r, dict)
+                            ).strip()
 
-                if text:
-                    entries.append({
-                        "start_sec": int(start_sec),
-                        "text": text,
-                    })
+                    if text:
+                        entries.append({
+                            "start_sec": int(start_sec),
+                            "text": text,
+                        })
 
-        if entries:
-            return sorted(entries, key=lambda e: e["start_sec"])
+            if entries:
+                return sorted(entries, key=lambda e: e["start_sec"])
+
 
     # 4. Phân tích nếu là List of dicts
     if isinstance(raw_data, list):
@@ -122,20 +128,20 @@ def extract_transcript_entries(raw_data: bytes | str | dict | list) -> list[dict
             line = line.strip()
             if not line:
                 continue
-            # Match [123s] text hoặc [123] text
-            m_sec = re.match(r"^\[?(\d+)s?\]?\s*(.*)$", line)
-            if m_sec and m_sec.group(2):
-                entries.append({
-                    "start_sec": int(m_sec.group(1)),
-                    "text": m_sec.group(2).strip(),
-                })
-                continue
-            # Match [02:30] text hoặc 02:30 text
+            # Match [02:30] text hoặc [0:01] text hoặc [1:23:45] text (MM:SS TRƯỚC seconds)
             m_ts = re.match(r"^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*(.*)$", line)
             if m_ts and m_ts.group(2):
                 entries.append({
                     "start_sec": parse_timestamp_to_sec(m_ts.group(1)),
                     "text": m_ts.group(2).strip(),
+                })
+                continue
+            # Match [123s] text hoặc [123] text (chỉ pure digits, KHÔNG chứa ":")
+            m_sec = re.match(r"^\[(\d+)s?\]\s*(.*)$", line)
+            if m_sec and m_sec.group(2):
+                entries.append({
+                    "start_sec": int(m_sec.group(1)),
+                    "text": m_sec.group(2).strip(),
                 })
                 continue
             # Fallback nếu không có timestamp
