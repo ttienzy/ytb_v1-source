@@ -426,6 +426,36 @@ def _parse_gemini_response(resp_text: str) -> dict:
     return _normalize_recap_dict(data)
 
 
+def _ensure_intro_and_outro(scenes: list[dict[str, Any]]) -> None:
+    """Đảm bảo phân cảnh đầu tiên luôn có lời chào mở màn và phân cảnh cuối cùng luôn có lời cảm ơn & CTA."""
+    if not scenes:
+        return
+
+    flat_segs = []
+    for s in scenes:
+        for seg in s.get("segments", []):
+            if isinstance(seg, dict) and "vietnamese_vo" in seg:
+                flat_segs.append(seg)
+
+    if not flat_segs:
+        return
+
+    # 1. Kiểm tra Segment đầu tiên (Intro Greeting)
+    first_vo = flat_segs[0].get("vietnamese_vo", "").strip()
+    first_vo_lower = first_vo.lower()
+    intro_keywords = ("chào", "hello", "hé lô", "quay trở lại", "hôm nay cùng mình", "theo chân mình")
+    if not any(kw in first_vo_lower for kw in intro_keywords):
+        flat_segs[0]["vietnamese_vo"] = f"Chào cả nhà đã quay trở lại với kênh ẩm thực độc lạ! {first_vo}"
+
+    # 2. Kiểm tra Segment cuối cùng (Outro Thank You & CTA)
+    last_vo = flat_segs[-1].get("vietnamese_vo", "").strip()
+    last_vo_lower = last_vo.lower()
+    outro_keywords = ("cảm ơn", "theo dõi", "follow", "thả tim", "hẹn gặp lại", "tạm biệt", "like", "chia sẻ")
+    if not any(kw in last_vo_lower for kw in outro_keywords):
+        outro_tail = " Cảm ơn các bạn đã theo dõi hành trình ẩm thực hôm nay, nhớ bấm like và follow kênh để không bỏ lỡ những món ngon tiếp theo nhé! Hẹn gặp lại mọi người!"
+        flat_segs[-1]["vietnamese_vo"] = (last_vo.rstrip(".!?") + "." + outro_tail).strip()
+
+
 def generate_recap(
     youtube_url: str,
     raw_bytes: bytes | str | dict,
@@ -437,23 +467,11 @@ def generate_recap(
     progress_callback: Callable[[int, int], None] | None = None,
     status_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Tạo recap hoàn chỉnh qua kiến trúc phân chunk động đa giai đoạn (Step 0 -> Step 1 -> Step 2 -> Step 2b).
-
-    Args:
-        youtube_url: Link video YouTube.
-        raw_bytes: Dữ liệu transcript (bytes, str hoặc dict JSON).
-        raw_name: Tên file transcript.
-        prompt_bytes: [Optional fallback] Cho tương thích code cũ nếu có.
-        prompt_name: [Optional fallback] Cho tương thích code cũ nếu có.
-        prompt_template_path: Đường dẫn template prompt cho từng chunk (mặc định: food_review_chunk.prompt.txt).
-        caption_template_path: Đường dẫn template prompt caption (mặc định: social_caption.prompt.txt).
-        progress_callback: Callback fn(done_chunks, total_chunks) để cập nhật tiến độ lên Job State.
-    """
+    """Tạo recap hoàn chỉnh qua kiến trúc phân chunk động đa giai đoạn (Step 0 -> Step 1 -> Step 2 -> Step 2b)."""
     chunk_tpl_path = prompt_template_path or DEFAULT_CHUNK_PROMPT_PATH
     caption_tpl_path = caption_template_path or DEFAULT_CAPTION_PROMPT_PATH
 
     if not chunk_tpl_path.exists():
-        # Fallback nếu dùng thư mục prompts cũ
         old_prompt = TOOLS_DIR / "Backend" / "prompts" / "System Prompt Food Review Recap.txt"
         if old_prompt.exists():
             chunk_tpl_path = old_prompt
@@ -499,13 +517,23 @@ def generate_recap(
         filled_prompt = filled_prompt.replace("{{target_segments_max}}", str(c["target_segments_max"]))
         filled_prompt = filled_prompt.replace("{{raw_text}}", c["raw_text"])
 
+        # Chỉ dẫn chi tiết cho từng vị trí chunk
+        if c["is_first_chunk"] and c["is_last_chunk"]:
+            chunk_task_note = "LƯU Ý: Phân cảnh đầu tiên BẮT BUỘC có lời chào Intro, phân cảnh cuối cùng BẮT BUỘC có lời cảm ơn và kêu gọi follow kênh (Outro CTA)."
+        elif c["is_first_chunk"]:
+            chunk_task_note = "LƯU Ý: Đây là chunk ĐẦU TIÊN (is_first_chunk=true), phân cảnh đầu tiên BẮT BUỘC phải mở màn bằng lời chào Intro cuốn hút."
+        elif c["is_last_chunk"]:
+            chunk_task_note = "LƯU Ý: Đây là chunk CUỐI CÙNG (is_last_chunk=true), phân cảnh cuối cùng BẮT BUỘC phải có lời cảm ơn người xem và kêu gọi like/follow kênh (Outro CTA)."
+        else:
+            chunk_task_note = "Nối tiếp mượt mà từ chunk trước."
+
         chunk_json = None
         for attempt in range(1, 4):
             try:
                 resp_text = _call_gemini_stream(
                     prompt_text=filled_prompt,
                     filename=f"chunk_{c_idx}_prompt.txt",
-                    query_text=f"Tạo kịch bản recap ẩm thực JSON cho chunk {c_idx + 1}/{total_chunks} theo dữ liệu và cấu trúc trong file đính kèm.",
+                    query_text=f"Tạo kịch bản recap ẩm thực JSON cho chunk {c_idx + 1}/{total_chunks} theo dữ liệu trong file đính kèm. {chunk_task_note}",
                     status_callback=status_callback,
                 )
                 chunk_json = _parse_gemini_response(resp_text)
@@ -534,10 +562,14 @@ def generate_recap(
         if idx < total_chunks - 1:
             time.sleep(2)
 
-    # 3. Step 2: Merge All Chunks
+    # 3. Step 2: Merge All Chunks & Ensure Intro/Outro Guarantee
     _log("\n[Recap Engine] Bắt đầu Step 2: Ghép nối các scenes và kiểm tra tính liên tục...")
     merged_recap = merge_chunk_outputs(chunk_outputs, youtube_url)
     all_scenes = merged_recap.get("scenes", [])
+
+    # Đảm bảo 100% video luôn có lời chào mở màn và lời cảm ơn kết bài
+    _ensure_intro_and_outro(all_scenes)
+
     total_segments = sum(len(s.get("segments", [])) for s in all_scenes)
     _log(f"[Recap Engine] Hợp nhất thành công: {len(all_scenes)} scenes, {total_segments} segments.")
 
@@ -561,7 +593,6 @@ def generate_recap(
                 )
                 cap_parsed = _parse_gemini_response(cap_resp)
                 if cap_parsed and isinstance(cap_parsed, dict):
-                    # Nếu trả về bọc trong caption
                     if "caption" in cap_parsed and isinstance(cap_parsed["caption"], dict):
                         caption_dict = cap_parsed["caption"]
                     elif "title" in cap_parsed:
