@@ -1,9 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import os
 import sys
 
 block_cipher = None
-backend_dir = Path(__file__).resolve().parent
+# SPECPATH là biến môi trường nội bộ của PyInstaller chứa đường dẫn thư mục spec file
+backend_dir = Path(SPECPATH).resolve()
 
 a = Analysis(
     ['run_server.py'],
