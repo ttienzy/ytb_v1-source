@@ -270,7 +270,7 @@ def _extract_json_from_candidates(candidates: list[str]) -> dict | None:
 def _call_gemini_stream(
     prompt_text: str,
     filename: str,
-    query_url: str,
+    query_text: str = "Tạo kịch bản JSON theo nội dung trong file đính kèm.",
     allow_refresh: bool = True,
     status_callback: Callable[[str], None] | None = None,
     backoff_sec: int = 30,
@@ -296,7 +296,7 @@ def _call_gemini_stream(
                 if status_callback:
                     status_callback("running")
                 return _call_gemini_stream(
-                    prompt_text, filename, query_url, allow_refresh=False, status_callback=status_callback
+                    prompt_text, filename, query_text, allow_refresh=False, status_callback=status_callback
                 )
             raise
 
@@ -312,7 +312,7 @@ def _call_gemini_stream(
                 if status_callback:
                     status_callback("running")
                 return _call_gemini_stream(
-                    prompt_text, filename, query_url, allow_refresh=False, status_callback=status_callback
+                    prompt_text, filename, query_text, allow_refresh=False, status_callback=status_callback
                 )
             raise
 
@@ -321,7 +321,8 @@ def _call_gemini_stream(
         ]
 
         inner = copy.deepcopy(inner_template)
-        inner[0] = [query_url, 0, None, attachments, None, None, 0]
+        # Sử dụng câu lệnh chỉ đạo trực tiếp thay vì link YouTube để tránh Gemini Web kích hoạt YouTube/Search Tool ngầm gây xung đột & lỗi
+        inner[0] = [query_text, 0, None, attachments, None, None, 0]
         nj = json.dumps(
             [None, json.dumps(inner, ensure_ascii=False, separators=(",", ":"))],
             ensure_ascii=False,
@@ -504,7 +505,7 @@ def generate_recap(
                 resp_text = _call_gemini_stream(
                     prompt_text=filled_prompt,
                     filename=f"chunk_{c_idx}_prompt.txt",
-                    query_url=c["video_url"],
+                    query_text=f"Tạo kịch bản recap ẩm thực JSON cho chunk {c_idx + 1}/{total_chunks} theo dữ liệu và cấu trúc trong file đính kèm.",
                     status_callback=status_callback,
                 )
                 chunk_json = _parse_gemini_response(resp_text)
@@ -555,7 +556,7 @@ def generate_recap(
                 cap_resp = _call_gemini_stream(
                     prompt_text=caption_prompt,
                     filename="caption_prompt.txt",
-                    query_url=youtube_url,
+                    query_text="Tạo tiêu đề, mô tả và hashtags SEO theo danh sách tiêu đề cảnh trong file đính kèm.",
                     status_callback=status_callback,
                 )
                 cap_parsed = _parse_gemini_response(cap_resp)
