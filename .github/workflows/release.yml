@@ -35,6 +35,12 @@ jobs:
           cd Backend
           pyinstaller --noconfirm backend.spec
 
+      - name: Install Voice Service Dependencies & Build Executable
+        run: |
+          cd services/voice-service
+          pip install pyinstaller vieneu fastapi uvicorn onnxruntime huggingface_hub pydantic-settings python-multipart
+          pyinstaller --noconfirm voice.spec
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

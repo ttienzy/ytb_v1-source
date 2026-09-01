@@ -30,19 +30,31 @@ export function VoicesPage() {
     setPlayingVoiceId(null)
   }
 
-  useEffect(() => {
+  const loadVoicesAndPresets = (retryCount = 0) => {
     fetch(`${API_URL}/api/voices`)
       .then(r => (r.ok ? r.json() : Promise.reject(new Error('not ok'))))
-      .then(d => setVoices(d.voices ?? d ?? []))
-      .catch(() =>
-        setMessage('Voice service chưa kết nối. (BE chưa triển khai)')
-      )
+      .then(d => {
+        setVoices(d.voices ?? d ?? [])
+        setMessage('')
+      })
+      .catch(() => {
+        if (retryCount < 8) {
+          setTimeout(() => loadVoicesAndPresets(retryCount + 1), 1500)
+        } else {
+          setMessage('Voice service chưa sẵn sàng. Vui lòng kiểm tra tiến trình Voice.')
+        }
+      })
+
     fetch(`${API_URL}/api/voices/presets`)
       .then(r => (r.ok ? r.json() : Promise.reject(new Error('not ok'))))
       .then(setPresets)
       .catch(() => {
-        /* preset là tuỳ chọn — không bắt buộc */
+        /* preset là tuỳ chọn */
       })
+  }
+
+  useEffect(() => {
+    loadVoicesAndPresets()
 
     return () => {
       stopAudio()

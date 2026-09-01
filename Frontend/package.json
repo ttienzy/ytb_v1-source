@@ -55,6 +55,10 @@
         "to": "bin/backend_server.exe"
       },
       {
+        "from": "../services/voice-service/dist/voice_server.exe",
+        "to": "bin/voice_server.exe"
+      },
+      {
         "from": "../Backend/prompts",
         "to": "prompts"
       }

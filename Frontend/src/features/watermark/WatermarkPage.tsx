@@ -55,8 +55,8 @@ export function WatermarkPage() {
   const videoFileInputRef = useRef<HTMLInputElement | null>(null)
   const pollTimerRef = useRef<any>(null)
 
-  // Check CLI status
-  const checkCli = useCallback(() => {
+  // Check CLI status with auto-retry on startup
+  const checkCli = useCallback((retryCount = 0) => {
     fetch(`${API_URL}/api/watermark/check`)
       .then(r => r.json())
       .then(data => {
@@ -64,24 +64,36 @@ export function WatermarkPage() {
         setCliMsg(data.message)
       })
       .catch(() => {
-        setCliOk(false)
-        setCliMsg('Không thể kết nối với Backend service.')
+        if (retryCount < 10) {
+          setTimeout(() => checkCli(retryCount + 1), 1500)
+        } else {
+          setCliOk(false)
+          setCliMsg('Không thể kết nối với Backend service.')
+        }
       })
   }, [])
 
-  // Load History
-  const loadHistory = useCallback(() => {
+  // Load History with auto-retry
+  const loadHistory = useCallback((retryCount = 0) => {
     fetch(`${API_URL}/api/watermark/jobs`)
       .then(r => (r.ok ? r.json() : Promise.reject()))
       .then((jobs: WatermarkBatchJob[]) => setHistoryJobs(jobs))
-      .catch(() => {})
+      .catch(() => {
+        if (retryCount < 5) {
+          setTimeout(() => loadHistory(retryCount + 1), 2000)
+        }
+      })
   }, [])
 
-  const loadDriveStatus = useCallback(() => {
+  const loadDriveStatus = useCallback((retryCount = 0) => {
     fetch(`${API_URL}/api/gdrive/status`)
       .then(r => (r.ok ? r.json() : Promise.reject()))
       .then(data => setDriveStatus(data))
-      .catch(() => {})
+      .catch(() => {
+        if (retryCount < 5) {
+          setTimeout(() => loadDriveStatus(retryCount + 1), 2000)
+        }
+      })
   }, [])
 
   useEffect(() => {

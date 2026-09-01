@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import secrets
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,18 +33,42 @@ def _generate_job_id() -> str:
     return secrets.token_hex(6)
 
 
+def _resolve_gwr_path() -> str | None:
+    """Tìm đường dẫn thực thi của gwr (cả global PATH, npm appdata, và local bundle)."""
+    # 1. Thử system PATH
+    which_path = shutil.which(GWR_CMD)
+    if which_path:
+        return which_path
+
+    # 2. Thử các đường dẫn phổ biến trên Windows
+    appdata = os.environ.get("APPDATA", "")
+    candidates = [
+        Path(appdata) / "npm" / "gwr.cmd",
+        Path(appdata) / "npm" / "gwr",
+        Path(sys.executable).parent / "gwr.cmd",
+        Path(sys.executable).parent / "gwr.exe",
+        Path(sys.executable).parent / "bin" / "gwr.cmd",
+        Path(__file__).resolve().parents[3] / "Frontend" / "node_modules" / ".bin" / "gwr.cmd",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return None
+
+
 def _gwr_available() -> bool:
-    return shutil.which(GWR_CMD) is not None
+    return _resolve_gwr_path() is not None
 
 
 def _gwr_command() -> list[str]:
     """Dựng prefix lệnh gwr — handle npm global shim .cmd/.bat trên Windows."""
-    exe = shutil.which(GWR_CMD)
+    exe = _resolve_gwr_path()
     if not exe:
         return [GWR_CMD]
     if exe.lower().endswith((".cmd", ".bat")):
         return ["cmd", "/c", exe]
     return [exe]
+
 
 
 def _parse_frame_progress(line: str) -> tuple[int | None, int | None]:

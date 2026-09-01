@@ -35,6 +35,43 @@ export function SettingsPage() {
   const [ytMsg, setYtMsg] = useState('')
   const [pippitRefreshKey, setPippitRefreshKey] = useState(0)
 
+  // Update check states
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'up_to_date' | 'available'>('idle')
+  const [updateInfo, setUpdateInfo] = useState<any>(null)
+  const [updateError, setUpdateError] = useState('')
+
+  const CURRENT_APP_VERSION = 'v0.1.0'
+
+  async function checkUpdates() {
+    setUpdateChecking(true)
+    setUpdateStatus('idle')
+    setUpdateInfo(null)
+    setUpdateError('')
+    try {
+      const res = await fetch('https://api.github.com/repos/ttienzy/ytb_v1/releases/latest')
+      if (!res.ok) {
+        if (res.status === 404) {
+          setUpdateStatus('up_to_date')
+          return
+        }
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      const latestTag = data.tag_name
+      if (latestTag && latestTag !== CURRENT_APP_VERSION) {
+        setUpdateStatus('available')
+        setUpdateInfo(data)
+      } else {
+        setUpdateStatus('up_to_date')
+      }
+    } catch (err: any) {
+      setUpdateError('Không thể kiểm tra cập nhật. Vui lòng kiểm tra kết nối Internet.')
+    } finally {
+      setUpdateChecking(false)
+    }
+  }
+
   useEffect(() => {
     fetch(`${API_URL}/api/settings/gemini`)
       .then(response => response.json())
@@ -319,6 +356,58 @@ export function SettingsPage() {
               </strong>{' '}
               — account bị SABR sẽ ra 360p.
             </p>
+          </div>
+
+          {/* ── Card: Check for Updates ── */}
+          <div className="settings-card" style={{ marginTop: 22 }}>
+            <div className="integration-title">
+              <div className="gemini-icon" style={{ background: '#3b82f6' }}>
+                <Sparkles size={17} />
+              </div>
+              <div>
+                <h2>Cập nhật Ứng dụng (Check for Updates)</h2>
+                <p>
+                  Kiểm tra và cập nhật phiên bản mới nhất từ GitHub Releases. Phiên bản hiện tại: <strong>v0.1.0</strong>
+                </p>
+              </div>
+            </div>
+            <div className="settings-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={checkUpdates}
+                disabled={updateChecking}
+              >
+                {updateChecking ? 'Đang kiểm tra...' : 'Kiểm tra cập nhật ngay'}
+              </button>
+              {updateStatus === 'up_to_date' && (
+                <span className="cookie-status" style={{ color: '#16a34a' }}>
+                  <CheckCircle2 size={15} /> Bạn đang dùng phiên bản mới nhất!
+                </span>
+              )}
+            </div>
+            {updateInfo && (
+              <div style={{ marginTop: 14, padding: 12, borderRadius: 8, background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                <div style={{ fontWeight: 600, color: '#2563eb' }}>
+                  🎉 Đã có phiên bản mới: {updateInfo.tag_name} ({updateInfo.name || 'Release'})
+                </div>
+                <div style={{ fontSize: 13, color: '#4b5563', marginTop: 4 }}>
+                  Ngày phát hành: {new Date(updateInfo.published_at).toLocaleDateString()}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <a
+                    href={updateInfo.html_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="primary-button"
+                    style={{ display: 'inline-block', textDecoration: 'none', padding: '6px 14px', fontSize: 13 }}
+                  >
+                    Tải bản cập nhật tại GitHub Releases ↗
+                  </a>
+                </div>
+              </div>
+            )}
+            {updateError && <p className="settings-message" style={{ color: '#ef4444' }}>{updateError}</p>}
           </div>
         </div>
       )}
