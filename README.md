@@ -1,168 +1,181 @@
-# ytb_v1 — YouTube Recap Tools
+# YouTube Studio Recap & Video Tools (`ytb_v1`)
 
-Bộ công cụ desktop để tạo **video recap tiếng Việt** từ YouTube: phân tích transcript bằng Gemini,
-cắt video theo đoạn, lồng tiếng Việt (TTS), ghép lại thành video cuối.
+[![Build and Release Desktop App](https://github.com/ttienzy/ytb_v1/actions/workflows/release.yml/badge.svg)](https://github.com/ttienzy/ytb_v1/actions/workflows/release.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/ttienzy/ytb_v1?color=blue&logo=github)](https://github.com/ttienzy/ytb_v1/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue.svg)](https://github.com/ttienzy/ytb_v1/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> Trạng thái: recap pipeline **R1–R4 đã chạy end-to-end** (generate → cut → voice+sync → merge),
-> có REST API, rehydrate job sau restart + resume từ UI. Voice-service (VieNeu-TTS, ONNX/CPU) đã chạy
-> port 8001. Còn chế lại / đánh bóng — xem [docs/](docs/).
+A powerful, all-in-one desktop application designed for automated **YouTube Video Recap Creation**, **Vietnamese AI Voiceover Dubbing**, and **Batch Watermark Inpainting**. Built with Electron, React, FastAPI, and VieNeu-TTS.
 
-## Kiến trúc
+---
 
-```
-Frontend/   Electron + Vite + React + Tailwind v4 (desktop app, port dev 5173)
-Backend/    FastAPI + SQLAlchemy + SQLite (Python, port 8000)
-services/   voice-service — VieNeu-TTS độc lập (ONNX/CPU, port 8001)
-Desktop/    package.json gốc (concurrently) — `npm start` chạy cả 3 service
-docs/       Plan + implementation notes pipeline
-```
+## 🌟 Key Features
 
-- **Frontend** (Electron): sidebar Dashboard / Studio / Voices / Thư viện nhạc / Xóa Watermark / Lịch sử / Cài đặt. Studio chạy
-  recap 4 bước + nghe thử từng VO / xem final, có **resume** (dựng lại job sau restart server). Tab Xóa Watermark hỗ trợ xử lý hàng loạt video bằng AI Inpainting.
-- **Backend** (FastAPI, `http://127.0.0.1:8000`):
-  - `app/recap/` — orchestration R1–R4 (router, service, schemas, state, ffmpeg, paths, ytdlp).
-  - `app/watermark/` — xóa Gemini SynthID ✦ watermark (Hybrid: path-based cho Desktop + upload cho Web, tải toàn bộ ZIP).
-  - `app/ai/gemini/` — gọi **Gemini web qua HTTP thuần** (cookie + token, không automation/Playwright).
-  - `app/voices/` — voice_client gọi voice-service `/tts`.
-  - `app/routers/health.py` — health check.
-- **Voice-service** (`services/voice-service`, port 8001): VieNeu-TTS (CPU-ONNX), API HTTP:
-  `/tts`, `/tts/batch`, `/voices`, `/health`. Load model 1 lần trong lifespan (dung sai lỗi).
+- 🎬 **Automated 4-Stage Recap Pipeline (R1–R4):**
+  - **R1 (AI Script Generation):** Dynamic 10+ minute transcript chunking with context chaining using Gemini Web API. Generates high-retention, witty, storytelling Vietnamese reviewer scripts with mandatory Intro Hook and Outro CTA.
+  - **R2 (Lossless Video Stream-Cut):** Downloads source video via `yt-dlp` (with multi-tiered anti-bot fallbacks) and performs frame-accurate segment extraction using `FFmpeg`.
+  - **R3 (Voiceover Synthesis & Pacing Sync):** High-speed batch Vietnamese TTS generation (VieNeu-TTS ONNX engine) with automated `atempo` time-stretching to match exact clip duration.
+  - **R4 (Muxing & Seamless Concatenation):** Muxes synthesized voiceover with video clips, normalizes audio levels, and produces the final merged MP4 recap.
+- 🧹 **AI Watermark & SynthID Remover:** Batch video inpainting to remove watermarks and platform stamps with zero quality loss.
+- 🎙️ **Voice Studio & Music Library:** Comprehensive voice previewing, audio adjustments, and background audio ducking.
+- 🔄 **Fault-Tolerant Job State & Rehydration:** Automatic job state persistence (`recap.json` + SQLite) allowing instant resume and replay across app restarts.
+- 📦 **Standalone Windows Installer:** Self-contained executable (`.exe`) packaged with PyInstaller and Electron-Builder. No Docker or local Python setup required for end users.
 
-## Pipeline recap (4 bước, user-triggered)
+---
+
+## 🏗️ Architecture Overview
 
 ```
-link YouTube + raw.txt  ──R1 Gemini (HTTP)──▶  recap.json
-recap.json  ──R2 yt-dlp + FFmpeg stream-cut [start,end]──▶  clip_i.mp4
-clip_i + vietnamese_vo  ──R3 voice-service /tts/batch + atempo sync──▶  voice_i.wav
-clip_i + voice_i  ──R4 FFmpeg mux + concat copy──▶  final_recap.mp4
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Desktop Application (Electron)                  │
+│  React UI + Vite + Tailwind CSS (Port 5173 / Main Process)             │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ IPC / HTTP
+                ┌──────────────────┴──────────────────┐
+                ▼                                     ▼
+┌───────────────────────────────┐     ┌──────────────────────────────────┐
+│   Backend Service (FastAPI)   │     │   Voice Service (VieNeu-TTS)     │
+│   Port: 8000                  │     │   Port: 8001                     │
+│   - R1-R4 Recap Engine        │────▶│   - CPU-Optimized ONNX Engine    │
+│   - Gemini Web API Client     │     │   - Batch TTS Synthesis          │
+│   - yt-dlp & FFmpeg Handler   │     │   - 20+ Vietnamese Voice Models  │
+│   - Watermark Inpainting      │     └──────────────────────────────────┘
+└───────────────────────────────┘
 ```
 
-Mỗi job 1 thư mục riêng `Backend/Data/Downloads/{job_id}/` chia subfolder `source/` `clips/`
-`voice/` `merge/` + `recap.json` + `final_recap.mp4`. File nguồn (video gốc) được giữ để
-re-cut / re-merge khỏi phải tải lại. State in-memory + persist `recap.json` → rehydrate sau restart.
+---
 
-Chi tiết: [docs/RECAP_PIPELINE_PLAN.md](docs/RECAP_PIPELINE_PLAN.md) ·
-[docs/RECAP_IMPLEMENTATION_PLAN.md](docs/RECAP_IMPLEMENTATION_PLAN.md) ·
-[docs/VOICE_SERVICE_PLAN.md](docs/VOICE_SERVICE_PLAN.md).
+## ⚡ Recap Pipeline Workflow
 
-### REST API (`/api/recap`)
+```
+1. YouTube URL ──▶ [Transcript Fetcher (Mức 0-3)] ──▶ Clean Subtitles (.vtt)
+2. Subtitles ──▶ [Dynamic Chunker (10min+)] ──▶ Gemini LLM ──▶ recap.json
+3. recap.json ──▶ [yt-dlp + FFmpeg Stream-Cut] ──▶ Segment Clips (clip_0.mp4 ... clip_n.mp4)
+4. Segments ──▶ [VieNeu-TTS Batch + atempo Sync] ──▶ Voice Tracks (voice_0.wav ... voice_n.wav)
+5. Clips + Voice ──▶ [FFmpeg Mux & Lossless Concat] ──▶ final_recap.mp4
+```
 
-| Endpoint | Pha | Tác dụng |
-|---|---|---|
-| `POST /api/recap/generate` | R1 | multipart `youtube_url` + `raw_file` → `recap_done` |
-| `POST /api/recap/cut` | R2 | json `{job_id}` → tải + cut từng segment → `cut_done` |
-| `POST /api/recap/voice` | R3 | json `{job_id, voice_id}` → TTS batch + atempo sync → `voice_done` |
-| `POST /api/recap/merge` | R4 | json `{job_id}` → mux + concat → `merged`, `final` |
-| `GET  /api/recap/jobs/{id}` | — | doc state (tự rehydrate nếu server restart) |
-| `GET  /api/recap/jobs/{id}/voice/{i}` | — | `audio/wav` VO đoạn i (UI nghe thử) |
-| `GET  /api/recap/jobs/{id}/final` | — | `video/mp4` final (range request, seek) |
-| `GET  /api/recap/jobs` | — | list job (gộp memory + disk) |
+---
 
-Mỗi bước chạy trong threadpool (httpx/yt-dlp/ffmpeg blocking) để không block event loop.
-Có gate: mỗi pha yêu cầu status của pha trước.
+## 🚀 Getting Started
 
-## Yêu cầu
+### Option 1: Download Prebuilt Desktop App (Recommended for Users)
 
-- Node.js ≥ 20, npm
-- Python ≥ 3.12, [uv](https://github.com/astral-sh/uv) (hoặc pip + venv)
-- `ffmpeg` + `yt-dlp` trong PATH (cho pipeline recap)
-- Tài khoản Google (cookie Gemini) — cấu hình ở `Backend/Data/config.json` (không commit)
+1. Go to the [Releases Page](https://github.com/ttienzy/ytb_v1/releases).
+2. Download the latest `Google Search App Setup <version>.exe`.
+3. Run the installer and launch the app directly from your Desktop shortcut.
 
-## Khởi động nhanh (dev — tất cả service)
+---
 
+### Option 2: Development Environment Setup (For Developers)
+
+#### Prerequisites
+- **Node.js:** $\ge 22.12.0$ (LTS recommended)
+- **Python:** $\ge 3.11$
+- **FFmpeg:** Installed and added to system `PATH`
+- **uv (Optional):** Recommended for managing Python environments ([Install uv](https://github.com/astral-sh/uv))
+
+#### 1. Clone the Repository
 ```bash
-# Lần đầu: cài deps
-cd Frontend && npm install && cd ..
-cd services/voice-service && uv sync && cd ../..     # voice-service env riêng (torch-free)
-
-# Chạy cả 3 cùng lúc: backend :8000 + voice-service :8001 + frontend (electron)
-npm start
+git clone https://github.com/ttienzy/ytb_v1.git
+cd ytb_v1
 ```
 
-`npm start` (qua [Desktop/package.json](Desktop/package.json)) dùng `concurrently` khởi động
-song song **BACKEND + VOICE + FRONTEND**; Ctrl+C sẽ tắt hết. Muốn chạy không cần voice
-(nhẹ hơn): `npm run start:core --prefix Desktop` (chỉ backend + frontend).
-
-Verify từng service:
+#### 2. Install Dependencies
 ```bash
-curl http://127.0.0.1:8000/api/ping     # backend (DB ping)
-curl http://127.0.0.1:8001/health      # voice-service → {model_loaded:true, backend:"onnx", voices_count:20}
-```
-
-## Chạy từng phần (thủ công)
-
-### Backend
-
-```bash
-cd Backend
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-
-### Frontend
-
-```bash
+# Install Frontend dependencies
 cd Frontend
 npm install
-npm run dev                     # electron-vite dev
-```
+cd ..
 
-### Voice-service
+# Install Backend dependencies
+cd Backend
+python -m venv .venv
+.\.venv\Scripts\activate      # On Windows
+pip install -r requirements.txt
+cd ..
 
-```bash
+# Install Voice Service dependencies
 cd services/voice-service
-uv sync
-uv run uvicorn app.main:app --reload --port 8001
+uv sync                       # or pip install -r requirements.txt
+cd ../..
 ```
 
-## Cấu hình (bắt buộc trước khi chạy recap)
-
-Copy template rồi điền cookie Gemini:
-
+#### 3. Configure Credentials (Gemini Web API)
+Create your local configuration file:
 ```bash
 cp Backend/Data/config.example.json Backend/Data/config.json
 ```
+Edit `Backend/Data/config.json` and provide your Gemini cookies or use the built-in Chrome profile login in the Settings tab.
 
-Sửa `config.json`:
-- `gemini.cookies`: dán cookie từ `gemini.google.com` (DevTools → Application → Cookies → copy tất cả).
-- `gemini.client_context_token`: chỉ cần khi **upload file** qua Gemini (lấy từ DevTools network).
+#### 4. Launch All Services Simultaneously
+```bash
+# Starts Backend (:8000), Voice Service (:8001), and Electron Frontend
+npm start --prefix Desktop
+```
 
-## Cấu trúc
+---
+
+## 📡 REST API Reference
+
+The backend exposes a full suite of endpoints at `http://127.0.0.1:8000`:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/recap/generate` | Initiates R1: Transcript fetch & AI script generation |
+| `POST` | `/api/recap/cut` | Initiates R2: Video stream-cutting via FFmpeg |
+| `POST` | `/api/recap/voice` | Initiates R3: Batch TTS voice synthesis & atempo synchronization |
+| `POST` | `/api/recap/merge` | Initiates R4: Final audio-video muxing and concatenation |
+| `GET` | `/api/recap/jobs/{id}` | Retrieves job status and execution progress |
+| `GET` | `/api/recap/jobs/{id}/voice/{i}` | Streams audio preview for segment `i` |
+| `GET` | `/api/recap/jobs/{id}/final` | Streams the final completed recap video (`.mp4`) |
+| `POST` | `/api/watermark/clean` | Submits batch video watermark removal job |
+| `GET` | `/api/health` | Service health check and database connectivity status |
+
+---
+
+## 🏷️ Automated Releases (CI/CD)
+
+This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`) that automatically builds and publishes Windows standalone installers.
+
+To publish a new version:
+```bash
+# 1. Update version in Frontend/package.json
+# 2. Commit changes
+git commit -am "chore(release): bump version to 1.0.0"
+
+# 3. Create and push tag
+git tag v1.0.0
+git push origin v1.0.0
+```
+GitHub Actions will automatically compile the Python backend into a standalone binary (`backend_server.exe`), package the Electron frontend via `electron-builder`, and publish the installer on the GitHub Releases tab.
+
+---
+
+## 📁 Repository Structure
 
 ```
 .
-├─ Frontend/               # Electron app
-│  ├─ src/                 # React (main.tsx — recap UI + resume)
-│  └─ electron/            # main/preload
-├─ Backend/                # FastAPI
-│  ├─ app/
-│  │  ├─ ai/gemini/        # Gemini HTTP (router, service, schemas, recap, capture)
-│  │  ├─ recap/            # R1–R4 (router, service, schemas, state, ffmpeg, paths, ytdlp)
-│  │  ├─ voices/           # voice_client → voice-service
-│  │  ├─ routers/          # health
-│  │  ├─ config.py, db.py, main.py
-│  ├─ prompts/             # system prompt recap
-│  ├─ tests/recap/         # test_cut / test_merge / test_voice
-│  ├─ Data/                # config.json (gitignored), Downloads/{job}/, recap.json, ChromeProfile
-│  └─ requirements.txt
-├─ services/voice-service/ # VieNeu-TTS (app/routers: health, tts, voices) + data/
-├─ Desktop/                # package.json gốc (concurrently)
-├─ docs/                   # RECAP_PIPELINE_PLAN, RECAP_IMPLEMENTATION_PLAN, VOICE_SERVICE_PLAN
-└─ package.json
+├── .github/workflows/         # CI/CD Release Workflows
+├── Backend/                   # FastAPI Backend (Python)
+│   ├── app/
+│   │   ├── ai/gemini/         # Gemini Web API Client & Recap Script Engine
+│   │   ├── recap/             # Chunker, Merger, Subtitle Downloader, FFmpeg
+│   │   ├── watermark/         # AI Inpainting Watermark Cleaner
+│   │   └── core/              # Configuration, Database & Storage
+│   ├── prompts/recap/         # Production Prompt Templates
+│   ├── backend.spec           # PyInstaller Executable Specification
+│   └── run_server.py          # Standalone Server Entrypoint
+├── Frontend/                  # Electron + React + Vite + Tailwind CSS
+│   ├── electron/              # Electron Main Process & Process Lifecycle Manager
+│   └── src/                   # React Components (Studio, Watermark, Settings)
+├── services/voice-service/    # Independent VieNeu-TTS Engine (ONNX Runtime)
+├── Desktop/                   # Multi-process Development Runner (dev.js)
+└── docs/                      # Architecture & Implementation Notes
 ```
 
-## .gitignore — đã loại bỏ
+---
 
-- **Mật**: `Backend/Data/config.json` (cookie Gemini), `*.har` (capture chứa cookie),
-  `Backend/Data/ChromeProfile/`, `.env`.
-- **Runtime**: `Backend/Data/*.txt`, `Backend/Data/recap.json`, `Backend/Data/Downloads/`,
-  `Data/app.db`, `Data/jobs/`.
-- **Build/deps**: `node_modules/`, `Frontend/out/`, `.venv/`, `__pycache__/`.
+## 📄 License
 
-Dùng `Backend/Data/config.example.json` làm mẫu cấu hình (không có secret).
-
-## License
-
-Internal use only — chưa công bố. Recap video YouTube + lồng tiếng: cân nhắc chính sách bản quyền / fair-use nội bộ.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
