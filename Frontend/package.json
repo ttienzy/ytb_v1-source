@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Google Search & Studio Recap Desktop App",
   "author": "ttienzy",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ttienzy/ytb_v1.git"
+  },
   "private": true,
   "type": "module",
   "main": "out/main/main.js",
@@ -34,6 +38,11 @@
   "build": {
     "appId": "com.googlesearch.app",
     "productName": "Google Search App",
+    "publish": {
+      "provider": "github",
+      "owner": "ttienzy",
+      "repo": "ytb_v1"
+    },
     "directories": {
       "output": "release"
     },
