@@ -150,8 +150,26 @@ def _parse_stream_frames(raw: str) -> list:
     return payloads
 
 
+def _clean_citation_markers(obj: Any) -> Any:
+    """Loại bỏ triệt để các ký tự trích dẫn nguồn của Gemini Web (ví dụ: [cite: 1], [cite: 1, 2], [1], v.v.)."""
+    if isinstance(obj, str):
+        # Loại bỏ [cite: 1], [cite: 1, 2], [cite: 1,2,3]
+        cleaned = re.sub(r"\[cite:\s*[\d,\s]+\]", "", obj)
+        # Chuẩn hóa khoảng trắng bị thừa sau khi bỏ cite
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        return cleaned.strip()
+    elif isinstance(obj, dict):
+        return {k: _clean_citation_markers(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_clean_citation_markers(item) for item in obj]
+    return obj
+
+
 def _normalize_recap_dict(data: dict) -> dict:
-    """Chuẩn hóa recap dict: làm sạch link markdown [url](url) nếu có, chuẩn hoá caption."""
+    """Chuẩn hóa recap dict: loại bỏ citation tags, làm sạch link markdown [url](url) nếu có, chuẩn hoá caption."""
+    # 1. Làm sạch toàn bộ citation tags ([cite: 1], ...) trong toàn bộ cấu trúc dict
+    data = _clean_citation_markers(data)
+
     if "video_url" in data and isinstance(data["video_url"], str):
         m = re.search(r"https?://[^\s\)\]]+", data["video_url"])
         if m:
