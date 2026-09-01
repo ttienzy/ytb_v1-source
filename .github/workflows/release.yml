@@ -1,0 +1,66 @@
+name: Build and Release Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*' # Tự động kích hoạt khi push tag dạng v1.0.0, v1.0.1...
+
+jobs:
+  release:
+    name: Build Windows Installer & Create GitHub Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: Backend/requirements.txt
+
+      - name: Install Python Dependencies & PyInstaller
+        run: |
+          cd Backend
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+          pip install pyinstaller uvicorn fastapi httpx pydantic pydantic-settings sqlalchemy alembic yt-dlp youtube-transcript-api python-dotenv playwright pyyaml requests websockets
+
+      - name: Build Standalone Backend Executable
+        run: |
+          cd Backend
+          pyinstaller --noconfirm backend.spec
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install Node Dependencies
+        run: |
+          cd Frontend
+          npm ci
+
+      - name: Build and Package Electron App
+        run: |
+          cd Frontend
+          npm run build
+          npx electron-builder --win nsis --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Frontend/release/*.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
