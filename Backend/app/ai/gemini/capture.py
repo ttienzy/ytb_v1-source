@@ -58,6 +58,7 @@ def capture() -> None:
                 user_data_dir=str(settings.chrome_profile_dir),
                 executable_path=str(settings.chrome_executable),
                 headless=False,
+                ignore_default_args=["--no-sandbox"],
                 args=["--no-first-run", "--no-default-browser-check"],
             )
         except Exception as error:

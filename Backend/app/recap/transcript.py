@@ -287,6 +287,7 @@ def _fetch_with_playwright(url: str, *, headless: bool, timeout_ms: int) -> dict
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=headless,
+            ignore_default_args=["--no-sandbox"],
             args=["--disable-blink-features=AutomationControlled"],
         )
         ctx = browser.new_context(
