@@ -7,14 +7,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Hỗ trợ tùy chỉnh APP_DATA_DIR khi chạy môi trường đóng gói (Production) hoặc mặc định thư mục gốc (Dev)
 if os.environ.get("APP_DATA_DIR"):
     TOOLS_DIR = Path(os.environ["APP_DATA_DIR"]).resolve()
+    DATA_DIR = TOOLS_DIR / "Data"
 elif getattr(sys, "frozen", False):
     # Nếu chạy từ file .exe đóng gói bởi PyInstaller, lưu data vào AppData của User
     app_data = Path(os.environ.get("APPDATA", Path.home())).resolve() / "GoogleSearchApp"
     TOOLS_DIR = app_data
+    DATA_DIR = TOOLS_DIR / "Data"
 else:
+    # Ở chế độ Development: TOOLS_DIR là thư mục gốc của repo, DATA_DIR là Backend/Data
     TOOLS_DIR = Path(__file__).resolve().parents[3]
+    DATA_DIR = Path(__file__).resolve().parents[2] / "Data"
 
-DATA_DIR = TOOLS_DIR / "Data"
 try:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 except OSError:
