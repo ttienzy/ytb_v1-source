@@ -72,3 +72,37 @@ def delete_processed_history_item(video_id: str):
     """Xóa video khỏi DB lịch sử nếu người dùng muốn làm lại từ đầu."""
     ok = remove_from_history(video_id)
     return {"ok": ok, "video_id": video_id}
+
+
+from app.discover.schemas import (
+    DriveUploadBatchRequest,
+    DriveUploadTaskOut,
+    ScoutVideosRequest,
+    ScoutVideosResponse,
+)
+
+
+@router.post("/recommend-videos", response_model=ScoutVideosResponse)
+@router.post("/scout-videos", response_model=ScoutVideosResponse)
+def scout_niche_videos(req: ScoutVideosRequest):
+    """Gọi Gemini AI để tìm kiếm và đề xuất video ngách (TikTok/Douyin Cooking, Bento...) kèm link YouTube."""
+    results = service.scout_niche_videos(
+        query=req.query,
+        custom_prompt=req.custom_prompt,
+        urls=req.urls,
+    )
+    return {"query": req.query, "results": results}
+
+
+@router.post("/drive-upload", response_model=list[DriveUploadTaskOut])
+def start_drive_upload(req: DriveUploadBatchRequest):
+    """Khởi chạy hàng đợi tải video từ YouTube và upload lên Google Drive (hỗ trợ rename và chọn folder)."""
+    tasks = service.start_drive_upload_batch(items=req.items, folder_id=req.folder_id)
+    return tasks
+
+
+@router.get("/drive-upload-tasks", response_model=list[DriveUploadTaskOut])
+def get_drive_upload_tasks():
+    """Lấy danh sách trạng thái các tác vụ upload Google Drive."""
+    return service.get_drive_upload_tasks()
+

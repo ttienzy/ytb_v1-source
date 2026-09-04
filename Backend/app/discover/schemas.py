@@ -62,3 +62,52 @@ class ChannelVideosResponse(BaseModel):
     subscribers: str | None = None
     video_count: int
     videos: list[VideoOut]
+
+
+class ScoutVideosRequest(BaseModel):
+    query: str = Field(default="", description="Search query or prompt for niche videos")
+    custom_prompt: str | None = Field(default=None, description="Optional extra custom instructions")
+    urls: list[str] | None = Field(default=None, description="Optional list of direct YouTube URLs")
+
+
+class ScoutedVideoItem(BaseModel):
+    title: str
+    url: str
+    video_id: str | None = None
+    channel_name: str | None = None
+    channel_url: str | None = None
+    thumbnail_url: str | None = None
+    duration_approx: str | None = None
+    niche_topic: str | None = None
+    reason: str | None = None
+
+
+class ScoutVideosResponse(BaseModel):
+    query: str
+    results: list[ScoutedVideoItem]
+
+
+class DriveUploadItem(BaseModel):
+    url: str
+    custom_name: str | None = None
+    title: str | None = None
+
+
+class DriveUploadBatchRequest(BaseModel):
+    items: list[DriveUploadItem]
+    folder_id: str | None = None
+
+
+class DriveUploadTaskOut(BaseModel):
+    task_id: str
+    url: str
+    title: str = ""
+    custom_name: str = ""
+    status: str = "pending"  # pending | downloading | uploading | done | error
+    progress_percent: int = 0
+    error: str | None = None
+    file_id: str | None = None
+    web_view_link: str | None = None
+    size_bytes: int | None = None
+    created_at: str = ""
+

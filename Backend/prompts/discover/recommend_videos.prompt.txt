@@ -1,0 +1,26 @@
+Hãy tìm và gợi ý cho mình 6 đến 8 video YouTube phổ biến, hấp dẫn và thịnh hành về chủ đề:
+"{user_prompt}"
+
+Trả về kết quả dưới dạng danh sách JSON (JSON Array) gồm các thông tin cho mỗi video:
+- "title": Tiêu đề video YouTube
+- "url": Đường dẫn xem video YouTube (ví dụ: https://www.youtube.com/watch?v=...)
+- "video_id": Mã ID video YouTube (nếu có)
+- "channel_name": Tên kênh YouTube
+- "channel_url": Đường dẫn kênh (nếu có)
+- "duration_approx": Thời lượng ước tính (ví dụ: 10:30)
+- "niche_topic": Phân loại chủ đề
+- "reason": Lý do video này nổi bật và thu hút người xem
+
+Ví dụ mẫu:
+[
+  {
+    "title": "Tiêu đề video",
+    "url": "https://www.youtube.com/watch?v=...",
+    "video_id": "...",
+    "channel_name": "Tên kênh",
+    "channel_url": "https://www.youtube.com/@...",
+    "duration_approx": "10:30",
+    "niche_topic": "Cơm hộp Bento",
+    "reason": "Video hướng dẫn chi tiết, hình ảnh đẹp mắt và nhiều lượt xem."
+  }
+]

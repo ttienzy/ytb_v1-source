@@ -43,3 +43,31 @@ export interface QuickCategory {
   label: string
   query: string
 }
+
+export interface ScoutedVideoItem {
+  title: string
+  url: string
+  video_id?: string
+  channel_name?: string
+  channel_url?: string
+  thumbnail_url?: string
+  duration_approx?: string
+  niche_topic?: string
+  reason?: string
+  custom_name?: string
+}
+
+export interface DriveUploadTask {
+  task_id: string
+  url: string
+  title: string
+  custom_name: string
+  status: 'pending' | 'downloading' | 'uploading' | 'done' | 'error'
+  progress_percent: number
+  error?: string | null
+  file_id?: string | null
+  web_view_link?: string | null
+  size_bytes?: number | null
+  created_at: string
+}
+

@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import * as api from './services/discoverApi'
+import { NicheVideoScoutTab } from './components/NicheVideoScoutTab'
 import type { ChannelVideo, DiscoveredChannel, QuickCategory } from './types'
 
 const QUICK_CATEGORIES: QuickCategory[] = [
@@ -66,6 +67,9 @@ interface DiscoverPageProps {
 }
 
 export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPageProps) {
+  // Sub-tab State
+  const [activeSubTab, setActiveSubTab] = useState<'channels' | 'niche_videos'>('channels')
+
   // Channels State
   const [presetChannels, setPresetChannels] = useState<DiscoveredChannel[]>([])
   const [savedChannels, setSavedChannels] = useState<DiscoveredChannel[]>([])
@@ -308,17 +312,75 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
         </div>
       )}
 
-      {/* Header Banner */}
+      {/* Sub-tab Navigation (Sleek Segmented Control) */}
       <div
-        className="card"
         style={{
-          padding: 20,
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
-          color: '#fff',
-          borderRadius: 16,
-          boxShadow: '0 8px 30px rgba(15, 23, 42, 0.25)',
+          display: 'inline-flex',
+          padding: 4,
+          background: '#f1f5f9',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          marginBottom: 16,
+          gap: 4,
         }}
       >
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('channels')}
+          style={{
+            padding: '7px 20px',
+            borderRadius: 7,
+            border: 'none',
+            background: activeSubTab === 'channels' ? '#ffffff' : 'transparent',
+            color: activeSubTab === 'channels' ? '#0f172a' : '#64748b',
+            fontSize: 13,
+            fontWeight: activeSubTab === 'channels' ? 600 : 500,
+            cursor: 'pointer',
+            boxShadow:
+              activeSubTab === 'channels'
+                ? '0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04)'
+                : 'none',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          Kênh Mục Tiêu
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('niche_videos')}
+          style={{
+            padding: '7px 20px',
+            borderRadius: 7,
+            border: 'none',
+            background: activeSubTab === 'niche_videos' ? '#ffffff' : 'transparent',
+            color: activeSubTab === 'niche_videos' ? '#0f172a' : '#64748b',
+            fontSize: 13,
+            fontWeight: activeSubTab === 'niche_videos' ? 600 : 500,
+            cursor: 'pointer',
+            boxShadow:
+              activeSubTab === 'niche_videos'
+                ? '0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04)'
+                : 'none',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          Khai Thác Video &amp; Lưu Drive
+        </button>
+      </div>
+
+      {/* Tab 1: Kênh Mục Tiêu (Hidden when inactive, preserving state) */}
+      <div style={{ display: activeSubTab === 'channels' ? 'block' : 'none' }}>
+        {/* Header Banner */}
+          <div
+            className="card"
+            style={{
+              padding: 20,
+              background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
+              color: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 8px 30px rgba(15, 23, 42, 0.25)',
+            }}
+          >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -336,11 +398,11 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                 <Compass size={20} color="#38bdf8" />
               </div>
               <h1 style={{ fontSize: 19, fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>
-                Khám Phá Kênh &amp; Săn Video Ẩm Thực
+                Khám Phá &amp; Quản Lý Kênh Nguồn
               </h1>
             </div>
             <p style={{ margin: '6px 0 0', fontSize: 13, color: '#94a3b8' }}>
-              Dùng <strong>AI Gemini</strong> rà soát các kênh ẩm thực tiếng Anh nổi tiếng thế giới ➔ Quét video tự động ➔ Đẩy 1-chạm sang Studio Recap.
+              Dùng <strong>AI Gemini</strong> rà soát các kênh nội dung tiềm năng ➔ Quét video tự động ➔ Đẩy nhanh sang Studio Recap.
             </p>
           </div>
 
@@ -1028,6 +1090,12 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
           </button>
         </div>
       )}
+      </div>
+
+      {/* Tab 2: Khai Thác Video & Drive (Hidden when inactive, preserving state) */}
+      <div style={{ display: activeSubTab === 'niche_videos' ? 'block' : 'none' }}>
+        <NicheVideoScoutTab onSendToStudioBatch={onSendToStudioBatch} />
+      </div>
 
       {/* Add Custom Channel Modal */}
       {addChannelModalOpen && (

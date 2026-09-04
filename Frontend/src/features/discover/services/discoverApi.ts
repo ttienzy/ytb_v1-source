@@ -59,3 +59,49 @@ export async function fetchChannelVideos(channelUrl: string, limit = 24): Promis
   }
   return res.json()
 }
+
+export async function scoutNicheVideos(
+  query: string,
+  customPrompt?: string,
+  urls?: string[]
+): Promise<{ query: string; results: any[] }> {
+  const res = await fetch(`${API_URL}/api/discover/scout-videos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, custom_prompt: customPrompt, urls }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Tìm kiếm video bằng Gemini thất bại')
+  }
+  return res.json()
+}
+
+export async function startDriveUploadBatch(
+  items: { url: string; custom_name?: string; title?: string }[],
+  folderId?: string
+): Promise<any[]> {
+  const res = await fetch(`${API_URL}/api/discover/drive-upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, folder_id: folderId }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Không thể bắt đầu tải lên Google Drive')
+  }
+  return res.json()
+}
+
+export async function fetchDriveUploadTasks(): Promise<any[]> {
+  const res = await fetch(`${API_URL}/api/discover/drive-upload-tasks`)
+  if (!res.ok) throw new Error('Không thể lấy danh sách tác vụ Drive')
+  return res.json()
+}
+
+export async function fetchDriveFolders(parentId = 'root'): Promise<any[]> {
+  const res = await fetch(`${API_URL}/api/gdrive/folders?parent_id=${encodeURIComponent(parentId)}`)
+  if (!res.ok) throw new Error('Không thể tải danh sách thư mục Google Drive')
+  return res.json()
+}
+

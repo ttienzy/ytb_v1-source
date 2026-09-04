@@ -286,3 +286,171 @@ def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
         "video_count": len(videos),
         "videos": videos,
     }
+
+
+# ── Niche Video Scout & Google Drive Upload Pipeline ──────────────────────────
+
+from pathlib import Path
+import asyncio
+import secrets
+import shutil
+from datetime import datetime, timezone
+
+from app.core.config import DATA_DIR, settings
+from app.discover.scout import scout_videos_with_gemini
+from app.discover.schemas import DriveUploadItem
+
+_DRIVE_UPLOAD_TASKS: dict[str, dict[str, Any]] = {}
+
+
+def scout_niche_videos(
+    query: str,
+    custom_prompt: str | None = None,
+    urls: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Gọi Gemini Scout để gợi ý danh sách video YouTube theo ngách."""
+    return scout_videos_with_gemini(query=query, custom_prompt=custom_prompt, urls=urls)
+
+
+def get_drive_upload_tasks() -> list[dict[str, Any]]:
+    """Lấy danh sách task tải video & upload Google Drive."""
+    tasks = list(_DRIVE_UPLOAD_TASKS.values())
+    tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return tasks
+
+
+def _sync_download_and_upload(task_id: str, url: str, custom_name: str | None, folder_id: str | None) -> None:
+    """Xử lý đồng bộ 1 task: tải bằng yt-dlp và upload lên Google Drive."""
+    from app.externals.gdrive.service import upload_clean_video
+    from app.externals.gdrive.schemas import GDriveUploadRequest
+
+    task = _DRIVE_UPLOAD_TASKS.get(task_id)
+    if not task:
+        return
+
+    temp_dir = DATA_DIR / "temp_gdrive_downloads" / task_id
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        task["status"] = "downloading"
+        task["progress_percent"] = 25
+
+        # Dùng yt-dlp tải video full (Video + Audio)
+        cmd = [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            "--output", str(temp_dir / "%(title)s.%(ext)s"),
+            "--no-playlist",
+            "--no-warnings",
+        ]
+
+        if settings.yt_cookies_file.exists() and settings.yt_cookies_file.stat().st_size > 0:
+            cmd.extend(["--cookies", str(settings.yt_cookies_file)])
+
+        cmd.append(url)
+
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=900,  # 15 phút
+        )
+
+        if proc.returncode != 0:
+            err_msg = proc.stderr.strip() or proc.stdout.strip() or f"yt-dlp exited with code {proc.returncode}"
+            # Rút gọn message nếu quá dài
+            if len(err_msg) > 300:
+                err_msg = err_msg[-300:]
+            raise RuntimeError(f"Tải video YouTube thất bại: {err_msg}")
+
+        # Tìm file mp4 đã tải về
+        mp4_files = list(temp_dir.glob("*.mp4"))
+        if not mp4_files:
+            # Fallback tìm file media bất kỳ
+            any_files = [f for f in temp_dir.iterdir() if f.is_file()]
+            if not any_files:
+                raise RuntimeError("Không tìm thấy file video sau khi tải về.")
+            downloaded_file = any_files[0]
+        else:
+            downloaded_file = mp4_files[0]
+
+        task["title"] = downloaded_file.stem
+        task["status"] = "uploading"
+        task["progress_percent"] = 65
+
+        # Xác định tên file upload
+        target_name = (custom_name or "").strip()
+        if not target_name:
+            target_name = downloaded_file.name
+        elif not target_name.lower().endswith(".mp4"):
+            target_name += ".mp4"
+
+        task["custom_name"] = target_name
+
+        # Gọi service Google Drive Resumable Upload
+        upload_res = upload_clean_video(GDriveUploadRequest(
+            file_path=str(downloaded_file),
+            folder_id=folder_id,
+            custom_name=target_name,
+        ))
+
+        task["status"] = "done"
+        task["progress_percent"] = 100
+        task["file_id"] = upload_res.file_id
+        task["web_view_link"] = upload_res.web_view_link
+        task["size_bytes"] = upload_res.size_bytes
+
+    except Exception as exc:
+        task["status"] = "error"
+        task["error"] = str(exc)
+    finally:
+        # Dọn dẹp thư mục tạm
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+async def _async_worker_drive_upload(task_id: str, url: str, custom_name: str | None, folder_id: str | None):
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _sync_download_and_upload, task_id, url, custom_name, folder_id)
+
+
+def start_drive_upload_batch(items: list[DriveUploadItem], folder_id: str | None = None) -> list[dict[str, Any]]:
+    """Khởi chạy hàng đợi tải video & upload Google Drive."""
+    created_tasks = []
+    for item in items:
+        u = (item.url or "").strip()
+        if not u:
+            continue
+        tid = secrets.token_hex(6)
+        task_info = {
+            "task_id": tid,
+            "url": u,
+            "title": item.title or "",
+            "custom_name": item.custom_name or "",
+            "status": "pending",
+            "progress_percent": 0,
+            "error": None,
+            "file_id": None,
+            "web_view_link": None,
+            "size_bytes": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _DRIVE_UPLOAD_TASKS[tid] = task_info
+        created_tasks.append(task_info)
+
+        # Kích hoạt worker chạy ngầm
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_async_worker_drive_upload(tid, u, item.custom_name, folder_id))
+        except RuntimeError:
+            # Fallback nếu gọi từ thread ngoài không có running loop
+            import threading
+            t = threading.Thread(target=_sync_download_and_upload, args=(tid, u, item.custom_name, folder_id), daemon=True)
+            t.start()
+
+    return created_tasks
+
