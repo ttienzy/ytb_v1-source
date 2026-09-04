@@ -1,7 +1,9 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 
 let mainWindow: BrowserWindow | null = null
 const backendProcesses: ChildProcess[] = []
@@ -97,6 +99,19 @@ function createWindow() {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
+
+ipcMain.handle('video:choose-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow ?? undefined, { properties: ['openDirectory', 'createDirectory'] })
+  return result.canceled ? null : result.filePaths[0]
+})
+ipcMain.handle('video:get-default-folder', () => app.getPath('downloads'))
+
+ipcMain.handle('video:save-file', async (_event, payload: { folder: string; name: string; data: ArrayBuffer }) => {
+  const safeName = basename(payload.name).replace(/[<>:"/\\|?*]+/g, '_')
+  const target = join(payload.folder, safeName)
+  await writeFile(target, Buffer.from(payload.data))
+  return target
+})
 
 app.whenReady().then(() => {
   startProductionBackend()
