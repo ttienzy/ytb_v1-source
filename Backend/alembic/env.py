@@ -7,6 +7,7 @@ from app.config import settings
 from app.db import Base
 from app.voices import models as _voice_models  # noqa: F401 — register metadata cho autogenerate
 from app.media import models as _media_models  # noqa: F401 — register BgmTrack
+from app.stories import models as _story_models  # noqa: F401 — register crawled stories
 
 
 config = context.config

@@ -1,0 +1,1842 @@
+[
+    {
+        "id": 112,
+        "categoryName": "",
+        "url": ""
+    },
+    {
+        "id": 228,
+        "categoryName": "...",
+        "url": ""
+    },
+    {
+        "id": 362,
+        "categoryName": "1V1",
+        "url": "1v1"
+    },
+    {
+        "id": 215,
+        "categoryName": "1VS1",
+        "url": "1vs1"
+    },
+    {
+        "id": 285,
+        "categoryName": "1X1",
+        "url": "1x1"
+    },
+    {
+        "id": 323,
+        "categoryName": "ABO",
+        "url": "abo"
+    },
+    {
+        "id": 383,
+        "categoryName": "ÁC NỮ",
+        "url": "ac-nu"
+    },
+    {
+        "id": 374,
+        "categoryName": "ÂM MƯU",
+        "url": "am-muu"
+    },
+    {
+        "id": 316,
+        "categoryName": "ÂM NHẠC",
+        "url": "am-nhac"
+    },
+    {
+        "id": 110,
+        "categoryName": "ẨM THỰC",
+        "url": "am-thuc"
+    },
+    {
+        "id": 275,
+        "categoryName": "ÁN MẠNG",
+        "url": "an-mang"
+    },
+    {
+        "id": 151,
+        "categoryName": "BÁC SĨ",
+        "url": "bac-si"
+    },
+    {
+        "id": 391,
+        "categoryName": "BẠCH NGUYỆT QUANG",
+        "url": "bach-nguyet-quang"
+    },
+    {
+        "id": 286,
+        "categoryName": "BÀN TAY VÀNG",
+        "url": "ban-tay-vang"
+    },
+    {
+        "id": 120,
+        "categoryName": "BẠN THÂN",
+        "url": "ban-than"
+    },
+    {
+        "id": 198,
+        "categoryName": "BẠO LỰC",
+        "url": "bao-luc"
+    },
+    {
+        "id": 30,
+        "categoryName": "BÁO THÙ",
+        "url": "bao-thu"
+    },
+    {
+        "id": 269,
+        "categoryName": "BÁO THÙ PHA KE",
+        "url": "bao-thu-pha-ke"
+    },
+    {
+        "id": 188,
+        "categoryName": "BÁO THÙ.",
+        "url": "bao-thu"
+    },
+    {
+        "id": 184,
+        "categoryName": "BÁO ỨNG",
+        "url": "bao-ung"
+    },
+    {
+        "id": 340,
+        "categoryName": "BẮT NẠT",
+        "url": "bat-nat"
+    },
+    {
+        "id": 375,
+        "categoryName": "BE",
+        "url": "be"
+    },
+    {
+        "id": 153,
+        "categoryName": "BỆNH KIỀU",
+        "url": "benh-kieu"
+    },
+    {
+        "id": 212,
+        "categoryName": "BÍ ẨN",
+        "url": "bi-an"
+    },
+    {
+        "id": 170,
+        "categoryName": "BÌNH LUẬN",
+        "url": "binh-luan"
+    },
+    {
+        "id": 257,
+        "categoryName": "BÌNH LUẬN CỐT TRUYỆN",
+        "url": "binh-luan-cot-truyen"
+    },
+    {
+        "id": 392,
+        "categoryName": "BỐ MẸ CHỒNG",
+        "url": "bo-me-chong"
+    },
+    {
+        "id": 99,
+        "categoryName": "BUÔNG BỎ",
+        "url": "buong-bo"
+    },
+    {
+        "id": 201,
+        "categoryName": "CẢM ĐỘNG",
+        "url": "cam-dong"
+    },
+    {
+        "id": 96,
+        "categoryName": "CẬN ĐẠI",
+        "url": "can-dai"
+    },
+    {
+        "id": 351,
+        "categoryName": "CAO MÔN LỆNH TỘC",
+        "url": "cao-mon-lenh-toc"
+    },
+    {
+        "id": 295,
+        "categoryName": "CHỊ BA MÊ TRUYỆN",
+        "url": "chi-ba-me-truyen"
+    },
+    {
+        "id": 147,
+        "categoryName": "CHỊ DÂU EM CHỒNG",
+        "url": "chi-dau-em-chong"
+    },
+    {
+        "id": 263,
+        "categoryName": "CHỊ EM",
+        "url": "chi-em"
+    },
+    {
+        "id": 164,
+        "categoryName": "CHỊ GÁI - EM TRAI",
+        "url": "chi-gai-em-trai"
+    },
+    {
+        "id": 281,
+        "categoryName": "CHIẾM HỮU",
+        "url": "chiem-huu"
+    },
+    {
+        "id": 136,
+        "categoryName": "CHIẾN TRANH",
+        "url": "chien-tranh"
+    },
+    {
+        "id": 311,
+        "categoryName": "CHỮ LÀNH",
+        "url": "chu-lanh"
+    },
+    {
+        "id": 69,
+        "categoryName": "CHỮA LÀNH",
+        "url": "chua-lanh"
+    },
+    {
+        "id": 42,
+        "categoryName": "CỔ ĐẠI",
+        "url": "co-dai"
+    },
+    {
+        "id": 384,
+        "categoryName": "CỔ ĐẠI TRUYỆN DÀI",
+        "url": "co-dai-truyen-dai"
+    },
+    {
+        "id": 133,
+        "categoryName": "CỔ ĐẠI.",
+        "url": "co-dai"
+    },
+    {
+        "id": 395,
+        "categoryName": "CỔ ĐẠI. CƯỚI TRƯỚC YÊU SAU. NỮ CƯỜNG. CUNG ĐẤU. HE. NGÔN TÌNH",
+        "url": "co-dai-cuoi-truoc-yeu-sau-nu-cuong-cung-dau-he-ngon-tinh"
+    },
+    {
+        "id": 101,
+        "categoryName": "CỔ TRANG",
+        "url": "co-trang"
+    },
+    {
+        "id": 64,
+        "categoryName": "CỔ TRÙNG",
+        "url": "co-trung"
+    },
+    {
+        "id": 155,
+        "categoryName": "CÔNG LƯỢC",
+        "url": "cong-luoc"
+    },
+    {
+        "id": 98,
+        "categoryName": "CÔNG SỞ",
+        "url": "cong-so"
+    },
+    {
+        "id": 60,
+        "categoryName": "CUNG ĐẤU",
+        "url": "cung-dau"
+    },
+    {
+        "id": 378,
+        "categoryName": "CUNG ĐÌNH",
+        "url": "cung-dinh"
+    },
+    {
+        "id": 43,
+        "categoryName": "CUNG ĐÌNH HẦU TƯỚC",
+        "url": "cung-dinh-hau-tuoc"
+    },
+    {
+        "id": 302,
+        "categoryName": "CƯỚI TRƯỚC YÊU SAU",
+        "url": "cuoi-truoc-yeu-sau"
+    },
+    {
+        "id": 276,
+        "categoryName": "CƯƠNG THI",
+        "url": "cuong-thi"
+    },
+    {
+        "id": 322,
+        "categoryName": "CƯỜNG THỦ HÀO ĐOẠT",
+        "url": "cuong-thu-hao-doat"
+    },
+    {
+        "id": 200,
+        "categoryName": "CỨU RỖI",
+        "url": "cuu-roi"
+    },
+    {
+        "id": 277,
+        "categoryName": "ĐAM MỸ",
+        "url": "dam-my"
+    },
+    {
+        "id": 126,
+        "categoryName": "DÂN GIAN",
+        "url": "dan-gian"
+    },
+    {
+        "id": 329,
+        "categoryName": "DÂN QUỐC",
+        "url": "dan-quoc"
+    },
+    {
+        "id": 294,
+        "categoryName": "ĐẤU ĐÁ",
+        "url": "dau-da"
+    },
+    {
+        "id": 356,
+        "categoryName": "ĐAU LÒNG",
+        "url": "dau-long"
+    },
+    {
+        "id": 206,
+        "categoryName": "ĐẤU PHÁP",
+        "url": "dau-phap"
+    },
+    {
+        "id": 255,
+        "categoryName": "ĐẤU TRANH",
+        "url": "dau-tranh"
+    },
+    {
+        "id": 284,
+        "categoryName": "ĐẤU TRÍ",
+        "url": "dau-tri"
+    },
+    {
+        "id": 156,
+        "categoryName": "DỊ GIỚI",
+        "url": "di-gioi"
+    },
+    {
+        "id": 264,
+        "categoryName": "DỊ NĂNG",
+        "url": "di-nang"
+    },
+    {
+        "id": 114,
+        "categoryName": "ĐIỀN VĂN",
+        "url": "dien-van"
+    },
+    {
+        "id": 209,
+        "categoryName": "ĐIỀU TRA",
+        "url": "dieu-tra"
+    },
+    {
+        "id": 128,
+        "categoryName": "ĐÔ THỊ",
+        "url": "do-thi"
+    },
+    {
+        "id": 234,
+        "categoryName": "ĐÔ THỊ HIỆN ĐẠI",
+        "url": "do-thi-hien-dai"
+    },
+    {
+        "id": 213,
+        "categoryName": "ĐOẢN VĂN",
+        "url": "doan-van"
+    },
+    {
+        "id": 390,
+        "categoryName": "ĐỘC ÁC",
+        "url": "doc-ac"
+    },
+    {
+        "id": 202,
+        "categoryName": "ĐỘC CHIẾM",
+        "url": "doc-chiem"
+    },
+    {
+        "id": 283,
+        "categoryName": "ĐỘC SỦNG",
+        "url": "doc-sung"
+    },
+    {
+        "id": 91,
+        "categoryName": "ĐỌC TÂM",
+        "url": "doc-tam"
+    },
+    {
+        "id": 350,
+        "categoryName": "ĐỌC TIẾNG LÒNG",
+        "url": "doc-tieng-long"
+    },
+    {
+        "id": 166,
+        "categoryName": "ĐỔI CON",
+        "url": "doi-con"
+    },
+    {
+        "id": 348,
+        "categoryName": "ĐỔI MỆNH",
+        "url": "doi-menh"
+    },
+    {
+        "id": 111,
+        "categoryName": "ĐỜI SỐNG",
+        "url": "doi-song"
+    },
+    {
+        "id": 135,
+        "categoryName": "ĐỜI SỐNG GIA ĐÌNH",
+        "url": "doi-song-gia-dinh"
+    },
+    {
+        "id": 191,
+        "categoryName": "ĐỜI THƯỜNG",
+        "url": "doi-thuong"
+    },
+    {
+        "id": 278,
+        "categoryName": "DRAMA",
+        "url": "drama"
+    },
+    {
+        "id": 371,
+        "categoryName": "DƯỠNG OA",
+        "url": "duong-oa"
+    },
+    {
+        "id": 343,
+        "categoryName": "DƯỠNG THÊ",
+        "url": "duong-the"
+    },
+    {
+        "id": 333,
+        "categoryName": "DUYÊN TRỜI TÁC HỢP",
+        "url": "duyen-troi-tac-hop"
+    },
+    {
+        "id": 314,
+        "categoryName": "GẢ THAY",
+        "url": "ga-thay"
+    },
+    {
+        "id": 57,
+        "categoryName": "GE",
+        "url": "ge"
+    },
+    {
+        "id": 58,
+        "categoryName": "GIA ĐẤU",
+        "url": "gia-dau"
+    },
+    {
+        "id": 46,
+        "categoryName": "GIA ĐÌNH",
+        "url": "gia-dinh"
+    },
+    {
+        "id": 355,
+        "categoryName": "GIA ĐÌNH QUYỀN QUÝ",
+        "url": "gia-dinh-quyen-quy"
+    },
+    {
+        "id": 373,
+        "categoryName": "GIẢ MẤT TRÍ NHỚ",
+        "url": "gia-mat-tri-nho"
+    },
+    {
+        "id": 272,
+        "categoryName": "GIẢ TƯỞNG",
+        "url": "gia-tuong"
+    },
+    {
+        "id": 21,
+        "categoryName": "GIẢI TRÍ",
+        "url": "giai-tri"
+    },
+    {
+        "id": 152,
+        "categoryName": "GIỚI GIẢI TRÍ",
+        "url": "gioi-giai-tri"
+    },
+    {
+        "id": 354,
+        "categoryName": "GIỚI NHÀ GIÀU",
+        "url": "gioi-nha-giau"
+    },
+    {
+        "id": 352,
+        "categoryName": "GIỚI QUYỀN QUÝ",
+        "url": "gioi-quyen-quy"
+    },
+    {
+        "id": 353,
+        "categoryName": "GIỚI THƯỢNG LƯU",
+        "url": "gioi-thuong-luu"
+    },
+    {
+        "id": 393,
+        "categoryName": "GÓC NHÌN NAM",
+        "url": "goc-nhin-nam"
+    },
+    {
+        "id": 247,
+        "categoryName": "GÓC NHÌN NAM CHÍNH",
+        "url": "goc-nhin-nam-chinh"
+    },
+    {
+        "id": 169,
+        "categoryName": "GÓC NHÌN NỮ CHÍNH",
+        "url": "goc-nhin-nu-chinh"
+    },
+    {
+        "id": 265,
+        "categoryName": "GÓC TRUYỆN CỦA YÊN",
+        "url": "goc-truyen-cua-yen"
+    },
+    {
+        "id": 89,
+        "categoryName": "GƯƠNG VỠ",
+        "url": "guong-vo"
+    },
+    {
+        "id": 78,
+        "categoryName": "GƯƠNG VỠ KHÔNG LÀNH",
+        "url": "guong-vo-khong-lanh"
+    },
+    {
+        "id": 105,
+        "categoryName": "GƯƠNG VỠ LẠI LÀNH",
+        "url": "guong-vo-lai-lanh"
+    },
+    {
+        "id": 227,
+        "categoryName": "HẮC THẦN THOẠI",
+        "url": "hac-than-thoai"
+    },
+    {
+        "id": 55,
+        "categoryName": "HÀI",
+        "url": "hai"
+    },
+    {
+        "id": 235,
+        "categoryName": "HÀI ĐEN",
+        "url": "hai-den"
+    },
+    {
+        "id": 39,
+        "categoryName": "HÀI HƯỚC",
+        "url": "hai-huoc"
+    },
+    {
+        "id": 76,
+        "categoryName": "HÀI NGỌT",
+        "url": "hai-ngot"
+    },
+    {
+        "id": 178,
+        "categoryName": "HÀNG XÓM",
+        "url": "hang-xom"
+    },
+    {
+        "id": 221,
+        "categoryName": "HÀNH ĐỘNG",
+        "url": "hanh-dong"
+    },
+    {
+        "id": 320,
+        "categoryName": "HÀNH TRÌNH TRƯỞNG THÀNH",
+        "url": "hanh-trinh-truong-thanh"
+    },
+    {
+        "id": 132,
+        "categoryName": "HÀO MÔN",
+        "url": "hao-mon"
+    },
+    {
+        "id": 137,
+        "categoryName": "HÀO MÔN THẾ GIA",
+        "url": "hao-mon-the-gia"
+    },
+    {
+        "id": 172,
+        "categoryName": "HẬU TẬN THẾ",
+        "url": "hau-tan-the"
+    },
+    {
+        "id": 40,
+        "categoryName": "HE",
+        "url": "he"
+    },
+    {
+        "id": 72,
+        "categoryName": "HỆ THỐNG",
+        "url": "he-thong"
+    },
+    {
+        "id": 195,
+        "categoryName": "HE.",
+        "url": "he"
+    },
+    {
+        "id": 279,
+        "categoryName": "HE·",
+        "url": "he"
+    },
+    {
+        "id": 260,
+        "categoryName": "HEALING",
+        "url": "healing"
+    },
+    {
+        "id": 35,
+        "categoryName": "HIỆN ĐẠI",
+        "url": "hien-dai"
+    },
+    {
+        "id": 146,
+        "categoryName": "HIỆN ĐẠI - CẬN ĐẠI",
+        "url": "hien-dai-can-dai"
+    },
+    {
+        "id": 361,
+        "categoryName": "HIỆN ĐẠI XEN CỔ ĐẠI",
+        "url": "hien-dai-xen-co-dai"
+    },
+    {
+        "id": 253,
+        "categoryName": "HIỆN ĐẠI-CHỮ LÀNH.",
+        "url": "hien-dai-chu-lanh"
+    },
+    {
+        "id": 177,
+        "categoryName": "HIỆN ĐẠI-GIA ĐÌNH",
+        "url": "hien-dai-gia-dinh"
+    },
+    {
+        "id": 183,
+        "categoryName": "HIỆN THỰC XÃ HỘI",
+        "url": "hien-thuc-xa-hoi"
+    },
+    {
+        "id": 108,
+        "categoryName": "HIỂU LẦM",
+        "url": "hieu-lam"
+    },
+    {
+        "id": 134,
+        "categoryName": "HÌNH SỰ",
+        "url": "hinh-su"
+    },
+    {
+        "id": 159,
+        "categoryName": "HOÁN ĐỔI",
+        "url": "hoan-doi"
+    },
+    {
+        "id": 299,
+        "categoryName": "HOÁN ĐỔI THÂN XÁC",
+        "url": "hoan-doi-than-xac"
+    },
+    {
+        "id": 341,
+        "categoryName": "HỌC BÁ",
+        "url": "hoc-ba"
+    },
+    {
+        "id": 45,
+        "categoryName": "HỌC ĐƯỜNG",
+        "url": "hoc-duong"
+    },
+    {
+        "id": 349,
+        "categoryName": "HỐI HẬN",
+        "url": "hoi-han"
+    },
+    {
+        "id": 109,
+        "categoryName": "HỒI HỘP",
+        "url": "hoi-hop"
+    },
+    {
+        "id": 84,
+        "categoryName": "HÔN NHÂN",
+        "url": "hon-nhan"
+    },
+    {
+        "id": 182,
+        "categoryName": "HÔN NHÂN HỢP ĐỒNG",
+        "url": "hon-nhan-hop-dong"
+    },
+    {
+        "id": 83,
+        "categoryName": "HƯ CẤU",
+        "url": "hu-cau"
+    },
+    {
+        "id": 242,
+        "categoryName": "HƯ CẤU HUYỀN ẢO",
+        "url": "hu-cau-huyen-ao"
+    },
+    {
+        "id": 122,
+        "categoryName": "HƯ CẤU KỲ ẢO",
+        "url": "hu-cau-ky-ao"
+    },
+    {
+        "id": 168,
+        "categoryName": "HỦ TỤC",
+        "url": "hu-tuc"
+    },
+    {
+        "id": 179,
+        "categoryName": "HUYỀN ẢO",
+        "url": "huyen-ao"
+    },
+    {
+        "id": 175,
+        "categoryName": "HUYỀN BÍ",
+        "url": "huyen-bi"
+    },
+    {
+        "id": 174,
+        "categoryName": "HUYỀN HỌC",
+        "url": "huyen-hoc"
+    },
+    {
+        "id": 192,
+        "categoryName": "HUYỀN HỌC.",
+        "url": "huyen-hoc"
+    },
+    {
+        "id": 12,
+        "categoryName": "HUYỀN HUYỄN",
+        "url": "huyen-huyen"
+    },
+    {
+        "id": 338,
+        "categoryName": "HUYỀN HUYỄN _LINH DỊ",
+        "url": "huyen-huyen-_linh-di"
+    },
+    {
+        "id": 102,
+        "categoryName": "HUYỀN NGHI",
+        "url": "huyen-nghi"
+    },
+    {
+        "id": 335,
+        "categoryName": "KHIẾM KHUYẾT",
+        "url": "khiem-khuyet"
+    },
+    {
+        "id": 244,
+        "categoryName": "KHOA HỌC VIỄN TƯỞNG",
+        "url": "khoa-hoc-vien-tuong"
+    },
+    {
+        "id": 300,
+        "categoryName": "KHOA HUYỄN",
+        "url": "khoa-huyen"
+    },
+    {
+        "id": 305,
+        "categoryName": "KHÔNG CP",
+        "url": "khong-cp"
+    },
+    {
+        "id": 236,
+        "categoryName": "KỊCH TÍNH",
+        "url": "kich-tinh"
+    },
+    {
+        "id": 307,
+        "categoryName": "KIẾM HIỆP",
+        "url": "kiem-hiep"
+    },
+    {
+        "id": 268,
+        "categoryName": "KIẾP TRƯỚC KIẾP NÀY",
+        "url": "kiep-truoc-kiep-nay"
+    },
+    {
+        "id": 138,
+        "categoryName": "KIM BÀI ĐỀ CỬ",
+        "url": "kim-bai-de-cu"
+    },
+    {
+        "id": 48,
+        "categoryName": "KINH DỊ",
+        "url": "kinh-di"
+    },
+    {
+        "id": 210,
+        "categoryName": "KỲ ẢO",
+        "url": "ky-ao"
+    },
+    {
+        "id": 226,
+        "categoryName": "KỲ BÍ",
+        "url": "ky-bi"
+    },
+    {
+        "id": 326,
+        "categoryName": "KỲ HUYỄN",
+        "url": "ky-huyen"
+    },
+    {
+        "id": 149,
+        "categoryName": "KÝ SỰ",
+        "url": "ky-su"
+    },
+    {
+        "id": 345,
+        "categoryName": "LÀM GIÀU",
+        "url": "lam-giau"
+    },
+    {
+        "id": 358,
+        "categoryName": "LÀM NHÂN VẬT NỮ ĐAU LÒNG",
+        "url": "lam-nhan-vat-nu-dau-long"
+    },
+    {
+        "id": 368,
+        "categoryName": "LÀM RUỘNG",
+        "url": "lam-ruong"
+    },
+    {
+        "id": 161,
+        "categoryName": "LÃNG MẠN",
+        "url": "lang-man"
+    },
+    {
+        "id": 47,
+        "categoryName": "LINH DỊ",
+        "url": "linh-di"
+    },
+    {
+        "id": 337,
+        "categoryName": "LINH DỊ THẦN QUÁI",
+        "url": "linh-di-than-quai"
+    },
+    {
+        "id": 165,
+        "categoryName": "LINH HỒN",
+        "url": "linh-hon"
+    },
+    {
+        "id": 273,
+        "categoryName": "LIVESTREAM",
+        "url": "livestream"
+    },
+    {
+        "id": 124,
+        "categoryName": "LÒNG NGƯỜI",
+        "url": "long-nguoi"
+    },
+    {
+        "id": 199,
+        "categoryName": "LỘT TRẦN",
+        "url": "lot-tran"
+    },
+    {
+        "id": 241,
+        "categoryName": "MA QUÁI",
+        "url": "ma-quai"
+    },
+    {
+        "id": 75,
+        "categoryName": "MẠT THẾ",
+        "url": "mat-the"
+    },
+    {
+        "id": 117,
+        "categoryName": "MÂU THUẪN",
+        "url": "mau-thuan"
+    },
+    {
+        "id": 229,
+        "categoryName": "MẪU TỬ",
+        "url": "mau-tu"
+    },
+    {
+        "id": 97,
+        "categoryName": "MẸ CHỒNG - NÀNG DÂU",
+        "url": "me-chong-nang-dau"
+    },
+    {
+        "id": 118,
+        "categoryName": "MẸ CHỒNG NÀNG DÂU",
+        "url": "me-chong-nang-dau"
+    },
+    {
+        "id": 380,
+        "categoryName": "MẸ CON",
+        "url": "me-con"
+    },
+    {
+        "id": 377,
+        "categoryName": "MINH HÔN",
+        "url": "minh-hon"
+    },
+    {
+        "id": 327,
+        "categoryName": "MƯU KẾ",
+        "url": "muu-ke"
+    },
+    {
+        "id": 88,
+        "categoryName": "MỸ THỰC",
+        "url": "my-thuc"
+    },
+    {
+        "id": 334,
+        "categoryName": "MỸ THỰC VĂN",
+        "url": "my-thuc-van"
+    },
+    {
+        "id": 288,
+        "categoryName": "NAM CƯỜNG",
+        "url": "nam-cuong"
+    },
+    {
+        "id": 245,
+        "categoryName": "NAM PHỤ LÊN NGÔI",
+        "url": "nam-phu-len-ngoi"
+    },
+    {
+        "id": 92,
+        "categoryName": "NGHE TIẾNG LÒNG",
+        "url": "nghe-tieng-long"
+    },
+    {
+        "id": 217,
+        "categoryName": "NGHỊCH TẬP",
+        "url": "nghich-tap"
+    },
+    {
+        "id": 254,
+        "categoryName": "NGOẠI TÌNH",
+        "url": "ngoai-tinh"
+    },
+    {
+        "id": 262,
+        "categoryName": "NGÔI LÀNG TỘI ÁC - KẺ THỦ ÁC 2",
+        "url": "ngoi-lang-toi-ac-ke-thu-ac-2"
+    },
+    {
+        "id": 80,
+        "categoryName": "NGÔN TÌNH",
+        "url": "ngon-tinh"
+    },
+    {
+        "id": 181,
+        "categoryName": "NGÔN TÌNH HIỆN ĐẠI",
+        "url": "ngon-tinh-hien-dai"
+    },
+    {
+        "id": 66,
+        "categoryName": "NGỌT",
+        "url": "ngot"
+    },
+    {
+        "id": 79,
+        "categoryName": "NGỌT NGÀO",
+        "url": "ngot-ngao"
+    },
+    {
+        "id": 81,
+        "categoryName": "NGỌT SỦNG",
+        "url": "ngot-sung"
+    },
+    {
+        "id": 90,
+        "categoryName": "NGƯỢC",
+        "url": "nguoc"
+    },
+    {
+        "id": 309,
+        "categoryName": "NGƯỢC LUYẾN TÀN TÂM",
+        "url": "nguoc-luyen-tan-tam"
+    },
+    {
+        "id": 256,
+        "categoryName": "NGƯỢC NAM",
+        "url": "nguoc-nam"
+    },
+    {
+        "id": 240,
+        "categoryName": "NGƯỢC NHẸ",
+        "url": "nguoc-nhe"
+    },
+    {
+        "id": 304,
+        "categoryName": "NGƯỢC NỮ",
+        "url": "nguoc-nu"
+    },
+    {
+        "id": 180,
+        "categoryName": "NGƯỢC TÂM",
+        "url": "nguoc-tam"
+    },
+    {
+        "id": 365,
+        "categoryName": "NGƯỢC TRA",
+        "url": "nguoc-tra"
+    },
+    {
+        "id": 360,
+        "categoryName": "NGUYÊN SANG",
+        "url": "nguyen-sang"
+    },
+    {
+        "id": 238,
+        "categoryName": "NHÂN QUẢ",
+        "url": "nhan-qua"
+    },
+    {
+        "id": 249,
+        "categoryName": "NHÂN QUẢ BÁO ỨNG",
+        "url": "nhan-qua-bao-ung"
+    },
+    {
+        "id": 148,
+        "categoryName": "NHÂN VẬT THỨC TỈNH",
+        "url": "nhan-vat-thuc-tinh"
+    },
+    {
+        "id": 204,
+        "categoryName": "NHẤT KIẾN CHUNG TÌNH",
+        "url": "nhat-kien-chung-tinh"
+    },
+    {
+        "id": 196,
+        "categoryName": "NHẸ NHÀNG",
+        "url": "nhe-nhang"
+    },
+    {
+        "id": 280,
+        "categoryName": "NIÊN CÔNG",
+        "url": "nien-cong"
+    },
+    {
+        "id": 130,
+        "categoryName": "NIÊN ĐẠI",
+        "url": "nien-dai"
+    },
+    {
+        "id": 231,
+        "categoryName": "NỔI TIẾNG",
+        "url": "noi-tieng"
+    },
+    {
+        "id": 154,
+        "categoryName": "NÔNG THÔN",
+        "url": "nong-thon"
+    },
+    {
+        "id": 379,
+        "categoryName": "NỮ",
+        "url": "nu"
+    },
+    {
+        "id": 186,
+        "categoryName": "NỮ CHÍNH TRƯỞNG THÀNH",
+        "url": "nu-chinh-truong-thanh"
+    },
+    {
+        "id": 160,
+        "categoryName": "NỮ CHỦ",
+        "url": "nu-chu"
+    },
+    {
+        "id": 27,
+        "categoryName": "NỮ CƯỜNG",
+        "url": "nu-cuong"
+    },
+    {
+        "id": 93,
+        "categoryName": "NỮ CƯỜNG HIỆN ĐẠI",
+        "url": "nu-cuong-hien-dai"
+    },
+    {
+        "id": 296,
+        "categoryName": "NỮ CƯỜNG;",
+        "url": "nu-cuong"
+    },
+    {
+        "id": 386,
+        "categoryName": "NỮ CƯỜNG; VẢ MẶT; TRẢ THÙ; GIA ĐÌNH; GƯƠNG VỠ KHÔNG LÀNH",
+        "url": "nu-cuong-va-mat-tra-thu-gia-dinh-guong-vo-khong-lanh"
+    },
+    {
+        "id": 211,
+        "categoryName": "NỮ CƯỜNG.",
+        "url": "nu-cuong"
+    },
+    {
+        "id": 216,
+        "categoryName": "NỮ ĐẾ",
+        "url": "nu-de"
+    },
+    {
+        "id": 396,
+        "categoryName": "NỮ LỚN TUỔI HƠN NAM",
+        "url": "nu-lon-tuoi-hon-nam"
+    },
+    {
+        "id": 214,
+        "categoryName": "NỮ PHỤ",
+        "url": "nu-phu"
+    },
+    {
+        "id": 219,
+        "categoryName": "NỮ TRUY",
+        "url": "nu-truy"
+    },
+    {
+        "id": 115,
+        "categoryName": "NULL",
+        "url": "null"
+    },
+    {
+        "id": 230,
+        "categoryName": "OE",
+        "url": "oe"
+    },
+    {
+        "id": 71,
+        "categoryName": "PHÁ ÁN",
+        "url": "pha-an"
+    },
+    {
+        "id": 388,
+        "categoryName": "PHẢN BỘI",
+        "url": "phan-boi"
+    },
+    {
+        "id": 346,
+        "categoryName": "PHẢN CỔ TÍCH",
+        "url": "phan-co-tich"
+    },
+    {
+        "id": 274,
+        "categoryName": "PHÁP Y",
+        "url": "phap-y"
+    },
+    {
+        "id": 185,
+        "categoryName": "PHÁT SÓNG TRỰC TIẾP",
+        "url": "phat-song-truc-tiep"
+    },
+    {
+        "id": 11,
+        "categoryName": "PHIÊU LƯU",
+        "url": "phieu-luu"
+    },
+    {
+        "id": 301,
+        "categoryName": "PHƯƠNG ĐÔNG",
+        "url": "phuong-dong"
+    },
+    {
+        "id": 189,
+        "categoryName": "PLOT TWIST",
+        "url": "plot-twist"
+    },
+    {
+        "id": 125,
+        "categoryName": "QUẢ BÁO",
+        "url": "qua-bao"
+    },
+    {
+        "id": 239,
+        "categoryName": "QUÁI DỊ",
+        "url": "quai-di"
+    },
+    {
+        "id": 157,
+        "categoryName": "QUÂN SỰ",
+        "url": "quan-su"
+    },
+    {
+        "id": 140,
+        "categoryName": "QUAN TRƯỜNG",
+        "url": "quan-truong"
+    },
+    {
+        "id": 224,
+        "categoryName": "QUY TẮC",
+        "url": "quy-tac"
+    },
+    {
+        "id": 103,
+        "categoryName": "QUY TẮC QUÁI ĐÀM",
+        "url": "quy-tac-quai-dam"
+    },
+    {
+        "id": 139,
+        "categoryName": "QUYỀN MƯU",
+        "url": "quyen-muu"
+    },
+    {
+        "id": 315,
+        "categoryName": "ROCK",
+        "url": "rock"
+    },
+    {
+        "id": 197,
+        "categoryName": "RÙNG RỢN",
+        "url": "rung-ron"
+    },
+    {
+        "id": 332,
+        "categoryName": "SẠCH",
+        "url": "sach"
+    },
+    {
+        "id": 68,
+        "categoryName": "SẢNG VĂN",
+        "url": "sang-van"
+    },
+    {
+        "id": 59,
+        "categoryName": "SE",
+        "url": "se"
+    },
+    {
+        "id": 131,
+        "categoryName": "SHOWBIG",
+        "url": "showbig"
+    },
+    {
+        "id": 61,
+        "categoryName": "SHOWBIZ",
+        "url": "showbiz"
+    },
+    {
+        "id": 223,
+        "categoryName": "SIÊU NHIÊN",
+        "url": "sieu-nhien"
+    },
+    {
+        "id": 261,
+        "categoryName": "SINH TỒN",
+        "url": "sinh-ton"
+    },
+    {
+        "id": 324,
+        "categoryName": "SINH TỬ VĂN",
+        "url": "sinh-tu-van"
+    },
+    {
+        "id": 271,
+        "categoryName": "SM",
+        "url": "sm"
+    },
+    {
+        "id": 100,
+        "categoryName": "SÓI MẮT TRẮNG",
+        "url": "soi-mat-trang"
+    },
+    {
+        "id": 289,
+        "categoryName": "SONG CƯỜNG",
+        "url": "song-cuong"
+    },
+    {
+        "id": 53,
+        "categoryName": "SỐNG LẠI",
+        "url": "song-lai"
+    },
+    {
+        "id": 382,
+        "categoryName": "SONG SINH",
+        "url": "song-sinh"
+    },
+    {
+        "id": 328,
+        "categoryName": "SỰ NGHIỆP",
+        "url": "su-nghiep"
+    },
+    {
+        "id": 29,
+        "categoryName": "SỦNG",
+        "url": "sung"
+    },
+    {
+        "id": 158,
+        "categoryName": "SỦNG NGỌT",
+        "url": "sung-ngot"
+    },
+    {
+        "id": 246,
+        "categoryName": "SỦNG VẢ MẶT",
+        "url": "sung-va-mat"
+    },
+    {
+        "id": 266,
+        "categoryName": "TÀ THUẬT",
+        "url": "ta-thuat"
+    },
+    {
+        "id": 52,
+        "categoryName": "TÁI SINH",
+        "url": "tai-sinh"
+    },
+    {
+        "id": 394,
+        "categoryName": "TÂM CƠ",
+        "url": "tam-co"
+    },
+    {
+        "id": 176,
+        "categoryName": "TÂM LINH",
+        "url": "tam-linh"
+    },
+    {
+        "id": 73,
+        "categoryName": "TÂM LÝ",
+        "url": "tam-ly"
+    },
+    {
+        "id": 190,
+        "categoryName": "TÂM LÝ TỘI PHẠM",
+        "url": "tam-ly-toi-pham"
+    },
+    {
+        "id": 237,
+        "categoryName": "TÂM LÝ XÃ HỘI",
+        "url": "tam-ly-xa-hoi"
+    },
+    {
+        "id": 67,
+        "categoryName": "TẬN THẾ",
+        "url": "tan-the"
+    },
+    {
+        "id": 225,
+        "categoryName": "TẢN VĂN",
+        "url": "tan-van"
+    },
+    {
+        "id": 258,
+        "categoryName": "TAROT",
+        "url": "tarot"
+    },
+    {
+        "id": 325,
+        "categoryName": "TEEN",
+        "url": "teen"
+    },
+    {
+        "id": 203,
+        "categoryName": "THẦM MẾN",
+        "url": "tham-men"
+    },
+    {
+        "id": 220,
+        "categoryName": "THẦM YÊU",
+        "url": "tham-yeu"
+    },
+    {
+        "id": 347,
+        "categoryName": "THẦN TIÊN. VẢ MẶT",
+        "url": "than-tien-va-mat"
+    },
+    {
+        "id": 173,
+        "categoryName": "THẦN Y",
+        "url": "than-y"
+    },
+    {
+        "id": 62,
+        "categoryName": "THANH MAI TRÚC MÃ",
+        "url": "thanh-mai-truc-ma"
+    },
+    {
+        "id": 243,
+        "categoryName": "THANH XUÂN",
+        "url": "thanh-xuan"
+    },
+    {
+        "id": 143,
+        "categoryName": "THANH XUÂN VƯỜN TRƯỜNG",
+        "url": "thanh-xuan-vuon-truong"
+    },
+    {
+        "id": 121,
+        "categoryName": "THẬP NIÊN",
+        "url": "thap-nien"
+    },
+    {
+        "id": 70,
+        "categoryName": "THẬT GIẢ",
+        "url": "that-gia"
+    },
+    {
+        "id": 330,
+        "categoryName": "THẬT GIẢ THIÊN KIM",
+        "url": "that-gia-thien-kim"
+    },
+    {
+        "id": 364,
+        "categoryName": "THẾ GIỚI SONG SONG",
+        "url": "the-gioi-song-song"
+    },
+    {
+        "id": 331,
+        "categoryName": "THỂ LOẠI: ĐAM MỸ",
+        "url": "the-loai-dam-my"
+    },
+    {
+        "id": 363,
+        "categoryName": "THẾ THÂN",
+        "url": "the-than"
+    },
+    {
+        "id": 357,
+        "categoryName": "THEO ĐUỔI LẠI VỢ",
+        "url": "theo-duoi-lai-vo"
+    },
+    {
+        "id": 145,
+        "categoryName": "THEO ĐUỔI TƯƠNG LAI",
+        "url": "theo-duoi-tuong-lai"
+    },
+    {
+        "id": 370,
+        "categoryName": "THỊ GIÁC NỮ CHỦ",
+        "url": "thi-giac-nu-chu"
+    },
+    {
+        "id": 385,
+        "categoryName": "THIÊN CHI KIÊU TỬ",
+        "url": "thien-chi-kieu-tu"
+    },
+    {
+        "id": 51,
+        "categoryName": "THIÊN KIM THẬT GIẢ",
+        "url": "thien-kim-that-gia"
+    },
+    {
+        "id": 344,
+        "categoryName": "THIÊN VỊ",
+        "url": "thien-vi"
+    },
+    {
+        "id": 387,
+        "categoryName": "THIẾU GIA THẬT GIẢ",
+        "url": "thieu-gia-that-gia"
+    },
+    {
+        "id": 123,
+        "categoryName": "THÔN QUÊ",
+        "url": "thon-que"
+    },
+    {
+        "id": 107,
+        "categoryName": "THÚ CƯNG",
+        "url": "thu-cung"
+    },
+    {
+        "id": 270,
+        "categoryName": "THÚ NHÂN",
+        "url": "thu-nhan"
+    },
+    {
+        "id": 308,
+        "categoryName": "THỨC TỈNH NHÂN VẬT",
+        "url": "thuc-tinh-nhan-vat"
+    },
+    {
+        "id": 194,
+        "categoryName": "THỨC TỈNH NHÂN VẬT.",
+        "url": "thuc-tinh-nhan-vat"
+    },
+    {
+        "id": 142,
+        "categoryName": "TIÊN HIỆP",
+        "url": "tien-hiep"
+    },
+    {
+        "id": 389,
+        "categoryName": "TIÊN TRI",
+        "url": "tien-tri"
+    },
+    {
+        "id": 233,
+        "categoryName": "TIẾNG LÒNG",
+        "url": "tieng-long"
+    },
+    {
+        "id": 248,
+        "categoryName": "TIỂU TAM",
+        "url": "tieu-tam"
+    },
+    {
+        "id": 319,
+        "categoryName": "TIỂU THUYẾT",
+        "url": "tieu-thuyet"
+    },
+    {
+        "id": 252,
+        "categoryName": "TIỂU THUYẾT LỊCH SỬ",
+        "url": "tieu-thuyet-lich-su"
+    },
+    {
+        "id": 85,
+        "categoryName": "TÌNH CẢM",
+        "url": "tinh-cam"
+    },
+    {
+        "id": 187,
+        "categoryName": "TÌNH CẢM CỔ ĐẠI",
+        "url": "tinh-cam-co-dai"
+    },
+    {
+        "id": 297,
+        "categoryName": "TÌNH CẢM GIA ĐÌNH",
+        "url": "tinh-cam-gia-dinh"
+    },
+    {
+        "id": 303,
+        "categoryName": "TÌNH CẢM HIỆN THỰC",
+        "url": "tinh-cam-hien-thuc"
+    },
+    {
+        "id": 162,
+        "categoryName": "TÌNH CHỊ EM",
+        "url": "tinh-chi-em"
+    },
+    {
+        "id": 298,
+        "categoryName": "TÌNH SƯ MÔN",
+        "url": "tinh-su-mon"
+    },
+    {
+        "id": 359,
+        "categoryName": "TINH TẾ",
+        "url": "tinh-te"
+    },
+    {
+        "id": 312,
+        "categoryName": "TÌNH THÂN",
+        "url": "tinh-than"
+    },
+    {
+        "id": 291,
+        "categoryName": "TÌNH THẦY TRÒ",
+        "url": "tinh-thay-tro"
+    },
+    {
+        "id": 232,
+        "categoryName": "TÌNH YÊU",
+        "url": "tinh-yeu"
+    },
+    {
+        "id": 54,
+        "categoryName": "TỘI PHẠM",
+        "url": "toi-pham"
+    },
+    {
+        "id": 367,
+        "categoryName": "TỌNG SINH",
+        "url": "tong-sinh"
+    },
+    {
+        "id": 82,
+        "categoryName": "TỔNG TÀI",
+        "url": "tong-tai"
+    },
+    {
+        "id": 381,
+        "categoryName": "TRÀ",
+        "url": "tra"
+    },
+    {
+        "id": 218,
+        "categoryName": "TRA NAM",
+        "url": "tra-nam"
+    },
+    {
+        "id": 56,
+        "categoryName": "TRẢ THÙ",
+        "url": "tra-thu"
+    },
+    {
+        "id": 193,
+        "categoryName": "TRẠCH ĐẤU",
+        "url": "trach-dau"
+    },
+    {
+        "id": 282,
+        "categoryName": "TRANH ĐẤU",
+        "url": "tranh-dau"
+    },
+    {
+        "id": 104,
+        "categoryName": "TRANH ĐOẠT THIÊN HẠ",
+        "url": "tranh-doat-thien-ha"
+    },
+    {
+        "id": 141,
+        "categoryName": "TRIỀU ĐẤU",
+        "url": "trieu-dau"
+    },
+    {
+        "id": 49,
+        "categoryName": "TRINH THÁM",
+        "url": "trinh-tham"
+    },
+    {
+        "id": 171,
+        "categoryName": "TRÒ CHƠI",
+        "url": "tro-choi"
+    },
+    {
+        "id": 290,
+        "categoryName": "TRÒ CHƠI KINH DỊ",
+        "url": "tro-choi-kinh-di"
+    },
+    {
+        "id": 313,
+        "categoryName": "TRÒ CHƠI VÔ HẠN LƯU",
+        "url": "tro-choi-vo-han-luu"
+    },
+    {
+        "id": 63,
+        "categoryName": "TRỌNG NAM KHINH NỮ",
+        "url": "trong-nam-khinh-nu"
+    },
+    {
+        "id": 31,
+        "categoryName": "TRỌNG SINH",
+        "url": "trong-sinh"
+    },
+    {
+        "id": 208,
+        "categoryName": "TRỪ TÀ",
+        "url": "tru-ta"
+    },
+    {
+        "id": 50,
+        "categoryName": "TRÙNG SINH",
+        "url": "trung-sinh"
+    },
+    {
+        "id": 113,
+        "categoryName": "TRƯỜNG",
+        "url": "truong"
+    },
+    {
+        "id": 119,
+        "categoryName": "TRƯỞNG THÀNH",
+        "url": "truong-thanh"
+    },
+    {
+        "id": 372,
+        "categoryName": "TRUY",
+        "url": "truy"
+    },
+    {
+        "id": 106,
+        "categoryName": "TRUY THÊ",
+        "url": "truy-the"
+    },
+    {
+        "id": 306,
+        "categoryName": "TRUYỀN CẢM HỨNG",
+        "url": "truyen-cam-hung"
+    },
+    {
+        "id": 321,
+        "categoryName": "TRUYỆN MA",
+        "url": "truyen-ma"
+    },
+    {
+        "id": 127,
+        "categoryName": "TRUYỀN MIỆNG",
+        "url": "truyen-mieng"
+    },
+    {
+        "id": 1,
+        "categoryName": "TRUYEN NGAN",
+        "url": "truyen-ngan"
+    },
+    {
+        "id": 86,
+        "categoryName": "TU CHÂN",
+        "url": "tu-chan"
+    },
+    {
+        "id": 14,
+        "categoryName": "TU TIÊN",
+        "url": "tu-tien"
+    },
+    {
+        "id": 318,
+        "categoryName": "TUỔI HỌC TRÒ",
+        "url": "tuoi-hoc-tro"
+    },
+    {
+        "id": 317,
+        "categoryName": "TUỔI TRẺ",
+        "url": "tuoi-tre"
+    },
+    {
+        "id": 310,
+        "categoryName": "UYÊN SÁCH",
+        "url": "uyen-sach"
+    },
+    {
+        "id": 129,
+        "categoryName": "VẢ M",
+        "url": "va-m"
+    },
+    {
+        "id": 28,
+        "categoryName": "VẢ MẶT",
+        "url": "va-mat"
+    },
+    {
+        "id": 144,
+        "categoryName": "VẢ MẶT TRÀ XANH",
+        "url": "va-mat-tra-xanh"
+    },
+    {
+        "id": 366,
+        "categoryName": "VẢ MẶT.",
+        "url": "va-mat"
+    },
+    {
+        "id": 339,
+        "categoryName": "VẢ MẶT. TRẢ THÙ",
+        "url": "va-mat-tra-thu"
+    },
+    {
+        "id": 292,
+        "categoryName": "VÔ HẠN LẶP LẠI",
+        "url": "vo-han-lap-lai"
+    },
+    {
+        "id": 336,
+        "categoryName": "VÔ HẠN LƯU",
+        "url": "vo-han-luu"
+    },
+    {
+        "id": 342,
+        "categoryName": "VÔ SỈ",
+        "url": "vo-si"
+    },
+    {
+        "id": 10,
+        "categoryName": "VÕ THUẬT",
+        "url": "vo-thuat"
+    },
+    {
+        "id": 267,
+        "categoryName": "VÔ TRI",
+        "url": "vo-tri"
+    },
+    {
+        "id": 376,
+        "categoryName": "VÕNG DU",
+        "url": "vong-du"
+    },
+    {
+        "id": 293,
+        "categoryName": "VÒNG LẶP",
+        "url": "vong-lap"
+    },
+    {
+        "id": 251,
+        "categoryName": "VÒNG LẶP THỜI GIAN",
+        "url": "vong-lap-thoi-gian"
+    },
+    {
+        "id": 87,
+        "categoryName": "VƯỜN TRƯỜNG",
+        "url": "vuon-truong"
+    },
+    {
+        "id": 163,
+        "categoryName": "XÃ HỘI",
+        "url": "xa-hoi"
+    },
+    {
+        "id": 116,
+        "categoryName": "XUYÊN",
+        "url": "xuyen"
+    },
+    {
+        "id": 259,
+        "categoryName": "XUYÊN GAME",
+        "url": "xuyen-game"
+    },
+    {
+        "id": 95,
+        "categoryName": "XUYÊN KHÔNG",
+        "url": "xuyen-khong"
+    },
+    {
+        "id": 207,
+        "categoryName": "XUYÊN KHÔNG NỮ PHỤ PHẢN CÔNG",
+        "url": "xuyen-khong-nu-phu-phan-cong"
+    },
+    {
+        "id": 77,
+        "categoryName": "XUYÊN NHANH",
+        "url": "xuyen-nhanh"
+    },
+    {
+        "id": 65,
+        "categoryName": "XUYÊN SÁCH",
+        "url": "xuyen-sach"
+    },
+    {
+        "id": 250,
+        "categoryName": "XUYÊN THƯ",
+        "url": "xuyen-thu"
+    },
+    {
+        "id": 205,
+        "categoryName": "XUYÊN THƯ - GIA ĐẤU -",
+        "url": "xuyen-thu-gia-dau"
+    },
+    {
+        "id": 369,
+        "categoryName": "XUYÊN VIỆT",
+        "url": "xuyen-viet"
+    },
+    {
+        "id": 150,
+        "categoryName": "Y HỌC",
+        "url": "y-hoc"
+    },
+    {
+        "id": 287,
+        "categoryName": "YÊU SÂU SẮC",
+        "url": "yeu-sau-sac"
+    },
+    {
+        "id": 94,
+        "categoryName": "YÊU THẦM",
+        "url": "yeu-tham"
+    },
+    {
+        "id": 167,
+        "categoryName": "YÊU THƯƠNG CHÍNH MÌNH",
+        "url": "yeu-thuong-chinh-minh"
+    },
+    {
+        "id": 74,
+        "categoryName": "ZHIHU",
+        "url": "zhihu"
+    },
+    {
+        "id": 222,
+        "categoryName": "ZOMBIE",
+        "url": "zombie"
+    }
+]

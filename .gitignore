@@ -68,3 +68,6 @@ Backend/_debug_*.png
 .vscode/
 *.swp
 *~
+
+linux.sh
+samples/

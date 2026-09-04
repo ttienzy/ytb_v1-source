@@ -9,6 +9,7 @@ import { getDailyPublishingSummary } from './features/monitor/services/monitorAp
 import type { PublisherDailySummary } from './features/monitor/types'
 import { PublisherPage } from './features/publisher/PublisherPage'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { StoriesPage } from './features/stories/StoriesPage'
 import { StudioPage } from './features/studio/StudioPage'
 import { VoicesPage } from './features/voices/VoicesPage'
 import { WatermarkPage } from './features/watermark/WatermarkPage'
@@ -158,6 +159,8 @@ export function App() {
             />
           ) : activePage === 'Lịch sử' ? (
             <HistoryPage />
+          ) : activePage === 'Crawl truyện' ? (
+            <StoriesPage />
           ) : (
             <section className="empty-state">
               <div className="empty-illustration">
