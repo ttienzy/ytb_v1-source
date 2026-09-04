@@ -7,6 +7,7 @@ import {
   Mic,
   Music,
   PlaySquare,
+  Video,
   Settings,
   Tv,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ export const navigation: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard },
   { label: 'Khám Phá Kênh', icon: Compass },
   { label: 'Studio', icon: PlaySquare },
+  { label: 'Video', icon: Video },
   { label: 'Voices', icon: Mic },
   { label: 'Thư viện nhạc', icon: Music },
   { label: 'Xóa Watermark', icon: Eraser },
