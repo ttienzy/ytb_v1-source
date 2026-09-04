@@ -13,6 +13,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(backend_dir / 'prompts'), 'prompts'),
+        (str(backend_dir / 'resources'), 'resources'),
     ],
     hiddenimports=[
         'uvicorn',
