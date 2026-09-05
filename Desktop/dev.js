@@ -36,6 +36,8 @@ const UV = resolveUv()
 const TARGETS = [
   {
     name: 'BACKEND',
+    critical: true,
+    healthUrl: 'http://127.0.0.1:8000/api/ping',
     color: '\x1b[34m', // blue
     cmd: PY,
     args: ['-m', 'uvicorn', 'app.main:app', '--reload', '--reload-dir', path.join(ROOT, 'Backend'), '--app-dir',
@@ -44,6 +46,8 @@ const TARGETS = [
   },
   {
     name: 'VOICE',
+    critical: true,
+    healthUrl: 'http://127.0.0.1:8001/health',
     color: '\x1b[35m', // magenta
     cmd: UV,
     args: ['run', '--directory', path.join(ROOT, 'services', 'voice-service'),
@@ -52,6 +56,7 @@ const TARGETS = [
   },
   {
     name: 'FRONTEND',
+    critical: false,
     color: '\x1b[32m', // green
     cmd: process.execPath, // node (cùng binary đang chạy dev.js)
     args: [EV_BIN, 'dev'],
@@ -72,7 +77,13 @@ function treeKill(pid) {
   if (!pid) return
   if (IS_WIN) {
     try {
-      spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', shell: true })
+      // Không dùng shell=true: tránh cảnh báo DEP0190 và tránh lỗi escape
+      // tham số khi đường dẫn/cmdline có ký tự đặc biệt.
+      spawn('taskkill.exe', ['/T', '/F', '/PID', String(pid)], {
+        stdio: 'ignore',
+        windowsHide: true,
+        shell: false,
+      })
     } catch { /* ignore */ }
   } else {
     try { process.kill(-pid, 'SIGKILL') } catch { try { process.kill(pid, 'SIGKILL') } catch {} }
@@ -97,7 +108,23 @@ function prefixPipe(child, name, color) {
   handle(child.stderr)
 }
 
-function launch(target) {
+async function isAlreadyHealthy(target) {
+  if (!target.healthUrl || typeof fetch !== 'function') return false
+  try {
+    const response = await fetch(target.healthUrl, {
+      signal: AbortSignal.timeout(1500),
+    })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+async function launch(target) {
+  if (await isAlreadyHealthy(target)) {
+    process.stdout.write(`${target.color}[${target.name}]${RESET} đã chạy sẵn, dùng lại service hiện tại.\n`)
+    return null
+  }
   const child = spawn(target.cmd, target.args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
@@ -106,10 +133,22 @@ function launch(target) {
   })
   prefixPipe(child, target.name, target.color)
   children.push(child)
+  child.on('error', error => {
+    process.stdout.write(`${target.color}[${target.name}]${RESET} không khởi động được: ${error.message}\n`)
+    if (target.critical && !shuttingDown) shutdown(`${target.name}-spawn-error`)
+  })
   child.on('exit', (code, signal) => {
     process.stdout.write(`${target.color}[${target.name}]${RESET} thoát (code=${code} sig=${signal})\n`)
-    // Nếu 1 process chết khi KHÔNG đang shutdown → tắt luôn cả 3 (đồng loạt).
-    if (!shuttingDown) shutdown('child-exit')
+    if (shuttingDown) return
+    if (target.critical) {
+      // Backend/voice là core: một service chết thì dừng cả cụm để tránh UI
+      // tiếp tục gửi request vào hệ thống nửa sống nửa chết.
+      shutdown(`${target.name.toLowerCase()}-exit-${code ?? signal ?? 'unknown'}`)
+    } else {
+      // Electron có thể thoát khi người dùng đóng cửa sổ hoặc renderer restart.
+      // Không được vì vậy mà kéo backend/voice xuống theo.
+      process.stdout.write(`${target.color}[${target.name}]${RESET} frontend đã dừng; backend và voice vẫn giữ nguyên.\n`)
+    }
   })
   return child
 }
@@ -132,7 +171,11 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGHUP', () => shutdown('SIGHUP'))
 
 // Launch all
-for (const t of TARGETS) launch(t)
-
-process.stdout.write('\x1b[36m[dev]\x1b[0m BACKEND :8000 · VOICE :8001 · FRONTEND (electron-vite)\n')
-process.stdout.write('\x1b[36m[dev]\x1b[0m Ctrl+C để tắt đồng loạt cả 3.\n\n')
+;(async () => {
+  for (const target of TARGETS) await launch(target)
+  process.stdout.write('\x1b[36m[dev]\x1b[0m BACKEND :8000 · VOICE :8001 · FRONTEND (electron-vite)\n')
+  process.stdout.write('\x1b[36m[dev]\x1b[0m Ctrl+C để tắt các service do runner khởi động.\n\n')
+})().catch(error => {
+  process.stderr.write(`[dev] startup error: ${error?.stack || error}\n`)
+  shutdown('startup-error')
+})

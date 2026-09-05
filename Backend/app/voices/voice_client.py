@@ -19,39 +19,58 @@ def _client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=settings.voice_service_url, timeout=timeout)
 
 
+def _connection_error(error: httpx.HTTPError) -> RuntimeError:
+    return RuntimeError(
+        f"Không kết nối được voice-service tại {settings.voice_service_url}. "
+        f"Hãy khởi động voice-service trên cổng 8001. Chi tiết: {error}"
+    )
+
+
 async def health() -> dict:
-    async with _client(5.0) as client:
-        r = await client.get("/health")
-        r.raise_for_status()
-        return r.json()
+    try:
+        async with _client(5.0) as client:
+            r = await client.get("/health")
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPError as error:
+        raise _connection_error(error) from error
 
 
 async def list_presets() -> list[dict]:
     """Forward → voice-service GET /internal/voices/presets. Trả [{name, description, gender}]."""
-    async with _client(10.0) as client:
-        r = await client.get("/internal/voices/presets")
-        if r.status_code >= 400:
-            raise RuntimeError(f"voice-service presets failed ({r.status_code}): {r.text}")
-        return r.json().get("presets", [])
+    try:
+        async with _client(10.0) as client:
+            r = await client.get("/internal/voices/presets")
+            if r.status_code >= 400:
+                raise RuntimeError(f"voice-service presets failed ({r.status_code}): {r.text}")
+            return r.json().get("presets", [])
+    except httpx.HTTPError as error:
+        raise _connection_error(error) from error
 
 
 async def register_voice(voice_id: str, ref_audio: bytes, filename: str, name: str | None) -> dict:
     """Forward ref audio → voice-service POST /internal/voices/{id} (engine add_voice)."""
     files = {"ref_audio": (filename, ref_audio)}
     data = {"name": name or voice_id}
-    async with _client(TIMEOUT_REGISTER) as client:
-        r = await client.post(f"/internal/voices/{voice_id}", files=files, data=data)
-        if r.status_code >= 400:
-            raise RuntimeError(f"voice-service register failed ({r.status_code}): {r.text}")
-        return r.json()
+    try:
+        async with _client(TIMEOUT_REGISTER) as client:
+            r = await client.post(f"/internal/voices/{voice_id}", files=files, data=data)
+            if r.status_code >= 400:
+                raise RuntimeError(f"voice-service register failed ({r.status_code}): {r.text}")
+            return r.json()
+    except httpx.HTTPError as error:
+        raise _connection_error(error) from error
 
 
 async def remove_voice(voice_id: str) -> dict:
-    async with _client(TIMEOUT_REMOVE) as client:
-        r = await client.delete(f"/internal/voices/{voice_id}")
-        if r.status_code >= 400:
-            raise RuntimeError(f"voice-service remove failed ({r.status_code}): {r.text}")
-        return r.json()
+    try:
+        async with _client(TIMEOUT_REMOVE) as client:
+            r = await client.delete(f"/internal/voices/{voice_id}")
+            if r.status_code >= 400:
+                raise RuntimeError(f"voice-service remove failed ({r.status_code}): {r.text}")
+            return r.json()
+    except httpx.HTTPError as error:
+        raise _connection_error(error) from error
 
 
 async def preview_voice(voice_id: str, text: str | None = None) -> tuple[bytes, str | None]:
@@ -63,11 +82,14 @@ async def preview_voice(voice_id: str, text: str | None = None) -> tuple[bytes, 
     payload: dict = {"voice_id": voice_id, "temperature": 0.6}
     if text:
         payload["text"] = text
-    async with _client(TIMEOUT_TTS) as client:
-        r = await client.post("/preview", json=payload)
-        if r.status_code >= 400:
-            raise RuntimeError(f"voice-service preview failed ({r.status_code}): {r.text}")
-        return r.content, r.headers.get("X-Audio-Duration")
+    try:
+        async with _client(TIMEOUT_TTS) as client:
+            r = await client.post("/preview", json=payload)
+            if r.status_code >= 400:
+                raise RuntimeError(f"voice-service preview failed ({r.status_code}): {r.text}")
+            return r.content, r.headers.get("X-Audio-Duration")
+    except httpx.HTTPError as error:
+        raise _connection_error(error) from error
 
 
 async def tts_batch(items: list[dict], voice_id: str) -> bytes:
@@ -78,8 +100,11 @@ async def tts_batch(items: list[dict], voice_id: str) -> bytes:
     Dùng timeout dài (25 infer CPU tuần tự).
     """
     payload = {"items": items, "voice_id": voice_id, "temperature": 0.8, "max_chars": 256}
-    async with _client(TIMEOUT_TTS_BATCH) as client:
-        r = await client.post("/tts/batch", json=payload)
-        if r.status_code >= 400:
-            raise RuntimeError(f"voice-service tts/batch failed ({r.status_code}): {r.text}")
-        return r.content
+    try:
+        async with _client(TIMEOUT_TTS_BATCH) as client:
+            r = await client.post("/tts/batch", json=payload)
+            if r.status_code >= 400:
+                raise RuntimeError(f"voice-service tts/batch failed ({r.status_code}): {r.text}")
+            return r.content
+    except httpx.HTTPError as error:
+        raise _connection_error(error) from error
