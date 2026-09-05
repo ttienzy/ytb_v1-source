@@ -9,6 +9,7 @@ import uuid
 import zipfile
 import re
 import random
+import textwrap
 from datetime import datetime
 from pathlib import Path
 
@@ -44,14 +45,22 @@ def _process_thumbnail(source: Path, story_name: str, chapter_number: int | None
     """Chuẩn hóa ảnh và burn label để dùng làm thumbnail/poster của video."""
     work.mkdir(parents=True, exist_ok=True)
     label = f"Audio {story_name} - phần {chapter_number or 1}"
+    # Chia dòng để tên truyện dài không tràn ra ngoài khung thumbnail.
+    label = "\n".join(textwrap.wrap(
+        label,
+        width=24 if aspect == "9:16" else 42,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ))
     text_file = work / "thumbnail-label.txt"
     text_file.write_text(label, encoding="utf-8")
     size = "1080:1920" if aspect == "9:16" else "1920:1080"
     output = work / "thumbnail.jpg"
     vf = (
         f"scale={size}:force_original_aspect_ratio=increase,crop={size},"
-        f"drawtext=textfile='{text_file.as_posix().replace(':', '\\:')}':fontcolor=white:fontsize=54:"
-        "x=(w-text_w)/2:y=h-text_h-100:box=1:boxcolor=black@0.65:boxborderw=24"
+        f"drawtext=textfile='{text_file.as_posix().replace(':', '\\:')}':fontcolor=white:fontsize=46:"
+        "line_spacing=10:fix_bounds=1:x=(w-text_w)/2:y=110:"
+        "box=1:boxcolor=black@0.65:boxborderw=24"
     )
     result = subprocess.run(["ffmpeg", "-y", "-i", str(source), "-vf", vf, "-frames:v", "1", str(output)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     if result.returncode or not output.exists():

@@ -19,6 +19,7 @@ class RunBody(BaseModel):
     voice_id: str
     aspect: str = "9:16"
     bgm_random: bool = True
+    bgm_enabled: bool = True
 
 class TestRunBody(BaseModel):
     text: str
@@ -63,10 +64,12 @@ async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = De
     if empty: raise HTTPException(400, f"Nội dung chương {empty.chapter_number} đang rỗng.")
     thumbnail = audio_workflow.thumbnail_path(story.story_slug)
     if thumbnail is None: raise HTTPException(400, "Truyện chưa có thumbnail. Hãy chọn và tải lên 1 ảnh thumbnail trước.")
-    tracks = bgm_service.list_tracks(db)
-    valid_tracks = [t for t in tracks if Path(t.file_path).exists() and Path(t.file_path).stat().st_size]
-    if not valid_tracks: raise HTTPException(400, "Thư viện nhạc chưa có bài nào hợp lệ để làm nhạc nền.")
-    bgm_pool = [Path(t.file_path) for t in valid_tracks]
+    bgm_pool: list[Path] = []
+    if body.bgm_enabled:
+        tracks = bgm_service.list_tracks(db)
+        valid_tracks = [t for t in tracks if Path(t.file_path).exists() and Path(t.file_path).stat().st_size]
+        if not valid_tracks: raise HTTPException(400, "Bạn đã bật nhạc nền nhưng thư viện nhạc chưa có bài nào hợp lệ.")
+        bgm_pool = [Path(t.file_path) for t in valid_tracks]
     job_id = audio_workflow.create(story.name, chapters[0].title, len(chapters))
     if len(chapters) == 1:
         background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool)

@@ -3939,6 +3939,8 @@ input[type="checkbox"],
 .audio-thumbnail-button { position: relative; cursor: pointer; white-space: nowrap; }
 .audio-thumbnail-preview { width: 48px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd6fe; }
 .audio-bgm-note { display: flex; align-items: center; gap: 7px; padding: 10px 12px; color: #7c3aed; background: #faf5ff; border: 1px solid #ede9fe; border-radius: 8px; font-size: 11px; }
+.audio-bgm-toggle { display: flex; align-items: center; gap: 8px; padding: 11px 12px; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 9px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.audio-bgm-toggle input { width: 17px; height: 17px; margin: 0; accent-color: #6366f1; }
 .merged-output-item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px; color: inherit; background: #f8f9fc; border: 1px solid #e2e8f0; border-radius: 9px; text-decoration: none; }
 .merged-output-item:hover { background: #f5f7ff; border-color: #a5b4fc; }
 .merged-output-item video { width: 82px; height: 58px; flex: 0 0 auto; object-fit: cover; background: #111827; border-radius: 6px; }
