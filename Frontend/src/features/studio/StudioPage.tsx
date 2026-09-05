@@ -3,6 +3,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
+  CheckCircle2,
   Clock3,
   ExternalLink,
   Headphones,
@@ -46,6 +47,18 @@ export function StudioPage({
   const [submitting, setSubmitting] = useState(false)
   const [mode, setMode] = useState<'single' | 'batch'>(initialUrls && initialUrls.length > 0 ? 'batch' : 'single')
   const [selectedWorkflow, setSelectedWorkflow] = useState<'youtube' | 'audio'>('youtube')
+  const [audioStories, setAudioStories] = useState<Array<{ story_slug: string; name: string; chapters: Array<{ chapter_number: number; title: string }> }>>([])
+  const [audioStory, setAudioStory] = useState('')
+  const [audioChapter, setAudioChapter] = useState<number | ''>('')
+  const [audioVoice, setAudioVoice] = useState('')
+  const [audioPresets, setAudioPresets] = useState<Array<{ name: string; description?: string }>>([])
+  const [audioAspect, setAudioAspect] = useState<'9:16' | '16:9'>('9:16')
+  const [audioJob, setAudioJob] = useState<Record<string, any> | null>(null)
+  const [audioOutputs, setAudioOutputs] = useState<Array<{ file_name: string; name: string; duration_sec: number; created_at: string }>>([])
+  const [audioError, setAudioError] = useState('')
+  const [audioBusy, setAudioBusy] = useState(false)
+  const [audioTestText, setAudioTestText] = useState('')
+  const [audioTestBusy, setAudioTestBusy] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -134,6 +147,68 @@ export function StudioPage({
       })
       .catch(() => {})
   }, []) // eslint-disable-line
+
+  useEffect(() => {
+    if (selectedWorkflow !== 'audio') return
+    fetch(`${API_URL}/api/audio/stories`).then(r => r.json()).then((items) => {
+      setAudioStories(items)
+      if (!audioStory && items[0]) { setAudioStory(items[0].story_slug); setAudioChapter(items[0].chapters[0]?.chapter_number ?? '') }
+    }).catch(() => setAudioError('Không tải được danh sách truyện đã crawl.'))
+    fetch(`${API_URL}/api/voices`).then(r => r.json()).then(d => { const list = d.voices ?? d ?? []; if (!audioVoice && list[0]) setAudioVoice(list[0].voice_id) }).catch(() => {})
+    fetch(`${API_URL}/api/voices/presets`).then(r => r.json()).then(list => { setAudioPresets(list); if (!audioVoice && !clonedVoices.length && list[0]) setAudioVoice(list[0].name) }).catch(() => {})
+    fetch(`${API_URL}/api/audio/outputs`).then(r => r.json()).then(setAudioOutputs).catch(() => {})
+  }, [selectedWorkflow]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!audioJob?.job_id || audioJob.status === 'completed' || audioJob.status === 'error') return
+    const timer = window.setInterval(async () => {
+      const response = await fetch(`${API_URL}/api/audio/jobs/${audioJob.job_id}`)
+      if (response.ok) {
+        const next = await response.json(); setAudioJob(next)
+        if (next.status === 'completed' || next.status === 'error') {
+          window.clearInterval(timer)
+          if (next.status === 'completed') fetch(`${API_URL}/api/audio/outputs`).then(r => r.json()).then(setAudioOutputs)
+        }
+      }
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [audioJob?.job_id, audioJob?.status])
+
+  const selectedAudioStory = audioStories.find(s => s.story_slug === audioStory)
+  const audioStepState = (key: string) => {
+    if (!audioJob) return 'pending'
+    const order = ['voice', 'duration', 'merge', 'mux', 'done']
+    const current = order.indexOf(audioJob.step)
+    const index = order.indexOf(key)
+    if (audioJob.status === 'error' && index === current) return 'error'
+    if (index < current || (audioJob.step === 'done' && index === current)) return 'done'
+    if (index === current) return 'running'
+    return 'pending'
+  }
+  const audioNode = (key: string, number: string, title: string) => {
+    const state = audioStepState(key)
+    return <div className={`audio-flow-node ${state}`}><span className="audio-flow-number">{state === 'done' ? <CheckCircle2 size={17} /> : state === 'error' ? <AlertCircle size={17} /> : number}</span><strong>{title}</strong><small>{state === 'running' ? audioJob?.message : state === 'error' ? audioJob?.error : state === 'done' ? 'Đã hoàn tất' : 'Đang chờ'}</small></div>
+  }
+  async function startAudioWorkflow() {
+    if (!audioStory || audioChapter === '' || !audioVoice) { setAudioError('Hãy chọn truyện, chương và giọng đọc.'); return }
+    setAudioBusy(true); setAudioError(''); setAudioJob(null)
+    try {
+      const response = await fetch(`${API_URL}/api/audio/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_slug: audioStory, chapter_number: audioChapter, voice_id: audioVoice, aspect: audioAspect }) })
+      const data = await response.json(); if (!response.ok) throw new Error(data.detail || `Lỗi ${response.status}`)
+      setAudioJob(data)
+    } catch (error) { setAudioError(error instanceof Error ? error.message : 'Không thể khởi động workflow Audio.') }
+    finally { setAudioBusy(false) }
+  }
+  async function startAudioTest() {
+    if (!audioTestText.trim()) { setAudioError('Hãy dán nội dung text để test.'); return }
+    setAudioTestBusy(true); setAudioError(''); setAudioJob(null)
+    try {
+      const response = await fetch(`${API_URL}/api/audio/test-run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: audioTestText.trim() }) })
+      const data = await response.json(); if (!response.ok) throw new Error(data.detail || `Lỗi ${response.status}`)
+      setAudioJob(data)
+    } catch (error) { setAudioError(error instanceof Error ? error.message : 'Không thể khởi động test workflow.') }
+    finally { setAudioTestBusy(false) }
+  }
 
   // Poll loop
   const pollJob = useCallback(async (id: string) => {
@@ -816,14 +891,20 @@ export function StudioPage({
               <p>Tạo, xử lý và hoàn thiện nội dung âm thanh trong một quy trình tập trung.</p>
             </div>
           </div>
-          <div className="audio-workflow-steps">
-            <div><span>01</span><strong>Nhập audio</strong><small>Tải file âm thanh của bạn</small></div>
-            <div><span>02</span><strong>Xử lý nội dung</strong><small>Chuẩn hóa và tùy chỉnh audio</small></div>
-            <div><span>03</span><strong>Xuất bản</strong><small>Lưu file hoàn thiện về máy</small></div>
+          <div className="settings-card audio-form-card">
+            <div className="audio-form-grid">
+              <label>Truyện đã crawl<select value={audioStory} onChange={e => { setAudioStory(e.target.value); setAudioChapter(audioStories.find(s => s.story_slug === e.target.value)?.chapters[0]?.chapter_number ?? '') }}><option value="">-- Chọn truyện --</option>{audioStories.map(s => <option key={s.story_slug} value={s.story_slug}>{s.name} ({s.chapters.length} chương)</option>)}</select></label>
+              <label>Chương<select value={audioChapter} onChange={e => setAudioChapter(e.target.value ? Number(e.target.value) : '')}><option value="">-- Chọn chương --</option>{selectedAudioStory?.chapters.map(c => <option key={c.chapter_number} value={c.chapter_number}>Chương {c.chapter_number} · {c.title}</option>)}</select></label>
+              <label>Giọng đọc<select value={audioVoice} onChange={e => setAudioVoice(e.target.value)}><option value="">-- Chọn giọng --</option>{clonedVoices.length > 0 && <optgroup label="Giọng đã clone">{clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}</optgroup>}{audioPresets.length > 0 && <optgroup label="Preset VieNeu">{audioPresets.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}</optgroup>}</select></label>
+              <label>Khổ video<select value={audioAspect} onChange={e => setAudioAspect(e.target.value as '9:16' | '16:9')}><option value="9:16">Dọc 9:16</option><option value="16:9">Ngang 16:9</option></select></label>
+            </div>
+            <p className="audio-output-path">Video hoàn tất sẽ lưu tại <code>D:\MMO\ytb_v1\Data\media\videos\Viaudio</code></p>
+            <button type="button" className="primary-button" onClick={startAudioWorkflow} disabled={audioBusy || (audioJob?.status === 'running' || audioJob?.status === 'queued')}><Headphones size={15} /> {audioBusy ? 'Đang khởi động…' : 'Bắt đầu Workflow Audio'}</button>
+            {audioError && <div className="audio-error"><AlertCircle size={15} /> {audioError}</div>}
           </div>
-          <div className="audio-workflow-note">
-            <Headphones size={16} /> Workflow Audio đang được chuẩn bị. Bạn có thể quay lại Workflow YouTube bất cứ lúc nào.
-          </div>
+          {audioJob && <div className="settings-card audio-progress-card"><h3>Tiến trình workflow</h3><div className="audio-flowchart"><div className="audio-flow-row audio-flow-start">{audioNode('voice', '01', 'Chuyển nội dung thành voice')}<i className="audio-flow-arrow right" />{audioNode('duration', '02', 'Lấy thời lượng voice')}</div><div className="audio-flow-connector down" /><div className="audio-flow-decision"><div className="audio-flow-diamond">✓<small>Nội dung hợp lệ</small></div></div><div className="audio-flow-connector down" />{audioNode('merge', '03', 'Gộp video theo thời lượng')}<div className="audio-flow-connector down" />{audioNode('mux', '04', 'Ghép voice vào video')}<div className="audio-flow-connector down" />{audioNode('done', '05', 'Hoàn thành video')}</div><div className="audio-progress-track"><div style={{ width: `${audioJob.progress || 0}%` }} /></div>{audioJob.status === 'completed' && <p className="audio-success">Đã lưu: {audioJob.output_name}</p>}</div>}
+          <div className="settings-card audio-test-card"><div className="video-section-head"><div><p className="overline">TEST WORKFLOW</p><h2>Test nhanh bằng text</h2><p>Dán nội dung bất kỳ để kiểm tra toàn bộ luồng Audio.</p></div></div><textarea value={audioTestText} onChange={e => setAudioTestText(e.target.value)} placeholder="Dán nội dung chương hoặc đoạn text muốn test tại đây…" rows={7} disabled={audioTestBusy} /><div className="audio-test-actions"><small>Dùng giọng preset mặc định · Video nền khổ dọc 9:16</small><button type="button" className="primary-button" onClick={startAudioTest} disabled={audioTestBusy || Boolean(audioJob && (audioJob.status === 'queued' || audioJob.status === 'running'))}><Headphones size={15} /> {audioTestBusy ? 'Đang khởi động…' : 'Chạy test workflow'}</button></div></div>
+          <div className="settings-card audio-output-gallery"><div className="video-section-head"><div><h2>Video Audio hoàn tất <span className="done-count">{audioOutputs.length}</span></h2><p>Bấm vào video để xem trực tiếp.</p></div></div>{audioOutputs.length === 0 ? <div className="video-empty">Chưa có video Audio hoàn tất.</div> : <div className="merged-output-grid">{audioOutputs.map(item => <a className="merged-output-item" href={`${API_URL}/api/audio/outputs/${encodeURIComponent(item.file_name)}`} target="_blank" rel="noreferrer" key={item.file_name}><video src={`${API_URL}/api/audio/outputs/${encodeURIComponent(item.file_name)}`} muted preload="metadata" /><div><strong>{item.name}</strong><small>{Math.round(item.duration_sec)} giây · {new Date(item.created_at).toLocaleString('vi-VN')}</small></div></a>)}</div>}</div>
         </div>
       )}
     </section>
