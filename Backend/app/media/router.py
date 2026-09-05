@@ -4,12 +4,18 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import Base, engine, get_db
 from app.media import service
 from app.media.models import BgmTrack
 from app.media.schemas import BgmOut
 
 router = APIRouter(prefix="/api/bgm", tags=["BGM"])
+
+
+@router.on_event("startup")
+def ensure_bgm_table() -> None:
+    """Cho phép upload ngay cả khi máy chưa chạy Alembic migration 0003."""
+    Base.metadata.create_all(bind=engine, tables=[BgmTrack.__table__])
 
 
 def _track_path(track: BgmTrack):
