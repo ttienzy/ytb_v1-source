@@ -1,8 +1,10 @@
 from pathlib import Path
+from urllib.parse import quote
 import asyncio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.stories.models import CrawledStory, CrawledChapter
@@ -12,7 +14,7 @@ router = APIRouter(prefix="/api/audio", tags=["Audio workflow"])
 
 class RunBody(BaseModel):
     story_slug: str
-    chapter_number: int
+    chapter_number: Optional[int] = None
     voice_id: str
     aspect: str = "9:16"
 
@@ -29,11 +31,19 @@ def stories(db: Session = Depends(get_db)):
 async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if body.aspect not in {"9:16", "16:9"}: raise HTTPException(400, "Khổ video không hợp lệ.")
     story = db.get(CrawledStory, body.story_slug)
-    chapter = db.query(CrawledChapter).filter_by(story_slug=body.story_slug, chapter_number=body.chapter_number).first()
-    if not story or not chapter: raise HTTPException(404, "Không tìm thấy truyện hoặc chương đã crawl.")
-    if not chapter.paragraph.strip(): raise HTTPException(400, "Nội dung chương đang rỗng.")
-    job_id = audio_workflow.create(story.name, chapter.title)
-    background_tasks.add_task(audio_workflow.run, job_id, story.name, chapter.title, chapter.paragraph, body.voice_id, body.aspect)
+    if not story: raise HTTPException(404, "Không tìm thấy truyện đã crawl.")
+    query = db.query(CrawledChapter).filter_by(story_slug=body.story_slug)
+    if body.chapter_number is not None:
+        query = query.filter_by(chapter_number=body.chapter_number)
+    chapters = query.order_by(CrawledChapter.chapter_number).all()
+    if not chapters: raise HTTPException(404, "Không tìm thấy chương đã crawl.")
+    empty = next((c for c in chapters if not c.paragraph.strip()), None)
+    if empty: raise HTTPException(400, f"Nội dung chương {empty.chapter_number} đang rỗng.")
+    job_id = audio_workflow.create(story.name, chapters[0].title, len(chapters))
+    if len(chapters) == 1:
+        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number)
+    else:
+        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect)
     return {"job_id": job_id}
 
 @router.post("/test-run", status_code=202)
@@ -60,4 +70,7 @@ def output(filename: str):
     if path.parent != audio_workflow.AUDIO_DIR or not path.exists(): raise HTTPException(404, "Không tìm thấy video Audio.")
     # inline để trình duyệt mở trình phát khi người dùng bấm xem;
     # FileResponse mặc định dùng attachment nên bị tải xuống ngay.
-    return FileResponse(path, media_type="video/mp4", headers={"Content-Disposition": f'inline; filename="{path.name}"'})
+    # Header HTTP phải là Latin-1; dùng filename* để truyền tên tiếng Việt theo UTF-8.
+    encoded_name = quote(path.name, safe="")
+    headers = {"Content-Disposition": f'inline; filename="audio-video.mp4"; filename*=UTF-8\'\'{encoded_name}'}
+    return FileResponse(path, media_type="video/mp4", headers=headers)
