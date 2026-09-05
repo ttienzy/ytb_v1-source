@@ -7,7 +7,7 @@ int8, 48kHz). Backend chính gọi qua HTTP (`http://127.0.0.1:8001`).
 > Lưu trữ: voice-service có `data/` riêng (ref audio + `voices.json`). **KHÔNG** dùng `Data/app.db`
 > (của main backend) hay `Backend/Data/` (nội bộ). Xem [`memory/data-dirs-convention`](../../).
 
-## Chạy (Phase 1 — skeleton)
+## Chạy voice-service
 
 ```bash
 cd services/voice-service
@@ -40,10 +40,14 @@ data/
 └─ voices.json     # engine persistence (Phase 2)
 ```
 
-## API (Phase 1 chỉ có /health)
+## API
 
 | Method | Path | Trả về |
 | --- | --- | --- |
 | GET | `/health` | `{status, model_loaded, backend, device, precision, voices_count, error}` |
-
-Phase 2+ sẽ thêm: `POST/DELETE /internal/voices/{id}`, `POST /tts`, `POST /tts/batch`, `POST /preview`.
+| GET | `/internal/voices/presets` | Danh sách voice preset |
+| POST | `/internal/voices/{id}` | Đăng ký voice clone bằng audio mẫu |
+| DELETE | `/internal/voices/{id}` | Xóa voice clone |
+| POST | `/preview` | Sinh audio nghe thử |
+| POST | `/tts` | Sinh audio cho một đoạn |
+| POST | `/tts/batch` | Sinh nhiều đoạn, trả ZIP WAV + manifest |

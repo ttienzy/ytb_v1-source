@@ -4,8 +4,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import Base, engine, get_db
 from app.voices import service, voice_client
+from app.voices.models import Voice
 from app.voices.schemas import VoiceOut
 
 router = APIRouter(prefix="/api/voices", tags=["Voices"])
@@ -13,6 +14,12 @@ router = APIRouter(prefix="/api/voices", tags=["Voices"])
 
 class PreviewBody(BaseModel):
     text: str | None = None  # None → voice-service dùng câu mặc định
+
+
+@router.on_event("startup")
+def ensure_voice_table() -> None:
+    """Bản cài mới dùng được ngay cả khi chưa chạy Alembic thủ công."""
+    Base.metadata.create_all(bind=engine, tables=[Voice.__table__])
 
 
 @router.get("")
@@ -26,6 +33,15 @@ async def list_presets() -> list[dict]:
     """Preset voices của VieNeu (sẵn dùng, không cần clone) — forward voice-service."""
     try:
         return await voice_client.list_presets()
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.get("/health")
+async def voice_health() -> dict:
+    """Health của engine voice phía sau, dùng để kiểm tra toàn bộ chuỗi BE → TTS."""
+    try:
+        return await voice_client.health()
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 

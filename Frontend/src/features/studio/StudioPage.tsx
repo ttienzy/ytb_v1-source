@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowRight,
   Clock3,
   ExternalLink,
+  Headphones,
   KeyRound,
   Layers,
   Loader2,
@@ -43,6 +45,7 @@ export function StudioPage({
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [mode, setMode] = useState<'single' | 'batch'>(initialUrls && initialUrls.length > 0 ? 'batch' : 'single')
+  const [selectedWorkflow, setSelectedWorkflow] = useState<'youtube' | 'audio'>('youtube')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -231,14 +234,46 @@ export function StudioPage({
     <section className="settings-page studio-page">
       <div className="settings-heading">
         <div>
-          <h1>Studio</h1>
+          <h1>Workflow</h1>
           <p className="page-subtitle">
-            Dán link YouTube — transcript tự lấy, <strong>1 click</strong>, Cut
-            &amp; Voice chạy song song, ghép tự động.
+            Chọn workflow phù hợp để bắt đầu sản xuất nội dung của bạn.
           </p>
         </div>
       </div>
 
+      <div className="workflow-switcher" role="tablist" aria-label="Chọn workflow">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={selectedWorkflow === 'youtube'}
+          className={`workflow-card ${selectedWorkflow === 'youtube' ? 'active' : ''}`}
+          onClick={() => setSelectedWorkflow('youtube')}
+        >
+          <span className="workflow-card-icon youtube"><Play size={20} /></span>
+          <span className="workflow-card-copy">
+            <strong>Workflow YouTube</strong>
+            <span>Recap video, lồng tiếng và ghép tự động</span>
+          </span>
+          <ArrowRight size={17} className="workflow-card-arrow" />
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={selectedWorkflow === 'audio'}
+          className={`workflow-card ${selectedWorkflow === 'audio' ? 'active' : ''}`}
+          onClick={() => setSelectedWorkflow('audio')}
+        >
+          <span className="workflow-card-icon audio"><Headphones size={20} /></span>
+          <span className="workflow-card-copy">
+            <strong>Workflow Audio</strong>
+            <span>Không gian xử lý và tạo nội dung âm thanh</span>
+          </span>
+          <ArrowRight size={17} className="workflow-card-arrow" />
+        </button>
+      </div>
+
+      {selectedWorkflow === 'youtube' ? (
+        <>
       {/* ── Input form ── */}
       <div className="settings-card" id="formCard">
         {/* Tab toggle: Đơn lẻ / Hàng loạt */}
@@ -768,6 +803,27 @@ export function StudioPage({
                 onReset={reset}
               />
             )}
+        </div>
+      )}
+        </>
+      ) : (
+        <div className="audio-workflow-panel">
+          <div className="audio-workflow-hero">
+            <span className="workflow-card-icon audio"><Headphones size={24} /></span>
+            <div>
+              <p className="overline">AUDIO WORKFLOW</p>
+              <h2>Workflow Audio</h2>
+              <p>Tạo, xử lý và hoàn thiện nội dung âm thanh trong một quy trình tập trung.</p>
+            </div>
+          </div>
+          <div className="audio-workflow-steps">
+            <div><span>01</span><strong>Nhập audio</strong><small>Tải file âm thanh của bạn</small></div>
+            <div><span>02</span><strong>Xử lý nội dung</strong><small>Chuẩn hóa và tùy chỉnh audio</small></div>
+            <div><span>03</span><strong>Xuất bản</strong><small>Lưu file hoàn thiện về máy</small></div>
+          </div>
+          <div className="audio-workflow-note">
+            <Headphones size={16} /> Workflow Audio đang được chuẩn bị. Bạn có thể quay lại Workflow YouTube bất cứ lúc nào.
+          </div>
         </div>
       )}
     </section>

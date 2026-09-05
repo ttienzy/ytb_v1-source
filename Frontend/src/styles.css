@@ -79,6 +79,29 @@ button.chip-active:hover { background: #4f46e5; }
 .final-meta strong { color: #30394b; font-size: 13px; }
 .final-meta span { color: #9aa5b5; font-size: 11px; }
 .studio-page select { width: 100%; height: 42px; padding: 0 12px; border: 1px solid #d8dee9; border-radius: 8px; font-size: 13px; background: #fff; color: #30394b; }
+.workflow-switcher { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: -8px 0 22px; }
+.workflow-card { display: flex; align-items: center; gap: 13px; min-height: 88px; padding: 17px 18px; color: #3d4758; background: #fff; border: 1px solid #e5e9f0; border-radius: 14px; box-shadow: 0 5px 16px #26324a08; text-align: left; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.workflow-card:hover { border-color: #c7d2fe; box-shadow: 0 8px 20px #4f46e51a; transform: translateY(-1px); }
+.workflow-card.active { border: 1.5px solid #6366f1; background: linear-gradient(135deg, #fafaff, #f5f7ff); box-shadow: 0 8px 22px #6366f124; }
+.workflow-card-icon { display: grid; flex: 0 0 43px; width: 43px; height: 43px; place-items: center; border-radius: 12px; }
+.workflow-card-icon.youtube { color: #4f46e5; background: #e9e7ff; }
+.workflow-card-icon.audio { color: #c026d3; background: #fce7f3; }
+.workflow-card-copy { display: flex; flex: 1; flex-direction: column; gap: 5px; min-width: 0; }
+.workflow-card-copy strong { color: #252f43; font-size: 14px; }
+.workflow-card-copy span { color: #8993a3; font-size: 11px; line-height: 1.4; }
+.workflow-card-arrow { flex-shrink: 0; color: #a5afbe; }
+.workflow-card.active .workflow-card-arrow { color: #6366f1; }
+.audio-workflow-panel { padding: 28px; background: #fff; border: 1px solid #e5e9f0; border-radius: 16px; box-shadow: 0 8px 24px #26324a0a; }
+.audio-workflow-hero { display: flex; align-items: center; gap: 15px; padding-bottom: 25px; border-bottom: 1px solid #edf0f5; }
+.audio-workflow-hero h2 { margin: 0; color: #252f43; font-size: 19px; }
+.audio-workflow-hero p:not(.overline) { margin: 6px 0 0; color: #8993a3; font-size: 12px; }
+.audio-workflow-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 24px; }
+.audio-workflow-steps > div { display: flex; flex-direction: column; gap: 6px; padding: 17px; background: #faf9fc; border: 1px solid #ece8f2; border-radius: 12px; }
+.audio-workflow-steps span { color: #c026d3; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.audio-workflow-steps strong { color: #3d4758; font-size: 13px; }
+.audio-workflow-steps small { color: #9aa5b5; font-size: 11px; }
+.audio-workflow-note { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 12px 14px; color: #8a4b97; background: #fdf4fc; border: 1px solid #f5d9f1; border-radius: 10px; font-size: 12px; }
+@media (max-width: 760px) { .workflow-switcher, .audio-workflow-steps { grid-template-columns: 1fr; } }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
