@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Bot,
   CheckCircle2,
+  Clapperboard,
   Film,
   HardDrive,
   Mail,
@@ -12,12 +13,13 @@ import { API_URL } from '../../shared/constants'
 import { GoogleDriveSection } from './components/GoogleDriveSection'
 import { MailTmSection } from './components/MailTmSection'
 import { PippitSection } from './components/PippitSection'
+import { VeoSection } from './components/VeoSection'
 import { YouTubeBrandIcon, YouTubeSection } from './components/YouTubeSection'
 import type { GeminiState, YtState } from './types'
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<
-    'gemini_yt' | 'mailtm' | 'pippit' | 'gdrive' | 'youtube'
+    'gemini_yt' | 'mailtm' | 'pippit' | 'gdrive' | 'youtube' | 'veo'
   >('gemini_yt')
 
 
@@ -220,6 +222,17 @@ export function SettingsPage() {
         >
           <YouTubeBrandIcon size={16} />
           <span>YouTube</span>
+        </button>
+
+        <button
+          type="button"
+          className={`settings-tab-btn ${
+            activeTab === 'veo' ? 'active' : ''
+          }`}
+          onClick={() => setActiveTab('veo')}
+        >
+          <Clapperboard size={16} />
+          <span>Google Veo</span>
         </button>
       </div>
 
@@ -439,6 +452,13 @@ export function SettingsPage() {
       {activeTab === 'youtube' && (
         <div className="tab-fade-in">
           <YouTubeSection />
+        </div>
+      )}
+
+      {/* ── Tab 6: Google Veo ── */}
+      {activeTab === 'veo' && (
+        <div className="tab-fade-in">
+          <VeoSection />
         </div>
       )}
     </section>

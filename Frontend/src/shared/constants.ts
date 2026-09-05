@@ -1,6 +1,7 @@
 import {
   CalendarClock,
   BookOpen,
+  Clapperboard,
   Clock3,
   Compass,
   Eraser,
@@ -25,6 +26,7 @@ export const navigation: NavItem[] = [
   { label: 'Khám Phá Kênh', icon: Compass },
   { label: 'Crawl truyện', icon: BookOpen },
   { label: 'Studio', icon: PlaySquare },
+  { label: 'Veo Studio', icon: Clapperboard },
   { label: 'Video', icon: Video },
   { label: 'Voices', icon: Mic },
   { label: 'Thư viện nhạc', icon: Music },
@@ -34,3 +36,4 @@ export const navigation: NavItem[] = [
   { label: 'Lịch sử', icon: Clock3 },
   { label: 'Cài đặt', icon: Settings },
 ]
+

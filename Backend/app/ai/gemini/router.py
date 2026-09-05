@@ -13,7 +13,6 @@ router = APIRouter(prefix="/api/settings/gemini", tags=["Gemini"])
 @router.get("")
 def get_settings() -> dict:
     config = read_config()
-    write_config(config)
     data = config["gemini"]
     return {"has_cookie": bool(data.get("cookies")), "cookie_count": data.get("cookie_count", 0), "saved_at": data.get("saved_at"), "client_context_token": data.get("client_context_token", ""), "app_url": data.get("app_url", "https://gemini.google.com/app")}
 

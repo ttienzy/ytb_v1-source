@@ -33,9 +33,21 @@ def read_config() -> dict:
 
 def write_config(config: dict) -> None:
     settings.config_file.parent.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(config, ensure_ascii=False, indent=2)
     temporary_file = settings.config_file.with_suffix(".tmp")
-    temporary_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary_file.replace(settings.config_file)
+    try:
+        temporary_file.write_text(content, encoding="utf-8")
+        try:
+            temporary_file.replace(settings.config_file)
+        except OSError:
+            settings.config_file.write_text(content, encoding="utf-8")
+            try:
+                temporary_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except Exception:
+        settings.config_file.write_text(content, encoding="utf-8")
+
 
 
 def mark_saved(data: dict) -> dict:
