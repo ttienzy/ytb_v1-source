@@ -28,6 +28,7 @@ from app.voices.router import router as voices_router
 from app.watermark.router import router as watermark_router
 from app.publisher_monitor.router import router as monitor_router
 from app.stories.router import router as stories_router
+from app.veo.router import router as veo_router
 
 
 
@@ -47,5 +48,16 @@ app.include_router(gdrive_router)
 app.include_router(youtube_router)
 app.include_router(monitor_router)
 app.include_router(stories_router)
+app.include_router(veo_router)
 
 
+@app.on_event("startup")
+def _veo_startup():
+    from app.veo import service as veo_service
+    veo_service.startup()
+
+
+@app.on_event("shutdown")
+def _veo_shutdown():
+    from app.veo import service as veo_service
+    veo_service.shutdown()

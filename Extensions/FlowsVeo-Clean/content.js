@@ -204,4 +204,158 @@
 
   refreshFab();
   setInterval(refreshFab, 5_000);
+
+  // ─── Auto Credits Scanner & Synchronizer ───────────────────────────────────
+  let lastKnownCredits = null;
+  let lastKnownEmail   = null;
+  let isProbing        = false;
+
+  function extractDeepText(node) {
+    if (!node) return '';
+    let txt = '';
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+    if (node.shadowRoot) {
+      for (const c of node.shadowRoot.childNodes || []) {
+        txt += ' ' + extractDeepText(c);
+      }
+    }
+    for (const c of node.childNodes || []) {
+      txt += ' ' + extractDeepText(c);
+    }
+    return txt;
+  }
+
+  function scanCreditsAndAccount() {
+    try {
+      let foundCredits = null;
+      let foundEmail   = null;
+
+      // 1. Quét document.body innerText
+      const bodyText = (document.body && document.body.innerText) || '';
+      const credMatch = bodyText.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+      if (credMatch) {
+        foundCredits = parseInt(credMatch[1].replace(/[,.]/g, ''), 10);
+      }
+
+      // 2. Quét sâu TreeWalker nếu chưa thấy
+      if (foundCredits === null) {
+        const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+          const t = node.textContent || '';
+          if (/credits/i.test(t)) {
+            const m = t.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+            if (m) {
+              foundCredits = parseInt(m[1].replace(/[,.]/g, ''), 10);
+              break;
+            }
+            const pt = node.parentElement?.textContent || '';
+            const pm = pt.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+            if (pm) {
+              foundCredits = parseInt(pm[1].replace(/[,.]/g, ''), 10);
+              break;
+            }
+          }
+        }
+      }
+
+      // 3. Quét Shadow DOM
+      if (foundCredits === null) {
+        const fullDeep = extractDeepText(document.body);
+        const dm = fullDeep.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+        if (dm) foundCredits = parseInt(dm[1].replace(/[,.]/g, ''), 10);
+      }
+
+      // 4. Tìm Email
+      const emailMatch = bodyText.match(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/);
+      if (emailMatch) foundEmail = emailMatch[1];
+      if (!foundEmail) {
+        const profEl = document.querySelector('[aria-label*="@"], [data-email]');
+        if (profEl) {
+          const em = (profEl.getAttribute('aria-label') || '').match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+          if (em) foundEmail = em[1];
+          else if (profEl.getAttribute('data-email')) foundEmail = profEl.getAttribute('data-email');
+        }
+      }
+
+      // 5. Nếu phát hiện credits > 0 và có sự thay đổi hoặc chưa gửi
+      if (foundCredits !== null && foundCredits >= 0) {
+        if (foundCredits !== lastKnownCredits || (foundEmail && foundEmail !== lastKnownEmail)) {
+          lastKnownCredits = foundCredits;
+          if (foundEmail) lastKnownEmail = foundEmail;
+          sendToBackground({
+            type: 'CREDITS_UPDATED',
+            credits: foundCredits,
+            email: foundEmail || '',
+          });
+        }
+      }
+      return { credits: foundCredits, email: foundEmail };
+    } catch {
+      return { credits: null, email: null };
+    }
+  }
+
+  // Tự động mở nhẹ menu avatar để lấy credits nếu trang chưa render
+  async function probeAvatarCredits() {
+    if (isProbing || lastKnownCredits !== null) return;
+    isProbing = true;
+    try {
+      const avatarBtn = document.querySelector(
+        'button[aria-label*="Google Account"], [aria-label*="@gmail.com"], header button:has(img), [aria-haspopup="dialog"], [data-ogsr-up]'
+      );
+      if (avatarBtn) {
+        avatarBtn.click();
+        await new Promise((r) => setTimeout(r, 350));
+        scanCreditsAndAccount();
+        // Đóng lại menu bằng click lại hoặc Escape
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      }
+    } catch {}
+    finally {
+      isProbing = false;
+    }
+  }
+
+  // Lắng nghe MutationObserver: khi user click avatar mở popup → bắt ngay lập tức!
+  let debounceTimer = null;
+  const observer = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(scanCreditsAndAccount, 150);
+  });
+
+  if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+  }
+
+  // Lắng nghe click (user bấm avatar)
+  document.addEventListener('click', () => {
+    setTimeout(scanCreditsAndAccount, 250);
+  }, { passive: true });
+
+  // Nhận lệnh từ background / popup
+  chrome.runtime.onMessage.addListener((req, _sender, sendResp) => {
+    if (req?.type === 'PROBE_CREDITS') {
+      const res = scanCreditsAndAccount();
+      if (res.credits === null) {
+        probeAvatarCredits().then(() => {
+          sendResp(scanCreditsAndAccount());
+        });
+        return true;
+      }
+      sendResp(res);
+      return true;
+    }
+  });
+
+  // Quét lúc mới load
+  setTimeout(scanCreditsAndAccount, 1_000);
+  setTimeout(scanCreditsAndAccount, 3_000);
+  setTimeout(() => {
+    if (lastKnownCredits === null) probeAvatarCredits();
+  }, 4_500);
 })();

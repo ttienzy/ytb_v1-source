@@ -1,0 +1,125 @@
+/**
+ * Veo Studio — TypeScript Types
+ *
+ * Mirrors Backend schemas. Model names & durations from Google Help docs.
+ */
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+export type JobStatus =
+  | 'pending'
+  | 'captcha'
+  | 'submitting'
+  | 'generating'
+  | 'downloading'
+  | 'done'
+  | 'error'
+
+export type InputMode = 'text_to_video' | 'frames' | 'ingredients' | 'extend'
+export type AspectRatio = '16:9' | '9:16'
+
+// ─── Model Info ─────────────────────────────────────────────────────────────
+
+export interface VeoModelInfo {
+  display_name: string
+  provider: string
+  provider_model_id: string | null
+  group: string
+  supported_modes: string[]
+  supported_durations: number[]
+  supported_resolutions: string[]
+  extend_supported: boolean | null
+  verified: boolean
+}
+
+// ─── Job ────────────────────────────────────────────────────────────────────
+
+export interface VeoJobRequest {
+  prompt: string
+  model_display_name: string
+  input_mode: InputMode
+  aspect_ratio: AspectRatio
+  duration_seconds: number
+  resolution: string
+  num_outputs: number
+  seed?: number | null
+  image_path?: string | null
+  end_image_path?: string | null
+  source_video_id?: string | null
+  continuation_prompt?: string | null
+}
+
+export interface VeoJobOut {
+  job_id: string
+  status: JobStatus
+  input_mode: InputMode
+  prompt: string
+  model_display_name: string
+  aspect_ratio: string
+  duration_seconds: number
+  resolution: string
+  num_outputs: number
+  current_step: string
+  error_message: string | null
+  output_files: string[]
+  created_at: string
+  updated_at: string
+}
+
+// ─── Bridge Status ──────────────────────────────────────────────────────────
+
+export interface ExtensionInfo {
+  ext_fp: string
+  version: string
+  tab_count: number
+  last_heartbeat: string | null
+  connected: boolean
+}
+
+export interface AccountInfo {
+  email: string
+  tier: string
+  credits: number | null
+  has_token: boolean
+  session_valid: boolean
+  last_updated: string | null
+}
+
+export interface VeoBridgeStatus {
+  bridge_running: boolean
+  bridge_port: number
+  bridge_uptime_seconds: number
+  secret_generated: boolean
+  extension: ExtensionInfo
+  accounts: AccountInfo[]
+  captcha_queue_size: number
+  total_captcha_solved: number
+  last_captcha_at: string | null
+}
+
+// ─── Capabilities ───────────────────────────────────────────────────────────
+
+export interface VeoCapabilities {
+  models: VeoModelInfo[]
+  aspect_ratios: string[]
+  max_outputs: number
+  last_verified: string | null
+  note: string
+}
+
+// ─── History ────────────────────────────────────────────────────────────────
+
+export interface VeoHistoryItem {
+  video_id: string
+  file_name: string
+  file_path: string
+  file_size_bytes: number
+  duration_seconds: number
+  width: number
+  height: number
+  prompt: string
+  model_display_name: string
+  aspect_ratio: string
+  input_mode: string
+  created_at: string
+}

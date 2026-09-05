@@ -14,6 +14,7 @@ import { StudioPage } from './features/studio/StudioPage'
 import { VoicesPage } from './features/voices/VoicesPage'
 import { WatermarkPage } from './features/watermark/WatermarkPage'
 import { VideoPage } from './features/video/VideoPage'
+import { VeoStudioPage } from './features/veo-studio/VeoStudioPage'
 import { YouTubePublisherPage } from './features/youtube-publisher/YouTubePublisherPage'
 
 export function App() {
@@ -151,6 +152,8 @@ export function App() {
             <WatermarkPage />
           ) : activePage === 'Video' ? (
             <VideoPage />
+          ) : activePage === 'Veo Studio' ? (
+            <VeoStudioPage setActivePage={setActivePage} />
           ) : activePage === 'Lên lịch Pippit' ? (
             <PublisherPage />
           ) : activePage === 'Lên lịch Youtube' ? (
