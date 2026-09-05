@@ -1,6 +1,7 @@
 from pathlib import Path
+import subprocess
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 from urllib.parse import urlparse
 from app.media import video_service as service
@@ -109,6 +110,27 @@ def process(video_ids: list[str] = Form(...), options: str = Form(...)):
     if not video_ids: raise HTTPException(400, "Chưa chọn video.")
     first = service.get(video_ids[0])
     if not first: raise HTTPException(404, "Không tìm thấy video.")
-    try: out = service.transform(first, opts); service.record_done(out, first, opts)
-    except (OSError, RuntimeError) as e: raise HTTPException(500, f"Xử lý video thất bại: {e}") from e
-    return FileResponse(out, media_type="video/mp4", filename=out.name)
+    return {"job_id": service.start_transform(first, opts), "video_id": first["video_id"]}
+
+@router.get("/process/{job_id}")
+def process_status(job_id: str):
+    job = service.get_process_job(job_id)
+    if not job: raise HTTPException(404, "Không tìm thấy tiến trình xử lý video.")
+    return {key: value for key, value in job.items() if key != "output_path"}
+
+@router.get("/process/{job_id}/file")
+def process_file(job_id: str):
+    job = service.get_process_job(job_id)
+    if not job: raise HTTPException(404, "Không tìm thấy tiến trình xử lý video.")
+    if job["status"] != "completed" or not job.get("output_path"):
+        raise HTTPException(409, "Video chưa xử lý xong.")
+    path = Path(job["output_path"])
+    if not path.exists(): raise HTTPException(404, "Không tìm thấy video đầu ra.")
+    return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+@router.get("/process/{job_id}/log", response_class=PlainTextResponse)
+def process_log(job_id: str):
+    if not service.get_process_job(job_id): raise HTTPException(404, "Không tìm thấy tiến trình xử lý video.")
+    log = service.get_process_log(job_id)
+    if log is None: raise HTTPException(404, "Chưa có log cho tiến trình này.")
+    return log

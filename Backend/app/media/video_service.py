@@ -6,6 +6,10 @@ import re
 import subprocess
 import uuid
 import shutil
+import threading
+import time
+import shlex
+from typing import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +25,9 @@ DONE_FILE = VIDEO_DIR / "done.json"
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 BACKGROUND_DIR = VIDEO_DIR / "backgrounds"
+PROCESS_LOG_DIR = VIDEO_DIR / "logs"
+_PROCESS_JOBS: dict[str, dict] = {}
+_PROCESS_JOBS_LOCK = threading.Lock()
 
 
 def _read() -> list[dict]:
@@ -136,7 +143,80 @@ def get_done(done_id: str) -> dict | None:
     return next((x for x in list_done() if x["done_id"] == done_id), None)
 
 
-def transform(item: dict, options: dict) -> Path:
+def _write_process_log(log_file: Path | None, message: str) -> None:
+    if not log_file: return
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{datetime.now().isoformat(timespec='seconds')}] {message}\n")
+            handle.flush()
+    except OSError:
+        pass
+
+
+def _run_ffmpeg(cmd: list[str], duration_sec: float | None, total_frames: int | None = None, on_progress: Callable[[int], None] | None = None, log_file: Path | None = None) -> tuple[int, str]:
+    """Run FFmpeg and report real output-time progress (not elapsed-time estimates)."""
+    progress_cmd = [*cmd[:-1], "-progress", "pipe:1", "-stats_period", "0.5", "-nostats", cmd[-1]]
+    _write_process_log(log_file, f"FFmpeg START: {shlex.join(progress_cmd)}")
+    proc = subprocess.Popen(progress_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace", bufsize=1)
+    last_progress = -1
+    started_at = time.monotonic()
+    log_lines: list[str] = []
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            _write_process_log(log_file, f"FFmpeg: {line.rstrip()}" )
+            if time.monotonic() - started_at > 1800:
+                _write_process_log(log_file, "FFmpeg TIMEOUT after 1800 seconds; terminating process")
+                proc.kill()
+                proc.communicate()
+                raise subprocess.TimeoutExpired(progress_cmd, 1800)
+            if line.startswith("out_time_ms=") or line.startswith("out_time_us="):
+                try:
+                    current_us = int(line.split("=", 1)[1].strip())
+                    if line.startswith("out_time_ms="): current_us *= 1000
+                    current = min(99, max(0, round(current_us / (duration_sec * 1_000_000) * 100))) if duration_sec and duration_sec > 0 else 0
+                    if current != last_progress and on_progress:
+                        last_progress = current
+                        on_progress(current)
+                except ValueError:
+                    pass
+            elif line.startswith("frame=") and total_frames and total_frames > 0:
+                try:
+                    current = min(99, max(0, round(int(line.split("=", 1)[1].strip()) / total_frames * 100)))
+                    if current > last_progress and on_progress:
+                        last_progress = current
+                        on_progress(current)
+                except ValueError:
+                    pass
+            elif line.strip() and not line.startswith(("fps=", "stream_", "bitrate=", "total_size=", "out_time=", "dup_frames=", "drop_frames=", "speed=", "progress=")):
+                log_lines.append(line.strip())
+        return_code = proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        _write_process_log(log_file, "FFmpeg did not exit after progress stream closed; terminating process")
+        proc.kill()
+        proc.communicate()
+        raise
+    if on_progress and return_code == 0:
+        on_progress(100)
+    _write_process_log(log_file, f"FFmpeg END: return_code={return_code}")
+    if log_lines: _write_process_log(log_file, "FFmpeg diagnostics: " + " | ".join(log_lines[-20:]))
+    return return_code, "\n".join(log_lines)
+
+
+def _probe_video_frames(path: Path) -> int | None:
+    cmd = ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+           "-show_entries", "stream=nb_read_frames", "-of", "default=noprint_wrappers=1:nokey=1", str(path)]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        value = int((result.stdout or "").strip())
+        return value if value > 0 else None
+    except (ValueError, OSError, subprocess.SubprocessError):
+        return None
+
+
+def transform(item: dict, options: dict, on_progress: Callable[[int], None] | None = None, log_file: Path | None = None) -> Path:
     src = Path(item["file_path"])
     aspect = options.get("aspect", "9:16")
     tw, th = (1080, 1920) if aspect == "9:16" else (1920, 1080)
@@ -199,11 +279,67 @@ def transform(item: dict, options: dict) -> Path:
     inputs = ["-i", str(src)]
     if background: inputs += ["-loop", "1", "-i", background["file_path"]]
     cmd = ["ffmpeg", "-y", *inputs, *video_args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", *audio_args, "-movflags", "+faststart", str(out)]
+    duration_sec = item.get("duration_sec") or ffprobe_duration(src)
+    total_frames = _probe_video_frames(src)
     # Audio stream-copy may fail for odd source codecs; retry with AAC.
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
-    if proc.returncode != 0 and not remove_audio:
+    _write_process_log(log_file, f"Input: {src} | duration={duration_sec}s | frames={total_frames} | output={out}")
+    proc_code, proc_stderr = _run_ffmpeg(cmd, duration_sec, total_frames, on_progress, log_file)
+    if proc_code != 0 and not remove_audio:
         cmd[cmd.index("copy")] = "aac"; cmd.insert(cmd.index("-movflags"), "-b:a"); cmd.insert(cmd.index("-movflags"), "192k")
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
-    if proc.returncode != 0 or not out.exists():
-        raise RuntimeError((proc.stderr or "FFmpeg lỗi")[-800:])
+        _write_process_log(log_file, "Retrying FFmpeg with AAC audio because audio stream-copy failed")
+        proc_code, proc_stderr = _run_ffmpeg(cmd, duration_sec, total_frames, on_progress, log_file)
+    if proc_code != 0 or not out.exists():
+        raise RuntimeError((proc_stderr or "FFmpeg lỗi")[-800:])
     return out
+
+
+def start_transform(item: dict, options: dict) -> str:
+    job_id = uuid.uuid4().hex[:12]
+    log_file = PROCESS_LOG_DIR / f"{job_id}.log"
+    with _PROCESS_JOBS_LOCK:
+        _PROCESS_JOBS[job_id] = {"job_id": job_id, "status": "queued", "phase": "Đang xếp hàng...", "progress": 0, "error": None, "output_path": None, "log_path": str(log_file)}
+    _write_process_log(log_file, f"JOB CREATED: job_id={job_id} video_id={item.get('video_id')} name={item.get('name')}")
+    _write_process_log(log_file, f"Options: {json.dumps(options, ensure_ascii=False, sort_keys=True)}")
+
+    def run() -> None:
+        def update(progress: int) -> None:
+            with _PROCESS_JOBS_LOCK:
+                if job_id in _PROCESS_JOBS:
+                    _PROCESS_JOBS[job_id]["progress"] = progress
+                    _PROCESS_JOBS[job_id]["status"] = "running"
+                    _PROCESS_JOBS[job_id]["phase"] = "Đang hoàn tất file..." if progress >= 99 else "Đang render video..."
+            _write_process_log(log_file, f"PROGRESS: {progress}% | phase={_PROCESS_JOBS[job_id]['phase']}")
+        try:
+            update(1)
+            with _PROCESS_JOBS_LOCK:
+                _PROCESS_JOBS[job_id]["status"] = "running"
+                _PROCESS_JOBS[job_id]["phase"] = "Đang render video..."
+            _write_process_log(log_file, "PHASE: Đang render video...")
+            output = transform(item, options, update, log_file)
+            with _PROCESS_JOBS_LOCK:
+                _PROCESS_JOBS[job_id]["phase"] = "Đang lưu kết quả..."
+            _write_process_log(log_file, f"PHASE: Đang lưu kết quả... output={output}")
+            record_done(output, item, options)
+            with _PROCESS_JOBS_LOCK:
+                _PROCESS_JOBS[job_id].update(status="completed", phase="Hoàn tất", progress=100, output_path=str(output))
+            _write_process_log(log_file, "JOB COMPLETED: done.json updated")
+        except Exception as exc:
+            with _PROCESS_JOBS_LOCK:
+                _PROCESS_JOBS[job_id].update(status="error", phase="Đã xảy ra lỗi", error=str(exc))
+            _write_process_log(log_file, f"JOB ERROR: {type(exc).__name__}: {exc}")
+
+    threading.Thread(target=run, daemon=True, name=f"video-process-{job_id}").start()
+    return job_id
+
+
+def get_process_job(job_id: str) -> dict | None:
+    with _PROCESS_JOBS_LOCK:
+        job = _PROCESS_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def get_process_log(job_id: str) -> str | None:
+    log_file = PROCESS_LOG_DIR / f"{job_id}.log"
+    if not log_file.exists(): return None
+    try: return log_file.read_text(encoding="utf-8")
+    except OSError: return None
