@@ -9,6 +9,7 @@ import shutil
 import threading
 import time
 import shlex
+import random
 from typing import Callable
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 BACKGROUND_DIR = VIDEO_DIR / "backgrounds"
 PROCESS_LOG_DIR = VIDEO_DIR / "logs"
+MERGE_DIR = VIDEO_DIR / "MergeVideo"
 _PROCESS_JOBS: dict[str, dict] = {}
 _PROCESS_JOBS_LOCK = threading.Lock()
 
@@ -141,6 +143,69 @@ def record_done(output: Path, source: dict, options: dict) -> dict:
 
 def get_done(done_id: str) -> dict | None:
     return next((x for x in list_done() if x["done_id"] == done_id), None)
+
+
+def _has_audio_stream(path: Path) -> bool:
+    try:
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        return bool((probe.stdout or "").strip())
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def merge_done_videos(target_seconds: int, done_ids: list[str] | None = None, randomize: bool = True, aspect: str = "9:16") -> dict:
+    if target_seconds < 1: raise ValueError("Thời lượng gộp phải lớn hơn 0 giây.")
+    if aspect not in {"9:16", "16:9"}: raise ValueError("Khổ video không hợp lệ.")
+    available = [item for item in list_done() if item.get("aspect") == aspect]
+    if not available: raise ValueError(f"Kho video hoàn tất chưa có video khổ {aspect}.")
+    if done_ids:
+        by_id = {item["done_id"]: item for item in available}
+        selected = [by_id[done_id] for done_id in done_ids if done_id in by_id]
+        if len(selected) != len(set(done_ids)): raise ValueError(f"Một hoặc nhiều video đã chọn không phải khổ {aspect} hoặc không còn tồn tại.")
+    else:
+        selected = []
+    if done_ids and not selected: raise ValueError("Kho video hoàn tất đang trống hoặc chưa chọn video.")
+
+    durations = {item["done_id"]: ffprobe_duration(Path(item["file_path"])) for item in available}
+    available = [item for item in available if durations.get(item["done_id"], 0.0) > 0]
+    selected = [item for item in selected if item["done_id"] in {candidate["done_id"] for candidate in available}]
+    if not available: raise ValueError(f"Kho video khổ {aspect} không có file hợp lệ để gộp.")
+    usable: list[tuple[dict, float]] = []
+    total = 0.0
+    while total < target_seconds:
+        pool = selected if selected and total < target_seconds and len(usable) < len(selected) else available
+        item = random.choice(pool) if randomize or not selected or len(usable) >= len(selected) else selected[len(usable)]
+        duration = durations.get(item["done_id"], 0.0)
+        if duration <= 0: available = [candidate for candidate in available if candidate["done_id"] != item["done_id"]]; selected = [candidate for candidate in selected if candidate["done_id"] != item["done_id"]]; pool = available; continue
+        usable.append((item, duration))
+        total += duration
+        if not available: raise ValueError("Không có video hợp lệ để gộp.")
+
+    MERGE_DIR.mkdir(parents=True, exist_ok=True)
+    output = MERGE_DIR / f"merged_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.mp4"
+    try:
+        inputs: list[str] = []
+        filters: list[str] = []
+        with_audio = all(_has_audio_stream(Path(item["file_path"])) for item, _ in usable)
+        for index, (item, _) in enumerate(usable):
+            inputs.extend(["-i", item["file_path"]])
+            filters.append(f"[{index}:v:0]setpts=PTS-STARTPTS[v{index}]")
+            if with_audio:
+                filters.append(f"[{index}:a:0]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a{index}]")
+        concat_inputs = "".join(f"[v{index}]" + (f"[a{index}]" if with_audio else "") for index in range(len(usable)))
+        concat_filter = f"{concat_inputs}concat=n={len(usable)}:v=1:a={1 if with_audio else 0}[v]" + ("[a]" if with_audio else "")
+        filter_graph = ";".join([*filters, concat_filter])
+        cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filter_graph, "-map", "[v]"]
+        if with_audio: cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        else: cmd += ["-an"]
+        cmd += ["-t", str(target_seconds), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart", str(output)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+        if proc.returncode != 0 or not output.exists() or output.stat().st_size == 0:
+            raise RuntimeError((proc.stderr or "FFmpeg không thể gộp video.")[-1200:])
+        return {"file_name": output.name, "file_path": str(output), "duration_sec": ffprobe_duration(output),
+                "source_count": len(usable), "source_names": [item["name"] for item, _ in usable], "aspect": aspect}
+    finally:
+        pass
 
 
 def _write_process_log(log_file: Path | None, message: str) -> None:
@@ -343,3 +408,19 @@ def get_process_log(job_id: str) -> str | None:
     if not log_file.exists(): return None
     try: return log_file.read_text(encoding="utf-8")
     except OSError: return None
+
+
+def list_merged_videos() -> list[dict]:
+    if not MERGE_DIR.exists(): return []
+    items = []
+    for path in sorted(MERGE_DIR.glob("*.mp4"), key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+            stream = (json.loads(probe.stdout).get("streams") or [{}])[0]
+            width, height = int(stream.get("width") or 0), int(stream.get("height") or 0)
+            aspect = "9:16" if height > width else "16:9"
+            items.append({"file_name": path.name, "name": path.name, "file_path": str(path),
+                          "duration_sec": ffprobe_duration(path), "aspect": aspect, "created_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat()})
+        except OSError:
+            continue
+    return items

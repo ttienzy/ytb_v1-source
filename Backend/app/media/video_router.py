@@ -28,6 +28,12 @@ class NamedPresetBody(BaseModel):
     name: str
     options: dict
 
+class MergeBody(BaseModel):
+    target_seconds: int
+    done_ids: list[str] = []
+    randomize: bool = True
+    aspect: str = "9:16"
+
 @router.get("/preset")
 def preset():
     return service.load_preset()
@@ -54,6 +60,36 @@ def done_file(done_id: str):
     item = service.get_done(done_id)
     if not item: raise HTTPException(404, "Không tìm thấy video đã xử lý.")
     return FileResponse(item["file_path"], media_type="video/mp4", filename=item["name"])
+
+@router.post("/merge")
+def merge(body: MergeBody):
+    try:
+        result = service.merge_done_videos(body.target_seconds, body.done_ids or None, body.randomize, body.aspect)
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(504, "Gộp video quá thời gian cho phép (30 phút).") from e
+    except (OSError, RuntimeError) as e:
+        raise HTTPException(500, f"Gộp video thất bại: {e}") from e
+
+@router.get("/merge")
+def merged_videos():
+    return service.list_merged_videos()
+
+@router.get("/merge-file/{filename}")
+def merge_file(filename: str):
+    path = service.MERGE_DIR / Path(filename).name
+    if path.parent != service.MERGE_DIR or not path.exists():
+        raise HTTPException(404, "Không tìm thấy video đã gộp.")
+    return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+@router.get("/merge-preview/{filename}")
+def merge_preview(filename: str):
+    path = service.MERGE_DIR / Path(filename).name
+    if path.parent != service.MERGE_DIR or not path.exists():
+        raise HTTPException(404, "Không tìm thấy video đã gộp.")
+    return FileResponse(path, media_type="video/mp4", headers={"Content-Disposition": f'inline; filename="{path.name}"'})
 
 @router.get("/library")
 def library():
