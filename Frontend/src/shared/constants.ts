@@ -25,7 +25,7 @@ export const navigation: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard },
   { label: 'Khám Phá Kênh', icon: Compass },
   { label: 'Crawl truyện', icon: BookOpen },
-  { label: 'Studio', icon: PlaySquare },
+  { label: 'Workflow', icon: PlaySquare },
   { label: 'Veo Studio', icon: Clapperboard },
   { label: 'Video', icon: Video },
   { label: 'Voices', icon: Mic },

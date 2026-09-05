@@ -54,7 +54,7 @@ export function App() {
 
   const handleSendToStudioBatch = (urls: string[]) => {
     setStudioBatchUrls(urls)
-    setActivePage('Studio')
+    setActivePage('Workflow')
   }
 
   return (
@@ -158,7 +158,7 @@ export function App() {
             <PublisherPage />
           ) : activePage === 'Lên lịch Youtube' ? (
             <YouTubePublisherPage setActivePage={setActivePage} />
-          ) : activePage === 'Studio' ? (
+          ) : activePage === 'Workflow' ? (
             <StudioPage
               setActivePage={setActivePage}
               initialUrls={studioBatchUrls}

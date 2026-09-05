@@ -264,7 +264,7 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
     if (onSendToStudioBatch) {
       onSendToStudioBatch(selectedVideoUrls)
     } else if (setActivePage) {
-      setActivePage('Studio')
+      setActivePage('Workflow')
     }
   }
 
