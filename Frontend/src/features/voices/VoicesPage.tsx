@@ -82,8 +82,8 @@ export function VoicesPage() {
       setName('')
       setFile(null)
       setMessage('Đã thêm giọng.')
-    } catch {
-      setMessage('Tạo giọng thất bại. (BE chưa triển khai?)')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Tạo giọng thất bại. Kiểm tra voice-service.')
     } finally {
       setLoading(false)
     }
