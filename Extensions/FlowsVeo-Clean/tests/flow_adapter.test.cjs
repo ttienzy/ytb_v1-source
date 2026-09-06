@@ -94,6 +94,7 @@ for (const profile of verifiedProfiles) {
     const createPayload = JSON.parse(createCall.outer[0][0][1]);
     assert.equal(createPayload[0][0][0][2][0][0][0], 'Cat');
     assert.equal(createPayload[0][0][1], profile.provider_model_id);
+    assert.equal(createPayload[0][0][2], 1);
     assert.equal(createPayload[1][5], 'project-test');
     assert.ok(typeof createPayload[2][0] === 'string' && createPayload[2][0].length > 0);
     assert.equal(createPayload[2][1], 2);
@@ -118,6 +119,9 @@ test('adapter dispatches 16:9 aspect ratio successfully', async () => {
   const result = await h.run({ ...verifiedRequest(), aspect_ratio: '16:9' });
   assert.equal(result.ok, true);
   assert.equal(h.calls.length, 3);
+  const createPayload = JSON.parse(h.calls[0].outer[0][0][1]);
+  assert.equal(createPayload[0][0][2], 2);
+  assert.equal(createPayload[2][1], 2);
 });
 
 test('adapter requires a logged-in Flow project session', async () => {

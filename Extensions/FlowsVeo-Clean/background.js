@@ -1157,11 +1157,13 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     const requestUuidA = (crypto.randomUUID ? crypto.randomUUID() : 'AD722819-13F6-46E3-A074-9CA0266A4FE0').toUpperCase();
     const requestUuidB = (crypto.randomUUID ? crypto.randomUUID() : '4C8832DC-AD37-4C11-859E-DCFD4FB4903E').toUpperCase();
     const sceneUuid = (crypto.randomUUID ? crypto.randomUUID() : '154922EC-9CE9-4413-A9C0-B2664F7FFB7B').toUpperCase();
+    // Google Flow Aspect Ratio Enum: 2 = 16:9 (Landscape), 1 = 9:16 (Portrait)
+    const aspectEnum = flowRequest?.aspect_ratio === '16:9' ? 2 : 1;
     const createPayload = [
       [[
         [null, null, [[[flowRequest.prompt.trim()]]]],
         modelId,
-        1,
+        aspectEnum,
         null,
         [null, null, null, null, requestUuidA, requestUuidB],
       ]],
