@@ -3815,6 +3815,36 @@ input[type="checkbox"],
 .saved-story-content pre { margin: 0; color: #4b5563; font-family: inherit; font-size: 12px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Video & Audio workflow */
+.audio-mode-switcher { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 4px; background: #eef2f7; border-radius: 13px; }
+.audio-mode-switcher button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 0 14px; color: #64748b; background: transparent; border: 0; border-radius: 10px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.audio-mode-switcher button:hover { color: #4f46e5; }
+.audio-mode-switcher button.active { color: #4f46e5; background: #fff; box-shadow: 0 2px 7px #64748b1c; }
+.audio-mode-switcher button span { font-weight: 600; }
+.audio-batch-selector { grid-column: 1 / -1; padding: 11px 12px; background: #f8fafc; border: 1px solid #dfe4eb; border-radius: 9px; }
+.audio-batch-selector-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: #52617a; font-size: 11px; }
+.audio-batch-selector-head small { color: #4f46e5; font-weight: 800; }
+.audio-chapter-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; max-height: 154px; overflow: auto; }
+.audio-chapter-list label { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; color: #475569; font-size: 11px; cursor: pointer; }
+.audio-chapter-list input { margin: 0; accent-color: #6366f1; }
+.audio-chapter-list span { font-weight: 700; white-space: nowrap; }
+.audio-chapter-list small { overflow: hidden; color: #94a3b8; text-overflow: ellipsis; white-space: nowrap; }
+.audio-story-queue-list { display: grid; gap: 7px; max-height: 330px; overflow-y: auto; }
+.audio-queue-story { padding: 8px 9px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.audio-queue-story.selected { border-color: #a5b4fc; background: #fafaff; }
+.audio-queue-story-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.audio-queue-story-toggle { display: inline-flex; align-items: center; gap: 7px; min-width: 0; padding: 0; color: #475569; background: transparent; border: 0; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; text-align: left; }
+.audio-queue-story-toggle input { margin: 0; accent-color: #6366f1; pointer-events: none; }
+.audio-queue-story-head > small { flex: 0 0 auto; color: #94a3b8; font-size: 10px; }
+.audio-completed-badge { flex: 0 0 auto; padding: 3px 7px; color: #15803d; background: #dcfce7; border-radius: 99px; font-size: 9px; font-style: normal; font-weight: 800; }
+.audio-queue-thumbnail { display: flex; align-items: center; gap: 8px; margin: 7px 0 0 24px; color: #b45309; font-size: 10px; }
+.audio-queue-thumbnail img { width: 32px; height: 44px; object-fit: cover; border: 1px solid #ddd6fe; border-radius: 4px; }
+.audio-queue-thumbnail-button { min-height: 26px; padding: 0 8px; font-size: 10px; }
+.audio-queue-chapters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 9px; margin: 8px 0 1px 24px; padding-top: 7px; border-top: 1px solid #eef2f7; }
+.audio-queue-chapters label { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 5px; min-width: 0; color: #475569; font-size: 10px; cursor: pointer; }
+.audio-queue-chapters input { margin: 0; accent-color: #6366f1; }
+.audio-queue-chapters span { white-space: nowrap; }
+.audio-queue-chapters small { overflow: hidden; color: #94a3b8; text-overflow: ellipsis; white-space: nowrap; }
+.audio-queue-chapters label.completed { color: #15803d; }
 .audio-workflow-panel { display: flex; flex-direction: column; gap: 18px; }
 .audio-workflow-hero { display: flex; align-items: center; gap: 14px; padding: 18px 20px; background: linear-gradient(135deg, #f5f3ff, #eef2ff); border: 1px solid #ddd6fe; border-radius: 14px; }
 .audio-workflow-hero h2 { margin: 2px 0 4px; color: #30394b; font-size: 20px; }.audio-workflow-hero p:not(.overline) { margin: 0; color: #64748b; font-size: 12px; }

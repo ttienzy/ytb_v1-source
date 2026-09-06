@@ -161,6 +161,23 @@ async def run_batch(job_id: str, story_name: str, chapters: list, voice_id: str,
         _set(job_id, status="error", step="error", message=str(error), error=str(error))
 
 
+async def run_queue(job_id: str, queue: list[tuple[str, list, Path | None]], voice_id: str, aspect: str, bgm_pool: list[Path] | None = None) -> None:
+    """Chạy tuần tự các chương đã chọn từ tối đa 10 truyện."""
+    total = sum(len(chapters) for _, chapters, _ in queue)
+    completed = 0
+    try:
+        for story_name, chapters, thumbnail in queue:
+            _set(job_id, current_story=story_name, message=f"Đang xử lý truyện {story_name}…")
+            for chapter in chapters:
+                _set(job_id, current_chapter=chapter.chapter_number, completed_chapters=completed, total_chapters=total, message=f"Đang xử lý {story_name} · chương {chapter.chapter_number}…")
+                await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(completed * 100 / total), round((completed + 1) * 100 / total))
+                completed += 1
+                _set(job_id, completed_chapters=completed)
+        _set(job_id, status="completed", step="done", progress=100, message=f"Đã hoàn thành {completed} video Audio từ {len(queue)} truyện.")
+    except Exception as error:  # noqa: BLE001
+        _set(job_id, status="error", step="error", message=str(error), error=str(error))
+
+
 def create(story_name: str, chapter_title: str, total_chapters: int = 1) -> str:
     job_id = uuid.uuid4().hex[:12]
     AUDIO_JOBS[job_id] = {"job_id": job_id, "story_name": story_name, "chapter_title": chapter_title, "status": "queued", "step": "queued", "progress": 0, "message": "Đang xếp hàng…", "total_chapters": total_chapters, "completed_chapters": 0, "created_at": datetime.now().isoformat()}
