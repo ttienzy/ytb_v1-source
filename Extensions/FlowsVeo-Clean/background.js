@@ -13,12 +13,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_BRIDGE_PORT = 60526;
-const POLL_INTERVAL_MS    = 2500;   // ms giữa các lần poll captcha/request
-const FAIL_THRESHOLD      = 5;      // số lần thất bại captcha liên tiếp trước khi reload
-const TOKENS_PER_SESSION  = 8;      // sau N token → xóa tracking cookies + refresh
-const HEARTBEAT_MS        = 30_000; // ms giữa các heartbeat
-const WATCHDOG_MINUTES    = 0.4;    // 24s mỗi vòng watchdog alarm
-const ACTIVITY_LOG_MAX    = 50;     // số dòng log giữ trong bộ nhớ
+const POLL_INTERVAL_MS = 2500;   // ms giữa các lần poll captcha/request
+const FAIL_THRESHOLD = 5;      // số lần thất bại captcha liên tiếp trước khi reload
+const TOKENS_PER_SESSION = 8;      // sau N token → xóa tracking cookies + refresh
+const HEARTBEAT_MS = 30_000; // ms giữa các heartbeat
+const WATCHDOG_MINUTES = 0.4;    // 24s mỗi vòng watchdog alarm
+const ACTIVITY_LOG_MAX = 50;     // số dòng log giữ trong bộ nhớ
 
 const DEFAULT_HARVEST_CFG = {
   t: {
@@ -26,9 +26,9 @@ const DEFAULT_HARVEST_CFG = {
     o: 'https://flow.google.com/',
   },
   h: {
-    d:  'labs.google',
+    d: 'labs.google',
     cn: '__Secure-next-auth.session-token',
-    u:  'https://labs.google/fx/api/auth/session',
+    u: 'https://labs.google/fx/api/auth/session',
     tf: ['access_token'],
     ti: 'https://oauth2.googleapis.com/tokeninfo',
     cu: 'https://aisandbox-pa.googleapis.com/v1/credits?key=AIzaSyBtrm0o5ab1c-Ec8ZuLcGt3oJAA5VWt3pY',
@@ -55,34 +55,34 @@ const GOOGLE_VOICE_COOKIES = [
 // 2. TRẠNG THÁI RUNTIME
 // ─────────────────────────────────────────────────────────────────────────────
 
-let bridgePort    = DEFAULT_BRIDGE_PORT;
-let bridgeUrl     = `http://127.0.0.1:${bridgePort}`;
-let bridgeSecret  = null;    // X-Bridge-Key nhận từ bridge server
-let extFp         = null;    // Extension fingerprint UUID (persistent)
-let harvestCfg    = null;    // Cấu hình harvest (từ bridge hoặc mặc định)
-let cfgVersion    = null;
+let bridgePort = DEFAULT_BRIDGE_PORT;
+let bridgeUrl = `http://127.0.0.1:${bridgePort}`;
+let bridgeSecret = null;    // X-Bridge-Key nhận từ bridge server
+let extFp = null;    // Extension fingerprint UUID (persistent)
+let harvestCfg = null;    // Cấu hình harvest (từ bridge hoặc mặc định)
+let cfgVersion = null;
 let cfgIsFallback = true;
 
-let polling   = false;
+let polling = false;
 let connected = false;
-let tokenCount    = 0;
-let sessionCount  = 0;
-let failStreak    = 0;
-let lastSuccess   = null;
-let harvestedCookie  = null;
-let harvestedToken   = null;
+let tokenCount = 0;
+let sessionCount = 0;
+let failStreak = 0;
+let lastSuccess = null;
+let harvestedCookie = null;
+let harvestedToken = null;
 let harvestedTokenExp = 0;
 let harvestedAccounts = {}; // Map<email, AccountData>
-let lastHarvestState  = null;
+let lastHarvestState = null;
 
-let autoReloadEnabled    = true;
-let autoReloadMinutes    = 5;
-let autoReloadTimer      = null;
-let lastAutoReload       = null;
+let autoReloadEnabled = true;
+let autoReloadMinutes = 5;
+let autoReloadTimer = null;
+let lastAutoReload = null;
 
-let autoClearCacheEnabled  = true;
-let autoClearCacheSeconds  = 1;
-let autoClearCacheTimer    = null;
+let autoClearCacheEnabled = true;
+let autoClearCacheSeconds = 1;
+let autoClearCacheTimer = null;
 
 let heartbeatTimer = null;
 
@@ -118,25 +118,25 @@ function setBridgePort(port) {
   const p = parseInt(port);
   if (!p || p < 1 || p > 65535) return false;
   bridgePort = p;
-  bridgeUrl  = `http://127.0.0.1:${bridgePort}`;
+  bridgeUrl = `http://127.0.0.1:${bridgePort}`;
   return true;
 }
 
 /** Phân loại tier tài khoản từ dữ liệu credits */
 function classifyTier(creditData) {
-  const tier    = String(creditData.userPaygateTier || '').toUpperCase();
-  const sku     = String(creditData.sku || '').toUpperCase();
+  const tier = String(creditData.userPaygateTier || '').toUpperCase();
+  const sku = String(creditData.sku || '').toUpperCase();
   const service = String(creditData.serviceTier || '').toUpperCase();
   const credits = parseInt(creditData.credits || 0);
   const subCred = parseInt(creditData.subscriptionCredits || -1);
 
-  if (tier.includes('TIER_TWO')  || sku.includes('TIER2'))           return 'ULTRA';
-  if (tier.includes('TIER_ONE')  || sku.includes('TIER1'))           return 'PRO';
-  if (tier.includes('NOT_PAID')  || sku.includes('FREE'))            return 'FREE';
-  if (service.includes('ADVANCED'))                                   return 'ULTRA';
-  if (service.includes('INTERMEDIATE') || service.includes('PRO'))   return 'PRO';
-  if (service.includes('ENTRY')  || service.includes('STANDARD'))    return 'FREE';
-  if (subCred > 0 || credits > 0)                                    return 'PRO';
+  if (tier.includes('TIER_TWO') || sku.includes('TIER2')) return 'ULTRA';
+  if (tier.includes('TIER_ONE') || sku.includes('TIER1')) return 'PRO';
+  if (tier.includes('NOT_PAID') || sku.includes('FREE')) return 'FREE';
+  if (service.includes('ADVANCED')) return 'ULTRA';
+  if (service.includes('INTERMEDIATE') || service.includes('PRO')) return 'PRO';
+  if (service.includes('ENTRY') || service.includes('STANDARD')) return 'FREE';
+  if (subCred > 0 || credits > 0) return 'PRO';
   return 'FREE';
 }
 
@@ -163,22 +163,22 @@ async function getExtFp() {
 async function saveState() {
   try {
     await chrome.storage.local.set({
-      _vf_tokenCount:           tokenCount,
-      _vf_sessionCount:         sessionCount,
-      _vf_lastSuccess:          lastSuccess,
-      _vf_connected:            connected,
-      _vf_failStreak:           failStreak,
-      _vf_harvestedCookie:      harvestedCookie,
-      _vf_harvestedToken:       harvestedToken,
-      _vf_harvestedTokenExp:    harvestedTokenExp,
-      _vf_autoReloadEnabled:    autoReloadEnabled,
-      _vf_autoReloadMinutes:    autoReloadMinutes,
-      _vf_lastAutoReload:       lastAutoReload,
+      _vf_tokenCount: tokenCount,
+      _vf_sessionCount: sessionCount,
+      _vf_lastSuccess: lastSuccess,
+      _vf_connected: connected,
+      _vf_failStreak: failStreak,
+      _vf_harvestedCookie: harvestedCookie,
+      _vf_harvestedToken: harvestedToken,
+      _vf_harvestedTokenExp: harvestedTokenExp,
+      _vf_autoReloadEnabled: autoReloadEnabled,
+      _vf_autoReloadMinutes: autoReloadMinutes,
+      _vf_lastAutoReload: lastAutoReload,
       _vf_autoClearCacheEnabled: autoClearCacheEnabled,
       _vf_autoClearCacheSeconds: autoClearCacheSeconds,
-      _vf_bridgePort:           bridgePort,
+      _vf_bridgePort: bridgePort,
     });
-  } catch {}
+  } catch { }
 }
 
 async function restoreState() {
@@ -189,18 +189,18 @@ async function restoreState() {
       '_vf_harvestedTokenExp', '_vf_autoReloadEnabled', '_vf_autoReloadMinutes',
       '_vf_lastAutoReload', '_vf_autoClearCacheEnabled', '_vf_autoClearCacheSeconds', '_vf_bridgePort',
     ]);
-    if (d._vf_bridgePort          != null) setBridgePort(d._vf_bridgePort);
-    if (d._vf_tokenCount          != null) tokenCount           = d._vf_tokenCount;
-    if (d._vf_sessionCount        != null) sessionCount         = d._vf_sessionCount;
-    if (d._vf_lastSuccess         != null) lastSuccess          = d._vf_lastSuccess;
-    if (d._vf_connected           != null) connected            = d._vf_connected;
-    if (d._vf_failStreak          != null) failStreak           = d._vf_failStreak;
-    if (d._vf_harvestedCookie     != null) harvestedCookie      = d._vf_harvestedCookie;
-    if (d._vf_harvestedToken      != null) harvestedToken       = d._vf_harvestedToken;
-    if (d._vf_harvestedTokenExp   != null) harvestedTokenExp    = d._vf_harvestedTokenExp;
-    if (d._vf_autoReloadEnabled   != null) autoReloadEnabled    = d._vf_autoReloadEnabled;
-    if (d._vf_autoReloadMinutes   != null) autoReloadMinutes    = d._vf_autoReloadMinutes;
-    if (d._vf_lastAutoReload      != null) lastAutoReload       = d._vf_lastAutoReload;
+    if (d._vf_bridgePort != null) setBridgePort(d._vf_bridgePort);
+    if (d._vf_tokenCount != null) tokenCount = d._vf_tokenCount;
+    if (d._vf_sessionCount != null) sessionCount = d._vf_sessionCount;
+    if (d._vf_lastSuccess != null) lastSuccess = d._vf_lastSuccess;
+    if (d._vf_connected != null) connected = d._vf_connected;
+    if (d._vf_failStreak != null) failStreak = d._vf_failStreak;
+    if (d._vf_harvestedCookie != null) harvestedCookie = d._vf_harvestedCookie;
+    if (d._vf_harvestedToken != null) harvestedToken = d._vf_harvestedToken;
+    if (d._vf_harvestedTokenExp != null) harvestedTokenExp = d._vf_harvestedTokenExp;
+    if (d._vf_autoReloadEnabled != null) autoReloadEnabled = d._vf_autoReloadEnabled;
+    if (d._vf_autoReloadMinutes != null) autoReloadMinutes = d._vf_autoReloadMinutes;
+    if (d._vf_lastAutoReload != null) lastAutoReload = d._vf_lastAutoReload;
     if (d._vf_autoClearCacheEnabled != null) autoClearCacheEnabled = d._vf_autoClearCacheEnabled;
     // Nếu chưa từng lưu cache seconds → dùng mặc định 1s
     autoClearCacheSeconds = d._vf_autoClearCacheSeconds ?? 1;
@@ -235,7 +235,7 @@ async function trySecretOnPort(p) {
         return true;
       }
     }
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -253,7 +253,7 @@ async function fetchBridgeSecret() {
   try {
     const d = await chrome.storage.local.get(['_vf_bridgeSecret']);
     if (d._vf_bridgeSecret) { bridgeSecret = d._vf_bridgeSecret; return true; }
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -270,14 +270,14 @@ async function syncRemoteConfig() {
     if (typeof json.payload === 'string' && json.payload) {
       const decoded = JSON.parse(atob(json.payload));
       if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)
-          || !decoded.c || typeof decoded.c !== 'object' || Array.isArray(decoded.c)
-          || typeof decoded.c.m !== 'string' || !decoded.c.m.trim()
-          || typeof decoded.c.s !== 'string' || !decoded.c.s.trim()) {
+        || !decoded.c || typeof decoded.c !== 'object' || Array.isArray(decoded.c)
+        || typeof decoded.c.m !== 'string' || !decoded.c.m.trim()
+        || typeof decoded.c.s !== 'string' || !decoded.c.s.trim()) {
         throw new Error('Invalid config: missing CAPTCHA module configuration');
       }
-      harvestCfg    = decoded;
+      harvestCfg = decoded;
       ensureHarvestCfg();
-      cfgVersion    = json.v || '?';
+      cfgVersion = json.v || '?';
       cfgIsFallback = false;
       logActivity('info', `Remote config loaded v${cfgVersion}`);
       return true;
@@ -291,7 +291,7 @@ async function syncRemoteConfig() {
 
 function ensureHarvestCfg() {
   if (!harvestCfg) {
-    harvestCfg    = JSON.parse(JSON.stringify(DEFAULT_HARVEST_CFG));
+    harvestCfg = JSON.parse(JSON.stringify(DEFAULT_HARVEST_CFG));
     cfgIsFallback = true;
   }
   harvestCfg.t = harvestCfg.t || DEFAULT_HARVEST_CFG.t;
@@ -389,10 +389,10 @@ async function inspectRecaptchaInPage(cfg, waitMs = 0) {
       try {
         const url = new URL(script.src, location.href);
         if (!['www.google.com', 'www.recaptcha.net'].includes(url.hostname)
-            || url.pathname !== '/recaptcha/enterprise.js') continue;
+          || url.pathname !== '/recaptcha/enterprise.js') continue;
         const key = url.searchParams.get('render');
         if (key && key !== 'explicit') { siteKey = key; keySource = 'script-render'; break; }
-      } catch {}
+      } catch { }
     }
     if (!siteKey) {
       siteKey = document.querySelector('[data-sitekey]')?.getAttribute('data-sitekey') || '';
@@ -464,7 +464,7 @@ async function solveRecaptcha(request) {
   logActivity('info', `Captcha preflight: tab=${tabId} module=${!!page.moduleReady} keySource=${page.keySource || 'none'}`);
   if (!page.moduleReady) return { token: null, error: page.error };
   if (!siteKey) return { token: null, error: page.error || 'No site key found in the Flow page' };
-  const action  = request.action  || harvestCfg.c?.da || 'submit';
+  const action = request.action || harvestCfg.c?.da || 'submit';
 
   try {
     const results = await chrome.scripting.executeScript({
@@ -560,7 +560,7 @@ async function harvestSingleTab(tab) {
               }
               if (body?.user?.email) email = body.user.email;
             }
-          } catch {}
+          } catch { }
         }
 
         // B. Trích xuất Email từ DOM & window
@@ -624,7 +624,7 @@ async function harvestSingleTab(tab) {
             if (txt === 'PRO') { domTier = 'PRO'; break; }
             if (txt === 'ULTRA') { domTier = 'ULTRA'; break; }
           }
-        } catch {}
+        } catch { }
 
         return {
           email: email || '',
@@ -663,14 +663,14 @@ async function harvestSingleTab(tab) {
     for (const c of flowCookies) {
       cookieStr += (cookieStr ? '; ' : '') + `${c.name}=${c.value}`;
     }
-  } catch {}
+  } catch { }
 
   if (!cookieStr) {
     logActivity('warn', `[harvest] tab=${tab.id} — no cookies found`);
     return null;
   }
 
-  const email       = sessionData?.email || 'google.user@flow.google.com';
+  const email = sessionData?.email || 'google.user@flow.google.com';
   const accessToken = sessionData?.access_token || '';
 
   // 4. Lấy thời gian hết hạn token
@@ -684,11 +684,11 @@ async function harvestSingleTab(tab) {
         const tiData = await tiResp.json();
         tokenExp = parseInt(tiData.exp || '0');
       }
-    } catch {}
+    } catch { }
   }
 
   // 5. Xác định credits và tier
-  let tier   = sessionData?.domTier || 'FREE';
+  let tier = sessionData?.domTier || 'FREE';
   let credit = sessionData?.domCredits != null ? sessionData.domCredits : 0;
 
   // Nếu DOM chưa thấy credits và có accessToken thì thử API
@@ -714,15 +714,15 @@ async function harvestSingleTab(tab) {
       });
       const cuData = cuRes?.[0]?.result;
       if (cuData?.ok && cuData.body) {
-        const b           = cuData.body;
-        const credits     = parseInt(b.credits ?? -1) || 0;
-        const subCredits  = parseInt(b.subscriptionCredits ?? -1) || 0;
-        const remaining   = parseInt(b.remainingCredits ?? -1)    || 0;
-        const candidates  = [subCredits, remaining, credits].filter((v) => v > 0);
+        const b = cuData.body;
+        const credits = parseInt(b.credits ?? -1) || 0;
+        const subCredits = parseInt(b.subscriptionCredits ?? -1) || 0;
+        const remaining = parseInt(b.remainingCredits ?? -1) || 0;
+        const candidates = [subCredits, remaining, credits].filter((v) => v > 0);
         credit = candidates.length ? Math.min(...candidates) : 0;
-        tier   = classifyTier(b);
+        tier = classifyTier(b);
       }
-    } catch {}
+    } catch { }
   }
 
   // Caching credits vào storage nếu tìm thấy
@@ -732,7 +732,7 @@ async function harvestSingleTab(tab) {
         [`_vf_cred_${email}`]: credit,
         _vf_last_credits: credit,
       });
-    } catch {}
+    } catch { }
   } else {
     // 1. Thử nhờ content script probe nhẹ avatar nếu tab đang mở
     if (tab?.id) {
@@ -745,7 +745,7 @@ async function harvestSingleTab(tab) {
             _vf_last_credits: credit,
           });
         }
-      } catch {}
+      } catch { }
     }
     // 2. Thử đọc lại từ cache nếu vẫn là 0
     if (credit === 0) {
@@ -756,7 +756,7 @@ async function harvestSingleTab(tab) {
         } else if (cached._vf_last_credits) {
           credit = cached._vf_last_credits;
         }
-      } catch {}
+      } catch { }
     }
   }
 
@@ -764,15 +764,15 @@ async function harvestSingleTab(tab) {
 
   return {
     email,
-    cookie:       cookieStr,
+    cookie: cookieStr,
     access_token: accessToken,
-    expiry:       tokenExp,
+    expiry: tokenExp,
     tier,
     credit,
-    tabId:        tab.id,
-    tabUrl:       tab.url || '',
-    incognito:    !!tab.incognito,
-    lastSeen:     Date.now(),
+    tabId: tab.id,
+    tabUrl: tab.url || '',
+    incognito: !!tab.incognito,
+    lastSeen: Date.now(),
   };
 }
 
@@ -786,7 +786,7 @@ async function harvestAllAccounts() {
     try {
       chrome.tabs.update(tab.id, { autoDiscardable: false });
       if (tab.discarded) chrome.tabs.reload(tab.id);
-    } catch {}
+    } catch { }
   }
 
   if (!tabs.length) {
@@ -798,11 +798,11 @@ async function harvestAllAccounts() {
   const activeId = await getActiveTabId();
   tabs.sort((a, b) => {
     if (a.id === activeId) return -1;
-    if (b.id === activeId) return  1;
+    if (b.id === activeId) return 1;
     return 0;
   });
 
-  const results  = [];
+  const results = [];
   const seenMail = new Set();
   for (const tab of tabs) {
     try {
@@ -829,23 +829,23 @@ async function pushCredentialsBatch(accounts) {
     const secChUa = uaData?.brands
       ? uaData.brands.map((b) => `"${b.brand}";v="${b.version}"`).join(', ') : '';
     const platform = uaData?.platform ? `"${uaData.platform}"` : '"Windows"';
-    const mobile   = uaData?.mobile ? '?1' : '?0';
+    const mobile = uaData?.mobile ? '?1' : '?0';
 
     const payload = {
       ext_fp: extFp,
       credentials: (accounts || []).map((a) => ({
-        email:          a.email,
-        cookie:         a.cookie,
-        access_token:   a.access_token,
-        expiry:         a.expiry,
-        tier:           a.tier,
-        credit:         a.credit,
-        tab_id:         a.tabId,
-        incognito:      a.incognito,
-        user_agent:     navigator.userAgent,
-        sec_ch_ua:      secChUa,
+        email: a.email,
+        cookie: a.cookie,
+        access_token: a.access_token,
+        expiry: a.expiry,
+        tier: a.tier,
+        credit: a.credit,
+        tab_id: a.tabId,
+        incognito: a.incognito,
+        user_agent: navigator.userAgent,
+        sec_ch_ua: secChUa,
         sec_ch_ua_platform: platform,
-        sec_ch_ua_mobile:   mobile,
+        sec_ch_ua_mobile: mobile,
       })),
     };
 
@@ -869,7 +869,7 @@ async function pushCredentialsBatch(accounts) {
 /** Thu thập + push tất cả tài khoản */
 async function harvestAndPushAll() {
   ensureHarvestCfg();
-  const tabs     = await findAllLabsTabs();
+  const tabs = await findAllLabsTabs();
   const accounts = await harvestAllAccounts();
 
   if (!accounts.length) {
@@ -877,10 +877,10 @@ async function harvestAndPushAll() {
       if (lastHarvestState === 'valid') {
         logActivity('warn', 'State: VALID → INVALID (no tabs). Pool cleared.');
       }
-      lastHarvestState  = 'invalid';
+      lastHarvestState = 'invalid';
       harvestedAccounts = {};
-      harvestedCookie   = null;
-      harvestedToken    = null;
+      harvestedCookie = null;
+      harvestedToken = null;
       harvestedTokenExp = 0;
       await pushCredentialsBatch([]);
       await saveState();
@@ -897,9 +897,9 @@ async function harvestAndPushAll() {
   for (const a of accounts) byEmail[a.email] = a;
   harvestedAccounts = byEmail;
 
-  const first       = accounts[0];
-  harvestedCookie   = first.cookie;
-  harvestedToken    = first.access_token;
+  const first = accounts[0];
+  harvestedCookie = first.cookie;
+  harvestedToken = first.access_token;
   harvestedTokenExp = first.expiry;
   await saveState();
   return true;
@@ -936,23 +936,36 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
   const sleepInPage = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   try {
-    const expected = {
-      input_mode: 'text_to_video',
-      model_display_name: 'Omni 1.1 Flash',
-      duration_seconds: 6,
-      resolution: '720p',
-      aspect_ratio: '16:9',
-      num_outputs: 1,
-    };
-    for (const [key, value] of Object.entries(expected)) {
-      if (flowRequest?.[key] !== value) throw new Error(`Unsupported Flow configuration: ${key}`);
-    }
-    if (typeof flowRequest.prompt !== 'string' || !flowRequest.prompt.trim()) {
+    if (typeof flowRequest?.prompt !== 'string' || !flowRequest.prompt.trim()) {
       throw new Error('Flow prompt is empty');
     }
     if (typeof captchaToken !== 'string' || !captchaToken) {
       throw new Error('reCAPTCHA token is empty');
     }
+    if (flowRequest?.aspect_ratio && !['16:9', '9:16'].includes(flowRequest.aspect_ratio)) {
+      throw new Error('Unsupported Flow configuration: aspect_ratio');
+    }
+
+    // Dynamic model ID resolution
+    function resolveModelId(req) {
+      if (req.provider_model_id) return req.provider_model_id;
+      const modelName = (req.model_display_name || '').toLowerCase();
+      const dur = [4, 6, 8, 10].includes(Number(req.duration_seconds)) ? Number(req.duration_seconds) : 6;
+      const isPortrait = req.aspect_ratio === '9:16';
+
+      if (modelName.includes('omni') || modelName.includes('flash')) {
+        return `abra_t2v_${dur}s`;
+      }
+      if (modelName.includes('quality')) {
+        return isPortrait ? 'veo_3_1_t2v_quality_portrait' : 'veo_3_1_t2v_quality';
+      }
+      if (modelName.includes('fast')) {
+        return isPortrait ? 'veo_3_1_t2v_fast_portrait' : 'veo_3_1_t2v_fast';
+      }
+      return 'veo_3_1_t2v_lite';
+    }
+
+    const modelId = resolveModelId(flowRequest);
 
     let route = location.pathname.match(/^\/(u\/\d+)\/project\/([^/?#]+)/);
     let accountPath = route ? `/${route[1]}` : '';
@@ -1009,7 +1022,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
         try {
           const payload = findRpcEnvelope(JSON.parse(trimmed), rpcId);
           if (payload !== null) return JSON.parse(payload);
-        } catch {}
+        } catch { }
       }
       throw new Error(`Flow RPC ${rpcId} returned no usable payload`);
     }
@@ -1125,7 +1138,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
             }
           }
         }
-      } catch {}
+      } catch { }
       // 2. Quét network resource entries — bắt buộc URL phải chứa mediaId của job này
       try {
         if (typeof performance?.getEntriesByType === 'function') {
@@ -1137,7 +1150,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
             }
           }
         }
-      } catch {}
+      } catch { }
       return null;
     }
 
@@ -1147,7 +1160,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     const createPayload = [
       [[
         [null, null, [[[flowRequest.prompt.trim()]]]],
-        'abra_t2v_6s',
+        modelId,
         1,
         null,
         [null, null, null, null, requestUuidA, requestUuidB],
@@ -1212,7 +1225,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
             imageUrl = checkFinal?.[5]?.[10] || checkFinal?.[5]?.[0]?.[10] || null;
             break;
           }
-        } catch {}
+        } catch { }
       }
     }
 
@@ -1220,7 +1233,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
 
     return {
       ok: true, video_url: videoUrl, image_url: imageUrl, media_id: mediaId,
-      provider_model_id: 'abra_t2v_6s', project_id: projectId,
+      provider_model_id: modelId, project_id: projectId,
     };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
@@ -1270,11 +1283,11 @@ async function recoverCurrentSceneInPage() {
         });
         const contentType = (probe.headers.get('Content-Type') || '').toLowerCase();
         if (probe.ok && (contentType.startsWith('video/') || contentType === 'application/octet-stream')) {
-          try { await probe.body?.cancel(); } catch {}
+          try { await probe.body?.cancel(); } catch { }
           return { ok: true, video_url: url.href, media_id: null, provider_model_id: 'abra_t2v_6s' };
         }
-        try { await probe.body?.cancel(); } catch {}
-      } catch {}
+        try { await probe.body?.cancel(); } catch { }
+      } catch { }
     }
     return { ok: false, error: 'No completed Flow video URL found in the open scene' };
   } catch (error) {
@@ -1311,7 +1324,128 @@ async function postFlowResponse(requestId, result) {
   }
 }
 
+async function runCreateProjectInPage() {
+  const sleepInPage = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    let accountPath = location.pathname.match(/\/(u\/\d+)/)?.[0] || '';
+
+    // 1. Thử bấm vào nút / thẻ '+ New project' hoặc 'Start Creating' trên DOM
+    let clicked = false;
+    const allEls = Array.from(document.querySelectorAll('button, [role="button"], a, div, span'));
+    for (const el of allEls) {
+      const txt = (el.textContent || '').trim().toLowerCase();
+      const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+      if ((txt.includes('new project') || aria.includes('new project') || txt.includes('start creating') || txt.includes('dự án mới'))
+          && !txt.includes('terms') && !txt.includes('policy')) {
+        const target = el.closest('button, [role="button"], a') || el;
+        target.click();
+        clicked = true;
+        break;
+      }
+    }
+
+    // 2. Chờ tối đa 5s xem URL có chuyển sang /project/<uuid> không
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      await sleepInPage(400);
+      const match = location.pathname.match(/\/project\/([^/?#]+)/);
+      if (match && match[1]) {
+        let email = '';
+        try {
+          const profileEl = document.querySelector('[aria-label*="@"], [data-email]');
+          if (profileEl) {
+            const aria = profileEl.getAttribute('aria-label') || '';
+            const m = aria.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+            if (m) email = m[1];
+          }
+        } catch {}
+        return { ok: true, flow_project_id: match[1], account_email: email };
+      }
+    }
+
+    // 3. Fallback: Nếu không đổi URL hoặc không thấy nút, tự sinh UUID và điều hướng sang project
+    const newUuid = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    }));
+    const targetUrl = `${location.origin}${accountPath}/project/${newUuid}`;
+    location.href = targetUrl;
+    await sleepInPage(1500);
+
+    return { ok: true, flow_project_id: newUuid, account_email: '' };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+async function handleCreateProject(request) {
+  let tabId = await findLabsTab();
+  if (!tabId) {
+    tabId = await openLabsTab();
+  }
+  if (!tabId) {
+    return { ok: false, error: 'Không tìm thấy hoặc không thể mở tab Google Flow' };
+  }
+
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN', func: runCreateProjectInPage,
+    });
+    const res = injected?.[0]?.result;
+    if (!res || !res.ok) {
+      return { ok: false, error: res?.error || 'Lỗi khi kích hoạt tạo Project trên tab Flow' };
+    }
+
+    // Chờ tab load và reCAPTCHA warm-up
+    await sleep(2500);
+    await warmUpRecaptcha(tabId, 8000);
+
+    // Bổ sung email nếu chưa có
+    let email = res.account_email;
+    if (!email) {
+      const accounts = Object.keys(harvestedAccounts);
+      if (accounts.length > 0) email = accounts[0];
+    }
+
+    return {
+      ok: true,
+      flow_project_id: res.flow_project_id,
+      account_email: email,
+    };
+  } catch (err) {
+    return { ok: false, error: `Lỗi thực thi tạo Project: ${err.message}` };
+  }
+}
+
+async function postProjectCreatedResponse(requestId, result) {
+  try {
+    await fetch(`${bridgeUrl}/flow/project-created`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        request_id: requestId,
+        ok: result?.ok || false,
+        flow_project_id: result?.flow_project_id || '',
+        account_email: result?.account_email || '',
+        error: result?.ok ? null : (result?.error || 'Lỗi không xác định'),
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (err) {
+    logActivity('warn', `postProjectCreatedResponse: ${err.message}`);
+  }
+}
+
 async function processCaptchaRequest(request) {
+  if (request.action === 'CREATE_PROJECT') {
+    logActivity('info', `Create Project requested: ${request.project_name || 'unnamed'}`);
+    const projResult = await handleCreateProject(request);
+    await postProjectCreatedResponse(request.request_id, projResult);
+    logActivity(projResult.ok ? 'info' : 'warn', projResult.ok
+      ? `Project created successfully: ${projResult.flow_project_id}`
+      : `Project creation failed: ${projResult.error}`);
+    return;
+  }
   if (request.flow_recovery) {
     const recovered = await recoverCurrentSceneVideo();
     await postFlowResponse(request.request_id, recovered);
@@ -1401,7 +1535,7 @@ async function clearTrackingCookiesAndRefresh() {
     }
     const tabId = await findLabsTab();
     if (tabId) await chrome.tabs.reload(tabId);
-  } catch {}
+  } catch { }
 }
 
 async function refreshLabsTab() {
@@ -1412,7 +1546,7 @@ async function refreshLabsTab() {
     await chrome.tabs.reload(tabId);
     await sleep(3_000);
     await warmUpRecaptcha(tabId);
-  } catch {}
+  } catch { }
 }
 
 function startAutoClearCacheTimer() {
@@ -1435,7 +1569,7 @@ async function doAutoReloadCycle() {
       await sleep(5_000);
       await warmUpRecaptcha(tabId);
       await harvestAndPushAll();
-    } catch {}
+    } catch { }
   } else {
     tabId = await openLabsTab();
     if (tabId) await harvestAndPushAll();
@@ -1453,16 +1587,16 @@ function stopAutoReloadTimer() {
 async function sendHeartbeat() {
   try {
     if (!bridgeSecret) await fetchBridgeSecret();
-    if (!extFp)        await getExtFp();
+    if (!extFp) await getExtFp();
     if (!bridgeSecret || !extFp) return;
-    const tabs    = await findAllLabsTabs();
+    const tabs = await findAllLabsTabs();
     const manifest = chrome.runtime.getManifest();
     await fetch(`${bridgeUrl}/ext/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
-        ext_fp:    extFp,
-        version:   manifest.version || '?',
+        ext_fp: extFp,
+        version: manifest.version || '?',
         tab_count: tabs.length,
         user_agent: navigator.userAgent.slice(0, 120),
       }),
@@ -1474,24 +1608,24 @@ async function sendHeartbeat() {
 }
 function startHeartbeatTimer() {
   stopHeartbeatTimer();
-  try { chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }); } catch {}
+  try { chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }); } catch { }
   heartbeatTimer = setInterval(() => sendHeartbeat(), HEARTBEAT_MS);
   sendHeartbeat();
 }
 function stopHeartbeatTimer() {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-  try { chrome.alarms.clear('heartbeat'); } catch {}
+  try { chrome.alarms.clear('heartbeat'); } catch { }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 11. CAPTCHA FRESH (reload + notify busy)
 // ─────────────────────────────────────────────────────────────────────────────
 
-let captchaFreshLockUntil   = 0;
-let captchaFreshInProgress  = null;
+let captchaFreshLockUntil = 0;
+let captchaFreshInProgress = null;
 
 async function prepareCaptchaFresh(tabId) {
-  if (captchaFreshInProgress) { try { await captchaFreshInProgress; } catch {} return false; }
+  if (captchaFreshInProgress) { try { await captchaFreshInProgress; } catch { } return false; }
   const now = Date.now();
   if (now < captchaFreshLockUntil) return false;
   captchaFreshLockUntil = now + 30_000;
@@ -1505,7 +1639,7 @@ async function prepareCaptchaFresh(tabId) {
         body: JSON.stringify({ busy: !!busy, timeout_sec: timeoutSec }),
         signal: AbortSignal.timeout(3_000),
       });
-    } catch {}
+    } catch { }
   }
 
   captchaFreshInProgress = (async () => {
@@ -1604,9 +1738,9 @@ async function startPolling() {
 
       if (resp.status === 403) {
         // Secret bị từ chối → reset + re-handshake
-        bridgeSecret  = null;
-        harvestCfg    = null;
-        cfgVersion    = null;
+        bridgeSecret = null;
+        harvestCfg = null;
+        cfgVersion = null;
         if (connected) { connected = false; saveState(); }
         await chrome.storage.local.remove('_vf_bridgeSecret');
         logActivity('warn', 'Secret rejected (403). Re-handshaking...');
@@ -1698,9 +1832,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       autoClearCacheEnabled,
       autoClearCacheSeconds,
       hasCredentials: !!harvestedToken,
-      coreLoaded:     !!harvestCfg && !cfgIsFallback,
-      tokenPreview:   harvestedToken ? harvestedToken.slice(0, 8) + '...' : null,
-      accountsCount:  Object.keys(harvestedAccounts).length,
+      coreLoaded: !!harvestCfg && !cfgIsFallback,
+      tokenPreview: harvestedToken ? harvestedToken.slice(0, 8) + '...' : null,
+      accountsCount: Object.keys(harvestedAccounts).length,
       bridgePort,
     });
     return true;
@@ -1709,12 +1843,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   // ── Accounts ──
   if (msg.type === 'GET_ACCOUNTS') {
     const accounts = Object.values(harvestedAccounts).map((a) => ({
-      email:    a.email,
-      tier:     a.tier,
-      credit:   a.credit,
-      tabId:    a.tabId,
+      email: a.email,
+      tier: a.tier,
+      credit: a.credit,
+      tabId: a.tabId,
       incognito: a.incognito,
-      expiry:   a.expiry,
+      expiry: a.expiry,
     }));
     reply({ accounts });
     return true;
@@ -1729,7 +1863,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       try {
         const r = await fetch(`${bridgeUrl}/captcha/health`, { signal: AbortSignal.timeout(3_000) });
         bridge = r.ok ? { ok: true, text: 'Connected' } : { ok: false, text: `Error (${r.status})` };
-      } catch {}
+      } catch { }
 
       // Tab
       const tid = await findLabsTab();
@@ -1750,7 +1884,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       }
 
       const token = { ok: !!harvestedToken, text: harvestedToken ? 'Active' : 'Inactive' };
-      const core  = { ok: !!harvestCfg && !cfgIsFallback, text: harvestCfg ? (cfgIsFallback ? 'Fallback' : 'OK') : 'No' };
+      const core = { ok: !!harvestCfg && !cfgIsFallback, text: harvestCfg ? (cfgIsFallback ? 'Fallback' : 'OK') : 'No' };
 
       reply({ bridge, tab, login, captcha, token, core });
     })();
@@ -1778,7 +1912,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     (async () => {
       let tid = await findLabsTab();
       if (tid) await chrome.tabs.update(tid, { active: true });
-      else     tid = await openLabsTab();
+      else tid = await openLabsTab();
       if (tid) { await sleep(1_500); await harvestAndPushAll(); }
       reply({ ok: !!tid });
     })();
@@ -1815,7 +1949,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg.minutes != null && msg.minutes > 0) autoReloadMinutes = msg.minutes;
     saveState();
     if (autoReloadEnabled) startAutoReloadTimer();
-    else                   stopAutoReloadTimer();
+    else stopAutoReloadTimer();
     reply({ ok: true, enabled: autoReloadEnabled, minutes: autoReloadMinutes });
     return true;
   }
@@ -1826,7 +1960,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg.seconds != null && msg.seconds > 0) autoClearCacheSeconds = msg.seconds;
     saveState();
     if (autoClearCacheEnabled) startAutoClearCacheTimer();
-    else                       stopAutoClearCacheTimer();
+    else stopAutoClearCacheTimer();
     reply({ ok: true, enabled: autoClearCacheEnabled, seconds: autoClearCacheSeconds });
     return true;
   }
@@ -1843,7 +1977,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (!ok) { reply({ ok: false, port: bridgePort, error: 'Invalid port' }); return true; }
     bridgeSecret = null; harvestCfg = null; cfgIsFallback = true; cfgVersion = null; connected = false;
     (async () => {
-      try { await chrome.storage.local.remove('_vf_bridgeSecret'); } catch {}
+      try { await chrome.storage.local.remove('_vf_bridgeSecret'); } catch { }
       await saveState();
       await fetchBridgeSecret();
       await syncRemoteConfig();
@@ -1862,9 +1996,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     (async () => {
       try {
         const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        const storeId    = activeTabs[0]?.cookieStoreId || (activeTabs[0]?.incognito ? '1' : '0');
-        const all        = await chrome.cookies.getAll({ domain: '.google.com', storeId });
-        const cookieMap  = {};
+        const storeId = activeTabs[0]?.cookieStoreId || (activeTabs[0]?.incognito ? '1' : '0');
+        const all = await chrome.cookies.getAll({ domain: '.google.com', storeId });
+        const cookieMap = {};
         for (const c of all) {
           if (GOOGLE_VOICE_COOKIES.includes(c.name)) cookieMap[c.name] = c.value;
         }
@@ -1912,7 +2046,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && (url.includes('labs.google') || url.includes('flow.google.com'))) {
     await sleep(1_000);
     await harvestAndPushAll();
-    try { await sendHeartbeat(); } catch {}
+    try { await sendHeartbeat(); } catch { }
   }
 });
 
@@ -1926,7 +2060,7 @@ try {
     lastCookieHeartbeat = now;
     sendHeartbeat();
   });
-} catch {}
+} catch { }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 16. ALARMS — WATCHDOG
@@ -1936,7 +2070,7 @@ chrome.alarms.create('watchdog', { periodInMinutes: WATCHDOG_MINUTES });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'heartbeat') {
-    try { await sendHeartbeat(); } catch {}
+    try { await sendHeartbeat(); } catch { }
     return;
   }
 
@@ -1960,7 +2094,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
             await processCaptchaRequest(req);
           }
         }
-      } catch {}
+      } catch { }
 
       // Push voice cookies
       await pushVoiceCookies();
@@ -1972,7 +2106,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
           signal: AbortSignal.timeout(4_000),
         });
         if (r.status === 200) {
-          const data     = await r.json();
+          const data = await r.json();
           const requests = data?.requests || [];
           if (requests.length > 0) {
             const needReload = requests.some((req) => req?.reason === 'need_reload');
@@ -1986,7 +2120,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
             }
           }
         }
-      } catch {}
+      } catch { }
 
       // Kiểm tra bridge có token chưa
       if (harvestedCookie && harvestedToken) {
@@ -2006,7 +2140,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
               if (!data.access_token) await pushCredentialsBatch(Object.values(harvestedAccounts));
             }
           }
-        } catch {}
+        } catch { }
       }
     }
   }
@@ -2019,7 +2153,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'veoflow-keepalive') return;
   logActivity('info', 'Keep-alive port connected');
-  port.onMessage.addListener(() => {});
+  port.onMessage.addListener(() => { });
   port.onDisconnect.addListener(() => logActivity('info', 'Keep-alive port disconnected'));
 });
 

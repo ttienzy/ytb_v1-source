@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, FileText, ImagePlus, SkipForward, Zap } from 'lucide-react'
-import type { VeoBridgeStatus, VeoCapabilities, VeoHistoryItem, VeoJobOut, VeoJobRequest } from './types'
+import { Clapperboard, FileText, ImagePlus, SkipForward, Zap, Lock } from 'lucide-react'
+import type {
+  VeoBridgeStatus,
+  VeoCapabilities,
+  VeoHistoryItem,
+  VeoJobOut,
+  VeoJobRequest,
+  VeoProject,
+} from './types'
 import * as api from './services/veoApi'
+import { ProjectSelector } from './components/ProjectSelector'
 import { TextToVideoTab } from './components/TextToVideoTab'
 import { ImageToVideoTab } from './components/ImageToVideoTab'
 import { ExtendTab } from './components/ExtendTab'
@@ -10,11 +18,11 @@ import { VideoPlayer } from './components/VideoPlayer'
 import { VideoGallery } from './components/VideoGallery'
 
 type TabKey = 'text' | 'image' | 'extend' | 'status'
-const TABS: { key: TabKey; label: string; icon: typeof FileText }[] = [
-  { key: 'text', label: 'Text', icon: FileText },
-  { key: 'image', label: 'Image', icon: ImagePlus },
-  { key: 'extend', label: 'Extend', icon: SkipForward },
-  { key: 'status', label: 'Status', icon: Zap },
+const TABS: { key: TabKey; label: string; icon: typeof FileText; enabled: boolean }[] = [
+  { key: 'text', label: 'Text', icon: FileText, enabled: true },
+  { key: 'image', label: 'Image', icon: ImagePlus, enabled: true },
+  { key: 'extend', label: 'Extend', icon: SkipForward, enabled: true },
+  { key: 'status', label: 'Status', icon: Zap, enabled: true },
 ]
 
 interface Props {
@@ -26,6 +34,9 @@ export function VeoStudioPage({ setActivePage }: Props) {
   const [capabilities, setCapabilities] = useState<VeoCapabilities | null>(null)
   const [bridgeStatus, setBridgeStatus] = useState<VeoBridgeStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(false)
+  const [projects, setProjects] = useState<VeoProject[]>([])
+  const [activeProject, setActiveProject] = useState<VeoProject | null>(null)
+  const [projectCreating, setProjectCreating] = useState(false)
   const [jobs, setJobs] = useState<VeoJobOut[]>([])
   const [activeJob, setActiveJob] = useState<VeoJobOut | null>(null)
   const [history, setHistory] = useState<VeoHistoryItem[]>([])
@@ -37,6 +48,17 @@ export function VeoStudioPage({ setActivePage }: Props) {
   useEffect(() => {
     api.getCapabilities().then(setCapabilities).catch(() => {})
   }, [])
+
+  // Load projects from SQLite DB
+  const loadProjects = useCallback(async () => {
+    try {
+      const list = await api.getProjects()
+      setProjects(list)
+      const active = await api.getActiveProject()
+      setActiveProject(active)
+    } catch {}
+  }, [])
+  useEffect(() => { loadProjects() }, [loadProjects])
 
   // Load history
   const loadHistory = useCallback(() => {
@@ -68,21 +90,65 @@ export function VeoStudioPage({ setActivePage }: Props) {
         setJobs((prev) => prev.map((j) => (j.job_id === updated.job_id ? updated : j)))
         if (updated.status === 'done' || updated.status === 'error') {
           loadHistory()
+          loadProjects()
         }
       }
     }, 2000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [activeJob?.job_id, activeJob?.status, loadHistory])
+  }, [activeJob?.job_id, activeJob?.status, loadHistory, loadProjects])
 
-  // Submit job
+  // Project handlers
+  const handleSelectProject = async (projectId: string) => {
+    try {
+      const updated = await api.selectProject(projectId)
+      setActiveProject(updated)
+      await loadProjects()
+      setMessage(`Đã chuyển sang project "${updated.name}"`)
+    } catch (err: any) {
+      setMessage(err.message || 'Lỗi khi chọn project')
+    }
+  }
+
+  const handleCreateProject = async (name: string) => {
+    setProjectCreating(true)
+    setMessage('')
+    try {
+      const created = await api.createProject(name)
+      setActiveProject(created)
+      await loadProjects()
+      setMessage(`Đã tạo và kích hoạt project "${created.name}" (Flow: ${created.flow_project_id.slice(0, 8)}...)`)
+    } finally {
+      setProjectCreating(false)
+    }
+  }
+
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      await api.deleteProject(projectId)
+      await loadProjects()
+      setMessage('Đã xóa project khỏi Database')
+    } catch (err: any) {
+      setMessage(err.message || 'Lỗi khi xóa project')
+    }
+  }
+
+  // Submit job (enforces active project)
   const handleSubmit = async (request: VeoJobRequest) => {
+    if (!activeProject) {
+      setMessage('⚠️ Vui lòng tạo hoặc chọn một Project trước khi tạo video')
+      return
+    }
+
     setBusy(true)
     setMessage('')
     try {
-      const job = await api.submitJob(request)
+      const job = await api.submitJob({
+        ...request,
+        project_id: activeProject.id,
+      })
       setActiveJob(job)
       setJobs((prev) => [job, ...prev])
-      setMessage(`Job ${job.job_id} đã tạo`)
+      setMessage(`Job ${job.job_id} đã tạo trong project "${activeProject.name}"`)
     } catch (e: any) {
       setMessage(e.message || 'Tạo job thất bại')
     } finally {
@@ -93,6 +159,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
   const handleDeleteVideo = async (videoId: string) => {
     await api.deleteVideo(videoId)
     loadHistory()
+    loadProjects()
   }
 
   const handleSelectHistory = (item: VeoHistoryItem) => {
@@ -134,6 +201,16 @@ export function VeoStudioPage({ setActivePage }: Props) {
         </p>
       </div>
 
+      {/* Project Selector Bar */}
+      <ProjectSelector
+        projects={projects}
+        activeProject={activeProject}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+        onDeleteProject={handleDeleteProject}
+        creating={projectCreating}
+      />
+
       {/* Split layout */}
       <div className="veo-layout">
         {/* Sidebar */}
@@ -145,6 +222,8 @@ export function VeoStudioPage({ setActivePage }: Props) {
                 key={tab.key}
                 className={`veo-tab ${activeTab === tab.key ? 'active' : ''}`}
                 onClick={() => setActiveTab(tab.key)}
+                disabled={!tab.enabled}
+                title={tab.enabled ? undefined : 'Chưa có profile runtime được xác minh'}
               >
                 <tab.icon size={15} />
                 <span>{tab.label}</span>
@@ -154,34 +233,51 @@ export function VeoStudioPage({ setActivePage }: Props) {
 
           {/* Tab content */}
           <div className="veo-sidebar-body">
-            {activeTab === 'text' && (
-              <TextToVideoTab
-                capabilities={capabilities}
-                onSubmit={handleSubmit}
-                busy={busy}
-              />
-            )}
-            {activeTab === 'image' && (
-              <ImageToVideoTab
-                capabilities={capabilities}
-                onSubmit={handleSubmit}
-                busy={busy}
-              />
-            )}
-            {activeTab === 'extend' && (
-              <ExtendTab
-                capabilities={capabilities}
-                history={history}
-                onSubmit={handleSubmit}
-                busy={busy}
-              />
-            )}
-            {activeTab === 'status' && (
-              <StatusTab
-                status={bridgeStatus}
-                loading={statusLoading}
-                onRefresh={loadStatus}
-              />
+            {/* Nếu chưa có active project và đang ở tab tạo video -> Chặn và hiển thị Lock screen */}
+            {!activeProject && activeTab !== 'status' ? (
+              <div className="veo-project-required-banner">
+                <div className="veo-project-required-icon">🔒</div>
+                <h3>Chưa chọn Project làm việc</h3>
+                <p>
+                  Google Flow yêu cầu video phải thuộc một Project Workspace cụ thể.
+                  Vui lòng bấm nút <strong>"Tạo Project Mới"</strong> ở thanh phía trên để bắt đầu sử dụng.
+                </p>
+              </div>
+            ) : (
+              <>
+                {activeTab === 'text' && (
+                  <TextToVideoTab
+                    capabilities={capabilities}
+                    onSubmit={handleSubmit}
+                    busy={busy}
+                    activeProject={activeProject}
+                  />
+                )}
+                {activeTab === 'image' && (
+                  <ImageToVideoTab
+                    capabilities={capabilities}
+                    onSubmit={handleSubmit}
+                    busy={busy}
+                    activeProject={activeProject}
+                  />
+                )}
+                {activeTab === 'extend' && (
+                  <ExtendTab
+                    capabilities={capabilities}
+                    history={history}
+                    onSubmit={handleSubmit}
+                    busy={busy}
+                    activeProject={activeProject}
+                  />
+                )}
+                {activeTab === 'status' && (
+                  <StatusTab
+                    status={bridgeStatus}
+                    loading={statusLoading}
+                    onRefresh={loadStatus}
+                  />
+                )}
+              </>
             )}
           </div>
         </aside>
@@ -210,3 +306,4 @@ export function VeoStudioPage({ setActivePage }: Props) {
     </div>
   )
 }
+

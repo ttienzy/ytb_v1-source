@@ -9,9 +9,53 @@ import type {
   VeoHistoryItem,
   VeoJobOut,
   VeoJobRequest,
+  VeoProject,
 } from '../types'
 
 const BASE = `${API_URL}/api/veo`
+
+// ─── Projects ───────────────────────────────────────────────────────────────
+
+export async function getProjects(): Promise<VeoProject[]> {
+  const resp = await fetch(`${BASE}/projects`)
+  if (!resp.ok) return []
+  return resp.json()
+}
+
+export async function getActiveProject(): Promise<VeoProject | null> {
+  const resp = await fetch(`${BASE}/projects/active`)
+  if (!resp.ok) return null
+  return resp.json()
+}
+
+export async function createProject(name: string): Promise<VeoProject> {
+  const resp = await fetch(`${BASE}/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || 'Tạo project thất bại')
+  }
+  return resp.json()
+}
+
+export async function selectProject(projectId: string): Promise<VeoProject> {
+  const resp = await fetch(`${BASE}/projects/${projectId}/select`, {
+    method: 'POST',
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || 'Chọn project thất bại')
+  }
+  return resp.json()
+}
+
+export async function deleteProject(projectId: string): Promise<boolean> {
+  const resp = await fetch(`${BASE}/projects/${projectId}`, { method: 'DELETE' })
+  return resp.ok
+}
 
 // ─── Jobs ───────────────────────────────────────────────────────────────────
 

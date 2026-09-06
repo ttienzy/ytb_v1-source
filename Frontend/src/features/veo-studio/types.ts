@@ -32,9 +32,38 @@ export interface VeoModelInfo {
   verified: boolean
 }
 
+export interface VeoCapabilityProfile {
+  id: string
+  model_display_name: string
+  provider_model_id: string
+  input_mode: InputMode
+  aspect_ratio: AspectRatio
+  duration_seconds: number
+  resolution: string
+  num_outputs: number
+  credit_cost: number
+  documented: boolean
+  runtime_verified: boolean
+  note: string
+}
+
+// ─── Projects ───────────────────────────────────────────────────────────────
+
+export interface VeoProject {
+  id: string
+  name: string
+  flow_project_id: string
+  account_email: string
+  is_active: boolean
+  video_count: number
+  created_at: string
+  updated_at: string
+}
+
 // ─── Job ────────────────────────────────────────────────────────────────────
 
 export interface VeoJobRequest {
+  project_id?: string | null
   prompt: string
   model_display_name: string
   input_mode: InputMode
@@ -51,6 +80,9 @@ export interface VeoJobRequest {
 
 export interface VeoJobOut {
   job_id: string
+  project_id?: string | null
+  flow_project_id?: string | null
+  capability_profile_id?: string | null
   status: JobStatus
   input_mode: InputMode
   prompt: string
@@ -101,6 +133,7 @@ export interface VeoBridgeStatus {
 
 export interface VeoCapabilities {
   models: VeoModelInfo[]
+  profiles: VeoCapabilityProfile[]
   aspect_ratios: string[]
   max_outputs: number
   last_verified: string | null

@@ -144,6 +144,7 @@ def login_youtube() -> dict:
                 f"--remote-debugging-port={port}",
                 "--no-first-run",
                 "--no-default-browser-check",
+                "--disable-extensions",
                 "https://www.youtube.com/",
             ],
             stdout=subprocess.DEVNULL,

@@ -8,7 +8,7 @@ from app.core.storage import read_config, write_config
 
 
 AUTH_COOKIE_NAMES = {"SID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID"}
-LOGIN_TIMEOUT_SECONDS = 60
+LOGIN_TIMEOUT_SECONDS = 180
 
 
 def login_and_save_cookie() -> dict:
@@ -33,7 +33,8 @@ def login_and_save_cookie() -> dict:
 
     try:
         # Chrome thật — không qua Playwright launch — để Google không gắn nhãn
-        # phiên đăng nhập là automation.
+        # phiên đăng nhập là automation. Thêm --disable-extensions để chặn McAfee
+        # hoặc các extension bên ngoài can thiệp làm che/lỗi đăng nhập.
         proc = subprocess.Popen(
             [
                 str(settings.chrome_executable),
@@ -41,7 +42,9 @@ def login_and_save_cookie() -> dict:
                 f"--remote-debugging-port={cdp_port}",
                 "--no-first-run",
                 "--no-default-browser-check",
-                "https://gemini.google.com/app",
+                "--disable-extensions",
+                "--disable-default-apps",
+                "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp&service=cl",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -67,9 +70,10 @@ def login_and_save_cookie() -> dict:
             )
 
         cookies: list = []
+        user_agent: str = ""
         with sync_playwright() as playwright:
             browser = None
-            for _ in range(15):
+            for _ in range(20):
                 try:
                     browser = playwright.chromium.connect_over_cdp(cdp_url)
                     break
@@ -80,27 +84,99 @@ def login_and_save_cookie() -> dict:
 
             context = browser.contexts[0] if browser.contexts else browser.new_context()
             for _ in range(LOGIN_TIMEOUT_SECONDS):
+                # Nếu người dùng tự tắt cửa sổ Chrome trước khi xong
+                if proc.poll() is not None:
+                    raise HTTPException(
+                        status_code=408,
+                        detail="Trình duyệt Chrome đã bị đóng trước khi hoàn tất đăng nhập.",
+                    )
+
+                pages = context.pages
+                page = pages[0] if pages else None
+                current_url = page.url if page else ""
+
+                # 1. Nếu còn ở màn hình accounts.google.com (nhập email/mật khẩu/2FA) -> tiếp tục chờ
+                if "accounts.google.com" in current_url:
+                    time.sleep(1)
+                    continue
+
+                # 2. Phải chuyển hướng về gemini.google.com
+                if not current_url.startswith("https://gemini.google.com"):
+                    time.sleep(1)
+                    continue
+
+                # 3. Kiểm tra xem đã thực sự đăng nhập trên giao diện Gemini chưa (tránh Guest mode)
+                is_authenticated = False
+                try:
+                    is_authenticated = page.evaluate("""() => {
+                        // Kiểm tra token xác thực phiên SNlM0e
+                        if (window.WIZ_global_data && window.WIZ_global_data.SNlM0e) {
+                            return true;
+                        }
+                        // Kiểm tra xem có nút Sign In / Đăng nhập (Guest Mode)
+                        const text = document.body ? document.body.innerText : '';
+                        if (text.includes('Sign in to save') || text.includes('Đăng nhập để lưu')) {
+                            return false;
+                        }
+                        const signInBtn = document.querySelector(
+                            'a[href*="accounts.google.com/ServiceLogin"], a[href*="accounts.google.com/signin"]'
+                        );
+                        if (signInBtn) {
+                            return false;
+                        }
+                        // Kiểm tra avatar tài khoản / profile
+                        return Boolean(
+                            document.querySelector('a[href*="SignOutOptions"]') ||
+                            document.querySelector('button[aria-label*="Google"]') ||
+                            document.querySelector('button[aria-label*="Tài khoản"]') ||
+                            document.querySelector('img[alt*="Google Account"]') ||
+                            document.querySelector('div[data-user-email]')
+                        );
+                    }""")
+                except Exception:
+                    is_authenticated = False
+
+                if not is_authenticated:
+                    time.sleep(1)
+                    continue
+
+                # 4. Đã xác nhận đăng nhập thật sự, đọc cookies xác thực
                 try:
                     cookies = context.cookies(["https://gemini.google.com", "https://google.com"])
                 except Exception:
                     cookies = []
+
                 if any(cookie["name"] in AUTH_COOKIE_NAMES for cookie in cookies):
+                    try:
+                        user_agent = page.evaluate("() => navigator.userAgent")
+                    except Exception:
+                        user_agent = ""
                     break
+
                 time.sleep(1)
 
             if not any(cookie["name"] in AUTH_COOKIE_NAMES for cookie in cookies):
                 raise HTTPException(
                     status_code=408,
-                    detail=f"Chưa phát hiện đăng nhập Gemini sau {LOGIN_TIMEOUT_SECONDS} giây.",
+                    detail=f"Chưa hoàn tất đăng nhập Gemini sau {LOGIN_TIMEOUT_SECONDS} giây.",
                 )
 
-            time.sleep(5)
+            time.sleep(3)
+            try:
+                cookies = context.cookies(["https://gemini.google.com", "https://google.com"])
+            except Exception:
+                pass
+
             config = read_config()
-            config["gemini"].update({
+            gemini_update = {
                 "cookies": "; ".join(f"{cookie['name']}={cookie['value']}" for cookie in cookies),
                 "cookie_count": len(cookies),
                 "saved_at": datetime.now(timezone.utc).isoformat(),
-            })
+            }
+            if user_agent:
+                gemini_update["user_agent"] = user_agent
+
+            config["gemini"].update(gemini_update)
             write_config(config)
             try:
                 browser.close()

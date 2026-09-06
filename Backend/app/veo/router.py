@@ -30,9 +30,56 @@ from app.veo.schemas import (
     VeoHistoryItem,
     VeoJobOut,
     VeoJobRequest,
+    VeoProjectCreate,
+    VeoProjectOut,
+    VeoProjectSelect,
 )
 
 router = APIRouter(prefix="/api/veo", tags=["Veo Studio"])
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Projects
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/projects", response_model=list[VeoProjectOut])
+def list_projects():
+    """Lấy danh sách các Project đã lưu trong SQLite DB."""
+    return service.list_projects()
+
+
+@router.post("/projects", response_model=VeoProjectOut)
+def create_project(req: VeoProjectCreate):
+    """Tạo Project mới (tự động kích hoạt trên tab Google Flow và lưu DB)."""
+    try:
+        return service.create_project(name=req.name, flow_project_id=req.flow_project_id)
+    except (RuntimeError, TimeoutError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/projects/active", response_model=VeoProjectOut | None)
+def get_active_project():
+    """Lấy thông tin Project hiện đang kích hoạt."""
+    return service.get_active_project()
+
+
+@router.post("/projects/{project_id}/select", response_model=VeoProjectOut)
+def select_project(project_id: str):
+    """Chọn Project làm việc."""
+    try:
+        return service.select_project(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: str):
+    """Xóa Project khỏi cơ sở dữ liệu."""
+    ok = service.delete_project(project_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' không tồn tại")
+    return {"ok": True}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Jobs
@@ -41,8 +88,13 @@ router = APIRouter(prefix="/api/veo", tags=["Veo Studio"])
 
 @router.post("/jobs", response_model=VeoJobOut)
 def submit_job(request: VeoJobRequest):
-    """Submit job tạo video mới."""
-    return service.submit_job(request)
+    """Submit job tạo video mới (bắt buộc phải có project kích hoạt)."""
+    try:
+        return service.submit_job(request)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/jobs", response_model=list[VeoJobOut])
