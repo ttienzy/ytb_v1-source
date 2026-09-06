@@ -50,6 +50,12 @@ def story_stats(db: Session = Depends(get_db)) -> dict[str, int]:
     return service.get_story_statistics(db)
 
 
+@router.get("/catalog")
+def system_story_catalog() -> list[dict]:
+    """Danh sách toàn bộ truyện snapshot có sẵn trong hệ thống (3.226 truyện)."""
+    return service.get_system_catalog()
+
+
 @router.get("/crawled")
 def crawled_stories(
     category_ids: list[int] | None = Query(default=None),

@@ -23,6 +23,7 @@ import {
   fetchStoryCrawlJob,
   fetchStoryMetadata,
   fetchStoryStatistics,
+  fetchSystemStoryCatalog,
   fetchBulkStoryCrawlJob,
   startBulkStoryCrawl,
   startStoryCrawl,
@@ -59,6 +60,7 @@ export function StoriesPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const categoryDropdownRef = useRef<HTMLDivElement>(null)
   const storyLoadRequestRef = useRef(0)
+  const lastBulkCompletedRef = useRef(-1)
   const isBusy = crawling !== null || bulkJobId !== null
 
   useEffect(() => {
@@ -148,12 +150,22 @@ export function StoriesPage() {
     if (!bulkJobId) return
     let cancelled = false
     let timer: number | undefined
+    lastBulkCompletedRef.current = -1
 
     const poll = async () => {
       try {
         const job = await fetchBulkStoryCrawlJob(bulkJobId)
         if (cancelled) return
         setBulkJob(job)
+
+        // Cập nhật thống kê và danh sách truyện đã cào theo thời gian thực khi có thêm truyện hoàn tất
+        if (job.status === 'running' && job.completed_stories !== lastBulkCompletedRef.current) {
+          lastBulkCompletedRef.current = job.completed_stories
+          fetchStoryStatistics().then(setStatistics).catch(() => undefined)
+          if (viewMode === 'crawled') {
+            fetchCrawledStories(selectedCategoryIds).then(setStories).catch(() => undefined)
+          }
+        }
         if (job.status === 'completed' || job.status === 'completed_with_errors' || job.status === 'error') {
           if (job.status === 'error') {
             setMessage({ type: 'error', text: job.error || 'Cào hàng loạt thất bại.' })
@@ -217,10 +229,26 @@ export function StoriesPage() {
     }
     setLoadingStories(true)
     try {
-      const pages = await Promise.all(categoryIds.map(categoryId => fetchStoriesByCategory(categoryId)))
+      // Nếu chọn tất cả hoặc số lượng lớn thể loại (>= 50 thể loại):
+      // Dùng ngay catalog 3.226 truyện có sẵn của hệ thống trong 10ms, không tốn hàng trăm request cào mạng!
+      if (categories.length > 0 && (categoryIds.length >= categories.length || categoryIds.length >= 50)) {
+        const catalog = await fetchSystemStoryCatalog()
+        if (requestId !== storyLoadRequestRef.current) return
+        setStories(catalog)
+        return
+      }
+
+      const batchSize = 6
+      const allPages: StorySummary[][] = []
+      for (let i = 0; i < categoryIds.length; i += batchSize) {
+        if (requestId !== storyLoadRequestRef.current) return
+        const chunk = categoryIds.slice(i, i + batchSize)
+        const chunkResults = await Promise.all(chunk.map(categoryId => fetchStoriesByCategory(categoryId)))
+        allPages.push(...chunkResults)
+      }
       if (requestId !== storyLoadRequestRef.current) return
       const unique = new Map<string, StorySummary>()
-      pages.flat().forEach(story => unique.set(story.url, story))
+      allPages.flat().forEach(story => unique.set(story.url, story))
       setStories([...unique.values()])
     } catch (error) {
       if (requestId !== storyLoadRequestRef.current) return
@@ -300,6 +328,8 @@ export function StoriesPage() {
     try {
       const job = await startBulkStoryCrawl(selectedCategoryIds, recrawlFullStories)
       setBulkJobId(job.job_id)
+      // Tự động chuyển sang tab "Đã cào" để theo dõi truyện được ghi vào CSDL SQLite theo thời gian thực
+      void loadCrawledStories(selectedCategoryIds)
     } catch (error) {
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Không thể bắt đầu cào theo thể loại' })
     }
@@ -361,6 +391,24 @@ export function StoriesPage() {
     void handleCategoryChange(nextIds)
   }
 
+  const selectQuickCount = (count: number) => {
+    const query = categorySearch.trim().toLocaleLowerCase()
+    const pool = query
+      ? categories.filter(category => category.categoryName.toLocaleLowerCase().includes(query))
+      : categories
+    const targetIds = pool.slice(0, count).map(category => category.id)
+    void handleCategoryChange(targetIds)
+  }
+
+  const selectAllCategories = () => {
+    const query = categorySearch.trim().toLocaleLowerCase()
+    const pool = query
+      ? categories.filter(category => category.categoryName.toLocaleLowerCase().includes(query))
+      : categories
+    const targetIds = pool.map(category => category.id)
+    void handleCategoryChange(targetIds)
+  }
+
   const showStoryHoverDetail = (story: StorySummary, target: HTMLElement) => {
     const rect = target.getBoundingClientRect()
     const cardHeight = 245
@@ -414,7 +462,23 @@ export function StoriesPage() {
           {categoryMenuOpen && (
             <div className="story-category-menu" role="listbox" aria-multiselectable="true" aria-label="Danh sách thể loại">
               <div className="story-category-menu-search"><Search size={14} /><input value={categorySearch} onChange={event => setCategorySearch(event.target.value)} placeholder="Tìm thể loại…" autoFocus /></div>
-              <div className="story-category-menu-meta"><span>{selectedCategoryIds.length ? `${selectedCategoryIds.length} đang chọn` : 'Chưa chọn thể loại'}</span>{selectedCategoryIds.length > 0 && <button type="button" onClick={() => void handleCategoryChange([])}><X size={12} /> Bỏ chọn</button>}</div>
+              <div className="story-category-quick-select">
+                <span className="story-quick-label">Chọn nhanh:</span>
+                <button type="button" className="story-quick-btn" onClick={() => selectQuickCount(5)}>5</button>
+                <button type="button" className="story-quick-btn" onClick={() => selectQuickCount(10)}>10</button>
+                <button type="button" className="story-quick-btn" onClick={() => selectQuickCount(15)}>15</button>
+                <button type="button" className="story-quick-btn" onClick={() => selectQuickCount(20)}>20</button>
+                <button type="button" className="story-quick-btn" onClick={() => selectAllCategories()}>Tất cả</button>
+                {selectedCategoryIds.length > 0 && (
+                  <button type="button" className="story-quick-btn clear" onClick={() => void handleCategoryChange([])}>
+                    <X size={12} /> Bỏ chọn
+                  </button>
+                )}
+              </div>
+              <div className="story-category-menu-meta">
+                <span>{selectedCategoryIds.length ? `${selectedCategoryIds.length}/${categories.length} đang chọn` : 'Chưa chọn thể loại'}</span>
+                {selectedCategoryIds.length > 0 && <button type="button" onClick={() => void handleCategoryChange([])}><X size={12} /> Bỏ chọn</button>}
+              </div>
               <div className="story-category-options">
                 {loadingCategories ? <div className="story-category-empty">Đang tải thể loại…</div> : orderedCategories.length === 0 ? <div className="story-category-empty">Không tìm thấy thể loại.</div> : orderedCategories.map(category => {
                   const selected = selectedCategoryIds.includes(category.id)
@@ -442,7 +506,7 @@ export function StoriesPage() {
           {bulkJobId ? <RefreshCw className="spin" size={15} /> : <Download size={15} />}
           {bulkJobId ? 'Đang cào hàng loạt…' : `Cào tất cả (${selectedCategoryIds.length} thể loại)`}
         </button>
-        <div className="story-toolbar-note"><Clock3 size={16} /><span>Mỗi request cách nhau 1 giây để hạn chế rate-limit.</span></div>
+        <div className="story-toolbar-note"><Clock3 size={16} /><span>Tốc độ: 0.25s/request (tự động điều chỉnh khi gặp rate-limit).</span></div>
       </div>
 
       {message && (

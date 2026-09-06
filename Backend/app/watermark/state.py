@@ -11,9 +11,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.core.config import DATA_DIR as APP_DATA_DIR
+
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("Data/watermark")
+DATA_DIR = APP_DATA_DIR / "watermark"
 JOBS_FILE = DATA_DIR / "jobs.json"
 
 

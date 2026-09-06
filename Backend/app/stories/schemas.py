@@ -6,5 +6,5 @@ class CrawlRequest(BaseModel):
 
 
 class BulkCrawlRequest(BaseModel):
-    category_ids: list[int] = Field(min_length=1, max_length=100)
+    category_ids: list[int] = Field(min_length=1, max_length=1000)
     recrawl_full: bool = False

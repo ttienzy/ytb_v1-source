@@ -14,10 +14,10 @@ from typing import Callable
 from datetime import datetime
 from pathlib import Path
 
-from app.core.config import TOOLS_DIR
+from app.core.config import DATA_DIR
 from app.recap.ffmpeg import ffprobe_duration
 
-VIDEO_DIR = TOOLS_DIR / "Data" / "media" / "videos"
+VIDEO_DIR = DATA_DIR / "media" / "videos"
 OUTPUT_DIR = VIDEO_DIR / "processed"
 STATE_FILE = VIDEO_DIR / "library.json"
 PRESET_FILE = VIDEO_DIR / "preset.json"

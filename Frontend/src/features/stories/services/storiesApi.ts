@@ -26,6 +26,12 @@ export async function fetchStoryStatistics(): Promise<StoryStatistics> {
   return response.json()
 }
 
+export async function fetchSystemStoryCatalog(): Promise<StorySummary[]> {
+  const response = await fetch(`${API_URL}/api/stories/catalog`)
+  if (!response.ok) throw new Error(await readError(response, 'Không thể tải danh mục truyện hệ thống'))
+  return response.json()
+}
+
 export async function fetchCrawledStories(categoryIds: number[] = []): Promise<StorySummary[]> {
   const query = categoryIds.map(id => `category_ids=${encodeURIComponent(id)}`).join('&')
   const response = await fetch(`${API_URL}/api/stories/crawled${query ? `?${query}` : ''}`)

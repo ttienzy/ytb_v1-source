@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import secrets
 import sys
@@ -21,7 +22,8 @@ from app.core.database import SessionLocal
 from app.stories.models import CrawledChapter, CrawledStory
 
 BASE_URL = "https://daotruyen.me/api/public/v2"
-REQUEST_DELAY_SECONDS = 1.0
+REQUEST_DELAY_SECONDS = 0.15
+MAX_BULK_WORKERS = 4
 # Giống tham số trong samples/getStoriesByCategory.js; các trang tiếp theo
 # được tải tuần tự cho tới khi API trả next=false.
 DEFAULT_PAGE_SIZE = 20
@@ -183,6 +185,12 @@ def start_crawl_job(job_id: str) -> None:
 
 def _collect_stories_for_categories(category_ids: list[int]) -> list[dict[str, Any]]:
     """Lấy và hợp nhất truyện theo slug từ nhiều thể loại, giữ thứ tự gặp đầu tiên."""
+    all_categories = list_categories()
+    # Nếu chọn tất cả hoặc số lượng lớn thể loại (>= 100 hoặc toàn bộ danh mục):
+    # Dùng trực tiếp snapshot 3.226 truyện có sẵn để cào ngay lập tức, không tốn 366 request quét web!
+    if len(category_ids) >= len(all_categories) or len(category_ids) >= 100:
+        return _load_system_stories()
+
     stories: list[dict[str, Any]] = []
     seen_slugs: set[str] = set()
     for category_id in category_ids:
@@ -261,42 +269,73 @@ def run_bulk_crawl_job(job_id: str) -> None:
                 "story_slug": str(story["url"]),
                 "name": story.get("name") or story["url"],
                 "status": "pending",
-                "total": int(story.get("totalChapter") or 0),
+                "total": int(story.get("totalChapter") or story.get("lastChapterNumber") or 0),
                 "done": 0,
                 "chapters": [],
             }
             for story in source_stories
         ]
-        _update_crawl_job(
-            job_id,
-            total_stories=len(progress_stories),
-            completed_stories=0,
-            stories=progress_stories,
+
+        # 1. Smart Skip cực nhanh: Quét trước 1 lần từ SQLite để phát hiện các truyện đã đủ chương
+        recrawl_full = bool(job_data.get("recrawl_full", False))
+        stored_counts: dict[str, int] = dict(
+            db.execute(
+                select(
+                    CrawledChapter.story_slug,
+                    func.count(CrawledChapter.chapter_key),
+                ).group_by(CrawledChapter.story_slug)
+            ).all()
         )
+
+        completed_count = 0
+        pending_indices: list[int] = []
 
         for index, source_story in enumerate(source_stories):
             slug = str(source_story["url"])
+            expected = int(source_story.get("totalChapter") or source_story.get("lastChapterNumber") or 0)
+            actual_stored = stored_counts.get(slug, 0)
+            if not recrawl_full and expected > 0 and actual_stored >= expected:
+                progress_stories[index]["status"] = "skipped"
+                progress_stories[index]["done"] = actual_stored
+                progress_stories[index]["total"] = expected
+                completed_count += 1
+            else:
+                pending_indices.append(index)
+
+        _update_crawl_job(
+            job_id,
+            total_stories=len(progress_stories),
+            completed_stories=completed_count,
+            stories=progress_stories,
+        )
+
+        # 2. Xử lý từng truyện độc lập cho Worker
+        def _process_story(index: int) -> None:
+            source_story = source_stories[index]
+            slug = str(source_story["url"])
             _update_crawl_job(job_id, current_story=slug, current_chapter=None)
             with _JOBS_LOCK:
-                if job_id in _CRAWL_JOBS:
+                if job_id in _CRAWL_JOBS and index < len(_CRAWL_JOBS[job_id].stories):
                     _CRAWL_JOBS[job_id].stories[index]["status"] = "running"
+
+            worker_db = SessionLocal()
             try:
-                # Lấy metadata một lần để kiểm tra full trước khi tạo crawl job con.
                 with DaoTruyenClient() as client:
                     metadata = client.story_metadata(slug)
-                story = _upsert_story(db, metadata)
-                db.commit()
+                story = _upsert_story(worker_db, metadata)
+                worker_db.commit()
                 chapters = _chapter_index(metadata)
                 with _JOBS_LOCK:
-                    if job_id in _CRAWL_JOBS:
+                    if job_id in _CRAWL_JOBS and index < len(_CRAWL_JOBS[job_id].stories):
                         _CRAWL_JOBS[job_id].stories[index]["total"] = len(chapters)
 
-                if _is_fully_crawled(db, slug, metadata) and not job_data.get("recrawl_full", False):
+                if _is_fully_crawled(worker_db, slug, metadata) and not recrawl_full:
                     _update_bulk_story(job_id, index, status="skipped", done=len(chapters), total=len(chapters))
                 else:
                     result = crawl_story(
-                        db,
+                        worker_db,
                         slug,
+                        prefetched_metadata=metadata,
                         progress_callback=lambda event, i=index: _bulk_job_progress(job_id, i, event),
                     )
                     _update_bulk_story(
@@ -307,15 +346,25 @@ def run_bulk_crawl_job(job_id: str) -> None:
                         total=result["requested_count"],
                     )
             except StoryCrawlerError as error:
-                db.rollback()
+                worker_db.rollback()
                 _update_bulk_story(job_id, index, status="error", error=str(error))
-            except Exception as error:  # noqa: BLE001 — bulk job không được treo vô thời hạn
-                db.rollback()
+            except Exception as error:  # noqa: BLE001
+                worker_db.rollback()
                 _update_bulk_story(job_id, index, status="error", error=f"Lỗi lưu dữ liệu: {error}")
             finally:
-                current = get_crawl_job(job_id)
-                if current is not None:
-                    _update_crawl_job(job_id, completed_stories=current["completed_stories"] + 1)
+                worker_db.close()
+                with _JOBS_LOCK:
+                    current_job = _CRAWL_JOBS.get(job_id)
+                    if current_job is not None:
+                        current_job.completed_stories += 1
+                        current_job.updated_at = datetime.now(timezone.utc)
+
+        # 3. Đa luồng (ThreadPoolExecutor): Chạy song song tối đa MAX_BULK_WORKERS luồng
+        if pending_indices:
+            workers = min(MAX_BULK_WORKERS, len(pending_indices))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(_process_story, idx) for idx in pending_indices]
+                concurrent.futures.wait(futures)
 
         final = get_crawl_job(job_id) or {}
         has_errors = any(item.get("status") in {"error", "completed_with_errors"} for item in final.get("stories", []))
@@ -402,19 +451,41 @@ class DaoTruyenClient:
             if elapsed < self.delay:
                 time.sleep(self.delay - elapsed)
 
-            headers = {"Referer": referer} if referer else {}
-            if extra_headers:
-                headers.update(extra_headers)
-            try:
-                response = self._client.get(
-                    f"{BASE_URL}/{path.lstrip('/')}", params=params, headers=headers
-                )
-                self._last_request_at = time.monotonic()
-                _LAST_GLOBAL_REQUEST_AT = self._last_request_at
-                response.raise_for_status()
-                return response.json()
-            except (httpx.HTTPError, json.JSONDecodeError) as error:
-                raise StoryCrawlerError(f"Không thể tải dữ liệu truyện: {error}") from error
+        headers = {"Referer": referer} if referer else {}
+        if extra_headers:
+            headers.update(extra_headers)
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            with _RATE_LIMIT_LOCK:
+                now = time.monotonic()
+                # Phải chờ theo mốc gần nhất: cả client riêng lẫn toàn hệ thống
+                # đều cách request trước tối thiểu delay.
+                elapsed = min(now - self._last_request_at, now - _LAST_GLOBAL_REQUEST_AT)
+                if elapsed < self.delay:
+                    time.sleep(self.delay - elapsed)
+
+                try:
+                    response = self._client.get(
+                        f"{BASE_URL}/{path.lstrip('/')}", params=params, headers=headers
+                    )
+                    self._last_request_at = time.monotonic()
+                    _LAST_GLOBAL_REQUEST_AT = self._last_request_at
+                    # Nếu gặp rate limit 429 hoặc 503, tự động dãn cách và thử lại
+                    if response.status_code in (429, 503):
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 1.5
+                            time.sleep(wait_time)
+                            continue
+                    response.raise_for_status()
+                    return response.json()
+                except (httpx.HTTPError, json.JSONDecodeError) as error:
+                    if attempt < max_retries - 1 and isinstance(
+                        error, (httpx.ConnectError, httpx.TimeoutException)
+                    ):
+                        time.sleep(1.0)
+                        continue
+                    raise StoryCrawlerError(f"Không thể tải dữ liệu truyện: {error}") from error
 
     def category_page(
         self,
@@ -500,7 +571,21 @@ def _load_system_stories() -> list[dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
-    return [item for item in data if isinstance(item, dict) and item.get("url")] if isinstance(data, list) else []
+    result = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, dict) and item.get("url"):
+            total_chapters = item.get("totalChapter") or item.get("lastChapterNumber") or 0
+            result.append({
+                **item,
+                "totalChapter": total_chapters,
+                "storySlug": str(item.get("url")),
+            })
+    return result
+
+
+def get_system_catalog() -> list[dict[str, Any]]:
+    """Trả về toàn bộ 3.226 truyện hệ thống sẵn có để hiển thị tức thì."""
+    return _load_system_stories()
 
 
 def get_story_statistics(db: Session) -> dict[str, int]:
@@ -759,10 +844,11 @@ def crawl_story(
     story_slug: str,
     chapter_number: int | None = None,
     progress_callback: Any | None = None,
+    prefetched_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Cào một chương hoặc toàn bộ chương; commit độc lập sau mỗi chương."""
     with DaoTruyenClient() as client:
-        metadata = client.story_metadata(story_slug)
+        metadata = prefetched_metadata or client.story_metadata(story_slug)
         story = _upsert_story(db, metadata)
         db.commit()
 

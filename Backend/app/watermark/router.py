@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/watermark", tags=["Watermark"])
 
 # Upload directory
-UPLOAD_DIR = Path("Data/watermark/uploads")
+UPLOAD_DIR = wstate.DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -284,7 +284,7 @@ def download_all_files(job_id: str):
     if not done_videos:
         raise HTTPException(status_code=404, detail="Chưa có video nào hoàn thành để tải về.")
 
-    temp_zip_path = Path("Data/watermark/temp") / f"watermark_clean_{job_id}.zip"
+    temp_zip_path = wstate.DATA_DIR / "temp" / f"watermark_clean_{job_id}.zip"
     temp_zip_path.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_STORED) as zip_file:
