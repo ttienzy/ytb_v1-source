@@ -156,3 +156,27 @@ export interface VeoHistoryItem {
   input_mode: string
   created_at: string
 }
+
+// ─── Batch Script & Multi-threading ─────────────────────────────────────────
+
+export type SceneStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'
+
+export interface BatchSceneItem {
+  id: string
+  sceneNumber: number
+  timecode?: string
+  prompt: string
+  durationSeconds: number
+  status: SceneStatus
+  jobId?: string
+  workerId?: number
+  error?: string
+  videoUrl?: string
+  progressStep?: string
+}
+
+export interface ScriptParseOptions {
+  autoDuration: boolean
+  ignoreAudioText: boolean
+  includeTitlePrefix: boolean
+}

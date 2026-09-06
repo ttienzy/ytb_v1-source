@@ -1468,12 +1468,19 @@ async function processCaptchaRequest(request) {
   }
   onCaptchaSuccess();
   if (request.flow_request) {
-    logActivity('info', `Flow generation started: request=${request.request_id.slice(0, 8)}`);
-    const flowResult = await generateFlowVideo(request.flow_request, result.token);
-    await postFlowResponse(request.request_id, flowResult);
-    logActivity(flowResult.ok ? 'info' : 'warn', flowResult.ok
-      ? `Flow generation completed: request=${request.request_id.slice(0, 8)}`
-      : `Flow generation failed: ${flowResult.error}`);
+    logActivity('info', `Flow generation dispatched: request=${request.request_id.slice(0, 8)}`);
+    // Non-blocking promise: cho phép extension xử lý song song nhiều luồng video cùng lúc
+    (async () => {
+      try {
+        const flowResult = await generateFlowVideo(request.flow_request, result.token);
+        await postFlowResponse(request.request_id, flowResult);
+        logActivity(flowResult.ok ? 'info' : 'warn', flowResult.ok
+          ? `Flow generation completed: request=${request.request_id.slice(0, 8)}`
+          : `Flow generation failed: ${flowResult.error}`);
+      } catch (e) {
+        await postFlowResponse(request.request_id, { ok: false, error: e?.message || 'Flow generation error' });
+      }
+    })();
   }
 }
 
@@ -1765,6 +1772,8 @@ async function startPolling() {
         }
         if (request?.request_id) {
           await processCaptchaRequest(request);
+          // Khoảng trễ an toàn 2s giữa các request captcha
+          await sleep(2_000);
         }
 
       } else if (resp.status === 204) {

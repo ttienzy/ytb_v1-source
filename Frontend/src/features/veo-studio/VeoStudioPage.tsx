@@ -251,6 +251,11 @@ export function VeoStudioPage({ setActivePage }: Props) {
                     onSubmit={handleSubmit}
                     busy={busy}
                     activeProject={activeProject}
+                    onBatchVideoDone={() => {
+                      loadHistory()
+                      loadProjects()
+                    }}
+                    onPreviewJob={(job) => setActiveJob(job)}
                   />
                 )}
                 {activeTab === 'image' && (
@@ -306,4 +311,3 @@ export function VeoStudioPage({ setActivePage }: Props) {
     </div>
   )
 }
-
