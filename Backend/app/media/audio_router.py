@@ -3,7 +3,7 @@ from urllib.parse import quote
 import asyncio
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.db import get_db
@@ -27,6 +27,115 @@ class TestRunBody(BaseModel):
     text: str
     voice_id: str = "Adam"
     aspect: str = "9:16"
+
+class AudioDriveRequest(BaseModel):
+    file_names: list[str] = Field(min_length=1, max_length=100)
+    auto_delete_local: bool = True
+
+class AudioLocalDeleteRequest(BaseModel):
+    file_names: list[str] = Field(min_length=1, max_length=100)
+
+AUDIO_DRIVE_JOBS: dict[str, dict] = {}
+
+def _audio_metadata() -> dict[str, dict]:
+    try:
+        import json
+        return {item["file_name"]: item for item in json.loads(audio_workflow.AUDIO_MANIFEST.read_text(encoding="utf-8"))}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+def _safe_audio_files(file_names: list[str]) -> list[tuple[str, Path, dict]]:
+    metadata = _audio_metadata()
+    result = []
+    for filename in dict.fromkeys(file_names):
+        path = audio_workflow.AUDIO_DIR / Path(filename).name
+        if Path(filename).name != filename or path.parent != audio_workflow.AUDIO_DIR:
+            raise HTTPException(400, "Tên file video không hợp lệ.")
+        if not path.exists():
+            raise HTTPException(404, f"Không tìm thấy video local: {filename}")
+        result.append((filename, path, metadata.get(filename, {})))
+    return result
+
+def _remove_audio_local(filename: str, path: Path) -> None:
+    path.unlink(missing_ok=True)
+    metadata = _audio_metadata()
+    thumb = metadata.get(filename, {}).get("thumbnail_name")
+    if thumb:
+        (audio_workflow.AUDIO_THUMBNAIL_DIR / Path(thumb).name).unlink(missing_ok=True)
+
+def _drive_video_name(meta: dict) -> str:
+    story_name = audio_workflow._safe_name(meta.get("story_name") or "Video_Audio")
+    chapter_number = meta.get("chapter_number") or 1
+    return f"{story_name}_Phần_{chapter_number}.mp4"
+
+def _unique_drive_video_name(client, filename: str, folder_id: str) -> str:
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix or ".mp4"
+    candidate = f"{stem}{suffix}"
+    index = 1
+    while client.find_file_in_folder(candidate, folder_id):
+        candidate = f"{stem} ({index}){suffix}"
+        index += 1
+    return candidate
+
+def _upload_outputs_worker(job_id: str, body: AudioDriveRequest) -> None:
+    from app.externals.gdrive import service as gdrive_service
+    cfg = gdrive_service.get_gdrive_config()
+    root_id = gdrive_service.get_workflow_folder_id("audio") or cfg.get("folder_id")
+    client = gdrive_service.get_client()
+    job = AUDIO_DRIVE_JOBS[job_id]
+    for filename, path, meta in _safe_audio_files(body.file_names):
+        item = next(entry for entry in job["items"] if entry["file_name"] == filename)
+        try:
+            item.update(status="uploading", percent=0)
+            def progress(done: int, total: int, current=item) -> None:
+                current["percent"] = min(99, round(done * 100 / total)) if total else 0
+            story_folder = client.get_or_create_child_folder(meta.get("story_name") or "Video Audio khác", root_id)
+            chapter_name = f"Chương {meta['chapter_number']}" if meta.get("chapter_number") else "Video khác"
+            drive_name = _unique_drive_video_name(client, _drive_video_name(meta), story_folder["id"])
+            result = client.upload_file_resumable(path, folder_id=story_folder["id"], custom_name=drive_name, progress_callback=progress)
+            item.update(status="done", percent=100, drive_url=result.get("web_view_link"))
+            if body.auto_delete_local:
+                _remove_audio_local(filename, path)
+                item["deleted"] = True
+        except Exception as exc:  # keep other selected videos running
+            item.update(status="error", percent=0, error=str(exc))
+    job["status"] = "completed"
+
+@router.post("/outputs/upload-drive", status_code=202)
+def upload_outputs_to_drive(body: AudioDriveRequest, background_tasks: BackgroundTasks):
+    """Bắt đầu upload các video Audio theo cấu trúc Truyện/Chương."""
+    from app.externals.gdrive import service as gdrive_service
+    if not gdrive_service.get_client():
+        raise HTTPException(400, "Google Drive chưa được kết nối. Vui lòng vào Cài đặt để kết nối.")
+    cfg = gdrive_service.get_gdrive_config()
+    if not (gdrive_service.get_workflow_folder_id("audio") or cfg.get("folder_id")):
+        raise HTTPException(400, "Chưa cấu hình thư mục Google Drive cho Audio.")
+    files = _safe_audio_files(body.file_names)
+    import uuid
+    job_id = uuid.uuid4().hex[:12]
+    AUDIO_DRIVE_JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "items": [{"file_name": filename, "status": "queued", "percent": 0} for filename, _, _ in files],
+    }
+    background_tasks.add_task(_upload_outputs_worker, job_id, body)
+    return {"job_id": job_id, **AUDIO_DRIVE_JOBS[job_id]}
+
+@router.get("/outputs/upload-drive/{job_id}")
+def upload_outputs_status(job_id: str):
+    job = AUDIO_DRIVE_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Không tìm thấy tiến trình upload.")
+    return job
+
+@router.post("/outputs/delete-local")
+def delete_audio_outputs_local(body: AudioLocalDeleteRequest):
+    deleted = []
+    for filename, path, _ in _safe_audio_files(body.file_names):
+        _remove_audio_local(filename, path)
+        deleted.append(filename)
+    return {"ok": True, "deleted": deleted}
 
 @router.get("/stories")
 def stories(db: Session = Depends(get_db)):

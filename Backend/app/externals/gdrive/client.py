@@ -131,6 +131,27 @@ class GDriveClient:
             "url": f.get("webViewLink", f"https://drive.google.com/drive/folders/{f.get('id')}"),
         }
 
+    def get_or_create_child_folder(self, folder_name: str, parent_id: str) -> dict[str, str]:
+        """Tìm hoặc tạo một thư mục con trực tiếp trong parent_id."""
+        clean_name = folder_name.strip() or "Untitled"
+        escaped = clean_name.replace("'", "\\'")
+        query = (
+            f"name = '{escaped}' and mimeType = 'application/vnd.google-apps.folder' "
+            f"and trashed = false and '{parent_id}' in parents"
+        )
+        result = self.service.files().list(
+            q=query, spaces="drive", fields="files(id, name, webViewLink)", pageSize=1
+        ).execute()
+        files = result.get("files", [])
+        if files:
+            folder = files[0]
+            return {
+                "id": folder.get("id", ""),
+                "name": folder.get("name", clean_name),
+                "url": folder.get("webViewLink", f"https://drive.google.com/drive/folders/{folder.get('id')}"),
+            }
+        return self.create_folder(clean_name, parent_id=parent_id)
+
     def rename_folder(self, folder_id: str, folder_name: str) -> dict[str, str]:
         """Đổi tên một folder Google Drive mà không thay đổi vị trí hoặc ID."""
         self._ensure_valid_token()
