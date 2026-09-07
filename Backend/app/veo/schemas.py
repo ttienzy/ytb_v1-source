@@ -116,9 +116,16 @@ class VeoJobRequest(BaseModel):
     # Project
     project_id: Optional[str] = Field(default=None, description="ID của VeoProject đã chọn")
 
-    # Cho mode frames / ingredients
-    image_path: Optional[str] = Field(default=None, description="Đường dẫn ảnh input (local)")
-    end_image_path: Optional[str] = Field(default=None, description="Ảnh frame cuối (nếu có)")
+    # Cho mode frames
+    image_path: Optional[str] = Field(default=None, description="Đường dẫn ảnh input / Frame đầu (local)")
+    end_image_path: Optional[str] = Field(default=None, description="Ảnh Frame cuối (nếu có)")
+
+    # Cho mode ingredients (tối đa 3 ảnh: Subject, Scene, Style)
+    ingredient_image_paths: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Danh sách ảnh thành phần tham chiếu (tối đa 3 ảnh: Subject, Scene, Style)",
+    )
 
     # Cho mode extend
     source_video_id: Optional[str] = Field(default=None, description="Video ID nguồn để extend")

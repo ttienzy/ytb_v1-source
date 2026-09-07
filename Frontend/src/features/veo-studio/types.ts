@@ -74,8 +74,18 @@ export interface VeoJobRequest {
   seed?: number | null
   image_path?: string | null
   end_image_path?: string | null
+  ingredient_image_paths?: string[]
   source_video_id?: string | null
   continuation_prompt?: string | null
+}
+
+export interface IngredientSlot {
+  id: 'subject' | 'scene' | 'style'
+  label: string
+  desc: string
+  icon: string
+  imagePath: string | null
+  previewUrl: string | null
 }
 
 export interface VeoJobOut {

@@ -80,9 +80,11 @@ let autoReloadMinutes = 5;
 let autoReloadTimer = null;
 let lastAutoReload = null;
 
-let autoClearCacheEnabled = true;
-let autoClearCacheSeconds = 1;
+let autoClearCacheEnabled = false;
+let autoClearCacheSeconds = 300;
 let autoClearCacheTimer = null;
+
+let activeGenerationCount = 0; // Đếm các tác vụ sinh ảnh / video đang chạy để tránh bị reload hoặc xóa cache làm đứt mạch
 
 let heartbeatTimer = null;
 
@@ -1671,13 +1673,6 @@ async function runImageGenerationInPage(imageRequest, captchaToken) {
 }
 
 async function generateFlowImage(imageRequest, captchaToken) {
-  if (imageRequest?.project_id) {
-    try {
-      await ensureProjectTab(imageRequest.project_id);
-    } catch (e) {
-      logActivity('warn', `ensureProjectTab pre-flight error: ${e.message}`);
-    }
-  }
   const tabId = await findLabsTab(imageRequest?.project_id);
   if (!tabId) return { ok: false, error: 'Open a Flow project in Chrome' };
   try {
@@ -1687,6 +1682,15 @@ async function generateFlowImage(imageRequest, captchaToken) {
     });
     if (injected?.[0]?.result) {
       return injected[0].result;
+    }
+    // Fallback retry sau 2s nếu tab vừa điều hướng hoặc context chưa sẵn sàng
+    await sleep(2000);
+    const retryInjected = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN', func: runImageGenerationInPage,
+      args: [imageRequest, captchaToken],
+    });
+    if (retryInjected?.[0]?.result) {
+      return retryInjected[0].result;
     }
     return { ok: false, error: 'Flow page returned no image result (trang bị tải lại hoặc mất ngữ cảnh)' };
   } catch (error) {
@@ -1946,6 +1950,7 @@ async function processCaptchaRequest(request) {
   }
   if (request.action === 'IMAGE_GENERATION') {
     logActivity('info', `Flow Image generation requested: ${request.request_id?.slice(0, 8)}`);
+    activeGenerationCount++;
     const targetPid = request.image_request?.project_id || request.project_id || null;
     if (targetPid) {
       try {
@@ -1973,6 +1978,8 @@ async function processCaptchaRequest(request) {
         : `Image generation failed: ${imgResult.error}`);
     } catch (e) {
       await postImageResponse(request.request_id, { ok: false, error: e?.message || 'Image generation error' });
+    } finally {
+      activeGenerationCount = Math.max(0, activeGenerationCount - 1);
     }
     return;
   }
@@ -2005,6 +2012,7 @@ async function processCaptchaRequest(request) {
     logActivity('info', `Flow generation dispatched: request=${request.request_id.slice(0, 8)}`);
     // Non-blocking promise: cho phép extension xử lý song song nhiều luồng video cùng lúc
     (async () => {
+      activeGenerationCount++;
       try {
         const flowResult = await generateFlowVideo(request.flow_request, result.token);
         await postFlowResponse(request.request_id, flowResult);
@@ -2013,6 +2021,8 @@ async function processCaptchaRequest(request) {
           : `Flow generation failed: ${flowResult.error}`);
       } catch (e) {
         await postFlowResponse(request.request_id, { ok: false, error: e?.message || 'Flow generation error' });
+      } finally {
+        activeGenerationCount = Math.max(0, activeGenerationCount - 1);
       }
     })();
   }
@@ -2050,6 +2060,10 @@ async function pushVoiceCookies() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function clearLabsCache() {
+  if (activeGenerationCount > 0) {
+    logActivity('info', 'Skipping clearLabsCache: generation is active');
+    return false;
+  }
   try {
     await chrome.browsingData.remove(
       { origins: ['https://labs.google'], since: 0 },
@@ -2064,6 +2078,7 @@ async function clearLabsCache() {
 }
 
 async function clearTrackingCookiesAndRefresh() {
+  if (activeGenerationCount > 0) return;
   if (!autoReloadEnabled) return;
   ensureHarvestCfg();
   if (autoClearCacheEnabled) await clearLabsCache();
@@ -2082,6 +2097,7 @@ async function clearTrackingCookiesAndRefresh() {
 }
 
 async function refreshLabsTab() {
+  if (activeGenerationCount > 0) return;
   if (!autoReloadEnabled) return;
   const tabId = await findLabsTab();
   if (!tabId) return;
@@ -2102,6 +2118,10 @@ function stopAutoClearCacheTimer() {
 }
 
 async function doAutoReloadCycle() {
+  if (activeGenerationCount > 0) {
+    logActivity('info', 'Skipping autoReload: generation is active');
+    return;
+  }
   if (!autoReloadEnabled) return;
   lastAutoReload = Date.now();
   await saveState();

@@ -8,6 +8,7 @@ import {
   Layers,
   ChevronDown,
   RefreshCw,
+  Loader2,
   X,
   Copy,
   Check,
@@ -104,6 +105,7 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
 
   // Execution state
   const [generating, setGenerating] = useState(false)
+  const [variationProgress, setVariationProgress] = useState<{ current: number; total: number } | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
@@ -119,8 +121,11 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
   const loadImages = async () => {
     setLoadingImages(true)
     try {
-      const list = await api.getImages(activeProject?.id)
-      setImages(list)
+      let list = await api.getImages(activeProject?.id)
+      if ((!list || list.length === 0) && !activeProject?.id) {
+        list = await api.getImages()
+      }
+      setImages(list || [])
     } catch {
       // ignore
     } finally {
@@ -143,27 +148,46 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
     setErrorMessage('')
     setSuccessMessage('')
 
+    const total = variationCount
+    let successCount = 0
+    const baseSeed = Math.floor(Math.random() * 1000000000)
+
     try {
-      const req: VeoImageGenerateRequest = {
-        prompt: prompt.trim(),
-        model_key: selectedModelKey,
-        model_display_name: currentModel.name,
-        aspect_ratio: aspectRatio,
-        count: variationCount,
-        project_id: activeProject?.id,
+      for (let i = 0; i < total; i++) {
+        setVariationProgress({ current: i + 1, total })
+
+        const req: VeoImageGenerateRequest = {
+          prompt: prompt.trim(),
+          model_key: selectedModelKey,
+          model_display_name: currentModel.name,
+          aspect_ratio: aspectRatio,
+          count: 1, // Tạo từng biến thể để cập nhật tiến trình trực tiếp & tránh timeout kết nối
+          seed: baseSeed + i,
+          project_id: activeProject?.id,
+        }
+
+        try {
+          const res = await api.generateImages(req)
+          if (res.ok && res.images.length > 0) {
+            successCount += res.images.length
+            // Ngay lập tức cập nhật ảnh mới vào thư viện để người dùng thấy kết quả thời gian thực
+            setImages((prev) => [...res.images, ...prev])
+          } else if (res.error) {
+            setErrorMessage(`Biến thể #${i + 1}: ${res.error}`)
+          }
+        } catch (itemErr: any) {
+          setErrorMessage(`Biến thể #${i + 1}: ${itemErr.message || 'Lỗi kết nối'}`)
+        }
       }
 
-      const res = await api.generateImages(req)
-      if (res.ok && res.images.length > 0) {
-        setSuccessMessage(`Đã tạo thành công ${res.images.length} hình ảnh với ${currentModel.name}`)
-        setImages((prev) => [...res.images, ...prev])
-      } else {
-        setErrorMessage(res.error || 'Tạo ảnh thất bại từ Google Flow')
+      if (successCount > 0) {
+        setSuccessMessage(`Đã tạo thành công ${successCount}/${total} hình ảnh với ${currentModel.name}`)
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Lỗi kết nối khi tạo ảnh')
     } finally {
       setGenerating(false)
+      setVariationProgress(null)
     }
   }
 
@@ -207,6 +231,7 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
     let successCount = 0
     try {
       for (let i = 0; i < prompts.length; i++) {
+        setVariationProgress({ current: i + 1, total: prompts.length })
         const p = prompts[i]
         const req: VeoImageGenerateRequest = {
           prompt: p,
@@ -232,6 +257,7 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
       setErrorMessage(err.message || 'Lỗi khi thực thi batch ảnh')
     } finally {
       setGenerating(false)
+      setVariationProgress(null)
     }
   }
 
@@ -389,8 +415,12 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
             />
             <div className="veo-image-action-bar">
               <div className="veo-engine-indicator">
-                <span className="veo-engine-dot online" />
-                <span className="veo-engine-label">Google Flow Image Engine • Sẵn sàng</span>
+                <span className={`veo-engine-dot ${generating ? 'busy' : 'online'}`} />
+                <span className="veo-engine-label">
+                  {generating && variationProgress
+                    ? `Đang tạo biến thể ${variationProgress.current}/${variationProgress.total} qua Google Flow...`
+                    : 'Google Flow Image Engine • Sẵn sàng'}
+                </span>
               </div>
               <button
                 type="button"
@@ -400,8 +430,12 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
               >
                 {generating ? (
                   <>
-                    <RefreshCw size={14} className="veo-spin" />
-                    <span>Đang tạo ảnh qua Google Flow...</span>
+                    <Loader2 size={15} className="veo-spin" />
+                    <span>
+                      {variationProgress
+                        ? `Đang tạo ${variationProgress.current}/${variationProgress.total}...`
+                        : 'Đang tạo ảnh qua Google Flow...'}
+                    </span>
                   </>
                 ) : (
                   <>
@@ -432,8 +466,12 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
               >
                 {generating ? (
                   <>
-                    <RefreshCw size={14} className="veo-spin" />
-                    <span>Đang xử lý batch ảnh...</span>
+                    <Loader2 size={15} className="veo-spin" />
+                    <span>
+                      {variationProgress
+                        ? `Đang xử lý cảnh ${variationProgress.current}/${variationProgress.total}...`
+                        : 'Đang xử lý batch ảnh...'}
+                    </span>
                   </>
                 ) : (
                   <>

@@ -631,6 +631,9 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         "resolution": request.resolution,
         "num_outputs": request.num_outputs,
         "seed": request.seed,
+        "image_path": request.image_path,
+        "end_image_path": request.end_image_path,
+        "ingredient_image_paths": request.ingredient_image_paths or [],
         "current_step": "Đã tạo job, đang chờ xử lý",
         "error_message": None,
         "output_files": [],
@@ -772,6 +775,9 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         "resolution": res,
         "aspect_ratio": aspect,
         "num_outputs": job.get("num_outputs") or 1,
+        "image_path": job.get("image_path"),
+        "end_image_path": job.get("end_image_path"),
+        "ingredient_image_paths": job.get("ingredient_image_paths") or [],
     }
 
 
@@ -1117,23 +1123,26 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
         combined_err = "; ".join(errors) if errors else "Google Flow không trả về ảnh nào"
         return VeoImageGenerateResponse(ok=False, error=combined_err)
 
-    # Lưu ảnh thành công vào DB & tải về local
+    # Lưu ảnh thành công vào DB & tải về local bất đồng bộ
     created_items: list[VeoImageItem] = []
     with SessionLocal() as db:
         for item in raw_images:
             img_id = str(uuid.uuid4())[:12]
             cdn_url = item.get("image_url", "")
-            local_rel_path = ""
+            local_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
+            local_rel_path = str(local_file.relative_to(_BASE_DIR)).replace("\\", "/")
 
+            # Tải ảnh về ổ cứng ngầm (không chặn response trả về UI)
             if cdn_url:
-                try:
-                    r = requests.get(cdn_url, timeout=20.0)
-                    if r.status_code == 200:
-                        local_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
-                        local_file.write_bytes(r.content)
-                        local_rel_path = str(local_file.relative_to(_BASE_DIR)).replace("\\", "/")
-                except Exception as ex:
-                    logger.warning("Không thể tải ảnh %s về máy cục bộ: %s", img_id, ex)
+                def _download_task(target_url=cdn_url, out_file=local_file, target_id=img_id):
+                    try:
+                        r = requests.get(target_url, timeout=25.0)
+                        if r.status_code == 200 and len(r.content) > 0:
+                            out_file.write_bytes(r.content)
+                    except Exception as ex:
+                        logger.warning("Không thể tải ngầm ảnh %s về máy: %s", target_id, ex)
+
+                Thread(target=_download_task, daemon=True).start()
 
             new_img = VeoImage(
                 id=img_id,
@@ -1168,9 +1177,24 @@ def list_images(project_id: str | None = None) -> list[VeoImageItem]:
     with SessionLocal() as db:
         q = db.query(VeoImage)
         if project_id:
-            q = q.filter((VeoImage.project_id == project_id))
+            # Tìm project tương ứng để match cả DB ID lẫn Flow Project ID
+            p = db.query(VeoProject).filter(
+                (VeoProject.id == project_id) | (VeoProject.flow_project_id == project_id)
+            ).first()
+            match_ids = {project_id}
+            if p:
+                if p.id: match_ids.add(p.id)
+                if p.flow_project_id: match_ids.add(p.flow_project_id)
+            q = q.filter(VeoImage.project_id.in_(list(match_ids)))
         images = q.order_by(VeoImage.created_at.desc()).limit(100).all()
         return [_model_to_image_item(img) for img in images]
+
+
+def get_image_by_id(image_id: str) -> VeoImage | None:
+    """Lấy thông tin bản ghi ảnh từ SQLite DB."""
+    init_db()
+    with SessionLocal() as db:
+        return db.query(VeoImage).filter(VeoImage.id == image_id).first()
 
 
 def delete_image(image_id: str) -> bool:
@@ -1189,13 +1213,13 @@ def delete_image(image_id: str) -> bool:
 
 
 def get_image_file_path(image_id: str) -> Path | None:
-    """Lấy đường dẫn file ảnh cục bộ."""
+    """Lấy đường dẫn file ảnh cục bộ nếu file đã có trên đĩa."""
     local_file = _VEO_IMAGES_DIR / f"{image_id}.jpg"
-    if local_file.exists():
+    if local_file.exists() and local_file.stat().st_size > 0:
         return local_file
     for ext in (".jpg", ".jpeg", ".png", ".webp"):
         candidate = _VEO_IMAGES_DIR / f"{image_id}{ext}"
-        if candidate.exists():
+        if candidate.exists() and candidate.stat().st_size > 0:
             return candidate
     return None
 

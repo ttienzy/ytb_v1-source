@@ -20,7 +20,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from app.veo import service
 from app.veo.schemas import (
@@ -282,11 +282,17 @@ def list_images(project_id: str | None = None):
 
 @router.get("/images/{image_id}/file")
 def get_image_file(image_id: str):
-    """Stream file ảnh cục bộ."""
+    """Stream file ảnh cục bộ, hoặc redirect sang Google CDN nếu file đang tải ngầm."""
     path = service.get_image_file_path(image_id)
-    if not path or not path.exists():
-        raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tìm thấy trên đĩa")
-    return FileResponse(path, media_type="image/jpeg", filename=f"{image_id}.jpg")
+    if path and path.exists() and path.stat().st_size > 0:
+        return FileResponse(path, media_type="image/jpeg", filename=f"{image_id}.jpg")
+
+    # Nếu file đang tải ngầm, redirect sang CDN để UI hiển thị ảnh ngay lập tức
+    img = service.get_image_by_id(image_id)
+    if img and img.image_url:
+        return RedirectResponse(img.image_url, status_code=307)
+
+    raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tìm thấy trên đĩa")
 
 
 @router.delete("/images/{image_id}")
