@@ -379,7 +379,7 @@ def sync_job_to_drive(job_id: str, force: bool = False):
         if job_id not in _SYNCING_JOBS:
             _SYNCING_JOBS.add(job_id)
             cfg = gdrive_service.get_gdrive_config()
-            target_folder_id = cfg.get("folder_id")
+            target_folder_id = gdrive_service.get_workflow_folder_id("watermark") or cfg.get("folder_id")
             threading.Thread(
                 target=_bg_sync_job_to_drive,
                 args=(job_id, target_folder_id, force),
@@ -419,7 +419,7 @@ def sync_single_video_to_drive(job_id: str, filename: str):
         raise HTTPException(status_code=404, detail=f"Không tìm thấy file sạch của {filename}.")
 
     cfg = gdrive_service.get_gdrive_config()
-    target_folder_id = cfg.get("folder_id")
+    target_folder_id = gdrive_service.get_workflow_folder_id("watermark") or cfg.get("folder_id")
 
     video.drive_status = "uploading"
     try:

@@ -104,7 +104,7 @@ class GDriveClient:
                 self.service.files()
                 .get(
                     fileId=folder_id,
-                    fields="id, name, mimeType, webViewLink, trashed",
+                    fields="id, name, mimeType, webViewLink, trashed, parents",
                 )
                 .execute()
             )
@@ -129,6 +129,20 @@ class GDriveClient:
             "id": f.get("id", ""),
             "name": f.get("name", folder_name),
             "url": f.get("webViewLink", f"https://drive.google.com/drive/folders/{f.get('id')}"),
+        }
+
+    def rename_folder(self, folder_id: str, folder_name: str) -> dict[str, str]:
+        """Đổi tên một folder Google Drive mà không thay đổi vị trí hoặc ID."""
+        self._ensure_valid_token()
+        f = self.service.files().update(
+            fileId=folder_id,
+            body={"name": folder_name.strip()},
+            fields="id, name, webViewLink",
+        ).execute()
+        return {
+            "id": f.get("id", folder_id),
+            "name": f.get("name", folder_name),
+            "url": f.get("webViewLink", f"https://drive.google.com/drive/folders/{folder_id}"),
         }
 
     def get_or_create_default_folder(self, folder_name: str = "AI_Clean_Videos") -> dict[str, str]:

@@ -149,7 +149,7 @@ def _process_single_sync(video: VideoState, job_id: str) -> None:
 
                     client = gdrive_service.get_client()
                     if client:
-                        target_folder = cfg.get("folder_id")
+                        target_folder = gdrive_service.get_workflow_folder_id("watermark") or cfg.get("folder_id")
                         upload_res = client.upload_file_resumable(
                             file_path=out,
                             folder_id=target_folder,
