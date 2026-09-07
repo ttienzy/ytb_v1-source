@@ -161,6 +161,7 @@ class ExtensionInfo(BaseModel):
     tab_count: int = 0
     last_heartbeat: Optional[str] = None
     connected: bool = False
+    tabs: list[dict] = Field(default_factory=list)
 
 
 class AccountInfo(BaseModel):

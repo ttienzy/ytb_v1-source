@@ -150,6 +150,22 @@ def refresh_credits():
     return service.trigger_refresh()
 
 
+@router.post("/extension/reload")
+def reload_extension():
+    """Yêu cầu Extension tự nạp lại mã nguồn mới nhất (chrome.runtime.reload)."""
+    from app.veo import bridge
+    bridge.request_extension_reload()
+    return {"ok": True, "message": "Đã gửi tín hiệu reload tới Extension"}
+
+
+@router.post("/tab/reload")
+def reload_tab(project_id: str = ""):
+    """Yêu cầu Extension làm mới tab Google Flow."""
+    from app.veo import bridge
+    bridge.request_tab_reload(target_project_id=project_id)
+    return {"ok": True, "message": "Đã gửi tín hiệu reload tab"}
+
+
 @router.post("/manual-credentials")
 def save_manual_credentials(req: ManualCredentialRequest):
     """Lưu session cookie/token thủ công từ giao diện Cài đặt."""
@@ -235,6 +251,14 @@ def reload_extension():
     from app.veo import bridge
     bridge.request_extension_reload()
     return {"ok": True, "message": "Extension reload requested"}
+
+
+@router.post("/tab/reload")
+def reload_tab(project_id: str | None = None):
+    """Gửi yêu cầu Extension làm mới tab Google Flow để xóa cờ WAF."""
+    from app.veo import bridge
+    bridge.request_tab_reload(project_id or "")
+    return {"ok": True, "message": "Tab reload queued"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

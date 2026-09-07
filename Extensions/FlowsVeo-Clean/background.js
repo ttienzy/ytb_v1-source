@@ -419,9 +419,13 @@ async function ensureProjectTab(targetProjectId) {
 
   const destinationUrl = `${targetOrigin}${accountPrefix}/project/${targetProjectId}`;
 
-  if (chosenTab) {
+  // ĐẶC BIỆT: Để TRÁNH XUNG ĐỘT với video đang chạy trên tab khác:
+  // Nếu chosenTab đang mở một project khác (/project/...), KHÔNG ghi đè URL của tab đó
+  // vì tab đó có thể đang sinh video hoặc ảnh. Thay vào đó, mở tab mới!
+  const isChosenTabInDifferentProject = chosenTab && chosenTab.url && /\/project\/[a-zA-Z0-9_-]+/.test(chosenTab.url);
+  if (chosenTab && !isChosenTabInDifferentProject) {
     try {
-      logActivity('info', `Navigating existing Flow tab ${chosenTab.id} to project ${targetProjectId}`);
+      logActivity('info', `Navigating existing idle Flow tab ${chosenTab.id} to project ${targetProjectId}`);
       await chrome.tabs.update(chosenTab.id, { url: destinationUrl, active: true });
       if (chosenTab.windowId) {
         await chrome.windows.update(chosenTab.windowId, { focused: true }).catch(() => {});
@@ -554,8 +558,9 @@ async function solveRecaptcha(request) {
   ensureHarvestCfg();
   if (!harvestCfg.c) return { token: null, error: 'Captcha config not loaded' };
 
-  // Tìm hoặc mở tab
-  let tabId = await findLabsTab();
+  // Tìm hoặc mở tab (ưu tiên đúng project của request)
+  const targetPid = request?.target_project_id || request?.image_request?.project_id || request?.flow_request?.project_id || request?.project_id || null;
+  let tabId = await findLabsTab(targetPid);
   const deadline = Date.now() + 15_000;
   while (!tabId && Date.now() < deadline) {
     tabId = await openLabsTab();
@@ -563,14 +568,37 @@ async function solveRecaptcha(request) {
   }
   if (!tabId) return { token: null, error: 'No labs tab (15s timeout)' };
 
+  // Kích hoạt active tab và window để trang có context người dùng hợp lệ
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    if (t?.windowId) {
+      await chrome.windows.update(t.windowId, { focused: true }).catch(() => {});
+    }
+  } catch { }
+
   const page = await warmUpRecaptcha(tabId);
   const siteKey = request.site_key || request.recaptcha_ent_key || page.siteKey || '';
   logActivity('info', `Captcha preflight: tab=${tabId} module=${!!page.moduleReady} keySource=${page.keySource || 'none'}`);
   if (!page.moduleReady) return { token: null, error: page.error };
-  let action = request.captcha_action || request.action || harvestCfg.c?.da || 'submit';
-  if (action === 'IMAGE_GENERATION' || action === 'SWITCH_PROJECT' || action === 'CREATE_PROJECT') {
-    action = 'submit';
+
+  // Trích xuất action chính xác cho Google Flow reCAPTCHA Enterprise:
+  // - Image generation yêu cầu: "IMAGE_GENERATION"
+  // - Video generation yêu cầu: "VIDEO_GENERATION"
+  // Tuyệt đối không tự gán "submit" bừa bãi khi Flow yêu cầu action cụ thể.
+  let action = '';
+  if (request.captcha_action && typeof request.captcha_action === 'string') {
+    action = request.captcha_action.trim();
+  } else if (request.action && typeof request.action === 'string') {
+    const act = request.action.trim();
+    if (act === 'IMAGE_GENERATION' || act === 'VIDEO_GENERATION' || act === 'USER_GENERATION') {
+      action = act;
+    }
+  } else if (harvestCfg.c?.da) {
+    action = String(harvestCfg.c.da).trim();
   }
+
+  logActivity('info', `solveRecaptcha: tab=${tabId} siteKey=${siteKey ? siteKey.slice(0, 10) + '...' : 'none'} action=${action ? `"${action}"` : 'none'}`);
 
   try {
     const results = await chrome.scripting.executeScript({
@@ -589,7 +617,10 @@ async function solveRecaptcha(request) {
             );
           });
           await withTimeout(new Promise((r) => module[cfg.s].ready(r)), 5000, 'reCAPTCHA ready callback timed out');
-          const token = await withTimeout(module[cfg.s].execute(siteKey, { action }), 10000, 'reCAPTCHA execute timed out');
+          const executePromise = (action && action.trim())
+            ? module[cfg.s].execute(siteKey, { action })
+            : module[cfg.s].execute(siteKey);
+          const token = await withTimeout(executePromise, 10000, 'reCAPTCHA execute timed out');
           return { token, error: null };
         } catch (e) {
           return { token: null, error: e.message || String(e) };
@@ -598,6 +629,11 @@ async function solveRecaptcha(request) {
       args: [harvestCfg.c, siteKey, action],
     });
     const res = results?.[0]?.result;
+    if (res?.token) {
+      logActivity('info', `solveRecaptcha success: tokenLen=${res.token.length} prefix=${res.token.slice(0, 20)}...`);
+    } else if (res?.error) {
+      logActivity('warn', `solveRecaptcha error: ${res.error}`);
+    }
     if (res) return res;
     return { token: null, error: 'No script result' };
   } catch (e) {
@@ -1465,7 +1501,7 @@ async function runImageGenerationInPage(imageRequest, captchaToken) {
         } catch { }
       }
       if (rpcError && rpcError.includes('PUBLIC_ERROR_UNUSUAL_ACTIVITY')) {
-        rpcError = 'Google Flow tạm thời giới hạn do phát hiện nhiều yêu cầu liên tiếp (PUBLIC_ERROR_UNUSUAL_ACTIVITY). Vui lòng nhấn F5 tải lại tab Google Flow trên trình duyệt và thử lại sau 30 giây.';
+        rpcError = `[DEBUG_UNUSUAL_ACTIVITY] ${rpcError}`;
       }
       const preview = text.length > 250 ? text.slice(0, 250) + '...' : text;
       throw new Error(rpcError || `Flow RPC ${rpcId} returned no usable payload. Response: ${preview}`);
@@ -1649,7 +1685,10 @@ async function generateFlowImage(imageRequest, captchaToken) {
       target: { tabId }, world: 'MAIN', func: runImageGenerationInPage,
       args: [imageRequest, captchaToken],
     });
-    return injected?.[0]?.result || { ok: false, error: 'Flow page returned no image result' };
+    if (injected?.[0]?.result) {
+      return injected[0].result;
+    }
+    return { ok: false, error: 'Flow page returned no image result (trang bị tải lại hoặc mất ngữ cảnh)' };
   } catch (error) {
     return { ok: false, error: `Cannot execute Flow Image adapter: ${error.message}` };
   }
@@ -1664,6 +1703,7 @@ async function postImageResponse(requestId, result) {
         request_id: requestId,
         result: result?.ok ? result : null,
         error: result?.ok ? null : (result?.error || 'Unknown Image error'),
+        logs: activityLog.slice(-10),
       }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -1906,28 +1946,40 @@ async function processCaptchaRequest(request) {
   }
   if (request.action === 'IMAGE_GENERATION') {
     logActivity('info', `Flow Image generation requested: ${request.request_id?.slice(0, 8)}`);
-    (async () => {
+    const targetPid = request.image_request?.project_id || request.project_id || null;
+    if (targetPid) {
       try {
-        let result = await solveRecaptcha({ ...request, action: 'submit' });
-        if (!result.token && result.error?.includes('not ready')) {
-          await sleep(3_000);
-          result = await solveRecaptcha({ ...request, action: 'submit' });
-        }
-        if (!result.token) {
-          onCaptchaFail();
-          await postImageResponse(request.request_id, { ok: false, error: result.error || 'reCAPTCHA failed' });
-          return;
-        }
-        onCaptchaSuccess();
-        const imgResult = await generateFlowImage(request.image_request, result.token);
-        await postImageResponse(request.request_id, imgResult);
-        logActivity(imgResult.ok ? 'info' : 'warn', imgResult.ok
-          ? `Image generation completed: ${imgResult.images?.length || 0} images`
-          : `Image generation failed: ${imgResult.error}`);
+        await ensureProjectTab(targetPid);
       } catch (e) {
-        await postImageResponse(request.request_id, { ok: false, error: e?.message || 'Image generation error' });
+        logActivity('warn', `ensureProjectTab pre-flight error: ${e.message}`);
       }
-    })();
+    }
+    try {
+      let result = await solveRecaptcha({ ...request, target_project_id: targetPid, captcha_action: 'IMAGE_GENERATION' });
+      if (!result.token && result.error?.includes('not ready')) {
+        await sleep(3_000);
+        result = await solveRecaptcha({ ...request, target_project_id: targetPid, captcha_action: 'IMAGE_GENERATION' });
+      }
+      if (!result.token) {
+        onCaptchaFail();
+        await postImageResponse(request.request_id, { ok: false, error: result.error || 'reCAPTCHA failed' });
+        return;
+      }
+      onCaptchaSuccess();
+      const imgResult = await generateFlowImage(request.image_request, result.token);
+      await postImageResponse(request.request_id, imgResult);
+      logActivity(imgResult.ok ? 'info' : 'warn', imgResult.ok
+        ? `Image generation completed: ${imgResult.images?.length || 0} images`
+        : `Image generation failed: ${imgResult.error}`);
+    } catch (e) {
+      await postImageResponse(request.request_id, { ok: false, error: e?.message || 'Image generation error' });
+    }
+    return;
+  }
+  if (request.action === 'RELOAD_TAB') {
+    logActivity('info', 'Reload tab requested by bridge');
+    const tid = await findLabsTab(request.target_project_id);
+    if (tid) await prepareCaptchaFresh(tid);
     return;
   }
   if (request.flow_recovery) {
@@ -2089,6 +2141,7 @@ async function sendHeartbeat() {
         ext_fp: extFp,
         version: manifest.version || '?',
         tab_count: tabs.length,
+        tabs: tabs.map((t) => ({ id: t.id, url: t.url })),
         user_agent: navigator.userAgent.slice(0, 120),
       }),
       signal: AbortSignal.timeout(5_000),

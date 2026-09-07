@@ -61,14 +61,14 @@ _harvest_config: dict[str, Any] = {
     "c": {
         "m": "grecaptcha",
         "s": "enterprise",
-        "da": "submit",
+        "da": "",
         "g": "___grecaptcha_cfg",
         "k": "clients",
         "p": "sitekey",
         "q": "script[src*=\"enterprise.js\"]",
     },
 }
-_config_version: str = "1.0"
+_config_version: str = "1.1"
 
 # Credentials pool: email → credential data
 _credentials_pool: dict[str, dict[str, Any]] = {}
@@ -238,6 +238,7 @@ def request_generate_image(image_request: dict[str, Any]) -> str | None:
         _captcha_pending.put_nowait({
             "request_id": request_id,
             "action": "IMAGE_GENERATION",
+            "captcha_action": "IMAGE_GENERATION",
             "image_request": image_request,
             "created_at": time.time(),
         })
@@ -302,6 +303,19 @@ def request_extension_reload() -> None:
     """Yêu cầu Extension tự gọi chrome.runtime.reload() qua hàng đợi poll."""
     try:
         _captcha_pending.put_nowait({"reload": True})
+    except Exception:
+        pass
+
+
+def request_tab_reload(target_project_id: str = "") -> None:
+    """Yêu cầu Extension làm mới tab Google Flow để xóa cờ WAF."""
+    try:
+        _captcha_pending.put_nowait({
+            "request_id": secrets.token_hex(16),
+            "action": "RELOAD_TAB",
+            "target_project_id": target_project_id,
+            "timestamp": time.time(),
+        })
     except Exception:
         pass
 
@@ -555,10 +569,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             request_id = data.get("request_id", "")
             if request_id:
+                if data.get("logs"):
+                    logger.info("Extension logs for %s: %s", request_id[:8], data.get("logs"))
                 with _bridge_lock:
                     _image_results[request_id] = {
                         "result": data.get("result"),
                         "error": data.get("error"),
+                        "logs": data.get("logs"),
                         "received_at": time.time(),
                     }
             self._send_json({"ok": True})
@@ -585,6 +602,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 _extension_info["ext_fp"] = data.get("ext_fp", "")
                 _extension_info["version"] = data.get("version", "")
                 _extension_info["tab_count"] = data.get("tab_count", 0)
+                _extension_info["tabs"] = data.get("tabs", [])
                 _extension_info["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
                 _extension_info["connected"] = True
             self._send_json({"ok": True})

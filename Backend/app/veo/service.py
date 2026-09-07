@@ -1069,9 +1069,11 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
 
     for i in range(count):
         if i > 0:
-            # Google Flow official cadence: ~1s delay giữa các biến thể
-            import time as _t
-            _t.sleep(1.0)
+            # Google Flow safe cadence: giãn cách 3.5s - 4.5s giữa các biến thể kèm jitter để tránh WAF trigger PUBLIC_ERROR_UNUSUAL_ACTIVITY
+            import random, time as _t
+            cadence_delay = random.uniform(3.5, 4.5)
+            logger.info("Image variation cadence delay: %.2fs (variation #%d)", cadence_delay, i + 1)
+            _t.sleep(cadence_delay)
 
         variation_seed = (req.seed + i) if req.seed else None
         flow_request = {
@@ -1102,6 +1104,9 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
                 or (bridge_res.get("result") and bridge_res["result"].get("error"))
                 or "Lỗi không xác định"
             )
+            logs = bridge_res.get("logs") or []
+            if logs:
+                logger.warning("Variation #%d failed with logs: %s", i + 1, logs)
             errors.append(f"Biến thể #{i + 1}: {err}")
             continue
 
