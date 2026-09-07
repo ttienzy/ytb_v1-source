@@ -175,8 +175,12 @@ export interface BatchSceneItem {
   progressStep?: string
 }
 
+export type ScriptSplitMode = 'by_video' | 'by_scene'
+
 export interface ScriptParseOptions {
+  splitMode?: ScriptSplitMode
   autoDuration: boolean
   ignoreAudioText: boolean
   includeTitlePrefix: boolean
 }
+

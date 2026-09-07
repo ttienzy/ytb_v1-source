@@ -8,10 +8,10 @@ import {
   Play,
   RotateCcw,
   CheckCircle2,
-  Clock,
   AlertCircle,
   Settings2,
   FileCode,
+  Loader2,
 } from 'lucide-react'
 import type { BatchSceneItem, ScriptParseOptions } from '../types'
 import { parseScript, getSampleScript } from '../utils/scriptParser'
@@ -36,17 +36,27 @@ export function BatchScriptEditor({
   const [rawText, setRawText] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [options, setOptions] = useState<ScriptParseOptions>({
+    splitMode: 'by_video',
     autoDuration: true,
-    ignoreAudioText: true,
+    ignoreAudioText: false,
     includeTitlePrefix: true,
   })
 
   // Thực hiện phân tách kịch bản
-  const handleParse = (textToParse = rawText) => {
+  const handleParse = (textToParse = rawText, currentOpts = options) => {
     if (!textToParse.trim()) return
-    const result = parseScript(textToParse, defaultDuration, options)
+    const result = parseScript(textToParse, defaultDuration, currentOpts)
     if (result.scenes.length > 0) {
       onScenesChange(result.scenes)
+    }
+  }
+
+  // Chuyển đổi nhanh chế độ phân tách
+  const handleModeChange = (mode: 'by_video' | 'by_scene') => {
+    const nextOpts: ScriptParseOptions = { ...options, splitMode: mode }
+    setOptions(nextOpts)
+    if (rawText.trim()) {
+      handleParse(rawText, nextOpts)
     }
   }
 
@@ -54,7 +64,7 @@ export function BatchScriptEditor({
   const handleLoadSample = () => {
     const sample = getSampleScript()
     setRawText(sample)
-    handleParse(sample)
+    handleParse(sample, options)
   }
 
   // Xóa trắng
@@ -158,39 +168,76 @@ export function BatchScriptEditor({
           </div>
         </div>
 
+        {/* Thanh chọn nhanh chế độ phân tách */}
+        <div className="veo-split-mode-bar">
+          <span className="veo-split-mode-label">Chế độ phân tách:</span>
+          <div className="veo-split-mode-options">
+            <button
+              type="button"
+              className={`veo-mode-btn ${options.splitMode !== 'by_scene' ? 'active' : ''}`}
+              onClick={() => handleModeChange('by_video')}
+              title="Mỗi món/mục kịch bản thành 1 video hoàn chỉnh (giữ nguyên toàn bộ text mô tả)"
+            >
+              Video hoàn chỉnh (1 Prompt / video)
+            </button>
+            <button
+              type="button"
+              className={`veo-mode-btn ${options.splitMode === 'by_scene' ? 'active' : ''}`}
+              onClick={() => handleModeChange('by_scene')}
+              title="Tách từng mốc thời gian (0:00-0:02, 0:02-0:08) thành từng cảnh riêng biệt"
+            >
+              Phân cảnh Timeline (1 Prompt / shot)
+            </button>
+          </div>
+        </div>
+
         {showOptions && (
           <div className="veo-parser-options">
             <label className="veo-option-checkbox">
               <input
                 type="checkbox"
-                checked={options.autoDuration}
-                onChange={(e) => setOptions({ ...options, autoDuration: e.target.checked })}
-              />
-              <span>Tự động khớp thời lượng (4s/6s/8s/10s) theo mốc timestamp (0:00-0:02)</span>
-            </label>
-            <label className="veo-option-checkbox">
-              <input
-                type="checkbox"
                 checked={options.ignoreAudioText}
-                onChange={(e) => setOptions({ ...options, ignoreAudioText: e.target.checked })}
+                onChange={(e) => {
+                  const next = { ...options, ignoreAudioText: e.target.checked }
+                  setOptions(next)
+                  if (rawText.trim()) handleParse(rawText, next)
+                }}
               />
-              <span>Tự động bỏ qua các dòng mô tả âm thanh/chữ (Text:, Music:, Audio:)</span>
+              <span>Lọc bỏ các dòng Text:, Music: (Mặc định tắt để giữ nguyên 100% text kịch bản)</span>
             </label>
             <label className="veo-option-checkbox">
               <input
                 type="checkbox"
-                checked={options.includeTitlePrefix}
-                onChange={(e) => setOptions({ ...options, includeTitlePrefix: e.target.checked })}
+                checked={options.autoDuration}
+                onChange={(e) => {
+                  const next = { ...options, autoDuration: e.target.checked }
+                  setOptions(next)
+                  if (rawText.trim()) handleParse(rawText, next)
+                }}
               />
-              <span>Gắn tiêu đề chủ đề (vd: "Grilled Lamb Chops:") vào đầu mỗi prompt</span>
+              <span>Tự động khớp thời lượng (4s/6s/8s/10s) theo mốc timestamp kịch bản</span>
             </label>
+            {options.splitMode === 'by_scene' && (
+              <label className="veo-option-checkbox">
+                <input
+                  type="checkbox"
+                  checked={options.includeTitlePrefix}
+                  onChange={(e) => {
+                    const next = { ...options, includeTitlePrefix: e.target.checked }
+                    setOptions(next)
+                    if (rawText.trim()) handleParse(rawText, next)
+                  }}
+                />
+                <span>Gắn tên món/chủ đề vào đầu mỗi prompt phân cảnh</span>
+              </label>
+            )}
           </div>
         )}
 
         <textarea
           className="veo-textarea veo-script-textarea"
           rows={5}
-          placeholder={`Dán kịch bản của bạn vào đây, ví dụ:\n48. Grilled Lamb Chops\n• 0:00–0:02: Lamb chops seasoned with rosemary, garlic...\n• 0:02–0:08: Chops dropped onto the sizzling grill...`}
+          placeholder="// Dán kịch bản vào đây (Mỗi video bắt đầu bằng số thứ tự như: 1., 2., 49., 50...)"
           value={rawText}
           onChange={(e) => setRawText(e.target.value)}
           disabled={disabled}
@@ -204,7 +251,9 @@ export function BatchScriptEditor({
             disabled={disabled || !rawText.trim()}
           >
             <Sparkles size={14} />
-            Phân tách thành các cảnh ({scenes.length} cảnh)
+            {options.splitMode === 'by_scene'
+              ? `Phân tách phân cảnh (${scenes.length} cảnh)`
+              : `Phân tách kịch bản (${scenes.length} video)`}
           </button>
         </div>
       </div>
@@ -213,7 +262,9 @@ export function BatchScriptEditor({
       <div className="veo-scenes-container">
         <div className="veo-scenes-head">
           <span className="veo-scenes-title">
-            Danh sách phân cảnh ({scenes.length} cảnh)
+            {options.splitMode === 'by_scene'
+              ? `Danh sách phân cảnh (${scenes.length} cảnh)`
+              : `Danh sách video kịch bản (${scenes.length} video)`}
           </span>
           <button
             type="button"
@@ -246,26 +297,6 @@ export function BatchScriptEditor({
                   <div className="veo-scene-card-header">
                     <div className="veo-scene-badge-group">
                       <span className="veo-scene-num">#{scene.sceneNumber}</span>
-                      {scene.timecode && (
-                        <span className="veo-scene-timecode" title="Mốc thời gian trong kịch bản">
-                          <Clock size={11} /> {scene.timecode}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Chọn thời lượng riêng cho cảnh */}
-                    <div className="veo-scene-duration-pills">
-                      {[4, 6, 8, 10].map((dur) => (
-                        <button
-                          key={dur}
-                          type="button"
-                          className={`veo-scene-dur-pill ${scene.durationSeconds === dur ? 'active' : ''}`}
-                          onClick={() => handleDurationChange(scene.id, dur)}
-                          disabled={disabled || isRunning}
-                        >
-                          {dur}s
-                        </button>
-                      ))}
                     </div>
 
                     {/* Trạng thái card */}
@@ -274,16 +305,16 @@ export function BatchScriptEditor({
                         <span className="veo-status-tag idle">Sẵn sàng</span>
                       )}
                       {scene.status === 'queued' && (
-                        <span className="veo-status-tag queued">Đang chờ...</span>
+                        <span className="veo-status-tag queued">Đang chờ</span>
                       )}
                       {scene.status === 'running' && (
                         <span className="veo-status-tag running">
-                          <span className="spin">🔄</span> Luồng #{scene.workerId || 1}
+                          <Loader2 size={11} className="spin" /> Luồng #{scene.workerId || 1}
                         </span>
                       )}
                       {scene.status === 'done' && (
                         <span className="veo-status-tag done">
-                          <CheckCircle2 size={12} /> Xong
+                          <CheckCircle2 size={12} /> Đã xong
                         </span>
                       )}
                       {scene.status === 'error' && (
@@ -340,9 +371,9 @@ export function BatchScriptEditor({
                   <div className="veo-scene-card-body">
                     <textarea
                       className="veo-scene-textarea"
-                      rows={2}
+                      rows={options.splitMode === 'by_scene' ? 2 : 5}
                       value={scene.prompt}
-                      placeholder="Mô tả cảnh quay video..."
+                      placeholder={options.splitMode === 'by_scene' ? 'Mô tả cảnh quay video...' : 'Mô tả toàn bộ video (giữ nguyên kịch bản gốc)...'}
                       onChange={(e) => handlePromptChange(scene.id, e.target.value)}
                       disabled={disabled || isRunning}
                     />

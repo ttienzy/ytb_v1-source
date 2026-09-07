@@ -97,6 +97,18 @@ export function TextToVideoTab({
     if (first) setProfileId(first.id)
   }
 
+  const handleGlobalDurationChange = (d: number) => {
+    if (!selectedProfile) return
+    selectProfile(
+      (p) =>
+        p.model_display_name === selectedProfile.model_display_name &&
+        p.aspect_ratio === selectedProfile.aspect_ratio &&
+        p.duration_seconds === d &&
+        p.resolution === selectedProfile.resolution,
+    )
+    setScenes((prev) => prev.map((s) => ({ ...s, durationSeconds: d })))
+  }
+
   // Submit đơn lẻ
   const handleSubmitSingle = () => {
     if (!prompt.trim() || !activeProject || !selectedProfile) return
@@ -117,15 +129,14 @@ export function TextToVideoTab({
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
   const updateScene = (id: string, patch: Partial<BatchSceneItem>) => {
-    setScenes((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
-    )
+    scenesRef.current = scenesRef.current.map((s) => (s.id === id ? { ...s, ...patch } : s))
+    setScenes([...scenesRef.current])
   }
 
   const updateWorkerSlot = (workerId: number, sceneNumber?: number, step?: string) => {
     setActiveWorkers((prev) => {
       const filtered = prev.filter((w) => w.workerId !== workerId)
-      return [...filtered, { workerId, sceneNumber, step }]
+      return [...filtered, { workerId, sceneNumber, step }].sort((a, b) => a.workerId - b.workerId)
     })
   }
 
@@ -137,101 +148,160 @@ export function TextToVideoTab({
     setIsBatchRunning(true)
     setIsBatchPaused(false)
 
-    // Đánh dấu các cảnh idle hoặc error thành queued
-    setScenes((prev) =>
-      prev.map((s) => (s.status === 'idle' || s.status === 'error' ? { ...s, status: 'queued', error: undefined } : s)),
+    // Đánh dấu các cảnh idle hoặc error thành queued, đồng bộ ngay lập tức vào scenesRef.current
+    const queuedScenes = scenesRef.current.map((s) =>
+      s.status === 'idle' || s.status === 'error'
+        ? { ...s, status: 'queued' as const, error: undefined, progressStep: undefined, workerId: undefined }
+        : s,
     )
+    scenesRef.current = queuedScenes
+    setScenes(queuedScenes)
 
-    // Khởi tạo active workers array
+    // Khởi tạo các slot worker (1 .. concurrency)
     setActiveWorkers(
       Array.from({ length: concurrency }).map((_, i) => ({ workerId: i + 1 })),
     )
 
-    const runWorker = async (workerId: number) => {
-      while (!stopRequestedRef.current) {
-        if (pausedRef.current) {
-          await sleep(1000)
-          continue
-        }
+    // Quản lý các slot đang xử lý trên Cloud (workerId -> sceneId)
+    const activeSlots = new Map<number, string>()
 
-        // Tìm cảnh queued tiếp theo từ ref mới nhất
-        const currentScenes = scenesRef.current
-        const nextScene = currentScenes.find((s) => s.status === 'queued')
+    const getFreeWorkerSlot = (): number | null => {
+      for (let i = 1; i <= concurrency; i++) {
+        if (!activeSlots.has(i)) return i
+      }
+      return null
+    }
 
-        if (!nextScene) {
-          // Hết cảnh trong hàng đợi
-          break
-        }
+    // ── TRACKER BẤT ĐỒNG BỘ: Theo dõi tiến độ render của từng cảnh độc lập ──
+    const trackScene = async (sceneId: string, sceneNumber: number, jobId: string, workerId: number) => {
+      try {
+        let finalJob: VeoJobOut | null = null
+        while (!stopRequestedRef.current) {
+          if (pausedRef.current) {
+            await sleep(1500)
+            continue
+          }
 
-        // Đánh dấu cảnh đang chạy trên worker này
-        updateScene(nextScene.id, {
-          status: 'running',
-          workerId,
-          progressStep: 'Đang gửi yêu cầu tạo video...',
-        })
-        updateWorkerSlot(workerId, nextScene.sceneNumber, 'Đang gửi yêu cầu...')
+          await sleep(2500)
+          const polled = await api.getJobStatus(jobId)
+          if (polled) {
+            finalJob = polled
+            updateScene(sceneId, { progressStep: polled.current_step })
+            updateWorkerSlot(workerId, sceneNumber, polled.current_step)
 
-        try {
-          const job = await api.submitJob({
-            project_id: activeProject.id,
-            prompt: nextScene.prompt,
-            model_display_name: selectedProfile.model_display_name,
-            input_mode: selectedProfile.input_mode,
-            aspect_ratio: selectedProfile.aspect_ratio,
-            duration_seconds: nextScene.durationSeconds,
-            resolution: selectedProfile.resolution,
-            num_outputs: selectedProfile.num_outputs,
-          })
-
-          updateScene(nextScene.id, {
-            jobId: job.job_id,
-            progressStep: job.current_step || 'Đã tạo job, đang giải CAPTCHA...',
-          })
-          updateWorkerSlot(workerId, nextScene.sceneNumber, job.current_step)
-
-          // Polling job cho đến khi xong hoặc lỗi
-          let finalJob: VeoJobOut = job
-          while (!stopRequestedRef.current && finalJob.status !== 'done' && finalJob.status !== 'error') {
-            await sleep(2500)
-            const polled = await api.getJobStatus(job.job_id)
-            if (polled) {
-              finalJob = polled
-              updateScene(nextScene.id, { progressStep: polled.current_step })
-              updateWorkerSlot(workerId, nextScene.sceneNumber, polled.current_step)
+            if (polled.status === 'done' || polled.status === 'error') {
+              break
             }
           }
+        }
 
-          if (finalJob.status === 'done') {
-            updateScene(nextScene.id, {
-              status: 'done',
-              progressStep: 'Hoàn tất',
-              videoUrl: finalJob.output_files?.[0],
-            })
-            onBatchVideoDone?.()
-          } else {
-            updateScene(nextScene.id, {
-              status: 'error',
-              error: finalJob.error_message || 'Tạo video thất bại',
-              progressStep: 'Lỗi',
-            })
-          }
-        } catch (err: any) {
-          updateScene(nextScene.id, {
+        if (finalJob?.status === 'done') {
+          updateScene(sceneId, {
+            status: 'done',
+            progressStep: 'Hoàn tất',
+            videoUrl: finalJob.output_files?.[0],
+          })
+          onBatchVideoDone?.()
+        } else if (finalJob?.status === 'error') {
+          updateScene(sceneId, {
             status: 'error',
-            error: err.message || 'Lỗi kết nối API',
+            error: finalJob.error_message || 'Tạo video thất bại',
             progressStep: 'Lỗi',
           })
-        } finally {
-          updateWorkerSlot(workerId, undefined, undefined)
-          // Delay an toàn 2s trước khi lấy cảnh tiếp theo
-          await sleep(2000)
         }
+      } catch (err: any) {
+        updateScene(sceneId, {
+          status: 'error',
+          error: err.message || 'Lỗi kiểm tra trạng thái video',
+          progressStep: 'Lỗi',
+        })
+      } finally {
+        // Giải phóng slot ngay lập tức khi job hoàn tất hoặc lỗi
+        activeSlots.delete(workerId)
+        updateWorkerSlot(workerId, undefined, undefined)
       }
     }
 
-    // Chạy song song N worker
-    const workerPromises = Array.from({ length: concurrency }).map((_, i) => runWorker(i + 1))
-    await Promise.all(workerPromises)
+    // ── DISPATCHER: Điều phối gửi lệnh theo mô hình cửa sổ trượt (Sliding Window) ──
+    const trackingPromises: Promise<void>[] = []
+
+    while (!stopRequestedRef.current) {
+      if (pausedRef.current) {
+        await sleep(1000)
+        continue
+      }
+
+      // Tìm cảnh queued tiếp theo từ ref mới nhất
+      const currentScenes = scenesRef.current
+      const nextScene = currentScenes.find((s) => s.status === 'queued')
+
+      // Nếu không còn cảnh nào queued
+      if (!nextScene) {
+        // Nếu tất cả các job đang render trên Cloud cũng đã xong -> Kết thúc toàn bộ batch!
+        if (activeSlots.size === 0) {
+          break
+        }
+        // Còn job đang render trên Cloud -> Đợi 1s rồi kiểm tra lại
+        await sleep(1000)
+        continue
+      }
+
+      // Tìm slot luồng còn trống (dựa theo concurrency)
+      const freeWorkerId = getFreeWorkerSlot()
+      if (freeWorkerId === null) {
+        // Các slot Cloud đều đang bận render -> Chờ 1s cho có slot giải phóng
+        await sleep(1000)
+        continue
+      }
+
+      // Giữ chỗ slot cho cảnh này ngay lập tức để không bị tranh chấp
+      activeSlots.set(freeWorkerId, nextScene.id)
+
+      updateScene(nextScene.id, {
+        status: 'running',
+        workerId: freeWorkerId,
+        progressStep: 'Đang gửi yêu cầu (giải CAPTCHA)...',
+      })
+      updateWorkerSlot(freeWorkerId, nextScene.sceneNumber, 'Đang gửi yêu cầu...')
+
+      try {
+        const job = await api.submitJob({
+          project_id: activeProject.id,
+          prompt: nextScene.prompt,
+          model_display_name: selectedProfile.model_display_name,
+          input_mode: selectedProfile.input_mode,
+          aspect_ratio: selectedProfile.aspect_ratio,
+          duration_seconds: nextScene.durationSeconds,
+          resolution: selectedProfile.resolution,
+          num_outputs: selectedProfile.num_outputs,
+        })
+
+        updateScene(nextScene.id, {
+          jobId: job.job_id,
+          progressStep: job.current_step || 'Flow đã nhận token; đang tạo video...',
+        })
+        updateWorkerSlot(freeWorkerId, nextScene.sceneNumber, job.current_step || 'Đang tạo video trên Cloud...')
+
+        // Kích hoạt theo dõi bất đồng bộ trong background (Không chặn vòng lặp gửi lệnh)
+        const trackerPromise = trackScene(nextScene.id, nextScene.sceneNumber, job.job_id, freeWorkerId)
+        trackingPromises.push(trackerPromise)
+
+        // Giãn cách an toàn 2.5s trước khi gửi cảnh tiếp theo để tránh rate-limit reCAPTCHA
+        await sleep(2500)
+      } catch (err: any) {
+        activeSlots.delete(freeWorkerId)
+        updateWorkerSlot(freeWorkerId, undefined, undefined)
+        updateScene(nextScene.id, {
+          status: 'error',
+          error: err.message || 'Lỗi kết nối API khi gửi job',
+          progressStep: 'Lỗi',
+        })
+        await sleep(2000)
+      }
+    }
+
+    // Chờ tất cả các tracker còn lại hoàn tất
+    await Promise.allSettled(trackingPromises)
 
     setIsBatchRunning(false)
     setIsBatchPaused(false)
@@ -301,7 +371,7 @@ export function TextToVideoTab({
           disabled={isBatchRunning}
         >
           <FileEdit size={14} />
-          <span>⚡ Tạo Đơn Lẻ</span>
+          <span>Tạo Đơn Lẻ</span>
         </button>
         <button
           type="button"
@@ -310,41 +380,44 @@ export function TextToVideoTab({
           disabled={isBatchRunning}
         >
           <Layers size={14} />
-          <span>📑 Kịch Bản Phân Cảnh (Đa Luồng)</span>
+          <span>Soạn Thảo Kịch Bản (Batch Studio)</span>
           {scenes.length > 0 && (
             <span className="veo-mode-counter">{scenes.length}</span>
           )}
         </button>
       </div>
 
-      {/* Model selector */}
+      {/* Model selector (Dropdown) */}
       {modelNames.length > 0 && (
-        <>
-          <label className="veo-label">Model Video</label>
-          <div className="veo-model-grid">
+        <div className="veo-model-select-row">
+          <div className="veo-model-select-header">
+            <label className="veo-label" htmlFor="veo-t2v-model-select">Model Video</label>
+            {selectedProfile?.credit_cost != null && (
+              <span className="veo-credit-tag">
+                {selectedProfile.credit_cost} credits / lần tạo
+              </span>
+            )}
+          </div>
+          <select
+            id="veo-t2v-model-select"
+            className="veo-select veo-model-dropdown"
+            value={selectedProfile?.model_display_name || ''}
+            onChange={(e) => selectModel(e.target.value)}
+            disabled={isBatchRunning}
+          >
             {modelNames.map((modelName) => {
               const repProfile = profiles.find(
                 (p) => p.model_display_name === modelName && p.resolution === '720p',
               ) || profiles.find((p) => p.model_display_name === modelName)
-              const isActive = selectedProfile?.model_display_name === modelName
+              const cost = repProfile?.credit_cost != null ? `${repProfile.credit_cost} credits` : '—'
               return (
-                <button
-                  key={modelName}
-                  type="button"
-                  className={`veo-model-btn ${isActive ? 'active' : ''}`}
-                  aria-pressed={isActive}
-                  onClick={() => selectModel(modelName)}
-                  disabled={isBatchRunning}
-                >
-                  <span>{modelName}</span>
-                  <small>
-                    {repProfile?.credit_cost != null ? `${repProfile.credit_cost} credits` : '—'}
-                  </small>
-                </button>
+                <option key={modelName} value={modelName}>
+                  {modelName} ({cost})
+                </option>
               )
             })}
-          </div>
-        </>
+          </select>
+        </div>
       )}
 
       {/* CHẾ ĐỘ 1: TẠO ĐƠN LẺ */}
@@ -483,54 +556,60 @@ export function TextToVideoTab({
       {/* CHẾ ĐỘ 2: KỊCH BẢN PHÂN CẢNH & ĐA LUỒNG */}
       {mode === 'batch' && selectedProfile && (
         <>
-          {/* Cấu hình dùng chung: Tỉ lệ & Độ phân giải */}
-          <div className="veo-batch-settings-grid">
-            <div>
-              <label className="veo-label">Tỉ lệ khung hình chung</label>
-              <div className="veo-aspect-row">
-                <button
-                  type="button"
-                  className={`veo-aspect-btn ${selectedProfile.aspect_ratio === '16:9' ? 'active' : ''}`}
-                  onClick={() =>
-                    selectProfile(
-                      (p) =>
-                        p.model_display_name === selectedProfile.model_display_name &&
-                        p.aspect_ratio === '16:9' &&
-                        p.duration_seconds === selectedProfile.duration_seconds &&
-                        p.resolution === selectedProfile.resolution,
-                    )
-                  }
-                  disabled={!aspectRatios.includes('16:9') || isBatchRunning}
-                >
-                  <span className="veo-aspect-icon landscape" /> 16:9
-                </button>
-                <button
-                  type="button"
-                  className={`veo-aspect-btn ${selectedProfile.aspect_ratio === '9:16' ? 'active' : ''}`}
-                  onClick={() =>
-                    selectProfile(
-                      (p) =>
-                        p.model_display_name === selectedProfile.model_display_name &&
-                        p.aspect_ratio === '9:16' &&
-                        p.duration_seconds === selectedProfile.duration_seconds &&
-                        p.resolution === selectedProfile.resolution,
-                    )
-                  }
-                  disabled={!aspectRatios.includes('9:16') || isBatchRunning}
-                >
-                  <span className="veo-aspect-icon portrait" /> 9:16
-                </button>
+          {/* Studio Control Ribbon: Tỉ lệ, Độ phân giải, Concurrency */}
+          <div className="veo-studio-ribbon">
+            <div className="veo-ribbon-item">
+              <span className="veo-ribbon-label">Tỉ lệ:</span>
+              <div className="veo-segmented-control">
+                {aspectRatios.map((ar) => (
+                  <button
+                    key={ar}
+                    type="button"
+                    className={`veo-segment-btn ${selectedProfile.aspect_ratio === ar ? 'active' : ''}`}
+                    onClick={() =>
+                      selectProfile(
+                        (p) =>
+                          p.model_display_name === selectedProfile.model_display_name &&
+                          p.aspect_ratio === ar &&
+                          p.duration_seconds === selectedProfile.duration_seconds &&
+                          p.resolution === selectedProfile.resolution,
+                      )
+                    }
+                    disabled={isBatchRunning}
+                  >
+                    {ar}
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div>
-              <label className="veo-label">Độ phân giải</label>
-              <div className="veo-duration-row">
+            {durations.length > 0 && (
+              <div className="veo-ribbon-item">
+                <span className="veo-ribbon-label">Thời lượng:</span>
+                <div className="veo-segmented-control">
+                  {durations.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`veo-segment-btn ${selectedProfile.duration_seconds === d ? 'active' : ''}`}
+                      onClick={() => handleGlobalDurationChange(d)}
+                      disabled={isBatchRunning}
+                    >
+                      {d}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="veo-ribbon-item">
+              <span className="veo-ribbon-label">Độ phân giải:</span>
+              <div className="veo-segmented-control">
                 {resolutions.map((r) => (
                   <button
                     key={r}
                     type="button"
-                    className={`veo-duration-btn ${selectedProfile.resolution === r ? 'active' : ''}`}
+                    className={`veo-segment-btn ${selectedProfile.resolution === r ? 'active' : ''}`}
                     onClick={() =>
                       selectProfile(
                         (p) =>
@@ -547,14 +626,13 @@ export function TextToVideoTab({
                 ))}
               </div>
             </div>
-          </div>
 
-          {/* Chọn số luồng (1 - 5 luồng) */}
-          <ConcurrencySelector
-            concurrency={concurrency}
-            onChange={setConcurrency}
-            disabled={isBatchRunning}
-          />
+            <ConcurrencySelector
+              concurrency={concurrency}
+              onChange={setConcurrency}
+              disabled={isBatchRunning}
+            />
+          </div>
 
           {/* Khung dán kịch bản và danh sách thẻ phân cảnh */}
           <BatchScriptEditor

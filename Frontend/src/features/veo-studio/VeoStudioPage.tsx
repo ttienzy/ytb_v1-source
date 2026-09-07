@@ -103,7 +103,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
       const updated = await api.selectProject(projectId)
       setActiveProject(updated)
       await loadProjects()
-      setMessage(`Đã chuyển sang project "${updated.name}"`)
+      setMessage(`Đã kích hoạt & chuyển tab Chrome sang "${updated.name}"`)
     } catch (err: any) {
       setMessage(err.message || 'Lỗi khi chọn project')
     }
@@ -184,37 +184,36 @@ export function VeoStudioPage({ setActivePage }: Props) {
 
   return (
     <div className="veo-studio">
-      {/* Header */}
-      <div className="settings-heading">
-        <p className="overline">VEO AI STUDIO</p>
-        <h1>
-          <Clapperboard size={24} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-          Veo Studio
-        </h1>
-        <p className="page-subtitle">
-          Tạo video AI với Google Flow — Text, Image, Extend.
-          {bridgeStatus?.bridge_running ? (
-            <span className="veo-bridge-pill online">🟢 Bridge Online</span>
-          ) : (
-            <span className="veo-bridge-pill offline">🔴 Bridge Offline</span>
-          )}
-        </p>
-      </div>
+      {/* Studio Header Bar */}
+      <header className="veo-studio-header">
+        <div className="veo-header-left">
+          <div className="veo-brand-badge">
+            <Clapperboard size={18} className="veo-brand-icon" />
+            <span className="veo-brand-title">VEO STUDIO</span>
+            <span className="veo-brand-engine">FLOW ENGINE</span>
+          </div>
+          <div className="veo-bridge-status-tag">
+            <span className={`veo-bridge-dot ${bridgeStatus?.bridge_running ? 'online' : 'offline'}`} />
+            <span className="veo-bridge-label">{bridgeStatus?.bridge_running ? 'Bridge Online' : 'Bridge Offline'}</span>
+          </div>
+        </div>
 
-      {/* Project Selector Bar */}
-      <ProjectSelector
-        projects={projects}
-        activeProject={activeProject}
-        onSelectProject={handleSelectProject}
-        onCreateProject={handleCreateProject}
-        onDeleteProject={handleDeleteProject}
-        creating={projectCreating}
-      />
+        <div className="veo-header-right">
+          <ProjectSelector
+            projects={projects}
+            activeProject={activeProject}
+            onSelectProject={handleSelectProject}
+            onCreateProject={handleCreateProject}
+            onDeleteProject={handleDeleteProject}
+            creating={projectCreating}
+          />
+        </div>
+      </header>
 
-      {/* Split layout */}
+      {/* Studio Layout: Workspace (Left/Center 65%) vs Inspector (Right 35%) */}
       <div className="veo-layout">
-        {/* Sidebar */}
-        <aside className="veo-sidebar">
+        {/* Workspace: Studio Creation Center */}
+        <section className="veo-workspace">
           {/* Tab bar */}
           <div className="veo-tab-bar">
             {TABS.map((tab) => (
@@ -225,22 +224,23 @@ export function VeoStudioPage({ setActivePage }: Props) {
                 disabled={!tab.enabled}
                 title={tab.enabled ? undefined : 'Chưa có profile runtime được xác minh'}
               >
-                <tab.icon size={15} />
+                <tab.icon size={14} />
                 <span>{tab.label}</span>
               </button>
             ))}
           </div>
 
           {/* Tab content */}
-          <div className="veo-sidebar-body">
-            {/* Nếu chưa có active project và đang ở tab tạo video -> Chặn và hiển thị Lock screen */}
+          <div className="veo-workspace-body">
             {!activeProject && activeTab !== 'status' ? (
               <div className="veo-project-required-banner">
-                <div className="veo-project-required-icon">🔒</div>
+                <div className="veo-project-required-icon">
+                  <Clapperboard size={28} />
+                </div>
                 <h3>Chưa chọn Project làm việc</h3>
                 <p>
                   Google Flow yêu cầu video phải thuộc một Project Workspace cụ thể.
-                  Vui lòng bấm nút <strong>"Tạo Project Mới"</strong> ở thanh phía trên để bắt đầu sử dụng.
+                  Vui lòng bấm nút <strong>"Tạo Project"</strong> ở góc trên bên phải để bắt đầu sử dụng.
                 </p>
               </div>
             ) : (
@@ -285,10 +285,10 @@ export function VeoStudioPage({ setActivePage }: Props) {
               </>
             )}
           </div>
-        </aside>
+        </section>
 
-        {/* Main stage */}
-        <main className="veo-main">
+        {/* Inspector Panel (Player + Status + Gallery) */}
+        <aside className="veo-inspector">
           {/* Player + Step Tracker */}
           <VideoPlayer
             activeJob={activeJob}
@@ -306,7 +306,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
             onSendToEditor={() => setActivePage('Video')}
             onSendToSchedule={() => setActivePage('Lên lịch Youtube')}
           />
-        </main>
+        </aside>
       </div>
     </div>
   )

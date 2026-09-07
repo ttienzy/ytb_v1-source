@@ -186,33 +186,36 @@ export function ImageToVideoTab({ capabilities, onSubmit, busy, activeProject }:
         onChange={(e) => setPrompt(e.target.value)}
       />
 
-      {/* Model selector */}
+      {/* Model selector (Dropdown) */}
       {modelNames.length > 0 && (
-        <>
-          <label className="veo-label">Model</label>
-          <div className="veo-model-grid">
+        <div className="veo-model-select-row">
+          <div className="veo-model-select-header">
+            <label className="veo-label" htmlFor="veo-i2v-model-select">Model Video</label>
+            {selectedProfile?.credit_cost != null && (
+              <span className="veo-credit-tag">
+                {selectedProfile.credit_cost} credits / lần tạo
+              </span>
+            )}
+          </div>
+          <select
+            id="veo-i2v-model-select"
+            className="veo-select veo-model-dropdown"
+            value={selectedProfile?.model_display_name || ''}
+            onChange={(e) => selectModel(e.target.value)}
+          >
             {modelNames.map((modelName) => {
               const repProfile = profiles.find(
                 (p) => p.model_display_name === modelName && p.resolution === '720p',
               ) || profiles.find((p) => p.model_display_name === modelName)
-              const isActive = selectedProfile?.model_display_name === modelName
+              const cost = repProfile?.credit_cost != null ? `${repProfile.credit_cost} credits` : '—'
               return (
-                <button
-                  key={modelName}
-                  type="button"
-                  className={`veo-model-btn ${isActive ? 'active' : ''}`}
-                  aria-pressed={isActive}
-                  onClick={() => selectModel(modelName)}
-                >
-                  <span>{modelName}</span>
-                  <small>
-                    {repProfile?.credit_cost != null ? `${repProfile.credit_cost} credits` : '—'}
-                  </small>
-                </button>
+                <option key={modelName} value={modelName}>
+                  {modelName} ({cost})
+                </option>
               )
             })}
-          </div>
-        </>
+          </select>
+        </div>
       )}
 
       {selectedProfile && (

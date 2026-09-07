@@ -203,6 +203,33 @@ def wait_project_result(request_id: str, timeout: float = 35.0) -> dict[str, Any
     return None
 
 
+def request_switch_project(flow_project_id: str, account_email: str = "") -> str | None:
+    """Yêu cầu Extension tự động điều hướng / mở tab Project trên Google Flow."""
+    request_id = secrets.token_hex(16)
+    try:
+        _captcha_pending.put_nowait({
+            "request_id": request_id,
+            "action": "SWITCH_PROJECT",
+            "flow_project_id": flow_project_id,
+            "account_email": account_email,
+            "created_at": time.time(),
+        })
+        return request_id
+    except Exception:
+        return None
+
+
+def wait_switch_result(request_id: str, timeout: float = 12.0) -> dict[str, Any] | None:
+    """Chờ Extension trả kết quả chuyển tab Project."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with _bridge_lock:
+            if request_id in _project_results:
+                return _project_results.pop(request_id)
+        time.sleep(0.3)
+    return None
+
+
 def wait_captcha_result(request_id: str, timeout: float = 30.0) -> dict[str, Any] | None:
     """Chờ Extension trả token reCAPTCHA. Blocking call."""
     deadline = time.time() + timeout
@@ -470,6 +497,24 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "ok": bool(data.get("ok", False)),
                         "flow_project_id": data.get("flow_project_id", ""),
                         "account_email": data.get("account_email", ""),
+                        "error": data.get("error"),
+                        "received_at": time.time(),
+                    }
+            self._send_json({"ok": True})
+            return
+
+        if self.path == "/flow/project-switched":
+            if not self._check_secret():
+                self._send_json({"error": "forbidden"}, 403)
+                return
+            data = self._read_json()
+            request_id = data.get("request_id", "")
+            if request_id:
+                with _bridge_lock:
+                    _project_results[request_id] = {
+                        "ok": bool(data.get("ok", False)),
+                        "flow_project_id": data.get("flow_project_id", ""),
+                        "tab_id": data.get("tab_id"),
                         "error": data.get("error"),
                         "received_at": time.time(),
                     }

@@ -43,97 +43,77 @@ export function ProjectSelector({
   }
 
   return (
-    <div className="veo-project-bar">
-      <div className="veo-project-bar-left">
-        <div className="veo-project-icon-wrap">
-          <FolderKanban size={18} className="veo-project-icon" />
-        </div>
-        <div className="veo-project-info">
-          <div className="veo-project-label-row">
-            <span className="veo-project-title">PROJECT LÀM VIỆC</span>
-            {activeProject ? (
-              <span className="veo-project-badge active" title={`Flow Project ID: ${activeProject.flow_project_id}`}>
-                <CheckCircle2 size={12} />
-                Đã chọn: {activeProject.name}
-              </span>
-            ) : (
-              <span className="veo-project-badge warning">
-                <AlertTriangle size={12} />
-                Chưa chọn Project
-              </span>
-            )}
-          </div>
-
-          <div className="veo-project-select-row">
-            {projects.length > 0 ? (
-              <select
-                className="veo-project-select"
-                value={activeProject?.id || ''}
-                onChange={(e) => {
-                  if (e.target.value) onSelectProject(e.target.value)
-                }}
-                disabled={creating}
-              >
-                <option value="" disabled>
-                  -- Chọn Project --
+    <div className="veo-project-toolbar">
+      <div className="veo-project-controls">
+        <div className="veo-project-select-wrap">
+          <FolderKanban size={14} className="veo-project-icon" />
+          {projects.length > 0 ? (
+            <select
+              className="veo-project-select-compact"
+              value={activeProject?.id || ''}
+              onChange={(e) => {
+                if (e.target.value) onSelectProject(e.target.value)
+              }}
+              disabled={creating}
+              title="Chọn Project Workspace"
+            >
+              <option value="" disabled>
+                -- Chọn Project --
+              </option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.video_count || 0} clips)
                 </option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.video_count || 0} clips) - Flow: {p.flow_project_id.slice(0, 8)}...
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="veo-project-empty-text">
-                Chưa có Project nào trong database. Hãy bấm nút tạo mới bên phải!
-              </span>
-            )}
-
-            {activeProject && (
-              <a
-                href={`https://flow.google.com/u/1/project/${activeProject.flow_project_id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="veo-project-flow-link"
-                title="Mở tab dự án này trên Google Flow"
-              >
-                <ExternalLink size={13} />
-                <span>Mở trên Flow</span>
-              </a>
-            )}
-
-            {activeProject && (
-              <button
-                className="veo-project-delete-btn"
-                title="Xóa project này khỏi Database"
-                onClick={() => {
-                  if (confirm(`Bạn có chắc muốn xóa project '${activeProject.name}'?`)) {
-                    onDeleteProject(activeProject.id)
-                  }
-                }}
-              >
-                <Trash2 size={13} />
-              </button>
-            )}
-          </div>
+              ))}
+            </select>
+          ) : (
+            <span className="veo-project-empty-tag">Chưa có Project</span>
+          )}
         </div>
-      </div>
 
-      <div className="veo-project-bar-right">
+        {activeProject && (
+          <a
+            href={`https://flow.google.com/u/1/project/${activeProject.flow_project_id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="veo-icon-btn"
+            title="Mở dự án trên Google Flow"
+          >
+            <ExternalLink size={13} />
+          </a>
+        )}
+
+        {activeProject && (
+          <button
+            type="button"
+            className="veo-icon-btn danger"
+            title="Xóa project khỏi Database"
+            onClick={() => {
+              if (confirm(`Bạn có chắc muốn xóa project '${activeProject.name}'?`)) {
+                onDeleteProject(activeProject.id)
+              }
+            }}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
+
         <button
-          className="veo-btn-create-project"
+          type="button"
+          className="veo-new-project-btn"
           onClick={handleOpenModal}
           disabled={creating}
+          title="Tạo Project mới"
         >
           {creating ? (
             <>
-              <Loader2 size={15} className="spinning" />
-              <span>Đang tạo trên Flow...</span>
+              <Loader2 size={13} className="spin" />
+              <span>Đang tạo...</span>
             </>
           ) : (
             <>
-              <Plus size={15} />
-              <span>Tạo Project Mới</span>
+              <Plus size={13} />
+              <span>Tạo Project</span>
             </>
           )}
         </button>
@@ -165,7 +145,7 @@ export function ProjectSelector({
               />
             </div>
 
-            {errorMsg && <div className="veo-modal-error">⚠️ {errorMsg}</div>}
+            {errorMsg && <div className="veo-modal-error">{errorMsg}</div>}
 
             <div className="veo-modal-actions">
               <button

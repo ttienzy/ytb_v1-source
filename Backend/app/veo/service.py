@@ -537,7 +537,7 @@ def create_project(name: str, flow_project_id: str | None = None) -> VeoProjectO
 
 
 def select_project(project_id: str) -> VeoProjectOut:
-    """Chọn project làm việc (kích hoạt is_active)."""
+    """Chọn project làm việc (kích hoạt is_active) và đồng bộ tab Chrome tương ứng."""
     init_db()
     with SessionLocal() as db:
         p = db.query(VeoProject).filter(
@@ -549,6 +549,15 @@ def select_project(project_id: str) -> VeoProjectOut:
         p.is_active = True
         db.commit()
         db.refresh(p)
+
+        # Tự động gửi lệnh sang Chrome Extension để chuyển/mở tab dự án này
+        if p.flow_project_id:
+            try:
+                bridge.request_switch_project(p.flow_project_id, p.account_email or "")
+                logger.info("Queued switch_project for flow_project_id: %s", p.flow_project_id)
+            except Exception as ex:
+                logger.warning("Failed to queue switch_project: %s", ex)
+
         return _model_to_project_out(p)
 
 

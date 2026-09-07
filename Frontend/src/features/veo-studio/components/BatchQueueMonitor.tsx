@@ -43,7 +43,7 @@ export function BatchQueueMonitor({
       <div className="veo-monitor-header">
         <div className="veo-monitor-stats">
           <div className="veo-stat-item">
-            <span className="veo-stat-label">Tổng cảnh</span>
+            <span className="veo-stat-label">Tổng số</span>
             <strong className="veo-stat-val">{total}</strong>
           </div>
           <div className="veo-stat-item text-success">
@@ -75,8 +75,8 @@ export function BatchQueueMonitor({
               onClick={onStart}
               disabled={disabled || total === 0}
             >
-              <Play size={16} />
-              <span>Chạy kịch bản ({total} cảnh · {concurrency} luồng)</span>
+              <Play size={15} />
+              <span>Chạy kịch bản ({total} mục · {concurrency} luồng)</span>
             </button>
           ) : (
             <div className="veo-running-actions">
