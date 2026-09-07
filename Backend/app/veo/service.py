@@ -1037,7 +1037,12 @@ def _model_to_image_item(img: VeoImage) -> VeoImageItem:
 
 
 def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
-    """Sinh ảnh từ prompt thông qua Google Flow Nano Banana (RPC ogiZ0b)."""
+    """Sinh ảnh từ prompt thông qua Google Flow Nano Banana (RPC ogiZ0b).
+
+    Tách N biến thể thành N request riêng biệt qua bridge, mỗi cái được
+    Extension giải reCAPTCHA độc lập → tránh lỗi PUBLIC_ERROR_UNUSUAL_ACTIVITY
+    do reuse token. Hỗ trợ partial success (2/3 ảnh ok vẫn trả về).
+    """
     init_db()
 
     target_flow_pid = ""
@@ -1055,33 +1060,59 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
             target_flow_pid = p.flow_project_id
             project_db_id = p.id
 
-    flow_request = {
-        "prompt": req.prompt.strip(),
-        "aspect_ratio": req.aspect_ratio or "16:9",
-        "model_key": req.model_key or "GEM_PIX_2",
-        "model_display_name": req.model_display_name or "Nano Banana Pro",
-        "count": min(max(req.count, 1), 4),
-        "seed": req.seed,
-        "project_id": target_flow_pid,
-        "reference_image_ids": req.reference_image_ids or [],
-    }
+    count = min(max(req.count, 1), 4)
+    # Scene UUID dùng chung cho tất cả biến thể (giống Flow gốc)
+    shared_scene_uuid = str(uuid.uuid4()).upper()
 
-    req_id = bridge.request_generate_image(flow_request)
-    if not req_id:
-        return VeoImageGenerateResponse(ok=False, error="Bridge chưa sẵn sàng hoặc hàng đợi đầy")
+    raw_images: list[dict] = []
+    errors: list[str] = []
 
-    bridge_res = bridge.wait_image_result(req_id, timeout=75.0)
-    if not bridge_res:
-        return VeoImageGenerateResponse(ok=False, error="Hết thời gian chờ Extension sinh ảnh từ Flow (Timeout 75s)")
+    for i in range(count):
+        if i > 0:
+            # Google Flow official cadence: ~1s delay giữa các biến thể
+            import time as _t
+            _t.sleep(1.0)
 
-    if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
-        err = bridge_res.get("error") or (bridge_res.get("result") and bridge_res["result"].get("error")) or "Lỗi không xác định khi tạo ảnh"
-        return VeoImageGenerateResponse(ok=False, error=str(err))
+        variation_seed = (req.seed + i) if req.seed else None
+        flow_request = {
+            "prompt": req.prompt.strip(),
+            "aspect_ratio": req.aspect_ratio or "16:9",
+            "model_key": req.model_key or "GEM_PIX_2",
+            "model_display_name": req.model_display_name or "Nano Banana Pro",
+            "count": 1,  # Luôn 1 — mỗi request tạo 1 ảnh duy nhất
+            "seed": variation_seed,
+            "project_id": target_flow_pid,
+            "reference_image_ids": req.reference_image_ids or [],
+            "scene_uuid": shared_scene_uuid,
+        }
 
-    raw_images = bridge_res["result"].get("images", [])
+        req_id = bridge.request_generate_image(flow_request)
+        if not req_id:
+            errors.append(f"Biến thể #{i + 1}: Bridge chưa sẵn sàng hoặc hàng đợi đầy")
+            continue
+
+        bridge_res = bridge.wait_image_result(req_id, timeout=60.0)
+        if not bridge_res:
+            errors.append(f"Biến thể #{i + 1}: Timeout chờ Extension (60s)")
+            continue
+
+        if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
+            err = (
+                bridge_res.get("error")
+                or (bridge_res.get("result") and bridge_res["result"].get("error"))
+                or "Lỗi không xác định"
+            )
+            errors.append(f"Biến thể #{i + 1}: {err}")
+            continue
+
+        variation_images = bridge_res["result"].get("images", [])
+        raw_images.extend(variation_images)
+
     if not raw_images:
-        return VeoImageGenerateResponse(ok=False, error="Google Flow không trả về ảnh nào")
+        combined_err = "; ".join(errors) if errors else "Google Flow không trả về ảnh nào"
+        return VeoImageGenerateResponse(ok=False, error=combined_err)
 
+    # Lưu ảnh thành công vào DB & tải về local
     created_items: list[VeoImageItem] = []
     with SessionLocal() as db:
         for item in raw_images:
@@ -1115,6 +1146,13 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
             db.commit()
             db.refresh(new_img)
             created_items.append(_model_to_image_item(new_img))
+
+    # Log partial success nếu có
+    if errors:
+        logger.warning(
+            "Image generation partial success: %d/%d ok. Errors: %s",
+            len(created_items), count, "; ".join(errors),
+        )
 
     return VeoImageGenerateResponse(ok=True, images=created_items)
 

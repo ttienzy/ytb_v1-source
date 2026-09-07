@@ -567,8 +567,10 @@ async function solveRecaptcha(request) {
   const siteKey = request.site_key || request.recaptcha_ent_key || page.siteKey || '';
   logActivity('info', `Captcha preflight: tab=${tabId} module=${!!page.moduleReady} keySource=${page.keySource || 'none'}`);
   if (!page.moduleReady) return { token: null, error: page.error };
-  if (!siteKey) return { token: null, error: page.error || 'No site key found in the Flow page' };
-  const action = request.action || harvestCfg.c?.da || 'submit';
+  let action = request.captcha_action || request.action || harvestCfg.c?.da || 'submit';
+  if (action === 'IMAGE_GENERATION' || action === 'SWITCH_PROJECT' || action === 'CREATE_PROJECT') {
+    action = 'submit';
+  }
 
   try {
     const results = await chrome.scripting.executeScript({
@@ -1369,8 +1371,8 @@ async function generateFlowVideo(flowRequest, captchaToken) {
 }
 
 /**
- * Runs inside the logged-in Flow project's MAIN world to generate images using RPC ogiZ0b.
- * Supports Nano Banana models (Pro, 2, 2 Lite), aspect ratios, x1-x4 counts, and reference images.
+ * Runs inside the logged-in Flow project's MAIN world to generate a single image using RPC ogiZ0b.
+ * Backend dispatches each variation as a separate request with its own fresh reCAPTCHA token.
  */
 async function runImageGenerationInPage(imageRequest, captchaToken) {
   try {
@@ -1441,15 +1443,32 @@ async function runImageGenerationInPage(imageRequest, captchaToken) {
     }
 
     function parseRpcResponse(text, rpcId) {
+      let rpcError = null;
       for (const line of text.split(/\r?\n/)) {
         const trimmed = line.trim();
         if (!trimmed.startsWith('[')) continue;
         try {
-          const payload = findRpcEnvelope(JSON.parse(trimmed), rpcId);
+          const parsed = JSON.parse(trimmed);
+          const payload = findRpcEnvelope(parsed, rpcId);
           if (payload !== null) return JSON.parse(payload);
+
+          // Trích xuất chi tiết lỗi từ envelope nếu có
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              if (Array.isArray(item) && item[0] === 'wrb.fr' && item[1] === rpcId) {
+                rpcError = `Flow RPC envelope error: ${JSON.stringify(item.slice(2))}`;
+              } else if (Array.isArray(item) && item[0] === 'er') {
+                rpcError = `Flow server error (er): ${JSON.stringify(item)}`;
+              }
+            }
+          }
         } catch { }
       }
-      throw new Error(`Flow RPC ${rpcId} returned no usable payload`);
+      if (rpcError && rpcError.includes('PUBLIC_ERROR_UNUSUAL_ACTIVITY')) {
+        rpcError = 'Google Flow tạm thời giới hạn do phát hiện nhiều yêu cầu liên tiếp (PUBLIC_ERROR_UNUSUAL_ACTIVITY). Vui lòng nhấn F5 tải lại tab Google Flow trên trình duyệt và thử lại sau 30 giây.';
+      }
+      const preview = text.length > 250 ? text.slice(0, 250) + '...' : text;
+      throw new Error(rpcError || `Flow RPC ${rpcId} returned no usable payload. Response: ${preview}`);
     }
 
     async function callRpc(rpcId, payload) {
@@ -1468,14 +1487,48 @@ async function runImageGenerationInPage(imageRequest, captchaToken) {
       });
       const base = location.origin || 'https://flow.google.com';
       const endpoint = `${base}${accountPath}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`;
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-        body: body.toString(),
-      });
-      if (!response.ok) throw new Error(`RPC ${rpcId} HTTP ${response.status}`);
-      const text = await response.text();
+
+      let text = null;
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'X-Same-Domain': '1',
+          },
+          body: body.toString(),
+        });
+        if (!response.ok) throw new Error(`RPC ${rpcId} HTTP ${response.status}`);
+        text = await response.text();
+      } catch (fetchErr) {
+        // Fallback qua XMLHttpRequest trong MAIN world nếu fetch gặp sự cố
+        if (typeof XMLHttpRequest !== 'undefined') {
+          try {
+            text = await new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.open('POST', endpoint, true);
+              xhr.withCredentials = true;
+              xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded;charset=UTF-8');
+              xhr.setRequestHeader('X-Same-Domain', '1');
+              xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
+                else reject(new Error(`HTTP ${xhr.status}: ${xhr.statusText}`));
+              };
+              xhr.onerror = () => reject(new Error('XHR network error'));
+              xhr.ontimeout = () => reject(new Error('XHR timeout'));
+              xhr.timeout = 45000;
+              xhr.send(body.toString());
+            });
+          } catch (xhrErr) {
+            throw new Error(`Flow RPC ${rpcId} error: fetch (${fetchErr.message}), xhr (${xhrErr.message})`);
+          }
+        } else {
+          throw fetchErr;
+        }
+      }
+
       return parseRpcResponse(text, rpcId);
     }
 
@@ -1507,80 +1560,72 @@ async function runImageGenerationInPage(imageRequest, captchaToken) {
       refImagesPayload = imageRequest.reference_image_ids.map((id) => [id, null, null, null, 1]);
     }
 
-    async function generateSingleImage(forcedSeed = null) {
-      const seed = forcedSeed || Math.floor(Math.random() * 2000000000);
-      const uuidA = (crypto.randomUUID ? crypto.randomUUID() : 'EBA3AD1B-C139-4F1B-88C0-290D5C5CD974').toUpperCase();
-      const uuidB = (crypto.randomUUID ? crypto.randomUUID() : 'B88CA090-09EA-443D-A368-718E69A7F171').toUpperCase();
-      const sceneUuid = (crypto.randomUUID ? crypto.randomUUID() : '1B6623B2-B5E4-4899-AA64-0122F1A067F9').toUpperCase();
+    // Scene UUID: dùng từ Backend nếu có (batch dùng chung), hoặc tự tạo
+    const sceneUuid = (imageRequest.scene_uuid || (crypto.randomUUID ? crypto.randomUUID() : '1B6623B2-B5E4-4899-AA64-0122F1A067F9')).toUpperCase();
 
-      const itemPayload = [
-        null,
-        null,
-        refImagesPayload,
-        seed,
-        aspectEnum,
-        modelKey,
-        null,
-        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
-        [[[imageRequest.prompt.trim()]]],
-        null,
-        null,
-        null,
-        uuidA,
-        uuidB,
-      ];
+    // Luôn tạo đúng 1 ảnh — Backend điều phối N biến thể bằng N request riêng
+    const seed = imageRequest.seed || Math.floor(Math.random() * 2000000000);
+    const uuidA = (crypto.randomUUID ? crypto.randomUUID() : 'EBA3AD1B-C139-4F1B-88C0-290D5C5CD974').toUpperCase();
+    const uuidB = (crypto.randomUUID ? crypto.randomUUID() : 'B88CA090-09EA-443D-A368-718E69A7F171').toUpperCase();
 
-      const rpcPayload = [
-        null,
-        [itemPayload],
-        1,
-        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
-        [sceneUuid],
-      ];
+    const itemPayload = [
+      null,
+      null,
+      refImagesPayload,
+      seed,
+      aspectEnum,
+      modelKey,
+      null,
+      [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+      [[[imageRequest.prompt.trim()]]],
+      null,
+      null,
+      null,
+      uuidA,
+      uuidB,
+    ];
 
-      const rpcResult = await callRpc('ogiZ0b', rpcPayload);
-      const imgUrl = findImageUrl(rpcResult);
-      if (!imgUrl) {
-        throw new Error('Flow ogiZ0b response did not contain an image URL');
-      }
+    const rpcPayload = [
+      null,
+      [itemPayload],
+      1,
+      [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+      [sceneUuid],
+    ];
 
-      let mediaId = null;
-      let dims = null;
-      try {
-        if (Array.isArray(rpcResult) && Array.isArray(rpcResult[0]) && Array.isArray(rpcResult[0][0])) {
-          mediaId = rpcResult[0][0][0] || null;
-          const sub = rpcResult[0][0][6];
-          if (Array.isArray(sub) && sub.length > 2 && Array.isArray(sub[2])) {
-            dims = sub[2];
-          }
+    const rpcResult = await callRpc('ogiZ0b', rpcPayload);
+    const imgUrl = findImageUrl(rpcResult);
+    if (!imgUrl) {
+      throw new Error('Flow ogiZ0b response did not contain an image URL');
+    }
+
+    let mediaId = null;
+    let dims = null;
+    try {
+      if (Array.isArray(rpcResult) && Array.isArray(rpcResult[0]) && Array.isArray(rpcResult[0][0])) {
+        mediaId = rpcResult[0][0][0] || null;
+        const sub = rpcResult[0][0][6];
+        if (Array.isArray(sub) && sub.length > 2 && Array.isArray(sub[2])) {
+          dims = sub[2];
         }
-      } catch { }
-
-      if (!mediaId) {
-        const mMatch = imgUrl.match(/\/image\/([^/?#]+)/);
-        if (mMatch) mediaId = mMatch[1];
       }
+    } catch { }
 
-      return {
+    if (!mediaId) {
+      const mMatch = imgUrl.match(/\/image\/([^/?#]+)/);
+      if (mMatch) mediaId = mMatch[1];
+    }
+
+    return {
+      ok: true,
+      images: [{
         media_id: mediaId,
         image_url: imgUrl,
         seed,
         aspect_ratio: imageRequest.aspect_ratio || '16:9',
         model_key: modelKey,
         dimensions: dims,
-      };
-    }
-
-    const count = Math.min(Math.max(Number(imageRequest.count) || 1, 1), 4);
-    const promises = [];
-    for (let i = 0; i < count; i++) {
-      promises.push(generateSingleImage(imageRequest.seed ? imageRequest.seed + i : null));
-    }
-
-    const results = await Promise.all(promises);
-    return {
-      ok: true,
-      images: results,
+      }],
       project_id: projectId,
       prompt: imageRequest.prompt,
     };
@@ -1863,10 +1908,10 @@ async function processCaptchaRequest(request) {
     logActivity('info', `Flow Image generation requested: ${request.request_id?.slice(0, 8)}`);
     (async () => {
       try {
-        let result = await solveRecaptcha(request);
+        let result = await solveRecaptcha({ ...request, action: 'submit' });
         if (!result.token && result.error?.includes('not ready')) {
           await sleep(3_000);
-          result = await solveRecaptcha(request);
+          result = await solveRecaptcha({ ...request, action: 'submit' });
         }
         if (!result.token) {
           onCaptchaFail();
