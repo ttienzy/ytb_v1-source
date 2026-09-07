@@ -29,6 +29,18 @@ from app.externals.gdrive.schemas import (
 
 logger = logging.getLogger(__name__)
 
+def _workflow_key(workflow: str | None) -> str:
+    key = re.sub(r"[^a-z0-9_]+", "_", (workflow or "").strip().lower()).strip("_")
+    aliases = {"workflow_audio": "audio", "workflow_studio": "studio"}
+    return aliases.get(key, key)
+
+
+def _require_workflow_key(workflow: str | None) -> str:
+    key = _workflow_key(workflow)
+    if not key or len(key) > 50:
+        raise HTTPException(status_code=400, detail="Tên workflow không hợp lệ.")
+    return key
+
 os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 os.environ["OAUTHLIB_IGNORE_TLS"] = "1"
 
@@ -109,6 +121,7 @@ def get_status() -> GDriveStatusOut:
             auto_upload=cfg.get("auto_upload", True),
             has_credentials=has_creds,
             client_id=cfg.get("client_id", ""),
+            workflow_folders=cfg.get("workflow_folders", {}),
             message="Chưa kết nối tài khoản Google Drive. Vui lòng đăng nhập để bắt đầu.",
         )
 
@@ -119,6 +132,7 @@ def get_status() -> GDriveStatusOut:
             auto_upload=cfg.get("auto_upload", True),
             has_credentials=has_creds,
             client_id=cfg.get("client_id", ""),
+            workflow_folders=cfg.get("workflow_folders", {}),
             message="Token Google Drive không hợp lệ hoặc đã hết hạn.",
         )
 
@@ -140,6 +154,7 @@ def get_status() -> GDriveStatusOut:
         auto_upload=cfg.get("auto_upload", True),
         has_credentials=has_creds,
         client_id=cfg.get("client_id", ""),
+        workflow_folders=cfg.get("workflow_folders", {}),
         message="Google Drive đã kết nối và sẵn sàng hoạt động!",
     )
 
@@ -400,6 +415,101 @@ def create_new_folder(folder_name: str = "AI_Clean_Videos") -> GDriveStatusOut:
     return get_status()
 
 
+def rename_root_folder(folder_name: str) -> GDriveStatusOut:
+    client = get_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
+    cfg = get_gdrive_config()
+    folder_id = cfg.get("folder_id", "")
+    clean_name = (folder_name or "").strip()
+    if not folder_id:
+        raise HTTPException(status_code=400, detail="Chưa có folder gốc để đổi tên.")
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Tên folder gốc không được để trống.")
+    try:
+        folder = client.rename_folder(folder_id, clean_name)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Không thể đổi tên folder gốc: {exc}") from exc
+    cfg["folder_name"] = folder["name"]
+    save_gdrive_config(cfg)
+    return get_status()
+
+
+def _workflow_folder_map(cfg: dict[str, Any]) -> dict[str, dict[str, str]]:
+    value = cfg.get("workflow_folders", {})
+    return value if isinstance(value, dict) else {}
+
+
+def get_workflow_folder_id(workflow: str | None) -> str:
+    """Trả folder theo workflow; workflow chưa cấu hình sẽ dùng folder mặc định."""
+    cfg = get_gdrive_config()
+    key = _workflow_key(workflow)
+    mapped = _workflow_folder_map(cfg).get(key) or {}
+    return mapped.get("folder_id", "") or cfg.get("folder_id", "")
+
+
+def update_workflow_folder(payload) -> GDriveStatusOut:
+    client = get_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
+    key = _require_workflow_key(payload.workflow)
+    folder_id = parse_folder_id(payload.folder_id)
+    folder_info = client.get_folder_info(folder_id) if folder_id else None
+    if not folder_info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thư mục trên Google Drive hoặc bạn không có quyền truy cập.")
+    root_id = get_gdrive_config().get("folder_id", "")
+    if root_id and folder_id != root_id and root_id not in (folder_info.get("parents") or []):
+        raise HTTPException(status_code=400, detail="Folder workflow phải nằm bên trong folder gốc đang chọn.")
+    cfg = get_gdrive_config()
+    folders = _workflow_folder_map(cfg)
+    folders[key] = {"folder_id": folder_id, "folder_name": payload.folder_name or folder_info.get("name", key.title()), "folder_url": folder_info.get("webViewLink", f"https://drive.google.com/drive/folders/{folder_id}")}
+    cfg["workflow_folders"] = folders
+    save_gdrive_config(cfg)
+    return get_status()
+
+
+def create_workflow_folder(payload) -> GDriveStatusOut:
+    client = get_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
+    key = _require_workflow_key(payload.workflow)
+    parent_id = parse_folder_id(payload.parent_id) if payload.parent_id else (get_gdrive_config().get("folder_id") or None)
+    cfg = get_gdrive_config()
+    existing = _workflow_folder_map(cfg).get(key) or {}
+    if existing.get("folder_id"):
+        raise HTTPException(status_code=409, detail=f"Workflow '{key}' đã có folder. Chỉ được đổi tên folder hiện tại.")
+    folder = client.create_folder(payload.folder_name.strip() or key.title(), parent_id=parent_id)
+    folders = _workflow_folder_map(cfg)
+    folders[key] = {"folder_id": folder["id"], "folder_name": folder["name"], "folder_url": folder["url"]}
+    cfg["workflow_folders"] = folders
+    save_gdrive_config(cfg)
+    return get_status()
+
+
+def rename_workflow_folder(payload) -> GDriveStatusOut:
+    client = get_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="Google Drive chưa được kết nối.")
+    key = _require_workflow_key(payload.workflow)
+    cfg = get_gdrive_config()
+    current = _workflow_folder_map(cfg).get(key) or {}
+    folder_id = current.get("folder_id", "")
+    clean_name = (payload.folder_name or "").strip()
+    if not folder_id:
+        raise HTTPException(status_code=400, detail="Workflow chưa có folder để đổi tên.")
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Tên folder không được để trống.")
+    try:
+        folder = client.rename_folder(folder_id, clean_name)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Không thể đổi tên folder workflow: {exc}") from exc
+    folders = _workflow_folder_map(cfg)
+    folders[key] = {"folder_id": folder_id, "folder_name": folder["name"], "folder_url": folder["url"]}
+    cfg["workflow_folders"] = folders
+    save_gdrive_config(cfg)
+    return get_status()
+
+
 def update_settings(payload: GDriveSettingsUpdateRequest) -> GDriveStatusOut:
     """Cập nhật cài đặt Google Drive."""
     cfg = get_gdrive_config()
@@ -435,7 +545,7 @@ def upload_clean_video(payload: GDriveUploadRequest) -> GDriveUploadResponse:
         raise HTTPException(status_code=404, detail=f"File video không tồn tại: {payload.file_path}")
 
     cfg = get_gdrive_config()
-    target_folder_id = payload.folder_id or cfg.get("folder_id")
+    target_folder_id = payload.folder_id or get_workflow_folder_id(payload.workflow)
 
     try:
         res = client.upload_file_resumable(

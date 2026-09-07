@@ -665,6 +665,22 @@ async def run(
     return job.job_id
 
 
+async def _backup_studio_video_to_drive(video_path: Path) -> None:
+    """Upload video thành phẩm Studio vào folder Studio nếu Auto Upload đang bật."""
+    from app.externals.gdrive import service as gdrive_service
+
+    cfg = gdrive_service.get_gdrive_config()
+    client = gdrive_service.get_client()
+    if not (cfg.get("enabled") and cfg.get("auto_upload", True) and client):
+        return
+    await asyncio.to_thread(
+        client.upload_file_resumable,
+        file_path=video_path,
+        folder_id=gdrive_service.get_workflow_folder_id("studio") or cfg.get("folder_id"),
+        custom_name=video_path.name,
+    )
+
+
 async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = None) -> None:
     """Background task: [fetch transcript] → generate → gather(cut, voice) → merge → [polish].
 
@@ -764,6 +780,14 @@ async def _run_pipeline(job_id: str, voice_id: str, polish_opts: dict | None = N
         # 5) Polish (BGM) nếu có polish_opts.
         if polish_opts:
             await polish(job_id, polish_opts)
+
+        # Upload sau khi video Studio đã hoàn tất; lỗi Drive không làm fail pipeline local.
+        try:
+            out_video = final_studio_path(job_id) if polish_opts else final_path(job_id)
+            if out_video.exists() and out_video.stat().st_size:
+                await _backup_studio_video_to_drive(out_video)
+        except Exception as drive_error:
+            logger.warning("[Studio] Tự động upload Google Drive thất bại: %s", drive_error)
 
         # 6) Đánh dấu thành công trong History DB
         try:

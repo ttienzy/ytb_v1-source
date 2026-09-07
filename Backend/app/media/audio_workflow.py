@@ -132,6 +132,22 @@ async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: 
             AUDIO_THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
             (AUDIO_THUMBNAIL_DIR / output_thumbnail_name).write_bytes(labeled_thumbnail.read_bytes())
         metadata = {"file_name": output.name, "name": output.name, "story_name": story_name, "chapter_number": chapter_number, "chapter_title": chapter_title, "thumbnail_name": output_thumbnail_name, "duration_sec": ffprobe_duration(output), "created_at": datetime.now().isoformat()}
+        # Sao lưu video Audio vào folder riêng trên Drive nếu đã kết nối và bật tự động upload.
+        try:
+            from app.externals.gdrive import service as gdrive_service
+            cfg = gdrive_service.get_gdrive_config()
+            client = gdrive_service.get_client()
+            if cfg.get("enabled") and cfg.get("auto_upload", True) and client:
+                drive_res = await asyncio.to_thread(
+                    client.upload_file_resumable,
+                    file_path=output,
+                    folder_id=gdrive_service.get_workflow_folder_id("audio") or cfg.get("folder_id"),
+                    custom_name=output.name,
+                )
+                metadata["drive_file_id"] = drive_res.get("file_id")
+                metadata["drive_url"] = drive_res.get("web_view_link")
+        except Exception as drive_error:  # Drive lỗi không làm hỏng video local đã tạo.
+            metadata["drive_error"] = str(drive_error)
         _append_manifest(metadata)
         return output.name
     except Exception as error:  # noqa: BLE001

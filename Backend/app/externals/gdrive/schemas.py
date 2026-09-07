@@ -15,6 +15,7 @@ class GDriveStatusOut(BaseModel):
     auto_upload: bool = True
     has_credentials: bool = False
     client_id: str = ""
+    workflow_folders: dict[str, dict[str, str]] = Field(default_factory=dict)
     message: str = ""
 
 
@@ -43,6 +44,27 @@ class GDriveFolderCreateRequest(BaseModel):
     folder_name: str = Field(default="AI_Clean_Videos", description="Tên thư mục mới muốn tạo trên Google Drive")
 
 
+class GDriveRootFolderRenameRequest(BaseModel):
+    folder_name: str = Field(..., description="Tên mới của folder gốc")
+
+
+class GDriveWorkflowFolderRequest(BaseModel):
+    workflow: str = Field(..., description="Tên workflow, ví dụ audio hoặc studio")
+    folder_id: str = Field(..., description="ID hoặc link thư mục Google Drive")
+    folder_name: str = Field(default="", description="Tên hiển thị của thư mục")
+
+
+class GDriveWorkflowFolderCreateRequest(BaseModel):
+    workflow: str = Field(..., description="Tên workflow, ví dụ audio hoặc studio")
+    folder_name: str = Field(..., description="Tên thư mục cần tạo")
+    parent_id: str = Field(default="", description="Folder cha, mặc định là root")
+
+
+class GDriveWorkflowFolderRenameRequest(BaseModel):
+    workflow: str = Field(..., description="Tên workflow, ví dụ audio hoặc studio")
+    folder_name: str = Field(..., description="Tên mới của folder workflow")
+
+
 class GDriveSettingsUpdateRequest(BaseModel):
     auto_upload: bool = Field(default=True, description="Tự động upload sau khi xóa watermark")
     client_id: str | None = None
@@ -53,6 +75,7 @@ class GDriveUploadRequest(BaseModel):
     file_path: str = Field(..., description="Đường dẫn file video local cần upload")
     custom_name: str = Field(default="", description="Tên file khi lưu trên Drive")
     folder_id: str | None = Field(default=None, description="Folder ID ghi đè nếu có")
+    workflow: str | None = Field(default=None, description="Workflow quyết định folder đích, ví dụ audio hoặc studio")
 
 
 class GDriveUploadResponse(BaseModel):

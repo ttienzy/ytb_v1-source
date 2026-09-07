@@ -11,7 +11,6 @@ import {
   HardDrive,
   HelpCircle,
   KeyRound,
-  Link,
   Loader2,
   Lock,
   LogOut,
@@ -45,6 +44,7 @@ interface GDriveStatus {
   auto_upload: boolean
   has_credentials: boolean
   client_id: string
+  workflow_folders?: Record<string, { folder_id: string; folder_name: string; folder_url?: string }>
   message: string
 }
 
@@ -58,6 +58,10 @@ export function GoogleDriveSection() {
   // Folder inputs
   const [customFolder, setCustomFolder] = useState('')
   const [folderSaving, setFolderSaving] = useState(false)
+  const [workflowFolderInputs, setWorkflowFolderInputs] = useState<Record<string, string>>({ audio: '', studio: '' })
+  const [showAddWorkflow, setShowAddWorkflow] = useState(false)
+  const [newWorkflowName, setNewWorkflowName] = useState('')
+  const [newWorkflowFolderName, setNewWorkflowFolderName] = useState('')
 
   // Credentials inputs
   const [showCredForm, setShowCredForm] = useState(false)
@@ -80,8 +84,9 @@ export function GoogleDriveSection() {
       const data: GDriveStatus = await res.json()
       setStatus(data)
       if (data.folder_id) {
-        setCustomFolder(data.folder_id)
+        setCustomFolder(data.folder_name || '')
       }
+      setWorkflowFolderInputs(Object.fromEntries(Object.entries(data.workflow_folders || {}).map(([key, folder]) => [key, folder.folder_name || ''])))
       if (data.client_id) {
         setClientId(data.client_id)
       }
@@ -227,57 +232,112 @@ export function GoogleDriveSection() {
     }
   }
 
-  async function handleSaveFolder() {
-    if (!customFolder.trim()) {
-      setError('Vui lòng nhập Folder ID hoặc Link Google Drive có sẵn.')
+  async function handleRenameRootFolder() {
+    const name = customFolder.trim()
+    if (!name) {
+      setError('Vui lòng nhập tên mới cho folder gốc.')
       return
     }
     setFolderSaving(true)
     setError('')
     setMessage('')
     try {
-      const res = await fetch(`${API_URL}/api/gdrive/folder`, {
+      const res = await fetch(`${API_URL}/api/gdrive/folder/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          folder_id: customFolder.trim(),
-        }),
+        body: JSON.stringify({ folder_name: name }),
       })
       const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.detail || 'Không thể lưu thư mục.')
-      }
+      if (!res.ok) throw new Error(data.detail || 'Không thể đổi tên folder gốc.')
       setStatus(data)
-      setMessage(`Đã kết nối thư mục lưu trữ: ${data.folder_name}`)
+      setCustomFolder(data.folder_name || name)
+      setMessage(`Đã đổi tên folder gốc thành "${data.folder_name || name}".`)
     } catch (err: any) {
-      setError(err.message || 'Cập nhật thư mục thất bại. Hãy kiểm tra lại link/ID hoặc dùng nút "+ Tạo thư mục này trên Drive".')
+      setError(err.message || 'Không thể đổi tên folder gốc.')
     } finally {
       setFolderSaving(false)
     }
   }
 
-  async function handleCreateFolder(nameToCreate?: string) {
-    const targetName = (nameToCreate || customFolder || 'AI_Clean_Videos').trim()
+  async function handleWorkflowFolder(workflow: string, create: boolean) {
+    const value = workflowFolderInputs[workflow].trim()
+    if (!value) {
+      setError(create ? `Vui lòng nhập tên folder cho workflow ${workflow === 'audio' ? 'Audio' : 'Studio'}.` : 'Vui lòng dán Folder ID hoặc link Google Drive.')
+      return
+    }
+    setFolderSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}/api/gdrive/workflow-folder${create ? '/create' : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(create ? { workflow, folder_name: value } : { workflow, folder_id: value }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Không thể cập nhật folder workflow.')
+      setStatus(data)
+      setWorkflowFolderInputs(prev => ({ ...prev, [workflow]: data.workflow_folders?.[workflow]?.folder_name || value }))
+      setMessage(`Đã đặt folder ${workflow}: ${data.workflow_folders?.[workflow]?.folder_name || value}`)
+    } catch (err: any) {
+      setError(err.message || 'Không thể cập nhật folder workflow.')
+    } finally {
+      setFolderSaving(false)
+    }
+  }
+
+  async function handleRenameWorkflowFolder(workflow: string) {
+    const value = workflowFolderInputs[workflow].trim()
+    if (!value) {
+      setError('Vui lòng nhập tên mới cho folder workflow.')
+      return
+    }
     setFolderSaving(true)
     setError('')
     setMessage('')
     try {
-      const res = await fetch(`${API_URL}/api/gdrive/folder/create`, {
+      const res = await fetch(`${API_URL}/api/gdrive/workflow-folder/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          folder_name: targetName || 'AI_Clean_Videos',
-        }),
+        body: JSON.stringify({ workflow, folder_name: value }),
       })
       const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.detail || 'Tạo thư mục thất bại.')
-      }
+      if (!res.ok) throw new Error(data.detail || 'Không thể đổi tên folder workflow.')
       setStatus(data)
-      setCustomFolder('')
-      setMessage(`Đã tạo và đặt thư mục "${data.folder_name}" làm thư mục lưu trữ mặc định thành công!`)
+      setWorkflowFolderInputs(prev => ({ ...prev, [workflow]: data.workflow_folders?.[workflow]?.folder_name || value }))
+      setMessage(`Đã đổi tên folder ${workflow}.`)
     } catch (err: any) {
-      setError(err.message || 'Tạo thư mục thất bại.')
+      setError(err.message || 'Không thể đổi tên folder workflow.')
+    } finally {
+      setFolderSaving(false)
+    }
+  }
+
+  async function handleAddWorkflow() {
+    const workflow = newWorkflowName.trim()
+    const folderName = newWorkflowFolderName.trim()
+    if (!workflow || !folderName) {
+      setError('Vui lòng nhập tên workflow và tên folder.')
+      return
+    }
+    setFolderSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}/api/gdrive/workflow-folder/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflow, folder_name: folderName }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Không thể tạo workflow folder.')
+      setStatus(data)
+      const key = workflow.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
+      setWorkflowFolderInputs(prev => ({ ...prev, [key]: data.workflow_folders?.[key]?.folder_name || folderName }))
+      setNewWorkflowName('')
+      setNewWorkflowFolderName('')
+      setShowAddWorkflow(false)
+      setMessage(`Đã thêm workflow ${workflow} và tạo folder thành công.`)
+    } catch (err: any) {
+      setError(err.message || 'Không thể tạo workflow folder.')
     } finally {
       setFolderSaving(false)
     }
@@ -556,7 +616,7 @@ export function GoogleDriveSection() {
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      Thư mục lưu video mặc định: <span style={{ color: '#4f46e5', fontSize: 14 }}>{status.folder_name || 'Chưa đặt'}</span>
+                      Thư mục gốc lưu video: <span style={{ color: '#4f46e5', fontSize: 14 }}>{status.folder_name || 'Chưa đặt'}</span>
                       <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}>
                         Đang sử dụng
                       </span>
@@ -594,51 +654,81 @@ export function GoogleDriveSection() {
               {/* Input & Actions */}
               <div>
                 <label style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, display: 'block', color: '#334155' }}>
-                  Đổi hoặc tạo thư mục lưu trữ mới
+                  Đổi tên folder gốc lưu trữ
                 </label>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <input
                     value={customFolder}
                     onChange={e => setCustomFolder(e.target.value)}
-                    placeholder="Nhập tên thư mục mới (VD: fl_V1, Review_Video) hoặc dán Link/ID thư mục có sẵn..."
+                    placeholder="Nhập tên mới cho folder gốc (VD: MMO_Videos)"
                     style={{ flex: 1, minWidth: 280, height: 40, fontSize: 12.5 }}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && customFolder.trim()) {
                         e.preventDefault()
-                        handleCreateFolder(customFolder)
+                        handleRenameRootFolder()
                       }
                     }}
                   />
                   <button
                     type="button"
                     className="btn-p"
-                    onClick={() => handleCreateFolder(customFolder)}
+                    onClick={handleRenameRootFolder}
                     disabled={folderSaving || !customFolder.trim()}
-                    title="Tạo mới thư mục với tên vừa nhập và đặt làm mặc định"
+                    title="Đổi tên folder gốc hiện tại"
                     style={{ height: 40, padding: '0 16px', fontSize: 12, background: '#4f46e5', gap: 6 }}
                   >
-                    {folderSaving ? <Loader2 size={13} className="spin" /> : <FolderPlus size={14} />}
-                    + Tạo và đặt làm mặc định
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-g"
-                    onClick={handleSaveFolder}
-                    disabled={folderSaving || !customFolder.trim()}
-                    title="Nếu bạn vừa dán Link hoặc Folder ID có sẵn trên Drive"
-                    style={{ height: 40, padding: '0 14px', fontSize: 12, gap: 6 }}
-                  >
-                    <Save size={13} /> Lưu Link/ID có sẵn
+                    {folderSaving ? <Loader2 size={13} className="spin" /> : <Save size={14} />}
+                    Đổi tên folder gốc
                   </button>
                 </div>
 
                 <p style={{ fontSize: 11.5, color: '#64748b', marginTop: 8, marginBottom: 0 }}>
-                  💡 <strong>Cách đổi thư mục:</strong> Gõ tên thư mục bạn muốn (ví dụ <code>fl_V1</code>) rồi bấm <strong>"+ Tạo và đặt làm mặc định"</strong>. Thư mục sẽ được tạo mới ngay trên Drive của bạn và hệ thống sẽ tự động chuyển sang lưu vào đó.
+                  💡 Folder ID được giữ nguyên; thao tác này chỉ đổi tên folder gốc hiện tại trên Google Drive.
                 </p>
               </div>
             </div>
 
             {/* Auto-upload setting toggle */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>Quản lý tập trung folder lưu theo workflow</div>
+                <button type="button" className="btn-p" onClick={() => setShowAddWorkflow(value => !value)} style={{ height: 30, padding: '0 10px', fontSize: 11, background: '#4f46e5' }}><FolderPlus size={12} /> Thêm workflow</button>
+              </div>
+              <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 12 }}>
+                Tất cả folder Audio và Studio được quản lý tại đây và nằm bên trong folder gốc ở phía trên. Video sẽ tự động đi vào folder tương ứng; nếu chưa cấu hình, hệ thống dùng folder gốc.
+              </div>
+              {showAddWorkflow && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 0', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+                  <input value={newWorkflowName} onChange={e => setNewWorkflowName(e.target.value)} placeholder="Tên workflow mới (VD: Shorts)" style={{ flex: '1 1 180px', height: 32, fontSize: 11 }} />
+                  <input value={newWorkflowFolderName} onChange={e => setNewWorkflowFolderName(e.target.value)} placeholder="Tên folder lưu" style={{ flex: '1 1 220px', height: 32, fontSize: 11 }} />
+                  <button type="button" className="btn-p" disabled={folderSaving} onClick={handleAddWorkflow} style={{ height: 32, padding: '0 10px', fontSize: 11, background: '#4f46e5' }}><FolderPlus size={12} /> Tạo folder workflow</button>
+                </div>
+              )}
+              {Array.from(new Set(['audio', 'studio', ...Object.keys(status.workflow_folders || {})])).map(workflow => {
+                const folder = status.workflow_folders?.[workflow]
+                const label = workflow === 'audio' ? 'Audio' : workflow === 'studio' ? 'Studio' : workflow.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
+                return (
+                  <div key={workflow} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+                    <Folder size={15} color={workflow === 'audio' ? '#c026d3' : '#4f46e5'} />
+                    <strong style={{ width: 70, fontSize: 12, color: '#334155' }}>{label}</strong>
+                    <span style={{ flex: 1, minWidth: 180, fontSize: 11.5, color: folder ? '#334155' : '#94a3b8' }}>{folder?.folder_name || 'Chưa cấu hình — dùng folder mặc định'}</span>
+                    <input
+                      value={workflowFolderInputs[workflow]}
+                      onChange={e => setWorkflowFolderInputs(prev => ({ ...prev, [workflow]: e.target.value }))}
+                      placeholder={folder ? 'Nhập tên mới cho folder này' : 'Tên folder con (VD: Audio_Videos)'}
+                      style={{ flex: '1 1 240px', minWidth: 220, height: 32, boxSizing: 'border-box', fontSize: 11 }}
+                    />
+                    {!folder ? (
+                      <button type="button" className="btn-p" disabled={folderSaving} onClick={() => handleWorkflowFolder(workflow, true)} style={{ height: 32, padding: '0 10px', fontSize: 11, background: '#4f46e5' }}><FolderPlus size={12} /> Tạo folder</button>
+                    ) : (
+                      <button type="button" className="btn-g" disabled={folderSaving} onClick={() => handleRenameWorkflowFolder(workflow)} style={{ height: 32, padding: '0 10px', fontSize: 11 }}><Save size={12} /> Đổi tên</button>
+                    )}
+                    {folder?.folder_url && <a href={folder.folder_url} target="_blank" rel="noreferrer" title="Mở folder trên Google Drive"><ExternalLink size={14} color="#4f46e5" /></a>}
+                  </div>
+                )
+              })}
+            </div>
+
             <div
               style={{
                 display: 'flex',

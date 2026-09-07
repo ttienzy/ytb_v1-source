@@ -8,6 +8,10 @@ from app.externals.gdrive.schemas import (
     GDriveFolderCreateRequest,
     GDriveFolderItem,
     GDriveFolderUpdateRequest,
+    GDriveRootFolderRenameRequest,
+    GDriveWorkflowFolderRequest,
+    GDriveWorkflowFolderCreateRequest,
+    GDriveWorkflowFolderRenameRequest,
     GDriveSettingsUpdateRequest,
     GDriveStatusOut,
     GDriveUploadRequest,
@@ -74,6 +78,30 @@ def create_folder(
     """Tạo mới một thư mục lưu trữ trên Google Drive với tên tùy chọn."""
     name = (payload.folder_name if payload and payload.folder_name else folder_name) or "AI_Clean_Videos"
     return service.create_new_folder(name)
+
+
+@router.post("/folder/rename", response_model=GDriveStatusOut)
+def rename_root_folder(payload: GDriveRootFolderRenameRequest):
+    """Đổi tên folder gốc hiện tại, giữ nguyên Folder ID."""
+    return service.rename_root_folder(payload.folder_name)
+
+
+@router.post("/workflow-folder", response_model=GDriveStatusOut)
+def update_workflow_folder(payload: GDriveWorkflowFolderRequest):
+    """Đặt folder đích riêng cho workflow Audio hoặc Studio."""
+    return service.update_workflow_folder(payload)
+
+
+@router.post("/workflow-folder/create", response_model=GDriveStatusOut)
+def create_workflow_folder(payload: GDriveWorkflowFolderCreateRequest):
+    """Tạo và đặt folder riêng cho workflow Audio hoặc Studio."""
+    return service.create_workflow_folder(payload)
+
+
+@router.post("/workflow-folder/rename", response_model=GDriveStatusOut)
+def rename_workflow_folder(payload: GDriveWorkflowFolderRenameRequest):
+    """Đổi tên folder của workflow, không tạo folder mới."""
+    return service.rename_workflow_folder(payload)
 
 
 @router.put("/settings", response_model=GDriveStatusOut)
