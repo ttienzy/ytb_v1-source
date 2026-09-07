@@ -415,11 +415,11 @@ export function GoogleDriveSection() {
       )}
 
       {/* Main Connection Card */}
-      <div className="card" style={{ padding: 20 }}>
+      <div className="mailtm-card" style={{ padding: '16px 20px' }}>
         <div
           style={{
             display: 'flex',
-            alignItems: 'flex-start',
+            alignItems: 'center',
             justifyContent: 'space-between',
             gap: 16,
             flexWrap: 'wrap',
@@ -429,22 +429,22 @@ export function GoogleDriveSection() {
             <div
               style={{
                 display: 'grid',
-                width: 44,
-                height: 44,
+                width: 36,
+                height: 36,
                 placeItems: 'center',
-                background: status?.connected ? '#e0f2fe' : '#f1f5f9',
-                color: status?.connected ? '#0284c7' : '#64748b',
-                borderRadius: 12,
+                background: '#f1f5f9',
+                color: '#475569',
+                borderRadius: 9,
                 flexShrink: 0,
               }}
             >
-              <GoogleDriveIcon size={24} />
+              <GoogleDriveIcon size={19} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
+              <h3 className="gemini-title" style={{ fontSize: 14.5, fontWeight: 700 }}>
                 Đồng bộ Google Drive
               </h3>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: '#64748b' }}>
+              <p className="gemini-subtitle">
                 Tự động tải lên và sao lưu video sau khi xóa watermark vào Google Drive cá nhân
               </p>
             </div>
@@ -454,27 +454,22 @@ export function GoogleDriveSection() {
             {status?.connected ? (
               <button
                 type="button"
-                className="btn-cancel"
+                className="mailtm-btn-danger-outline"
                 onClick={handleDisconnect}
                 disabled={actionLoading}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  color: '#dc2626',
-                  borderColor: '#fca5a5',
-                  background: '#fef2f2',
-                }}
               >
-                <LogOut size={13} /> Ngắt kết nối
+                <LogOut size={12} color="#ef4444" /> Ngắt kết nối
               </button>
             ) : (
               <button
                 type="button"
-                className="btn-p"
+                className="mailtm-btn-primary"
                 onClick={handleAutoLogin}
                 disabled={actionLoading}
                 style={{
+                  height: 32,
+                  padding: '0 12px',
+                  fontSize: 12,
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 7,
@@ -515,9 +510,10 @@ export function GoogleDriveSection() {
                 gridTemplateColumns: '1.2fr 1fr',
                 gap: 16,
                 background: '#f8fafc',
-                padding: '14px 16px',
-                borderRadius: 12,
+                padding: '12px 14px',
+                borderRadius: 10,
                 border: '1px solid #e2e8f0',
+                alignItems: 'center',
               }}
             >
               {/* Account info */}
@@ -526,45 +522,45 @@ export function GoogleDriveSection() {
                   <img
                     src={status.avatar_url}
                     alt="avatar"
-                    style={{ width: 40, height: 40, borderRadius: '50%', border: '1.5px solid #0284c7' }}
+                    style={{ width: 36, height: 36, borderRadius: '50%', border: '1px solid #cbd5e1', objectFit: 'cover' }}
                   />
                 ) : (
                   <div
                     style={{
-                      width: 40,
-                      height: 40,
+                      width: 36,
+                      height: 36,
                       borderRadius: '50%',
-                      background: '#0284c7',
-                      color: '#fff',
+                      background: '#e2e8f0',
+                      color: '#475569',
                       display: 'grid',
                       placeItems: 'center',
                       fontWeight: 700,
-                      fontSize: 14,
+                      fontSize: 13,
                     }}
                   >
                     {status.email ? status.email[0].toUpperCase() : 'G'}
                   </div>
                 )}
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>
                     {status.name || status.email}
                   </div>
-                  <div style={{ fontSize: 11.5, color: '#64748b' }}>{status.email}</div>
+                  <div style={{ fontSize: 11, color: '#64748b' }}>{status.email}</div>
                   <span
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 4,
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      color: '#15803d',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: '#16a34a',
                       background: '#dcfce7',
                       padding: '1px 6px',
                       borderRadius: 4,
-                      marginTop: 3,
+                      marginTop: 2,
                     }}
                   >
-                    <CheckCircle2 size={10} /> Đã kết nối OAuth 2.0
+                    <CheckCircle2 size={9} /> Đã kết nối OAuth 2.0
                   </span>
                 </div>
               </div>
@@ -576,19 +572,19 @@ export function GoogleDriveSection() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    fontSize: 11.5,
-                    marginBottom: 6,
+                    fontSize: 11,
+                    marginBottom: 5,
                   }}
                 >
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>Dung lượng Drive:</span>
-                  <span style={{ fontWeight: 700, color: '#1e293b' }}>
+                  <span style={{ color: '#64748b', fontWeight: 500 }}>Dung lượng Drive:</span>
+                  <span style={{ fontWeight: 600, color: '#1e293b' }}>
                     {formatBytes(usedBytes)} / {formatBytes(totalBytes)} ({usedPercent}%)
                   </span>
                 </div>
                 <div
                   style={{
                     width: '100%',
-                    height: 7,
+                    height: 6,
                     background: '#e2e8f0',
                     borderRadius: 999,
                     overflow: 'hidden',
@@ -598,7 +594,7 @@ export function GoogleDriveSection() {
                     style={{
                       width: `${usedPercent}%`,
                       height: '100%',
-                      background: usedPercent > 85 ? '#ef4444' : '#0284c7',
+                      background: usedPercent > 85 ? '#ef4444' : '#475569',
                       borderRadius: 999,
                     }}
                   />
@@ -607,22 +603,22 @@ export function GoogleDriveSection() {
             </div>
 
             {/* Folder Configuration */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '16px' }}>
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 14 }}>
               {/* Current Active Folder Banner */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap', gap: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 8, background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>
-                    <Folder size={18} />
+                  <div style={{ width: 30, height: 30, borderRadius: 6, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', flexShrink: 0 }}>
+                    <Folder size={15} />
                   </div>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      Thư mục gốc lưu video: <span style={{ color: '#4f46e5', fontSize: 14 }}>{status.folder_name || 'Chưa đặt'}</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      Thư mục gốc lưu video: <span style={{ color: '#0f172a', fontWeight: 700 }}>{status.folder_name || 'Chưa đặt'}</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: '1.5px 6px', borderRadius: 4, background: '#dcfce7', color: '#16a34a' }}>
                         Đang sử dụng
                       </span>
                     </div>
-                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                      Tất cả video đã xóa watermark sẽ tự động tải vào thư mục này. (Google Drive ID: <code>{status.folder_id || 'chưa có'}</code>)
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
+                      Tất cả video đã xóa watermark sẽ tự động tải vào thư mục này. (ID: <code>{status.folder_id || 'chưa có'}</code>)
                     </div>
                   </div>
                 </div>
@@ -632,36 +628,36 @@ export function GoogleDriveSection() {
                     href={status.folder_url}
                     target="_blank"
                     rel="noreferrer"
+                    className="mailtm-btn-refresh"
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 5,
-                      color: '#4f46e5',
-                      background: '#fff',
-                      border: '1px solid #c7d2fe',
-                      padding: '6px 12px',
-                      borderRadius: 8,
-                      fontSize: 12,
-                      fontWeight: 600,
+                      height: 28,
+                      padding: '0 9px',
+                      borderRadius: 6,
+                      fontSize: 11.5,
+                      fontWeight: 500,
                       textDecoration: 'none',
                     }}
                   >
-                    Mở xem trên Google Drive <ExternalLink size={12} />
+                    Mở xem trên Google Drive <ExternalLink size={11} />
                   </a>
                 )}
               </div>
 
               {/* Input & Actions */}
               <div>
-                <label style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, display: 'block', color: '#334155' }}>
+                <label style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 5, display: 'block', color: '#334155' }}>
                   Đổi tên folder gốc lưu trữ
                 </label>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <input
+                    className="mailtm-input"
                     value={customFolder}
                     onChange={e => setCustomFolder(e.target.value)}
                     placeholder="Nhập tên mới cho folder gốc (VD: MMO_Videos)"
-                    style={{ flex: 1, minWidth: 280, height: 40, fontSize: 12.5 }}
+                    style={{ flex: 1, minWidth: 260, height: 32, fontSize: 12 }}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && customFolder.trim()) {
                         e.preventDefault()
@@ -671,59 +667,142 @@ export function GoogleDriveSection() {
                   />
                   <button
                     type="button"
-                    className="btn-p"
+                    className="mailtm-btn-refresh"
                     onClick={handleRenameRootFolder}
                     disabled={folderSaving || !customFolder.trim()}
                     title="Đổi tên folder gốc hiện tại"
-                    style={{ height: 40, padding: '0 16px', fontSize: 12, background: '#4f46e5', gap: 6 }}
+                    style={{
+                      height: 32,
+                      padding: '0 12px',
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      background: '#1e293b',
+                      color: '#ffffff',
+                      borderColor: '#0f172a',
+                      gap: 5,
+                    }}
                   >
-                    {folderSaving ? <Loader2 size={13} className="spin" /> : <Save size={14} />}
+                    {folderSaving ? <Loader2 size={12} className="spin" /> : <Save size={12} />}
                     Đổi tên folder gốc
                   </button>
                 </div>
 
-                <p style={{ fontSize: 11.5, color: '#64748b', marginTop: 8, marginBottom: 0 }}>
+                <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, marginBottom: 0 }}>
                   💡 Folder ID được giữ nguyên; thao tác này chỉ đổi tên folder gốc hiện tại trên Google Drive.
                 </p>
               </div>
             </div>
 
             {/* Auto-upload setting toggle */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 16 }}>
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>Quản lý tập trung folder lưu theo workflow</div>
-                <button type="button" className="btn-p" onClick={() => setShowAddWorkflow(value => !value)} style={{ height: 30, padding: '0 10px', fontSize: 11, background: '#4f46e5' }}><FolderPlus size={12} /> Thêm workflow</button>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>Quản lý tập trung folder lưu theo workflow</div>
+                <button
+                  type="button"
+                  className="mailtm-btn-refresh"
+                  onClick={() => setShowAddWorkflow(value => !value)}
+                  style={{ height: 26, padding: '0 8px', fontSize: 11, gap: 4 }}
+                >
+                  <FolderPlus size={11} /> Thêm workflow
+                </button>
               </div>
-              <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 12 }}>
+              <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 10 }}>
                 Tất cả folder Audio và Studio được quản lý tại đây và nằm bên trong folder gốc ở phía trên. Video sẽ tự động đi vào folder tương ứng; nếu chưa cấu hình, hệ thống dùng folder gốc.
               </div>
               {showAddWorkflow && (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 0', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
-                  <input value={newWorkflowName} onChange={e => setNewWorkflowName(e.target.value)} placeholder="Tên workflow mới (VD: Shorts)" style={{ flex: '1 1 180px', height: 32, fontSize: 11 }} />
-                  <input value={newWorkflowFolderName} onChange={e => setNewWorkflowFolderName(e.target.value)} placeholder="Tên folder lưu" style={{ flex: '1 1 220px', height: 32, fontSize: 11 }} />
-                  <button type="button" className="btn-p" disabled={folderSaving} onClick={handleAddWorkflow} style={{ height: 32, padding: '0 10px', fontSize: 11, background: '#4f46e5' }}><FolderPlus size={12} /> Tạo folder workflow</button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '9px 0', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+                  <input
+                    className="mailtm-input"
+                    value={newWorkflowName}
+                    onChange={e => setNewWorkflowName(e.target.value)}
+                    placeholder="Tên workflow mới (VD: Shorts)"
+                    style={{ flex: '1 1 180px', height: 28, fontSize: 11.5 }}
+                  />
+                  <input
+                    className="mailtm-input"
+                    value={newWorkflowFolderName}
+                    onChange={e => setNewWorkflowFolderName(e.target.value)}
+                    placeholder="Tên folder lưu"
+                    style={{ flex: '1 1 220px', height: 28, fontSize: 11.5 }}
+                  />
+                  <button
+                    type="button"
+                    className="mailtm-btn-refresh"
+                    disabled={folderSaving}
+                    onClick={handleAddWorkflow}
+                    style={{
+                      height: 28,
+                      padding: '0 10px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      background: '#1e293b',
+                      color: '#ffffff',
+                      borderColor: '#0f172a',
+                      gap: 4,
+                    }}
+                  >
+                    <FolderPlus size={11} /> Tạo folder workflow
+                  </button>
                 </div>
               )}
               {Array.from(new Set(['audio', 'studio', ...Object.keys(status.workflow_folders || {})])).map(workflow => {
                 const folder = status.workflow_folders?.[workflow]
                 const label = workflow === 'audio' ? 'Audio' : workflow === 'studio' ? 'Studio' : workflow.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
                 return (
-                  <div key={workflow} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
-                    <Folder size={15} color={workflow === 'audio' ? '#c026d3' : '#4f46e5'} />
-                    <strong style={{ width: 70, fontSize: 12, color: '#334155' }}>{label}</strong>
-                    <span style={{ flex: 1, minWidth: 180, fontSize: 11.5, color: folder ? '#334155' : '#94a3b8' }}>{folder?.folder_name || 'Chưa cấu hình — dùng folder mặc định'}</span>
+                  <div key={workflow} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: '1px solid #f1f5f9', flexWrap: 'wrap' }}>
+                    <Folder size={14} color="#64748b" />
+                    <strong style={{ width: 65, fontSize: 11.5, color: '#1e293b' }}>{label}</strong>
+                    <span style={{ flex: 1, minWidth: 160, fontSize: 11, color: folder ? '#334155' : '#94a3b8' }}>
+                      {folder?.folder_name || 'Chưa cấu hình — dùng folder mặc định'}
+                    </span>
                     <input
+                      className="mailtm-input"
                       value={workflowFolderInputs[workflow]}
                       onChange={e => setWorkflowFolderInputs(prev => ({ ...prev, [workflow]: e.target.value }))}
                       placeholder={folder ? 'Nhập tên mới cho folder này' : 'Tên folder con (VD: Audio_Videos)'}
-                      style={{ flex: '1 1 240px', minWidth: 220, height: 32, boxSizing: 'border-box', fontSize: 11 }}
+                      style={{ flex: '1 1 200px', minWidth: 180, height: 28, fontSize: 11.5 }}
                     />
                     {!folder ? (
-                      <button type="button" className="btn-p" disabled={folderSaving} onClick={() => handleWorkflowFolder(workflow, true)} style={{ height: 32, padding: '0 10px', fontSize: 11, background: '#4f46e5' }}><FolderPlus size={12} /> Tạo folder</button>
+                      <button
+                        type="button"
+                        className="mailtm-btn-refresh"
+                        disabled={folderSaving}
+                        onClick={() => handleWorkflowFolder(workflow, true)}
+                        style={{
+                          height: 28,
+                          padding: '0 9px',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          background: '#f8fafc',
+                          color: '#1e293b',
+                          borderColor: '#cbd5e1',
+                          gap: 4,
+                        }}
+                      >
+                        <FolderPlus size={11} /> Tạo folder
+                      </button>
                     ) : (
-                      <button type="button" className="btn-g" disabled={folderSaving} onClick={() => handleRenameWorkflowFolder(workflow)} style={{ height: 32, padding: '0 10px', fontSize: 11 }}><Save size={12} /> Đổi tên</button>
+                      <button
+                        type="button"
+                        className="mailtm-btn-refresh"
+                        disabled={folderSaving}
+                        onClick={() => handleRenameWorkflowFolder(workflow)}
+                        style={{
+                          height: 28,
+                          padding: '0 9px',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          gap: 4,
+                        }}
+                      >
+                        <Save size={11} /> Đổi tên
+                      </button>
                     )}
-                    {folder?.folder_url && <a href={folder.folder_url} target="_blank" rel="noreferrer" title="Mở folder trên Google Drive"><ExternalLink size={14} color="#4f46e5" /></a>}
+                    {folder?.folder_url && (
+                      <a href={folder.folder_url} target="_blank" rel="noreferrer" title="Mở folder trên Google Drive" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                        <ExternalLink size={13} color="#64748b" />
+                      </a>
+                    )}
                   </div>
                 )
               })}
@@ -764,15 +843,15 @@ export function GoogleDriveSection() {
               style={{
                 background: '#f8fafc',
                 border: '1px solid #e2e8f0',
-                borderRadius: 12,
-                padding: '14px 16px',
-                fontSize: 12.5,
+                borderRadius: 10,
+                padding: '12px 14px',
+                fontSize: 12,
                 color: '#334155',
                 lineHeight: 1.6,
               }}
             >
-              <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <KeyRound size={15} color="#0284c7" /> Hướng dẫn tạo Google OAuth 2.0 Credentials (1 phút):
+              <div style={{ fontWeight: 600, color: '#0f172a', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <KeyRound size={14} color="#64748b" /> Hướng dẫn tạo Google OAuth 2.0 Credentials (1 phút):
               </div>
               <ol style={{ margin: 0, paddingLeft: 18 }}>
                 <li>
@@ -781,7 +860,7 @@ export function GoogleDriveSection() {
                     href="https://console.cloud.google.com/apis/credentials"
                     target="_blank"
                     rel="noreferrer"
-                    style={{ color: '#0284c7', fontWeight: 600 }}
+                    style={{ color: '#2563eb', fontWeight: 600 }}
                   >
                     Google Cloud Console Credentials <ExternalLink size={11} />
                   </a>
@@ -798,74 +877,76 @@ export function GoogleDriveSection() {
             </div>
 
             {/* Credentials Input Form */}
-            <div style={{ marginTop: 14, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 16 }}>
+            <div style={{ marginTop: 12, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: 14 }}>
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   cursor: 'pointer',
-                  fontWeight: 700,
-                  fontSize: 13,
+                  fontWeight: 600,
+                  fontSize: 12.5,
                   color: '#0f172a',
                 }}
                 onClick={() => setShowCredForm(!showCredForm)}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Settings size={15} color="#64748b" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <Settings size={14} color="#64748b" />
                   <span>Cấu hình Google OAuth 2.0 Client ID &amp; Secret</span>
                   {status?.has_credentials && (
-                    <span style={{ fontSize: 11, color: '#16a34a', background: '#dcfce7', padding: '1px 6px', borderRadius: 4 }}>
+                    <span style={{ fontSize: 10, color: '#16a34a', background: '#dcfce7', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
                       Đã lưu Client ID
                     </span>
                   )}
                 </div>
-                {showCredForm ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                {showCredForm ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
               </div>
 
               {showCredForm && (
-                <form onSubmit={handleSaveCredentials} style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <form onSubmit={handleSaveCredentials} style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div>
-                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Client ID</label>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, display: 'block', marginBottom: 4, color: '#334155' }}>Client ID</label>
                     <input
+                      className="mailtm-input"
                       value={clientId}
                       onChange={e => setClientId(e.target.value)}
                       placeholder="vd: 123456789-abcdef.apps.googleusercontent.com"
-                      style={{ width: '100%', height: 38, fontSize: 12.5 }}
+                      style={{ width: '100%', height: 32, fontSize: 12 }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Client Secret</label>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, display: 'block', marginBottom: 4, color: '#334155' }}>Client Secret</label>
                     <input
+                      className="mailtm-input"
                       type="password"
                       value={clientSecret}
                       onChange={e => setClientSecret(e.target.value)}
                       placeholder="vd: GOCSPX-xxxxxxxxxxxxxxxx"
-                      style={{ width: '100%', height: 38, fontSize: 12.5 }}
+                      style={{ width: '100%', height: 32, fontSize: 12 }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, display: 'block', marginBottom: 4, color: '#334155' }}>
                       Hoặc dán toàn bộ nội dung file <code>credentials.json</code>:
                     </label>
                     <textarea
                       value={credJson}
                       onChange={e => setCredJson(e.target.value)}
                       placeholder={'{\n  "installed": {\n    "client_id": "...",\n    "client_secret": "..."\n  }\n}'}
-                      style={{ width: '100%', minHeight: 80, fontSize: 11.5, fontFamily: 'monospace' }}
+                      style={{ width: '100%', minHeight: 70, fontSize: 11, fontFamily: 'monospace', border: '1px solid #e2e8f0', borderRadius: 6, padding: 8 }}
                     />
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                     <button
                       type="submit"
-                      className="btn-p"
+                      className="mailtm-btn-primary"
                       disabled={savingCreds}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}
+                      style={{ height: 30, padding: '0 12px', fontSize: 11.5 }}
                     >
-                      {savingCreds ? <Loader2 size={13} className="spin" /> : <Save size={13} />} Lưu thông tin xác thực
+                      {savingCreds ? <Loader2 size={12} className="spin" /> : <Save size={12} />} Lưu thông tin xác thực
                     </button>
                   </div>
                 </form>
@@ -873,13 +954,13 @@ export function GoogleDriveSection() {
             </div>
 
             {/* Manual Code Fallback Option */}
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 10 }}>
               <div
                 style={{
-                  fontSize: 12,
-                  color: '#0284c7',
+                  fontSize: 11.5,
+                  color: '#475569',
                   cursor: 'pointer',
-                  fontWeight: 600,
+                  fontWeight: 500,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 4,
@@ -889,24 +970,24 @@ export function GoogleDriveSection() {
                   if (!authUrl) handleGetAuthUrl()
                 }}
               >
-                <HelpCircle size={13} />
+                <HelpCircle size={12} color="#64748b" />
                 <span>Gặp lỗi kết nối tự động? Bấm vào đây để đăng nhập thủ công qua link</span>
               </div>
 
               {showManualCode && (
                 <div
                   style={{
-                    marginTop: 10,
-                    background: '#f0f9ff',
-                    border: '1px solid #bae6fd',
-                    borderRadius: 10,
-                    padding: 14,
+                    marginTop: 8,
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: 12,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 10,
+                    gap: 8,
                   }}
                 >
-                  <div style={{ fontSize: 12, color: '#0369a1' }}>
+                  <div style={{ fontSize: 11.5, color: '#334155' }}>
                     <strong>Cách 2:</strong> Bấm link bên dưới để mở trang đăng nhập Google trong trình duyệt của bạn:
                   </div>
 
@@ -915,47 +996,49 @@ export function GoogleDriveSection() {
                       href={authUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="btn-p"
+                      className="mailtm-btn-primary"
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        background: '#0284c7',
+                        height: 28,
+                        padding: '0 10px',
+                        fontSize: 11.5,
                         width: 'fit-content',
                         textDecoration: 'none',
-                        fontSize: 12,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
                       }}
                     >
-                      <ExternalLink size={13} /> Mở liên kết đăng nhập Google Drive
+                      <ExternalLink size={12} /> Mở liên kết đăng nhập Google Drive
                     </a>
                   ) : (
                     <button
                       type="button"
-                      className="btn-cancel"
+                      className="mailtm-btn-refresh"
                       onClick={handleGetAuthUrl}
-                      style={{ width: 'fit-content', fontSize: 12 }}
+                      style={{ width: 'fit-content', height: 28, fontSize: 11.5 }}
                     >
                       Tạo liên kết đăng nhập
                     </button>
                   )}
 
                   <div>
-                    <label style={{ fontSize: 11.5, fontWeight: 600, color: '#0369a1', display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: 11, fontWeight: 500, color: '#64748b', display: 'block', marginBottom: 4 }}>
                       Sau khi cấp quyền, dán toàn bộ đường link trình duyệt chuyển hướng (hoặc mã Authorization Code) vào đây:
                     </label>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
                       <input
+                        className="mailtm-input"
                         value={manualCode}
                         onChange={e => setManualCode(e.target.value)}
                         placeholder="vd: http://localhost:8080/?code=4/0Abc... hoặc mã 4/0Abc..."
-                        style={{ flex: 1, height: 36, fontSize: 12 }}
+                        style={{ flex: 1, height: 30, fontSize: 11.5 }}
                       />
                       <button
                         type="button"
-                        className="btn-p"
+                        className="mailtm-btn-primary"
                         onClick={handleExchangeManualCode}
                         disabled={exchangingCode}
-                        style={{ height: 36, fontSize: 12, background: '#0369a1' }}
+                        style={{ height: 30, padding: '0 12px', fontSize: 11.5 }}
                       >
                         {exchangingCode ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} />} Xác thực mã
                       </button>

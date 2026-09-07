@@ -283,333 +283,334 @@ export function MailTmSection({
   }
 
   return (
-    <div className="settings-card">
-      <div className="integration-title">
-        <div
-          className="gemini-icon"
-          style={{ background: '#eef2ff', color: '#4f46e5' }}
-        >
-          <Mail size={18} />
-        </div>
-        <div>
-          <h2>Mail.tm (Hộp thư tạm thời tự động)</h2>
-          <p>
-            Tự động tạo email theo tên miền tùy ý & đọc mã xác nhận OTP (lưu trữ
-            trong config.json).
-          </p>
-        </div>
-      </div>
-
-      <div className="mtm-tabs">
-        <button
-          type="button"
-          className={`mtm-tab-btn ${tab === 'single' ? 'mtm-tab-active' : ''}`}
-          onClick={() => setTab('single')}
-        >
-          <Plus size={14} /> Tạo 1 tài khoản tùy chỉnh
-        </button>
-        <button
-          type="button"
-          className={`mtm-tab-btn ${tab === 'batch' ? 'mtm-tab-active' : ''}`}
-          onClick={() => setTab('batch')}
-        >
-          <Layers size={14} /> Tạo hàng loạt (Batch Generate)
-        </button>
-      </div>
-
-      {tab === 'single' ? (
-        <form onSubmit={handleCreateSingle}>
-          <div className="mtm-form-grid">
-            <div>
-              <label>
-                Username <span>(tùy chọn)</span>
-              </label>
-              <input
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder="vd: recap_pip01"
-                disabled={loading}
-              />
+    <div className="mailtm-container">
+      <div className="mailtm-card">
+        <div className="mailtm-card-header">
+          <div className="gemini-card-title-group">
+            <div className="gemini-badge-icon">
+              <Mail size={17} />
             </div>
             <div>
-              <label>Tên miền (Domain Mail.tm)</label>
-              <select
-                className="mtm-select"
-                value={selectedDomain}
-                onChange={e => setSelectedDomain(e.target.value)}
-                disabled={loading || domains.length === 0}
-              >
-                {domains.map(d => (
-                  <option key={d.id} value={d.domain}>
-                    @{d.domain}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label>Mật khẩu</label>
-              <div className="mtm-input-wrap">
-                <input
-                  type={showPass ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Mật khẩu tùy ý..."
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  className="mtm-input-addon"
-                  onClick={() => setShowPass(!showPass)}
-                  title={showPass ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                >
-                  {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
+              <h3 className="gemini-title">Mail.tm (Hộp thư tạm thời tự động)</h3>
+              <p className="gemini-subtitle">
+                Tự động tạo email theo tên miền tùy ý &amp; đọc mã xác nhận OTP (lưu trữ trong config.json).
+              </p>
             </div>
           </div>
-          <div className="settings-actions">
-            <button type="submit" className="primary-button" disabled={loading}>
-              {loading ? (
-                <Loader2 size={16} className="spin" />
-              ) : (
-                <Plus size={16} />
-              )}{' '}
-              Tạo tài khoản
+        </div>
+
+        <div className="mailtm-card-body">
+          <div className="mailtm-segmented-tabs">
+            <button
+              type="button"
+              className={`mailtm-seg-btn ${tab === 'single' ? 'active' : ''}`}
+              onClick={() => setTab('single')}
+            >
+              <Plus size={13} /> Tạo 1 tài khoản tùy chỉnh
             </button>
             <button
               type="button"
-              className="chrome-button"
-              onClick={() => generatePass('single')}
-              disabled={loading}
+              className={`mailtm-seg-btn ${tab === 'batch' ? 'active' : ''}`}
+              onClick={() => setTab('batch')}
             >
-              <Key size={15} /> Tạo pass ngẫu nhiên
+              <Layers size={13} /> Tạo hàng loạt (Batch Generate)
             </button>
           </div>
-        </form>
-      ) : (
-        <form onSubmit={handleCreateBatch}>
-          <div className="mtm-form-grid">
-            <div>
-              <label>Tiền tố Username (Prefix)</label>
-              <input
-                value={batchPrefix}
-                onChange={e => setBatchPrefix(e.target.value)}
-                placeholder="vd: pip_acc"
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label>Số lượng tài khoản (1-20)</label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={batchCount}
-                onChange={e => setBatchCount(parseInt(e.target.value) || 1)}
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label>Tên miền (Domain)</label>
-              <select
-                className="mtm-select"
-                value={batchDomain}
-                onChange={e => setBatchDomain(e.target.value)}
-                disabled={loading || domains.length === 0}
-              >
-                {domains.map(d => (
-                  <option key={d.id} value={d.domain}>
-                    @{d.domain}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label>Mật khẩu chung</label>
-              <div className="mtm-input-wrap">
-                <input
-                  type={showBatchPass ? 'text' : 'password'}
-                  value={batchPassword}
-                  onChange={e => setBatchPassword(e.target.value)}
-                  placeholder="Mật khẩu cho các tài khoản..."
-                  disabled={loading}
-                />
+
+          {tab === 'single' ? (
+            <form onSubmit={handleCreateSingle}>
+              <div className="mailtm-form-grid">
+                <div className="mailtm-field">
+                  <label className="mailtm-label">
+                    Username <span>(tùy chọn)</span>
+                  </label>
+                  <input
+                    className="mailtm-input"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="vd: recap_pip01"
+                    disabled={loading}
+                  />
+                </div>
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Tên miền (Domain Mail.tm)</label>
+                  <select
+                    className="mailtm-select"
+                    value={selectedDomain}
+                    onChange={e => setSelectedDomain(e.target.value)}
+                    disabled={loading || domains.length === 0}
+                  >
+                    {domains.map(d => (
+                      <option key={d.id} value={d.domain}>
+                        @{d.domain}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Mật khẩu</label>
+                  <div className="mailtm-input-wrap">
+                    <input
+                      className="mailtm-input"
+                      type={showPass ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Mật khẩu tùy ý..."
+                      disabled={loading}
+                    />
+                    <button
+                      type="button"
+                      className="mailtm-input-addon"
+                      onClick={() => setShowPass(!showPass)}
+                      title={showPass ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    >
+                      {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="mailtm-actions">
+                <button type="submit" className="mailtm-btn-primary" disabled={loading}>
+                  {loading ? (
+                    <Loader2 size={14} className="spin" />
+                  ) : (
+                    <Plus size={14} />
+                  )}{' '}
+                  Tạo tài khoản
+                </button>
                 <button
                   type="button"
-                  className="mtm-input-addon"
-                  onClick={() => setShowBatchPass(!showBatchPass)}
-                  title={showBatchPass ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                  className="mailtm-btn-secondary"
+                  onClick={() => generatePass('single')}
+                  disabled={loading}
                 >
-                  {showBatchPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                  <Key size={14} /> Tạo pass ngẫu nhiên
                 </button>
               </div>
-            </div>
-          </div>
-          <div className="settings-actions">
-            <button type="submit" className="primary-button" disabled={loading}>
-              {loading ? (
-                <Loader2 size={16} className="spin" />
-              ) : (
-                <Layers size={16} />
-              )}{' '}
-              Tạo {batchCount} tài khoản hàng loạt
-            </button>
-            <button
-              type="button"
-              className="chrome-button"
-              onClick={() => generatePass('batch')}
-              disabled={loading}
-            >
-              <Key size={15} /> Tạo pass ngẫu nhiên
-            </button>
-          </div>
-        </form>
-      )}
-
-      {feedback && (
-        <p
-          className="settings-message"
-          style={{
-            color: feedback.type === 'success' ? '#16a34a' : '#dc2626',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            marginTop: 12,
-          }}
-        >
-          {feedback.type === 'success' ? (
-            <CheckCircle2 size={15} />
+            </form>
           ) : (
-            <AlertCircle size={15} />
+            <form onSubmit={handleCreateBatch}>
+              <div className="mailtm-form-grid">
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Tiền tố Username (Prefix)</label>
+                  <input
+                    className="mailtm-input"
+                    value={batchPrefix}
+                    onChange={e => setBatchPrefix(e.target.value)}
+                    placeholder="vd: pip_acc"
+                    disabled={loading}
+                  />
+                </div>
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Số lượng tài khoản (1-20)</label>
+                  <input
+                    className="mailtm-input"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={batchCount}
+                    onChange={e => setBatchCount(parseInt(e.target.value) || 1)}
+                    disabled={loading}
+                  />
+                </div>
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Tên miền (Domain)</label>
+                  <select
+                    className="mailtm-select"
+                    value={batchDomain}
+                    onChange={e => setBatchDomain(e.target.value)}
+                    disabled={loading || domains.length === 0}
+                  >
+                    {domains.map(d => (
+                      <option key={d.id} value={d.domain}>
+                        @{d.domain}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Mật khẩu chung</label>
+                  <div className="mailtm-input-wrap">
+                    <input
+                      className="mailtm-input"
+                      type={showBatchPass ? 'text' : 'password'}
+                      value={batchPassword}
+                      onChange={e => setBatchPassword(e.target.value)}
+                      placeholder="Mật khẩu cho các tài khoản..."
+                      disabled={loading}
+                    />
+                    <button
+                      type="button"
+                      className="mailtm-input-addon"
+                      onClick={() => setShowBatchPass(!showBatchPass)}
+                      title={showBatchPass ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    >
+                      {showBatchPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="mailtm-actions">
+                <button type="submit" className="mailtm-btn-primary" disabled={loading}>
+                  {loading ? (
+                    <Loader2 size={14} className="spin" />
+                  ) : (
+                    <Layers size={14} />
+                  )}{' '}
+                  Tạo {batchCount} tài khoản hàng loạt
+                </button>
+                <button
+                  type="button"
+                  className="mailtm-btn-secondary"
+                  onClick={() => generatePass('batch')}
+                  disabled={loading}
+                >
+                  <Key size={14} /> Tạo pass ngẫu nhiên
+                </button>
+              </div>
+            </form>
           )}
-          {feedback.text}
-        </p>
-      )}
 
-      {/* Danh sách tài khoản đã lưu */}
-      <div className="mtm-section-hdr">
-        <span className="mtm-section-title">
-          Danh sách tài khoản đã lưu{' '}
-          <span className="mtm-badge">{accounts.length}</span>
-        </span>
-        <button
-          type="button"
-          className="chrome-button"
-          style={{ minHeight: 32, padding: '0 10px', fontSize: 11 }}
-          onClick={() => {
-            loadDomains()
-            loadAccounts()
-          }}
-        >
-          <RefreshCw size={13} /> Làm mới
-        </button>
+          {feedback && (
+            <p
+              className="settings-message"
+              style={{
+                color: feedback.type === 'success' ? '#16a34a' : '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                marginTop: 12,
+                fontSize: 12.5,
+              }}
+            >
+              {feedback.type === 'success' ? (
+                <CheckCircle2 size={14} />
+              ) : (
+                <AlertCircle size={14} />
+              )}
+              {feedback.text}
+            </p>
+          )}
+
+          {/* Danh sách tài khoản đã lưu */}
+          <div className="mailtm-table-header">
+            <div className="mailtm-table-title">
+              <span>Danh sách tài khoản đã lưu</span>
+              <span className="mailtm-count-badge">{accounts.length}</span>
+            </div>
+            <button
+              type="button"
+              className="mailtm-btn-refresh"
+              onClick={() => {
+                loadDomains()
+                loadAccounts()
+              }}
+            >
+              <RefreshCw size={12} /> Làm mới
+            </button>
+          </div>
+
+          {accounts.length === 0 ? (
+            <div
+              style={{
+                padding: '24px 16px',
+                textAlign: 'center',
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px dashed #e2e8f0',
+                color: '#94a3b8',
+                fontSize: 12,
+              }}
+            >
+              Chưa có tài khoản Mail.tm nào được lưu. Hãy tạo tài khoản ở trên để bắt
+              đầu.
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="mailtm-table">
+                <thead>
+                  <tr>
+                    <th>Địa chỉ Email</th>
+                    <th>Mật khẩu</th>
+                    <th>Ngày tạo</th>
+                    <th style={{ textAlign: 'right' }}>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accounts.map(acc => (
+                    <tr key={acc.id}>
+                      <td>
+                        <button
+                          type="button"
+                          className="mailtm-tag-email"
+                          onClick={() => copyText(acc.address, `email_${acc.id}`)}
+                          title="Click để copy email"
+                        >
+                          <Mail size={12} style={{ color: '#6366f1' }} />
+                          <strong>{acc.address}</strong>
+                          {copiedKey === `email_${acc.id}` ? (
+                            <Check size={11} style={{ color: '#16a34a' }} />
+                          ) : (
+                            <Copy size={11} style={{ opacity: 0.6 }} />
+                          )}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="mailtm-tag-pass"
+                          onClick={() => copyText(acc.password, `pass_${acc.id}`)}
+                          title="Click để copy mật khẩu"
+                        >
+                          <Key size={12} />
+                          <span>{acc.password}</span>
+                          {copiedKey === `pass_${acc.id}` ? (
+                            <Check size={11} style={{ color: '#16a34a' }} />
+                          ) : (
+                            <Copy size={11} style={{ opacity: 0.6 }} />
+                          )}
+                        </button>
+                      </td>
+                      <td style={{ color: '#94a3b8', fontSize: 11.5 }}>
+                        {acc.created_at
+                          ? new Date(acc.created_at).toLocaleString()
+                          : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="mailtm-row-actions">
+                          <button
+                            type="button"
+                            className="mailtm-btn-pages"
+                            onClick={() => startLoginSyncPippit(acc)}
+                            title="Đăng nhập Pure HTTP và kéo toàn bộ Real Facebook Pages của tài khoản này"
+                          >
+                            <Bot size={12} /> Đăng nhập &amp; Kéo Pages
+                          </button>
+                          <button
+                            type="button"
+                            className="mailtm-btn-inbox"
+                            onClick={() => openInbox(acc)}
+                          >
+                            <Inbox size={12} /> Hòm thư / OTP
+                          </button>
+                          <button
+                            type="button"
+                            className="mailtm-btn-del"
+                            onClick={() => handleDelete(acc)}
+                            title="Xóa tài khoản"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
-
-      {accounts.length === 0 ? (
-        <div
-          style={{
-            padding: '24px 16px',
-            textAlign: 'center',
-            background: '#f8fafc',
-            borderRadius: 10,
-            border: '1px dashed #e2e8f0',
-            color: '#94a3b8',
-            fontSize: 12,
-          }}
-        >
-          Chưa có tài khoản Mail.tm nào được lưu. Hãy tạo tài khoản ở trên để bắt
-          đầu.
-        </div>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table className="mtm-acc-table">
-            <thead>
-              <tr>
-                <th>Địa chỉ Email</th>
-                <th>Mật khẩu</th>
-                <th>Ngày tạo</th>
-                <th style={{ textAlign: 'right' }}>Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map(acc => (
-                <tr key={acc.id}>
-                  <td>
-                    <button
-                      type="button"
-                      className="mtm-copy-tag"
-                      onClick={() => copyText(acc.address, `email_${acc.id}`)}
-                      title="Click để copy email"
-                    >
-                      <Mail size={12} style={{ color: '#6366f1' }} />
-                      <strong>{acc.address}</strong>
-                      {copiedKey === `email_${acc.id}` ? (
-                        <Check size={12} style={{ color: '#16a34a' }} />
-                      ) : (
-                        <Copy size={12} />
-                      )}
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="mtm-copy-tag mtm-copy-pass"
-                      onClick={() => copyText(acc.password, `pass_${acc.id}`)}
-                      title="Click để copy mật khẩu"
-                    >
-                      <Key size={12} />
-                      <span>{acc.password}</span>
-                      {copiedKey === `pass_${acc.id}` ? (
-                        <Check size={12} style={{ color: '#16a34a' }} />
-                      ) : (
-                        <Copy size={12} />
-                      )}
-                    </button>
-                  </td>
-                  <td style={{ color: '#94a3b8', fontSize: 11.5 }}>
-                    {acc.created_at
-                      ? new Date(acc.created_at).toLocaleString()
-                      : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="pip-btn-reg"
-                        onClick={() => startLoginSyncPippit(acc)}
-                        title="Đăng nhập Pure HTTP và kéo toàn bộ Real Facebook Pages của tài khoản này"
-                      >
-                        <Bot size={13} /> Đăng nhập & Kéo Pages
-                      </button>
-                      <button
-                        type="button"
-                        className="mtm-btn-inbox"
-                        onClick={() => openInbox(acc)}
-                      >
-                        <Inbox size={13} /> Hòm thư / OTP
-                      </button>
-                      <button
-                        type="button"
-                        className="mtm-btn-del"
-                        onClick={() => handleDelete(acc)}
-                        title="Xóa tài khoản"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
 
       {/* Pippit Login & Sync Modal */}
       {syncModal.open && (

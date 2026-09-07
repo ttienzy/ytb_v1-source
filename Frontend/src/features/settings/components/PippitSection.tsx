@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   ExternalLink,
   Loader2,
   Music,
   Plus,
   RefreshCw,
+  Search,
   Share2,
   Trash2,
   Video,
@@ -16,10 +19,31 @@ import {
 import { API_URL } from '../../../shared/constants'
 import type { PippitAccount, PippitTask } from '../types'
 
+function FacebookIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  )
+}
+
+function TikTokIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1.04-.1z" />
+    </svg>
+  )
+}
+
 export function PippitSection() {
   const [accounts, setAccounts] = useState<PippitAccount[]>([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+
+  // Search & Pagination
+  const [searchQuery, setSearchQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(5)
 
   // Add account form
   const [showAddForm, setShowAddForm] = useState(false)
@@ -82,7 +106,7 @@ export function PippitSection() {
 
   async function handleRefreshPages(acc: PippitAccount) {
     setLoading(true)
-    setMessage(`Đang quét lại Real Pages cho ${acc.email}...`)
+    setMessage(`Đang quét lại các kênh liên kết cho ${acc.email}...`)
     try {
       const res = await fetch(
         `${API_URL}/api/pippit/accounts/${acc.id}/refresh-pages`,
@@ -91,16 +115,20 @@ export function PippitSection() {
         }
       )
       const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Quét Pages thất bại')
+      if (!res.ok) throw new Error(data.detail || 'Quét kênh liên kết thất bại')
       await loadPippitAccounts()
-      const count = (data.facebook_pages || []).filter(
+      const fbCount = (data.facebook_pages || []).filter(
         (p: any) => p.page_id
       ).length
+      const ttCount = (data.tiktok_channels || []).filter(
+        (t: any) => t.channel_id
+      ).length
+      const total = fbCount + ttCount
       setMessage(
-        `Đã quét xong: Tìm thấy ${count} Real Facebook Pages cho ${acc.email}.`
+        `Đã quét xong: Tìm thấy ${fbCount} Facebook Pages và ${ttCount} TikTok (${total}/3 kênh) cho ${acc.email}.`
       )
     } catch (err: any) {
-      setMessage(err.message || 'Lỗi quét lại Fanpages')
+      setMessage(err.message || 'Lỗi quét lại kênh liên kết')
     } finally {
       setLoading(false)
     }
@@ -135,347 +163,461 @@ export function PippitSection() {
     }
   }
 
+  const filteredAccounts = useMemo(() => {
+    if (!searchQuery.trim()) return accounts
+    const q = searchQuery.trim().toLowerCase()
+    return accounts.filter(acc => {
+      const emailMatch = acc.email?.toLowerCase().includes(q)
+      const wsMatch = acc.workspace_id?.toLowerCase().includes(q)
+      const pageMatch = acc.facebook_pages?.some(
+        p => p.page_name?.toLowerCase().includes(q) || p.page_id?.includes(q)
+      )
+      const ttMatch = acc.tiktok_channels?.some(
+        t => t.nickname?.toLowerCase().includes(q) || t.channel_id?.includes(q)
+      )
+      return Boolean(emailMatch || wsMatch || pageMatch || ttMatch)
+    })
+  }, [accounts, searchQuery])
+
+  const totalItems = filteredAccounts.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
+  const safePage = Math.min(currentPage, totalPages)
+  const startIndex = (safePage - 1) * pageSize
+  const paginatedAccounts = filteredAccounts.slice(startIndex, startIndex + pageSize)
+
   return (
-    <div className="settings-card">
-      <div className="integration-title">
-        <div
-          className="gemini-icon"
-          style={{ background: '#ecfdf5', color: '#059669' }}
-        >
-          <Bot size={18} />
-        </div>
-        <div>
-          <h2>Pippit AI (Quản lý tài khoản & Real Facebook Pages)</h2>
-          <p>
-            Sử dụng Pure HTTP Reverse-Engineered REST API để đăng nhập, kéo
-            Facebook Pages thật và lên lịch video.
-          </p>
-        </div>
-      </div>
-
-      <div
-        className="mtm-section-hdr"
-        style={{ borderTop: 'none', margin: '0 0 14px', paddingTop: 0 }}
-      >
-        <span className="mtm-section-title">
-          Danh sách tài khoản Pippit{' '}
-          <span className="mtm-badge">{accounts.length}</span>
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            className="chrome-button"
-            style={{ minHeight: 32, padding: '0 10px', fontSize: 11 }}
-            onClick={() => setShowAddForm(!showAddForm)}
-          >
-            <Plus size={13} /> {showAddForm ? 'Đóng form' : 'Thêm tài khoản'}
-          </button>
-          <button
-            type="button"
-            className="chrome-button"
-            style={{ minHeight: 32, padding: '0 10px', fontSize: 11 }}
-            onClick={loadPippitAccounts}
-          >
-            <RefreshCw size={13} /> Làm mới
-          </button>
-        </div>
-      </div>
-
-      {showAddForm && (
-        <form
-          onSubmit={handleAddAccount}
-          style={{
-            background: '#f8fafc',
-            padding: 16,
-            borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            marginBottom: 16,
-          }}
-        >
-          <div className="mtm-form-grid">
-            <div>
-              <label>Email Pippit</label>
-              <input
-                value={addEmail}
-                onChange={e => setAddEmail(e.target.value)}
-                placeholder="vd: user@domain.com"
-                disabled={loading}
-              />
+    <div className="mailtm-container">
+      <div className="mailtm-card">
+        <div className="mailtm-card-header">
+          <div className="gemini-card-title-group">
+            <div className="gemini-badge-icon">
+              <Bot size={17} />
             </div>
             <div>
-              <label>Mật khẩu</label>
-              <input
-                type="password"
-                value={addPassword}
-                onChange={e => setAddPassword(e.target.value)}
-                placeholder="Mật khẩu..."
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label>
-                Proxy riêng <span>(tùy chọn: host:port)</span>
-              </label>
-              <input
-                value={addProxy}
-                onChange={e => setAddProxy(e.target.value)}
-                placeholder="user:pass@host:port"
-                disabled={loading}
-              />
+              <h3 className="gemini-title">Pippit AI (Quản lý tài khoản &amp; Real Facebook Pages)</h3>
+              <p className="gemini-subtitle">
+                Sử dụng Pure HTTP Reverse-Engineered REST API để đăng nhập, kéo Facebook Pages thật và lên lịch video.
+              </p>
             </div>
           </div>
-          <div className="settings-actions">
-            <button
-              type="submit"
-              className="primary-button"
-              disabled={loading}
+        </div>
+
+        <div className="mailtm-card-body">
+          <div
+            className="mailtm-table-header"
+            style={{ borderTop: 'none', margin: '0 0 12px', paddingTop: 0 }}
+          >
+            <div className="mailtm-table-title">
+              <span>Danh sách tài khoản Pippit</span>
+              <span className="mailtm-count-badge">{filteredAccounts.length}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className="pip-search-wrap">
+                <Search size={12} className="pip-search-icon" />
+                <input
+                  className="pip-search-input"
+                  placeholder="Tìm email, Page..."
+                  value={searchQuery}
+                  onChange={e => {
+                    setSearchQuery(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                className="mailtm-btn-refresh"
+                onClick={() => setShowAddForm(!showAddForm)}
+              >
+                <Plus size={12} /> {showAddForm ? 'Đóng form' : 'Thêm tài khoản'}
+              </button>
+              <button
+                type="button"
+                className="mailtm-btn-refresh"
+                onClick={loadPippitAccounts}
+              >
+                <RefreshCw size={12} /> Làm mới
+              </button>
+            </div>
+          </div>
+
+          {showAddForm && (
+            <form
+              onSubmit={handleAddAccount}
+              style={{
+                background: '#f8fafc',
+                padding: 14,
+                borderRadius: 10,
+                border: '1px solid #e2e8f0',
+                marginBottom: 14,
+              }}
             >
-              {loading ? (
-                <Loader2 size={15} className="spin" />
-              ) : (
-                <Bot size={15} />
-              )}{' '}
-              Đăng nhập Pure HTTP & Kéo Pages
-            </button>
-          </div>
-        </form>
-      )}
-
-      {accounts.length === 0 ? (
-        <div
-          style={{
-            padding: '24px 16px',
-            textAlign: 'center',
-            background: '#f8fafc',
-            borderRadius: 10,
-            border: '1px dashed #e2e8f0',
-            color: '#94a3b8',
-            fontSize: 12,
-          }}
-        >
-          Chưa có tài khoản Pippit nào. Hãy bấm{' '}
-          <strong>“Đăng nhập & Kéo Pages”</strong> trên bảng Mail.tm ở trên hoặc
-          bấm <strong>“Thêm tài khoản”</strong> để bắt đầu!
-        </div>
-      ) : (
-        <div className="pip-acc-grid">
-          {accounts.map(acc => (
-            <div key={acc.id} className="pip-acc-card">
-              <div className="pip-acc-top">
-                <div className="pip-acc-meta">
-                  <span className="pip-email-title">
-                    <Bot size={16} style={{ color: '#059669' }} /> {acc.email}
-                  </span>
-                  <span
-                    className="cookie-status"
-                    style={{ padding: '3px 8px', fontSize: 11 }}
-                  >
-                    <CheckCircle2 size={12} /> {acc.status}
-                  </span>
-                  {acc.workspace_id && (
-                    <span
-                      className="mtm-badge"
-                      style={{ background: '#f1f5f9', color: '#475569' }}
-                    >
-                      ws: {acc.workspace_id}
-                    </span>
-                  )}
-                  {acc.proxy && (
-                    <span
-                      className="mtm-badge"
-                      style={{ background: '#fef3c7', color: '#b45309' }}
-                    >
-                      proxy: {acc.proxy.split('@').pop()}
-                    </span>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button
-                    type="button"
-                    className="chrome-button"
-                    style={{ minHeight: 28, padding: '0 9px', fontSize: 11 }}
-                    onClick={() => handleRefreshPages(acc)}
+              <div className="mailtm-form-grid">
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Email Pippit</label>
+                  <input
+                    className="mailtm-input"
+                    value={addEmail}
+                    onChange={e => setAddEmail(e.target.value)}
+                    placeholder="vd: user@domain.com"
                     disabled={loading}
-                    title="Quét lại Real Facebook Pages từ Pippit"
-                  >
-                    <RefreshCw size={12} className={loading ? 'spin' : ''} />{' '}
-                    Quét lại Pages
-                  </button>
-                  <button
-                    type="button"
-                    className="chrome-button"
-                    style={{ minHeight: 28, padding: '0 9px', fontSize: 11 }}
-                    onClick={() => handleViewTasks(acc)}
-                    title="Xem lịch bài đăng trên Facebook"
-                  >
-                    <Clock3 size={12} /> Lịch đăng (
-                    {acc.facebook_pages?.filter(p => p.page_id).length || 0}{' '}
-                    Pages)
-                  </button>
-                  <button
-                    type="button"
-                    className="mtm-btn-del"
-                    onClick={() => handleDeletePippit(acc)}
-                    title="Xóa tài khoản Pippit"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  />
+                </div>
+                <div className="mailtm-field">
+                  <label className="mailtm-label">Mật khẩu</label>
+                  <input
+                    className="mailtm-input"
+                    type="password"
+                    value={addPassword}
+                    onChange={e => setAddPassword(e.target.value)}
+                    placeholder="Mật khẩu..."
+                    disabled={loading}
+                  />
+                </div>
+                <div className="mailtm-field">
+                  <label className="mailtm-label">
+                    Proxy riêng <span>(tùy chọn: host:port)</span>
+                  </label>
+                  <input
+                    className="mailtm-input"
+                    value={addProxy}
+                    onChange={e => setAddProxy(e.target.value)}
+                    placeholder="user:pass@host:port"
+                    disabled={loading}
+                  />
                 </div>
               </div>
+              <div className="mailtm-actions">
+                <button
+                  type="submit"
+                  className="mailtm-btn-primary"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <Loader2 size={14} className="spin" />
+                  ) : (
+                    <Bot size={14} />
+                  )}{' '}
+                  Đăng nhập Pure HTTP &amp; Kéo Pages
+                </button>
+              </div>
+            </form>
+          )}
 
-              {/* 3 Real Facebook Pages Management */}
-              <div className="pip-fb-container">
-                <div className="pip-fb-hdr">
-                  <span className="pip-fb-title">
-                    <Share2 size={13} style={{ color: '#3b82f6' }} /> 3 Real
-                    Facebook Pages (platform_type=301)
-                  </span>
-                </div>
+          {accounts.length === 0 ? (
+            <div
+              style={{
+                padding: '24px 16px',
+                textAlign: 'center',
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px dashed #e2e8f0',
+                color: '#94a3b8',
+                fontSize: 12,
+              }}
+            >
+              Chưa có tài khoản Pippit nào. Hãy bấm{' '}
+              <strong>“Đăng nhập &amp; Kéo Pages”</strong> trên bảng Mail.tm ở trên hoặc
+              bấm <strong>“Thêm tài khoản”</strong> để bắt đầu!
+            </div>
+          ) : filteredAccounts.length === 0 ? (
+            <div
+              style={{
+                padding: '24px 16px',
+                textAlign: 'center',
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px dashed #e2e8f0',
+                color: '#94a3b8',
+                fontSize: 12,
+              }}
+            >
+              Không tìm thấy tài khoản nào khớp với từ khóa tìm kiếm "{searchQuery}".
+            </div>
+          ) : (
+            <>
+              <div className="pip-acc-grid">
+                {paginatedAccounts.map(acc => {
+                  const connectedFb = (acc.facebook_pages || []).filter(p => p.page_id)
+                  const connectedTt = (acc.tiktok_channels || []).filter(t => t.channel_id)
+                  const totalConnected = connectedFb.length + connectedTt.length
+                  const remainingSlots = Math.max(0, 3 - totalConnected)
 
-                <div className="pip-fb-slots">
-                  {[0, 1, 2].map(idx => {
-                    const slot = acc.facebook_pages?.[idx]
-                    const isConn = Boolean(slot?.page_id)
-                    return (
-                      <div
-                        key={idx}
-                        className={`pip-slot-card ${
-                          isConn ? 'connected' : ''
-                        }`}
-                      >
-                        <span className="pip-slot-num">{idx + 1}</span>
-                        <div className="pip-slot-info">
-                          <strong>
-                            {slot?.page_name ||
-                              `Slot ${idx + 1} (Chưa gán Page)`}
-                          </strong>
-                          <span>
-                            {slot?.page_id
-                              ? `ID: ${slot.page_id}`
-                              : 'Chưa có Page liên kết'}
+                  return (
+                    <div key={acc.id} className="pip-acc-card">
+                      <div className="pip-acc-top">
+                        <div className="pip-acc-meta">
+                          <span className="pip-email-title">
+                            <Bot size={15} style={{ color: '#4f46e5' }} /> {acc.email}
+                          </span>
+                          <span className="pip-status-pill">
+                            <span className="pip-status-dot" /> {acc.status}
+                          </span>
+                          {acc.workspace_id && (
+                            <span className="pip-badge-meta">
+                              ws: {acc.workspace_id}
+                            </span>
+                          )}
+                          {acc.proxy && (
+                            <span className="pip-badge-meta">
+                              proxy: {acc.proxy.split('@').pop()}
+                            </span>
+                          )}
+                          <span
+                            className={`pip-quota-badge ${
+                              totalConnected >= 3
+                                ? 'max'
+                                : totalConnected > 0
+                                ? 'active'
+                                : 'empty'
+                            }`}
+                            title="Mỗi tài khoản Pippit hỗ trợ tối đa 3 kênh liên kết tổng cộng (Facebook Pages, TikTok, Instagram)"
+                          >
+                            <Share2 size={11} /> {totalConnected}/3 Kênh
+                            {totalConnected >= 3 ? ' (Tối đa)' : ''}
                           </span>
                         </div>
-                        {isConn && (
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="mailtm-btn-refresh"
+                            onClick={() => handleRefreshPages(acc)}
+                            disabled={loading}
+                            title="Quét lại các kênh Facebook Pages &amp; TikTok từ Pippit"
+                          >
+                            <RefreshCw size={11} className={loading ? 'spin' : ''} />{' '}
+                            Quét lại kênh
+                          </button>
+                          <button
+                            type="button"
+                            className="mailtm-btn-refresh"
+                            onClick={() => handleViewTasks(acc)}
+                            title="Xem lịch bài đăng của tài khoản này"
+                          >
+                            <Clock3 size={11} /> Lịch đăng ({connectedFb.length})
+                          </button>
+                          <button
+                            type="button"
+                            className="mailtm-btn-del"
+                            onClick={() => handleDeletePippit(acc)}
+                            title="Xóa tài khoản Pippit"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Connected Channels: Minimalist cards with Photo Avatars & 3-channel max quota */}
+                      {totalConnected === 0 ? (
+                        <div className="pip-empty-channels-banner">
+                          <span>
+                            Chưa liên kết kênh nào · Hỗ trợ tối đa 3 kênh (Facebook Pages, TikTok, Instagram)
+                          </span>
+                          <span className="pip-slots-remaining">Còn trống 3 slot</span>
+                        </div>
+                      ) : (
+                        <div className="pip-channels-wrap">
+                          {/* Facebook Pages with Photo */}
+                          {connectedFb.map((fb, idx) => (
+                            <div key={`fb-${fb.page_id || idx}`} className="pip-channel-card">
+                              <div className="pip-channel-avatar-wrap">
+                                {fb.avatar_url ? (
+                                  <img
+                                    src={fb.avatar_url}
+                                    alt=""
+                                    className="pip-channel-avatar"
+                                  />
+                                ) : (
+                                  <div className="pip-channel-avatar-placeholder fb">
+                                    <FacebookIcon size={12} />
+                                  </div>
+                                )}
+                                <span className="pip-platform-badge fb" title="Facebook Fanpage">
+                                  <FacebookIcon size={7} />
+                                </span>
+                              </div>
+                              <div className="pip-channel-info">
+                                <span className="pip-channel-name" title={fb.page_name}>
+                                  {fb.page_name}
+                                </span>
+                                <span className="pip-channel-sub">ID: {fb.page_id}</span>
+                              </div>
+                              <span
+                                className={`pip-channel-status ${
+                                  fb.un_expired ? 'ready' : 'warn'
+                                }`}
+                                title={fb.un_expired ? 'Sẵn sàng đăng bài' : 'Cần cấp quyền'}
+                              >
+                                {fb.un_expired ? 'Sẵn sàng' : 'Cần cấp quyền'}
+                              </span>
+                            </div>
+                          ))}
+
+                          {/* TikTok Channels with Photo */}
+                          {connectedTt.map((tt, idx) => (
+                            <div key={`tt-${tt.channel_id || idx}`} className="pip-channel-card">
+                              <div className="pip-channel-avatar-wrap">
+                                {tt.avatar_url ? (
+                                  <img
+                                    src={tt.avatar_url}
+                                    alt=""
+                                    className="pip-channel-avatar"
+                                  />
+                                ) : (
+                                  <div className="pip-channel-avatar-placeholder tt">
+                                    <TikTokIcon size={12} />
+                                  </div>
+                                )}
+                                <span className="pip-platform-badge tt" title="TikTok Channel">
+                                  <TikTokIcon size={7} />
+                                </span>
+                              </div>
+                              <div className="pip-channel-info">
+                                <span className="pip-channel-name" title={tt.nickname}>
+                                  {tt.nickname}{' '}
+                                  {tt.handle && (
+                                    <small className="pip-channel-handle">@{tt.handle}</small>
+                                  )}
+                                </span>
+                                <span className="pip-channel-sub">ID: {tt.channel_id}</span>
+                              </div>
+                              <span
+                                className={`pip-channel-status ${
+                                  tt.un_expired ? 'ready' : 'warn'
+                                }`}
+                                title={
+                                  tt.un_expired ? 'Sẵn sàng đăng video' : 'Hết hạn ủy quyền'
+                                }
+                              >
+                                {tt.un_expired ? 'Sẵn sàng' : 'Hết hạn'}
+                              </span>
+                            </div>
+                          ))}
+
+                          {/* Empty slot indicator if < 3 channels */}
+                          {remainingSlots > 0 && (
+                            <div
+                              className="pip-channel-card empty-slot"
+                              title={`Tài khoản này còn có thể liên kết thêm ${remainingSlots} kênh nữa (tối đa 3 kênh / tài khoản Pippit)`}
+                            >
+                              <Plus size={12} />
+                              <span>Còn {remainingSlots} slot trống</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Pagination Controls */}
+              {totalItems > 0 && (
+                <div className="pip-pagination-bar">
+                  <div className="pip-pagination-info">
+                    Hiển thị <strong>{startIndex + 1}</strong> -{' '}
+                    <strong>{Math.min(startIndex + pageSize, totalItems)}</strong>{' '}
+                    trên <strong>{totalItems}</strong> tài khoản
+                  </div>
+                  <div className="pip-pagination-controls">
+                    <button
+                      type="button"
+                      className="pip-page-btn"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={safePage <= 1}
+                      title="Trang trước"
+                    >
+                      <ChevronLeft size={14} />
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(
+                        p =>
+                          p === 1 ||
+                          p === totalPages ||
+                          Math.abs(p - safePage) <= 1
+                      )
+                      .map((p, idx, arr) => {
+                        const prev = arr[idx - 1]
+                        const showEllipsis = prev && p - prev > 1
+                        return (
                           <span
+                            key={p}
                             style={{
-                              fontSize: 10,
-                              fontWeight: 700,
-                              color: slot?.un_expired
-                                ? '#16a34a'
-                                : '#d97706',
-                              background: slot?.un_expired
-                                ? '#dcfce7'
-                                : '#fef3c7',
-                              padding: '2px 6px',
-                              borderRadius: 6,
+                              display: 'inline-flex',
+                              alignItems: 'center',
                             }}
                           >
-                            {slot?.un_expired
-                              ? 'Sẵn sàng'
-                              : 'Cần cấp quyền lại'}
+                            {showEllipsis && (
+                              <span
+                                style={{
+                                  padding: '0 4px',
+                                  color: '#94a3b8',
+                                }}
+                              >
+                                …
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              className={`pip-page-btn ${
+                                p === safePage ? 'active' : ''
+                              }`}
+                              onClick={() => setCurrentPage(p)}
+                            >
+                              {p}
+                            </button>
                           </span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Real TikTok Channels Management */}
-              <div className="pip-fb-container" style={{ marginTop: 10 }}>
-                <div className="pip-fb-hdr">
-                  <span className="pip-fb-title" style={{ color: '#0f172a' }}>
-                    <Music size={13} style={{ color: '#ec4899' }} /> Kênh TikTok Đã Liên Kết (platform_type=1)
-                  </span>
-                  <span className="mtm-badge" style={{ background: '#fdf2f8', color: '#db2777' }}>
-                    {acc.tiktok_channels?.filter(t => t.channel_id).length || 0} kênh
-                  </span>
-                </div>
-
-                <div className="pip-fb-slots">
-                  {(!acc.tiktok_channels || acc.tiktok_channels.filter(t => t.channel_id).length === 0) ? (
-                    <div
-                      style={{
-                        gridColumn: '1 / -1',
-                        padding: '10px 14px',
-                        background: '#fafafa',
-                        borderRadius: 8,
-                        fontSize: 11,
-                        color: '#94a3b8',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                      }}
+                        )
+                      })}
+                    <button
+                      type="button"
+                      className="pip-page-btn"
+                      onClick={() =>
+                        setCurrentPage(p => Math.min(totalPages, p + 1))
+                      }
+                      disabled={safePage >= totalPages}
+                      title="Trang sau"
                     >
-                      <Music size={12} style={{ opacity: 0.5 }} /> Chưa có kênh TikTok nào được ủy quyền cho tài khoản Pippit này.
-                    </div>
-                  ) : (
-                    acc.tiktok_channels.filter(t => t.channel_id).map((tt, tIdx) => (
-                      <div
-                        key={tIdx}
-                        className="pip-slot-card connected"
-                        style={{ borderLeft: '3px solid #ec4899' }}
-                      >
-                        {tt.avatar_url ? (
-                          <img
-                            src={tt.avatar_url}
-                            alt=""
-                            style={{
-                              width: 24,
-                              height: 24,
-                              borderRadius: '50%',
-                              objectFit: 'cover',
-                              flexShrink: 0,
-                            }}
-                          />
-                        ) : (
-                          <span className="pip-slot-num" style={{ background: '#fdf2f8', color: '#db2777' }}>
-                            {tIdx + 1}
-                          </span>
-                        )}
-                        <div className="pip-slot-info">
-                          <strong style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            {tt.nickname} {tt.handle && <span style={{ fontWeight: 400, color: '#64748b', fontSize: 11 }}>@{tt.handle}</span>}
-                          </strong>
-                          <span>ID: {tt.channel_id}</span>
-                        </div>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: tt.un_expired ? '#16a34a' : '#d97706',
-                            background: tt.un_expired ? '#dcfce7' : '#fef3c7',
-                            padding: '2px 6px',
-                            borderRadius: 6,
-                          }}
-                        >
-                          {tt.un_expired ? 'Sẵn sàng' : 'Hết hạn'}
-                        </span>
-                      </div>
-                    ))
-                  )}
+                      <ChevronRight size={14} />
+                    </button>
+                    <select
+                      className="pip-page-select"
+                      value={pageSize}
+                      onChange={e => {
+                        setPageSize(Number(e.target.value))
+                        setCurrentPage(1)
+                      }}
+                      title="Số tài khoản trên mỗi trang"
+                    >
+                      <option value={5}>5 / trang</option>
+                      <option value={10}>10 / trang</option>
+                      <option value={20}>20 / trang</option>
+                      <option value={50}>50 / trang</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+              )}
+            </>
+          )}
 
-      {message && (
-        <p
-          className="settings-message"
-          style={{
-            color: '#059669',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            marginTop: 12,
-          }}
-        >
-          <CheckCircle2 size={15} /> {message}
-        </p>
-      )}
+          {message && (
+            <p
+              className="settings-message"
+              style={{
+                color: '#059669',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                marginTop: 12,
+                fontSize: 12.5,
+              }}
+            >
+              <CheckCircle2 size={14} /> {message}
+            </p>
+          )}
+        </div>
+      </div>
 
       {/* View Tasks Modal */}
       {viewTasksAcc && (

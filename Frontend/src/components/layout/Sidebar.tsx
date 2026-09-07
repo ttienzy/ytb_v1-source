@@ -1,5 +1,4 @@
 import {
-  ChevronDown,
   Menu,
   PanelLeftClose,
   Sparkles,
@@ -34,35 +33,35 @@ export function Sidebar({
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
       <div className="brand-row">
-        <div className="brand-mark">
-          <Sparkles size={17} />
-        </div>
-        {!collapsed && <span className="brand-name">Search Studio</span>}
-        <button
-          type="button"
-          className="icon-button sidebar-toggle"
-          onClick={() => setCollapsed(!collapsed)}
-          title={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
-        >
-          {collapsed ? <Menu size={18} /> : <PanelLeftClose size={18} />}
-        </button>
-      </div>
-
-      <div className="workspace-select">
-        <div className="workspace-avatar">S</div>
-        {!collapsed && (
+        {collapsed ? (
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setCollapsed(false)}
+            title="Mở rộng menu"
+          >
+            <Menu size={15} />
+          </button>
+        ) : (
           <>
-            <div className="workspace-copy">
-              <span>Workspace</span>
-              <strong>Personal space</strong>
+            <div className="brand-mark">
+              <Sparkles size={15} />
             </div>
-            <ChevronDown size={15} />
+            <span className="brand-name">Search Studio</span>
+            <button
+              type="button"
+              className="sidebar-toggle"
+              onClick={() => setCollapsed(true)}
+              title="Thu gọn menu"
+            >
+              <PanelLeftClose size={13} />
+            </button>
           </>
         )}
       </div>
 
       <nav className="nav-list">
-        {!collapsed && <span className="nav-label">MENU</span>}
+        {!collapsed && <span className="nav-label">Menu</span>}
         {navigation.map(({ label, icon: Icon }) => {
           const hasUnposted =
             (label === 'Lên lịch Pippit' && unpostedPippit) ||
@@ -75,21 +74,22 @@ export function Sidebar({
               className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`}
               onClick={() => setActivePage(label)}
               style={{ position: 'relative' }}
+              title={collapsed ? label : undefined}
             >
-              <Icon size={18} />
+              <Icon size={16} style={{ flexShrink: 0 }} />
               <span className={collapsed ? 'sr-only' : ''}>{label}</span>
               {hasUnposted && (
                 <span
                   style={{
                     position: 'absolute',
-                    right: collapsed ? 8 : 12,
+                    right: collapsed ? 8 : 10,
                     top: '50%',
                     transform: 'translateY(-50%)',
-                    width: 7,
-                    height: 7,
+                    width: 6,
+                    height: 6,
                     borderRadius: '50%',
                     backgroundColor: '#e11d48',
-                    boxShadow: '0 0 0 2px #fff',
+                    boxShadow: activePage === label ? '0 0 0 2px #fff' : '0 0 0 2px #f1f5f9',
                   }}
                   title="Có kênh chưa đăng bài hôm nay"
                 />
