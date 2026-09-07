@@ -184,3 +184,40 @@ export interface ScriptParseOptions {
   includeTitlePrefix: boolean
 }
 
+// ─── Image Generation (Nano Banana) ─────────────────────────────────────────
+
+export type ImageModelKey = 'GEM_PIX_2' | 'NARWHAL' | 'HARBOR_SEAL'
+export type ImageAspectRatio = '16:9' | '4:3' | '1:1' | '3:4' | '9:16'
+
+export interface VeoImageItem {
+  id: string
+  media_id: string
+  prompt: string
+  model_display_name: string
+  model_key: string
+  aspect_ratio: ImageAspectRatio
+  seed?: number | null
+  image_url: string
+  local_path: string
+  project_id: string
+  created_at: string
+}
+
+export interface VeoImageGenerateRequest {
+  prompt: string
+  model_key: ImageModelKey
+  model_display_name: string
+  aspect_ratio: ImageAspectRatio
+  count: number
+  seed?: number | null
+  project_id?: string | null
+  reference_image_ids?: string[]
+}
+
+export interface VeoImageGenerateResponse {
+  ok: boolean
+  images: VeoImageItem[]
+  error?: string
+}
+
+

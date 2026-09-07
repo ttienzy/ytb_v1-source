@@ -79,6 +79,7 @@ _captcha_pending: Queue = Queue(maxsize=50)
 _captcha_results: dict[str, dict[str, Any]] = {}   # request_id → {token, error, ts}
 _flow_results: dict[str, dict[str, Any]] = {}      # request_id → Flow generation result
 _project_results: dict[str, dict[str, Any]] = {}   # request_id → Flow project creation result
+_image_results: dict[str, dict[str, Any]] = {}     # request_id → Flow image generation result
 _captcha_busy: bool = False
 _captcha_busy_until: float = 0
 _captcha_stats = {"total_solved": 0, "last_solved_at": None}
@@ -226,6 +227,32 @@ def wait_switch_result(request_id: str, timeout: float = 12.0) -> dict[str, Any]
         with _bridge_lock:
             if request_id in _project_results:
                 return _project_results.pop(request_id)
+        time.sleep(0.3)
+    return None
+
+
+def request_generate_image(image_request: dict[str, Any]) -> str | None:
+    """Yêu cầu Extension sinh ảnh trên Google Flow thông qua RPC ogiZ0b."""
+    request_id = secrets.token_hex(16)
+    try:
+        _captcha_pending.put_nowait({
+            "request_id": request_id,
+            "action": "IMAGE_GENERATION",
+            "image_request": image_request,
+            "created_at": time.time(),
+        })
+        return request_id
+    except Exception:
+        return None
+
+
+def wait_image_result(request_id: str, timeout: float = 60.0) -> dict[str, Any] | None:
+    """Chờ Extension trả kết quả sinh ảnh từ Google Flow."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with _bridge_lock:
+            if request_id in _image_results:
+                return _image_results.pop(request_id)
         time.sleep(0.3)
     return None
 
@@ -515,6 +542,22 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "ok": bool(data.get("ok", False)),
                         "flow_project_id": data.get("flow_project_id", ""),
                         "tab_id": data.get("tab_id"),
+                        "error": data.get("error"),
+                        "received_at": time.time(),
+                    }
+            self._send_json({"ok": True})
+            return
+
+        if self.path == "/flow/image-response":
+            if not self._check_secret():
+                self._send_json({"error": "forbidden"}, 403)
+                return
+            data = self._read_json()
+            request_id = data.get("request_id", "")
+            if request_id:
+                with _bridge_lock:
+                    _image_results[request_id] = {
+                        "result": data.get("result"),
                         "error": data.get("error"),
                         "received_at": time.time(),
                     }

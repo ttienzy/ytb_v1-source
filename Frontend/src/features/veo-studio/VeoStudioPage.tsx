@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, FileText, ImagePlus, SkipForward, Zap, Lock } from 'lucide-react'
+import { Clapperboard, FileText, ImagePlus, Palette, SkipForward, Zap, Lock } from 'lucide-react'
 import type {
   VeoBridgeStatus,
   VeoCapabilities,
   VeoHistoryItem,
+  VeoImageItem,
   VeoJobOut,
   VeoJobRequest,
   VeoProject,
@@ -11,18 +12,20 @@ import type {
 import * as api from './services/veoApi'
 import { ProjectSelector } from './components/ProjectSelector'
 import { TextToVideoTab } from './components/TextToVideoTab'
+import { TextToImageTab } from './components/TextToImageTab'
 import { ImageToVideoTab } from './components/ImageToVideoTab'
 import { ExtendTab } from './components/ExtendTab'
 import { StatusTab } from './components/StatusTab'
 import { VideoPlayer } from './components/VideoPlayer'
 import { VideoGallery } from './components/VideoGallery'
 
-type TabKey = 'text' | 'image' | 'extend' | 'status'
+type TabKey = 'text' | 'image-gen' | 'image' | 'extend' | 'status'
 const TABS: { key: TabKey; label: string; icon: typeof FileText; enabled: boolean }[] = [
-  { key: 'text', label: 'Text', icon: FileText, enabled: true },
-  { key: 'image', label: 'Image', icon: ImagePlus, enabled: true },
-  { key: 'extend', label: 'Extend', icon: SkipForward, enabled: true },
-  { key: 'status', label: 'Status', icon: Zap, enabled: true },
+  { key: 'text', label: 'Tạo Video (Text)', icon: FileText, enabled: true },
+  { key: 'image-gen', label: 'Tạo Ảnh (Nano Banana)', icon: Palette, enabled: true },
+  { key: 'image', label: 'Ảnh sang Video (I2V)', icon: ImagePlus, enabled: true },
+  { key: 'extend', label: 'Mở rộng (Extend)', icon: SkipForward, enabled: true },
+  { key: 'status', label: 'Trạng thái (Status)', icon: Zap, enabled: true },
 ]
 
 interface Props {
@@ -42,7 +45,17 @@ export function VeoStudioPage({ setActivePage }: Props) {
   const [history, setHistory] = useState<VeoHistoryItem[]>([])
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [forwardedImage, setForwardedImage] = useState<{ path: string; preview: string; prompt: string } | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const handleSendImageToVideo = (imageItem: VeoImageItem) => {
+    setForwardedImage({
+      path: imageItem.local_path || imageItem.image_url,
+      preview: api.getImageFileUrl(imageItem.id),
+      prompt: imageItem.prompt,
+    })
+    setActiveTab('image')
+  }
 
   // Load capabilities
   useEffect(() => {
@@ -258,12 +271,21 @@ export function VeoStudioPage({ setActivePage }: Props) {
                     onPreviewJob={(job) => setActiveJob(job)}
                   />
                 )}
+                {activeTab === 'image-gen' && (
+                  <TextToImageTab
+                    activeProject={activeProject}
+                    onSendToVideo={handleSendImageToVideo}
+                  />
+                )}
                 {activeTab === 'image' && (
                   <ImageToVideoTab
                     capabilities={capabilities}
                     onSubmit={handleSubmit}
                     busy={busy}
                     activeProject={activeProject}
+                    initialImagePath={forwardedImage?.path}
+                    initialImagePreview={forwardedImage?.preview}
+                    initialPrompt={forwardedImage?.prompt}
                   />
                 )}
                 {activeTab === 'extend' && (

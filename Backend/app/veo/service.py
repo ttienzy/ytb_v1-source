@@ -23,7 +23,7 @@ import requests
 
 from app.db import Base, SessionLocal, engine
 from app.veo import bridge
-from app.veo.models import VeoProject
+from app.veo.models import VeoProject, VeoImage
 from app.veo.schemas import (
     AccountInfo,
     AspectRatio,
@@ -33,6 +33,9 @@ from app.veo.schemas import (
     VeoBridgeStatus,
     VeoCapabilities,
     VeoHistoryItem,
+    VeoImageGenerateRequest,
+    VeoImageGenerateResponse,
+    VeoImageItem,
     VeoJobOut,
     VeoJobRequest,
     VeoModelInfo,
@@ -47,10 +50,12 @@ logger = logging.getLogger("veo.service")
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Backend/
 _VEO_DATA_DIR = _BASE_DIR / "Data" / "media" / "veo_outputs"
+_VEO_IMAGES_DIR = _BASE_DIR / "Data" / "media" / "veo_images"
 _VEO_JOBS_FILE = _BASE_DIR / "Data" / "veo_jobs.json"
 
 # Ensure directories exist
 _VEO_DATA_DIR.mkdir(parents=True, exist_ok=True)
+_VEO_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -432,11 +437,11 @@ def save_manual_credential(email: str, cookie: str, access_token: str = "") -> d
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_db() -> None:
-    """Tạo bảng veo_projects trong SQLite nếu chưa có."""
+    """Tạo bảng veo_projects và veo_images trong SQLite nếu chưa có."""
     try:
-        Base.metadata.create_all(bind=engine, tables=[VeoProject.__table__])
+        Base.metadata.create_all(bind=engine, tables=[VeoProject.__table__, VeoImage.__table__])
     except Exception as e:
-        logger.warning("Failed to init veo_projects table: %s", e)
+        logger.warning("Failed to init veo tables: %s", e)
 
 
 def _model_to_project_out(p: VeoProject) -> VeoProjectOut:
@@ -1009,6 +1014,147 @@ def delete_video(video_id: str) -> bool:
         path.with_suffix(".json").unlink(missing_ok=True)
         return True
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Image Generation (Nano Banana - Pinhole)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _model_to_image_item(img: VeoImage) -> VeoImageItem:
+    return VeoImageItem(
+        id=img.id,
+        media_id=img.media_id,
+        prompt=img.prompt,
+        model_display_name=img.model_display_name,
+        model_key=img.model_key,
+        aspect_ratio=img.aspect_ratio,
+        seed=img.seed,
+        image_url=img.image_url,
+        local_path=img.local_path,
+        project_id=img.project_id,
+        created_at=img.created_at.isoformat() if img.created_at else "",
+    )
+
+
+def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
+    """Sinh ảnh từ prompt thông qua Google Flow Nano Banana (RPC ogiZ0b)."""
+    init_db()
+
+    target_flow_pid = ""
+    project_db_id = ""
+    with SessionLocal() as db:
+        if req.project_id:
+            p = db.query(VeoProject).filter(
+                (VeoProject.id == req.project_id) | (VeoProject.flow_project_id == req.project_id)
+            ).first()
+        else:
+            p = db.query(VeoProject).filter(VeoProject.is_active == True).first()
+            if not p:
+                p = db.query(VeoProject).order_by(VeoProject.created_at.desc()).first()
+        if p:
+            target_flow_pid = p.flow_project_id
+            project_db_id = p.id
+
+    flow_request = {
+        "prompt": req.prompt.strip(),
+        "aspect_ratio": req.aspect_ratio or "16:9",
+        "model_key": req.model_key or "GEM_PIX_2",
+        "model_display_name": req.model_display_name or "Nano Banana Pro",
+        "count": min(max(req.count, 1), 4),
+        "seed": req.seed,
+        "project_id": target_flow_pid,
+        "reference_image_ids": req.reference_image_ids or [],
+    }
+
+    req_id = bridge.request_generate_image(flow_request)
+    if not req_id:
+        return VeoImageGenerateResponse(ok=False, error="Bridge chưa sẵn sàng hoặc hàng đợi đầy")
+
+    bridge_res = bridge.wait_image_result(req_id, timeout=75.0)
+    if not bridge_res:
+        return VeoImageGenerateResponse(ok=False, error="Hết thời gian chờ Extension sinh ảnh từ Flow (Timeout 75s)")
+
+    if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
+        err = bridge_res.get("error") or (bridge_res.get("result") and bridge_res["result"].get("error")) or "Lỗi không xác định khi tạo ảnh"
+        return VeoImageGenerateResponse(ok=False, error=str(err))
+
+    raw_images = bridge_res["result"].get("images", [])
+    if not raw_images:
+        return VeoImageGenerateResponse(ok=False, error="Google Flow không trả về ảnh nào")
+
+    created_items: list[VeoImageItem] = []
+    with SessionLocal() as db:
+        for item in raw_images:
+            img_id = str(uuid.uuid4())[:12]
+            cdn_url = item.get("image_url", "")
+            local_rel_path = ""
+
+            if cdn_url:
+                try:
+                    r = requests.get(cdn_url, timeout=20.0)
+                    if r.status_code == 200:
+                        local_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
+                        local_file.write_bytes(r.content)
+                        local_rel_path = str(local_file.relative_to(_BASE_DIR)).replace("\\", "/")
+                except Exception as ex:
+                    logger.warning("Không thể tải ảnh %s về máy cục bộ: %s", img_id, ex)
+
+            new_img = VeoImage(
+                id=img_id,
+                prompt=req.prompt,
+                model_display_name=req.model_display_name or "Nano Banana Pro",
+                model_key=item.get("model_key", req.model_key),
+                aspect_ratio=item.get("aspect_ratio", req.aspect_ratio),
+                seed=item.get("seed", req.seed),
+                media_id=item.get("media_id") or img_id,
+                image_url=cdn_url,
+                local_path=local_rel_path,
+                project_id=project_db_id or target_flow_pid,
+            )
+            db.add(new_img)
+            db.commit()
+            db.refresh(new_img)
+            created_items.append(_model_to_image_item(new_img))
+
+    return VeoImageGenerateResponse(ok=True, images=created_items)
+
+
+def list_images(project_id: str | None = None) -> list[VeoImageItem]:
+    """Lấy danh sách ảnh đã tạo từ SQLite DB."""
+    init_db()
+    with SessionLocal() as db:
+        q = db.query(VeoImage)
+        if project_id:
+            q = q.filter((VeoImage.project_id == project_id))
+        images = q.order_by(VeoImage.created_at.desc()).limit(100).all()
+        return [_model_to_image_item(img) for img in images]
+
+
+def delete_image(image_id: str) -> bool:
+    """Xóa ảnh khỏi SQLite DB và xóa file local."""
+    init_db()
+    with SessionLocal() as db:
+        img = db.query(VeoImage).filter(VeoImage.id == image_id).first()
+        if not img:
+            return False
+        if img.local_path:
+            local_file = _BASE_DIR / img.local_path
+            local_file.unlink(missing_ok=True)
+        db.delete(img)
+        db.commit()
+        return True
+
+
+def get_image_file_path(image_id: str) -> Path | None:
+    """Lấy đường dẫn file ảnh cục bộ."""
+    local_file = _VEO_IMAGES_DIR / f"{image_id}.jpg"
+    if local_file.exists():
+        return local_file
+    for ext in (".jpg", ".jpeg", ".png", ".webp"):
+        candidate = _VEO_IMAGES_DIR / f"{image_id}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

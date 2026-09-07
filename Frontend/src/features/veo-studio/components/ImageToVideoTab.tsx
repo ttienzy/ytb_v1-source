@@ -8,16 +8,33 @@ interface Props {
   onSubmit: (request: VeoJobRequest) => void
   busy: boolean
   activeProject?: VeoProject | null
+  initialImagePath?: string | null
+  initialImagePreview?: string | null
+  initialPrompt?: string
 }
 
-export function ImageToVideoTab({ capabilities, onSubmit, busy, activeProject }: Props) {
+export function ImageToVideoTab({
+  capabilities,
+  onSubmit,
+  busy,
+  activeProject,
+  initialImagePath,
+  initialImagePreview,
+  initialPrompt,
+}: Props) {
   const [inputMode, setInputMode] = useState<'frames' | 'ingredients'>('frames')
   const [profileId, setProfileId] = useState('')
-  const [imagePath, setImagePath] = useState<string | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const [prompt, setPrompt] = useState('')
+  const [imagePath, setImagePath] = useState<string | null>(initialImagePath || null)
+  const [imagePreview, setImagePreview] = useState<string | null>(initialImagePreview || null)
+  const [prompt, setPrompt] = useState(initialPrompt || '')
   const [uploading, setUploading] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (initialImagePath) setImagePath(initialImagePath)
+    if (initialImagePreview) setImagePreview(initialImagePreview)
+    if (initialPrompt) setPrompt(initialPrompt)
+  }, [initialImagePath, initialImagePreview, initialPrompt])
 
   // Lọc profiles theo chế độ đầu vào hiện tại
   const profiles = (capabilities?.profiles || []).filter(

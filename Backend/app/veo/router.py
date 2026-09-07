@@ -28,6 +28,9 @@ from app.veo.schemas import (
     VeoBridgeStatus,
     VeoCapabilities,
     VeoHistoryItem,
+    VeoImageGenerateRequest,
+    VeoImageGenerateResponse,
+    VeoImageItem,
     VeoJobOut,
     VeoJobRequest,
     VeoProjectCreate,
@@ -232,3 +235,40 @@ def reload_extension():
     from app.veo import bridge
     bridge.request_extension_reload()
     return {"ok": True, "message": "Extension reload requested"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Images (Nano Banana - Pinhole)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/images/generate", response_model=VeoImageGenerateResponse)
+def generate_images(req: VeoImageGenerateRequest):
+    """Sinh ảnh từ prompt qua Google Flow Nano Banana (Pro/2/Lite)."""
+    resp = service.generate_images(req)
+    if not resp.ok:
+        raise HTTPException(status_code=400, detail=resp.error or "Tạo ảnh thất bại")
+    return resp
+
+
+@router.get("/images", response_model=list[VeoImageItem])
+def list_images(project_id: str | None = None):
+    """Lấy danh sách ảnh đã tạo."""
+    return service.list_images(project_id=project_id)
+
+
+@router.get("/images/{image_id}/file")
+def get_image_file(image_id: str):
+    """Stream file ảnh cục bộ."""
+    path = service.get_image_file_path(image_id)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tìm thấy trên đĩa")
+    return FileResponse(path, media_type="image/jpeg", filename=f"{image_id}.jpg")
+
+
+@router.delete("/images/{image_id}")
+def delete_image(image_id: str):
+    """Xóa ảnh khỏi thư viện."""
+    ok = service.delete_image(image_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tìm thấy")
+    return {"ok": True}

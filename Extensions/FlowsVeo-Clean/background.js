@@ -1368,6 +1368,265 @@ async function generateFlowVideo(flowRequest, captchaToken) {
   }
 }
 
+/**
+ * Runs inside the logged-in Flow project's MAIN world to generate images using RPC ogiZ0b.
+ * Supports Nano Banana models (Pro, 2, 2 Lite), aspect ratios, x1-x4 counts, and reference images.
+ */
+async function runImageGenerationInPage(imageRequest, captchaToken) {
+  try {
+    if (typeof imageRequest?.prompt !== 'string' || !imageRequest.prompt.trim()) {
+      throw new Error('Image prompt is empty');
+    }
+    if (typeof captchaToken !== 'string' || !captchaToken) {
+      throw new Error('reCAPTCHA token is empty');
+    }
+
+    // 1. Resolve Aspect Ratio Code
+    // In Google Flow Image: 16:9 = 3, 1:1 = 2, 9:16 = 1, 4:3 = 4, 3:4 = 5
+    const aspectMap = {
+      '16:9': 3,
+      '1:1': 2,
+      '9:16': 1,
+      '4:3': 4,
+      '3:4': 5,
+    };
+    const aspectEnum = aspectMap[imageRequest.aspect_ratio] || 3;
+
+    // 2. Resolve Model Key
+    function resolveImageModel(m) {
+      const raw = String(m || '').toLowerCase();
+      if (raw.includes('lite') || raw.includes('harbor')) return 'HARBOR_SEAL';
+      if (raw.includes('pro') || raw.includes('gem_pix_2')) return 'GEM_PIX_2';
+      if (raw.includes('banana 2') || raw.includes('narwhal')) return 'NARWHAL';
+      return 'GEM_PIX_2';
+    }
+    const modelKey = resolveImageModel(imageRequest.model_key);
+
+    // 3. Resolve Project ID & Path
+    let route = location.pathname.match(/^\/(u\/\d+)\/project\/([^/?#]+)/);
+    let accountPath = route ? `/${route[1]}` : '';
+    let projectId = route ? route[2] : null;
+    if (!projectId) {
+      const match2 = location.pathname.match(/\/project\/([^/?#]+)/);
+      if (match2) {
+        projectId = match2[1];
+        const uMatch = location.pathname.match(/\/(u\/\d+)/);
+        accountPath = uMatch ? `/${uMatch[1]}` : '';
+      }
+    }
+    if (!projectId) {
+      projectId = imageRequest.project_id || null;
+    }
+    if (!projectId) {
+      throw new Error('Không tìm thấy Project ID trên tab Google Flow');
+    }
+
+    const sourcePath = `${accountPath}/project/${projectId}`;
+    const wiz = window.WIZ_global_data || {};
+    const csrfToken = wiz.SNlM0e;
+    const sessionId = wiz.FdrFJe;
+    const buildLabel = wiz.cfb2h;
+    if (!csrfToken || !sessionId || !buildLabel) {
+      throw new Error('Flow page session config is incomplete; reload the project');
+    }
+
+    function findRpcEnvelope(node, rpcId) {
+      if (!Array.isArray(node)) return null;
+      if (node[0] === 'wrb.fr' && node[1] === rpcId && typeof node[2] === 'string') return node[2];
+      for (const child of node) {
+        const found = findRpcEnvelope(child, rpcId);
+        if (found !== null) return found;
+      }
+      return null;
+    }
+
+    function parseRpcResponse(text, rpcId) {
+      for (const line of text.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('[')) continue;
+        try {
+          const payload = findRpcEnvelope(JSON.parse(trimmed), rpcId);
+          if (payload !== null) return JSON.parse(payload);
+        } catch { }
+      }
+      throw new Error(`Flow RPC ${rpcId} returned no usable payload`);
+    }
+
+    async function callRpc(rpcId, payload) {
+      const query = new URLSearchParams({
+        rpcids: rpcId,
+        'source-path': sourcePath,
+        bl: String(buildLabel),
+        'f.sid': String(sessionId),
+        hl: String(document.documentElement?.lang || 'en').split('-')[0],
+        _reqid: String(Math.floor(100000 + Math.random() * 900000)),
+        rt: 'c',
+      });
+      const body = new URLSearchParams({
+        'f.req': JSON.stringify([[[rpcId, JSON.stringify(payload), null, 'generic']]]),
+        at: String(csrfToken),
+      });
+      const base = location.origin || 'https://flow.google.com';
+      const endpoint = `${base}${accountPath}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: body.toString(),
+      });
+      if (!response.ok) throw new Error(`RPC ${rpcId} HTTP ${response.status}`);
+      const text = await response.text();
+      return parseRpcResponse(text, rpcId);
+    }
+
+    function findImageUrl(node) {
+      if (typeof node === 'string') {
+        if (node.startsWith('https://flow-content.google/image/') ||
+            (node.startsWith('https://flow-content.google/') && (node.includes('/image/') || node.includes('.jpg') || node.includes('.png') || node.includes('Signature=')))) {
+          return node;
+        }
+        return null;
+      }
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const u = findImageUrl(child);
+          if (u) return u;
+        }
+      } else if (typeof node === 'object' && node !== null) {
+        for (const v of Object.values(node)) {
+          const u = findImageUrl(v);
+          if (u) return u;
+        }
+      }
+      return null;
+    }
+
+    // Format reference images if provided: [[media_id, null, null, null, 1], ...]
+    let refImagesPayload = null;
+    if (Array.isArray(imageRequest.reference_image_ids) && imageRequest.reference_image_ids.length > 0) {
+      refImagesPayload = imageRequest.reference_image_ids.map((id) => [id, null, null, null, 1]);
+    }
+
+    async function generateSingleImage(forcedSeed = null) {
+      const seed = forcedSeed || Math.floor(Math.random() * 2000000000);
+      const uuidA = (crypto.randomUUID ? crypto.randomUUID() : 'EBA3AD1B-C139-4F1B-88C0-290D5C5CD974').toUpperCase();
+      const uuidB = (crypto.randomUUID ? crypto.randomUUID() : 'B88CA090-09EA-443D-A368-718E69A7F171').toUpperCase();
+      const sceneUuid = (crypto.randomUUID ? crypto.randomUUID() : '1B6623B2-B5E4-4899-AA64-0122F1A067F9').toUpperCase();
+
+      const itemPayload = [
+        null,
+        null,
+        refImagesPayload,
+        seed,
+        aspectEnum,
+        modelKey,
+        null,
+        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+        [[[imageRequest.prompt.trim()]]],
+        null,
+        null,
+        null,
+        uuidA,
+        uuidB,
+      ];
+
+      const rpcPayload = [
+        null,
+        [itemPayload],
+        1,
+        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+        [sceneUuid],
+      ];
+
+      const rpcResult = await callRpc('ogiZ0b', rpcPayload);
+      const imgUrl = findImageUrl(rpcResult);
+      if (!imgUrl) {
+        throw new Error('Flow ogiZ0b response did not contain an image URL');
+      }
+
+      let mediaId = null;
+      let dims = null;
+      try {
+        if (Array.isArray(rpcResult) && Array.isArray(rpcResult[0]) && Array.isArray(rpcResult[0][0])) {
+          mediaId = rpcResult[0][0][0] || null;
+          const sub = rpcResult[0][0][6];
+          if (Array.isArray(sub) && sub.length > 2 && Array.isArray(sub[2])) {
+            dims = sub[2];
+          }
+        }
+      } catch { }
+
+      if (!mediaId) {
+        const mMatch = imgUrl.match(/\/image\/([^/?#]+)/);
+        if (mMatch) mediaId = mMatch[1];
+      }
+
+      return {
+        media_id: mediaId,
+        image_url: imgUrl,
+        seed,
+        aspect_ratio: imageRequest.aspect_ratio || '16:9',
+        model_key: modelKey,
+        dimensions: dims,
+      };
+    }
+
+    const count = Math.min(Math.max(Number(imageRequest.count) || 1, 1), 4);
+    const promises = [];
+    for (let i = 0; i < count; i++) {
+      promises.push(generateSingleImage(imageRequest.seed ? imageRequest.seed + i : null));
+    }
+
+    const results = await Promise.all(promises);
+    return {
+      ok: true,
+      images: results,
+      project_id: projectId,
+      prompt: imageRequest.prompt,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+async function generateFlowImage(imageRequest, captchaToken) {
+  if (imageRequest?.project_id) {
+    try {
+      await ensureProjectTab(imageRequest.project_id);
+    } catch (e) {
+      logActivity('warn', `ensureProjectTab pre-flight error: ${e.message}`);
+    }
+  }
+  const tabId = await findLabsTab(imageRequest?.project_id);
+  if (!tabId) return { ok: false, error: 'Open a Flow project in Chrome' };
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN', func: runImageGenerationInPage,
+      args: [imageRequest, captchaToken],
+    });
+    return injected?.[0]?.result || { ok: false, error: 'Flow page returned no image result' };
+  } catch (error) {
+    return { ok: false, error: `Cannot execute Flow Image adapter: ${error.message}` };
+  }
+}
+
+async function postImageResponse(requestId, result) {
+  try {
+    await fetch(`${bridgeUrl}/flow/image-response`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        request_id: requestId,
+        result: result?.ok ? result : null,
+        error: result?.ok ? null : (result?.error || 'Unknown Image error'),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    logActivity('warn', `postImageResponse: ${error.message}`);
+  }
+}
+
 /** Recover the trusted media URL used by the scene currently open in Flow. */
 async function recoverCurrentSceneInPage() {
   try {
@@ -1598,6 +1857,32 @@ async function processCaptchaRequest(request) {
     logActivity(switchResult.ok ? 'info' : 'warn', switchResult.ok
       ? `Project switched successfully: ${switchResult.flow_project_id}`
       : `Project switch failed: ${switchResult.error}`);
+    return;
+  }
+  if (request.action === 'IMAGE_GENERATION') {
+    logActivity('info', `Flow Image generation requested: ${request.request_id?.slice(0, 8)}`);
+    (async () => {
+      try {
+        let result = await solveRecaptcha(request);
+        if (!result.token && result.error?.includes('not ready')) {
+          await sleep(3_000);
+          result = await solveRecaptcha(request);
+        }
+        if (!result.token) {
+          onCaptchaFail();
+          await postImageResponse(request.request_id, { ok: false, error: result.error || 'reCAPTCHA failed' });
+          return;
+        }
+        onCaptchaSuccess();
+        const imgResult = await generateFlowImage(request.image_request, result.token);
+        await postImageResponse(request.request_id, imgResult);
+        logActivity(imgResult.ok ? 'info' : 'warn', imgResult.ok
+          ? `Image generation completed: ${imgResult.images?.length || 0} images`
+          : `Image generation failed: ${imgResult.error}`);
+      } catch (e) {
+        await postImageResponse(request.request_id, { ok: false, error: e?.message || 'Image generation error' });
+      }
+    })();
     return;
   }
   if (request.flow_recovery) {
