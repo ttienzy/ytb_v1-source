@@ -59,7 +59,7 @@ def capture() -> None:
                 executable_path=str(settings.chrome_executable),
                 headless=False,
                 ignore_default_args=["--no-sandbox"],
-                args=["--no-first-run", "--no-default-browser-check"],
+                args=["--no-first-run", "--no-default-browser-check", "--disable-extensions"],
             )
         except Exception as error:
             raise SystemExit(

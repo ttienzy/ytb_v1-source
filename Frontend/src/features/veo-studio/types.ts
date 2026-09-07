@@ -32,9 +32,38 @@ export interface VeoModelInfo {
   verified: boolean
 }
 
+export interface VeoCapabilityProfile {
+  id: string
+  model_display_name: string
+  provider_model_id: string
+  input_mode: InputMode
+  aspect_ratio: AspectRatio
+  duration_seconds: number
+  resolution: string
+  num_outputs: number
+  credit_cost: number
+  documented: boolean
+  runtime_verified: boolean
+  note: string
+}
+
+// ─── Projects ───────────────────────────────────────────────────────────────
+
+export interface VeoProject {
+  id: string
+  name: string
+  flow_project_id: string
+  account_email: string
+  is_active: boolean
+  video_count: number
+  created_at: string
+  updated_at: string
+}
+
 // ─── Job ────────────────────────────────────────────────────────────────────
 
 export interface VeoJobRequest {
+  project_id?: string | null
   prompt: string
   model_display_name: string
   input_mode: InputMode
@@ -51,6 +80,9 @@ export interface VeoJobRequest {
 
 export interface VeoJobOut {
   job_id: string
+  project_id?: string | null
+  flow_project_id?: string | null
+  capability_profile_id?: string | null
   status: JobStatus
   input_mode: InputMode
   prompt: string
@@ -101,6 +133,7 @@ export interface VeoBridgeStatus {
 
 export interface VeoCapabilities {
   models: VeoModelInfo[]
+  profiles: VeoCapabilityProfile[]
   aspect_ratios: string[]
   max_outputs: number
   last_verified: string | null
@@ -123,3 +156,68 @@ export interface VeoHistoryItem {
   input_mode: string
   created_at: string
 }
+
+// ─── Batch Script & Multi-threading ─────────────────────────────────────────
+
+export type SceneStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'
+
+export interface BatchSceneItem {
+  id: string
+  sceneNumber: number
+  timecode?: string
+  prompt: string
+  durationSeconds: number
+  status: SceneStatus
+  jobId?: string
+  workerId?: number
+  error?: string
+  videoUrl?: string
+  progressStep?: string
+}
+
+export type ScriptSplitMode = 'by_video' | 'by_scene'
+
+export interface ScriptParseOptions {
+  splitMode?: ScriptSplitMode
+  autoDuration: boolean
+  ignoreAudioText: boolean
+  includeTitlePrefix: boolean
+}
+
+// ─── Image Generation (Nano Banana) ─────────────────────────────────────────
+
+export type ImageModelKey = 'GEM_PIX_2' | 'NARWHAL' | 'HARBOR_SEAL'
+export type ImageAspectRatio = '16:9' | '4:3' | '1:1' | '3:4' | '9:16'
+
+export interface VeoImageItem {
+  id: string
+  media_id: string
+  prompt: string
+  model_display_name: string
+  model_key: string
+  aspect_ratio: ImageAspectRatio
+  seed?: number | null
+  image_url: string
+  local_path: string
+  project_id: string
+  created_at: string
+}
+
+export interface VeoImageGenerateRequest {
+  prompt: string
+  model_key: ImageModelKey
+  model_display_name: string
+  aspect_ratio: ImageAspectRatio
+  count: number
+  seed?: number | null
+  project_id?: string | null
+  reference_image_ids?: string[]
+}
+
+export interface VeoImageGenerateResponse {
+  ok: boolean
+  images: VeoImageItem[]
+  error?: string
+}
+
+

@@ -7,11 +7,58 @@ import type {
   VeoBridgeStatus,
   VeoCapabilities,
   VeoHistoryItem,
+  VeoImageGenerateRequest,
+  VeoImageGenerateResponse,
+  VeoImageItem,
   VeoJobOut,
   VeoJobRequest,
+  VeoProject,
 } from '../types'
 
 const BASE = `${API_URL}/api/veo`
+
+// ─── Projects ───────────────────────────────────────────────────────────────
+
+export async function getProjects(): Promise<VeoProject[]> {
+  const resp = await fetch(`${BASE}/projects`)
+  if (!resp.ok) return []
+  return resp.json()
+}
+
+export async function getActiveProject(): Promise<VeoProject | null> {
+  const resp = await fetch(`${BASE}/projects/active`)
+  if (!resp.ok) return null
+  return resp.json()
+}
+
+export async function createProject(name: string): Promise<VeoProject> {
+  const resp = await fetch(`${BASE}/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || 'Tạo project thất bại')
+  }
+  return resp.json()
+}
+
+export async function selectProject(projectId: string): Promise<VeoProject> {
+  const resp = await fetch(`${BASE}/projects/${projectId}/select`, {
+    method: 'POST',
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || 'Chọn project thất bại')
+  }
+  return resp.json()
+}
+
+export async function deleteProject(projectId: string): Promise<boolean> {
+  const resp = await fetch(`${BASE}/projects/${projectId}`, { method: 'DELETE' })
+  return resp.ok
+}
 
 // ─── Jobs ───────────────────────────────────────────────────────────────────
 
@@ -87,3 +134,37 @@ export async function uploadImage(
   if (!resp.ok) throw new Error('Upload ảnh thất bại')
   return resp.json()
 }
+
+// ─── Image Generation (Nano Banana) ─────────────────────────────────────────
+
+export async function generateImages(
+  request: VeoImageGenerateRequest,
+): Promise<VeoImageGenerateResponse> {
+  const resp = await fetch(`${BASE}/images/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || 'Tạo ảnh thất bại')
+  }
+  return resp.json()
+}
+
+export async function getImages(projectId?: string | null): Promise<VeoImageItem[]> {
+  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''
+  const resp = await fetch(`${BASE}/images${query}`)
+  if (!resp.ok) return []
+  return resp.json()
+}
+
+export async function deleteImage(imageId: string): Promise<boolean> {
+  const resp = await fetch(`${BASE}/images/${imageId}`, { method: 'DELETE' })
+  return resp.ok
+}
+
+export function getImageFileUrl(imageId: string): string {
+  return `${BASE}/images/${imageId}/file`
+}
+

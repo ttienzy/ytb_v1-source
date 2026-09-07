@@ -21,7 +21,9 @@ from urllib.parse import urlparse
 
 import requests
 
+from app.db import Base, SessionLocal, engine
 from app.veo import bridge
+from app.veo.models import VeoProject, VeoImage
 from app.veo.schemas import (
     AccountInfo,
     AspectRatio,
@@ -31,9 +33,13 @@ from app.veo.schemas import (
     VeoBridgeStatus,
     VeoCapabilities,
     VeoHistoryItem,
+    VeoImageGenerateRequest,
+    VeoImageGenerateResponse,
+    VeoImageItem,
     VeoJobOut,
     VeoJobRequest,
     VeoModelInfo,
+    VeoProjectOut,
 )
 
 logger = logging.getLogger("veo.service")
@@ -44,10 +50,12 @@ logger = logging.getLogger("veo.service")
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Backend/
 _VEO_DATA_DIR = _BASE_DIR / "Data" / "media" / "veo_outputs"
+_VEO_IMAGES_DIR = _BASE_DIR / "Data" / "media" / "veo_images"
 _VEO_JOBS_FILE = _BASE_DIR / "Data" / "veo_jobs.json"
 
 # Ensure directories exist
 _VEO_DATA_DIR.mkdir(parents=True, exist_ok=True)
+_VEO_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,11 +150,235 @@ _DEFAULT_MODELS: list[dict[str, Any]] = [
 ]
 
 
+# ─── Dispatch Profile Matrix ───────────────────────────────────────────────
+# Nguồn: https://support.google.com/flow/answer/16526234?hl=en (Credit Table)
+# Nguồn: https://support.google.com/flow/answer/16352836?hl=en (Models page)
+#
+# Cấu trúc key: "{model_slug}_{aspect}_{duration}s_{resolution}"
+# Credit cost theo tài liệu Google; runtime_verified = True chỉ khi có trace E2E.
+
+def _build_profiles() -> list[dict[str, Any]]:  # noqa: C901
+    """Tạo danh sách VeoCapabilityProfile từ ma trận tài liệu Google Help."""
+    from app.veo.schemas import InputMode, AspectRatio  # local import tránh circular
+
+    rows: list[dict[str, Any]] = []
+
+    # ── Omni 1.1 Flash ────────────────────────────────────────────────────────
+    # Credit: 360p → 4/5/6/7 credits; 720p → 7/10/12/15 credits
+    omni_credit_720 = {4: 7, 6: 10, 8: 12, 10: 15}
+    omni_credit_360 = {4: 4, 6: 5, 8: 6, 10: 7}
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in (4, 6, 8, 10):
+            for res, credit_map in (("720p", omni_credit_720), ("360p", omni_credit_360)):
+                rows.append({
+                    "id": f"omni_flash_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Omni 1.1 Flash",
+                    "provider_model_id": "",  # chưa xác minh
+                    "input_mode": InputMode.TEXT_TO_VIDEO.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": credit_map[dur],
+                    "documented": True,
+                    "runtime_verified": False,
+                    "note": "Theo Google Flow Help — chưa xác minh E2E",
+                })
+
+    # ── Veo 3.1 - Lite ────────────────────────────────────────────────────────
+    # Credit: flat 10 credits bất kể duration/resolution
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in (4, 6, 8):
+            for res in ("720p", "360p"):
+                rows.append({
+                    "id": f"veo31_lite_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Veo 3.1 - Lite",
+                    "provider_model_id": "",
+                    "input_mode": InputMode.TEXT_TO_VIDEO.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": 10,
+                    "documented": True,
+                    "runtime_verified": False,
+                    "note": "Theo Google Flow Help — chưa xác minh E2E",
+                })
+
+    # ── Veo 3.1 - Fast ────────────────────────────────────────────────────────
+    # Credit: flat 20 credits
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in (4, 6, 8):
+            for res in ("720p", "360p"):
+                rows.append({
+                    "id": f"veo31_fast_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Veo 3.1 - Fast",
+                    "provider_model_id": "",
+                    "input_mode": InputMode.TEXT_TO_VIDEO.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": 20,
+                    "documented": True,
+                    "runtime_verified": False,
+                    "note": "Theo Google Flow Help — chưa xác minh E2E",
+                })
+
+    # ── Veo 3.1 - Quality ─────────────────────────────────────────────────────
+    # Credit: 100 credits (Ultra & Non-Ultra đều 100)
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in (4, 6, 8):
+            for res in ("720p", "360p"):
+                rows.append({
+                    "id": f"veo31_quality_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Veo 3.1 - Quality",
+                    "provider_model_id": "",
+                    "input_mode": InputMode.TEXT_TO_VIDEO.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": 100,
+                    "documented": True,
+                    "runtime_verified": False,
+                    "note": "Theo Google Flow Help — chưa xác minh E2E",
+                })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # IMAGE-TO-VIDEO: frames (first frame / first+last) & ingredients
+    # Nguồn: https://support.google.com/flow/answer/16352836
+    # Credit: cùng mức với T2V của từng model.
+    # Omni Flash hỗ trợ frames + ingredients; Veo Lite/Fast/Quality: frames only
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # Omni 1.1 Flash — frames (first frame) 720p/360p
+    for mode in (InputMode.FRAMES, InputMode.INGREDIENTS):
+        mode_slug = "frames" if mode == InputMode.FRAMES else "ingr"
+        for aspect in ("16:9", "9:16"):
+            aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+            for dur in (4, 6, 8, 10):
+                for res, credit_map in (("720p", omni_credit_720), ("360p", omni_credit_360)):
+                    rows.append({
+                        "id": f"omni_flash_{mode_slug}_{aspect_slug}_{dur}s_{res}",
+                        "model_display_name": "Omni 1.1 Flash",
+                        "provider_model_id": "",
+                        "input_mode": mode.value,
+                        "aspect_ratio": aspect,
+                        "duration_seconds": dur,
+                        "resolution": res,
+                        "num_outputs": 1,
+                        "credit_cost": credit_map[dur],
+                        "documented": True,
+                        "runtime_verified": False,
+                        "note": f"I2V {mode.value} — Theo Google Flow Help",
+                    })
+
+    # Veo 3.1 Lite — frames (10 credits) + ingredients (10 credits)
+    for mode in (InputMode.FRAMES, InputMode.INGREDIENTS):
+        mode_slug = "frames" if mode == InputMode.FRAMES else "ingr"
+        for aspect in ("16:9", "9:16"):
+            aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+            for dur in (4, 6, 8):
+                for res in ("720p", "360p"):
+                    rows.append({
+                        "id": f"veo31_lite_{mode_slug}_{aspect_slug}_{dur}s_{res}",
+                        "model_display_name": "Veo 3.1 - Lite",
+                        "provider_model_id": "",
+                        "input_mode": mode.value,
+                        "aspect_ratio": aspect,
+                        "duration_seconds": dur,
+                        "resolution": res,
+                        "num_outputs": 1,
+                        "credit_cost": 10,
+                        "documented": True,
+                        "runtime_verified": False,
+                        "note": f"I2V {mode.value} — Theo Google Flow Help",
+                    })
+
+    # Veo 3.1 Fast — frames only (20 credits)
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in (4, 6, 8):
+            for res in ("720p", "360p"):
+                rows.append({
+                    "id": f"veo31_fast_frames_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Veo 3.1 - Fast",
+                    "provider_model_id": "",
+                    "input_mode": InputMode.FRAMES.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": 20,
+                    "documented": True,
+                    "runtime_verified": False,
+                    "note": "I2V frames — Theo Google Flow Help",
+                })
+
+    # Veo 3.1 Quality — frames only (100 credits)
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in (4, 6, 8):
+            for res in ("720p", "360p"):
+                rows.append({
+                    "id": f"veo31_quality_frames_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Veo 3.1 - Quality",
+                    "provider_model_id": "",
+                    "input_mode": InputMode.FRAMES.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": 100,
+                    "documented": True,
+                    "runtime_verified": False,
+                    "note": "I2V frames — Theo Google Flow Help",
+                })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTEND VIDEO — chỉ Veo 3.1 Lite hỗ trợ (flat 10 credits)
+    # Nguồn: https://support.google.com/flow/answer/16352836 ("Extend supported: Yes")
+    # ─────────────────────────────────────────────────────────────────────────
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in (4, 6, 8):
+            for res in ("720p", "360p"):
+                rows.append({
+                    "id": f"veo31_lite_extend_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Veo 3.1 - Lite",
+                    "provider_model_id": "",
+                    "input_mode": InputMode.EXTEND.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": 10,
+                    "documented": True,
+                    "runtime_verified": False,
+                    "note": "Extend — chỉ Veo 3.1 Lite, Theo Google Flow Help",
+                })
+
+    return rows
+
+
+
+_DISPATCH_PROFILES: list[dict[str, Any]] = _build_profiles()
+
+
 def get_capabilities() -> VeoCapabilities:
-    """Trả về capabilities hiện tại — model list từ tài liệu Google Help."""
+    """Trả về capabilities đầy đủ — models + profiles từ tài liệu Google Help."""
+    from app.veo.schemas import VeoCapabilityProfile  # local import tránh circular
+
     models = [VeoModelInfo(**m) for m in _DEFAULT_MODELS]
+    profiles = [VeoCapabilityProfile(**p) for p in _DISPATCH_PROFILES]
     return VeoCapabilities(
         models=models,
+        profiles=profiles,
         aspect_ratios=["16:9", "9:16"],
         max_outputs=4,
         note="Dữ liệu từ tài liệu Google Help. Internal model IDs chưa xác minh runtime.",
@@ -201,16 +433,195 @@ def save_manual_credential(email: str, cookie: str, access_token: str = "") -> d
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Projects Management (SQLite DB app.db)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def init_db() -> None:
+    """Tạo bảng veo_projects và veo_images trong SQLite nếu chưa có."""
+    try:
+        Base.metadata.create_all(bind=engine, tables=[VeoProject.__table__, VeoImage.__table__])
+    except Exception as e:
+        logger.warning("Failed to init veo tables: %s", e)
+
+
+def _model_to_project_out(p: VeoProject) -> VeoProjectOut:
+    return VeoProjectOut(
+        id=p.id,
+        name=p.name,
+        flow_project_id=p.flow_project_id,
+        account_email=p.account_email or "",
+        is_active=bool(p.is_active),
+        video_count=p.video_count or 0,
+        created_at=p.created_at.isoformat() if p.created_at else "",
+        updated_at=p.updated_at.isoformat() if p.updated_at else "",
+    )
+
+
+def list_projects() -> list[VeoProjectOut]:
+    """Danh sách tất cả project đã lưu trong SQLite DB."""
+    init_db()
+    with SessionLocal() as db:
+        projects = db.query(VeoProject).order_by(VeoProject.created_at.desc()).all()
+        return [_model_to_project_out(p) for p in projects]
+
+
+def get_active_project() -> VeoProjectOut | None:
+    """Lấy project đang kích hoạt (active). Nếu chưa có, kích hoạt project gần nhất nếu có."""
+    init_db()
+    with SessionLocal() as db:
+        p = db.query(VeoProject).filter(VeoProject.is_active == True).first()
+        if not p:
+            p = db.query(VeoProject).order_by(VeoProject.created_at.desc()).first()
+            if p:
+                p.is_active = True
+                db.commit()
+                db.refresh(p)
+        return _model_to_project_out(p) if p else None
+
+
+def get_project(project_id: str) -> VeoProjectOut | None:
+    """Lấy thông tin project theo ID hoặc flow_project_id."""
+    init_db()
+    with SessionLocal() as db:
+        p = db.query(VeoProject).filter(
+            (VeoProject.id == project_id) | (VeoProject.flow_project_id == project_id)
+        ).first()
+        return _model_to_project_out(p) if p else None
+
+
+def create_project(name: str, flow_project_id: str | None = None) -> VeoProjectOut:
+    """Tạo Project mới: gửi lệnh tới Extension tự động tạo trên tab Flow, nhận flow_project_id và lưu DB."""
+    init_db()
+
+    account_email = ""
+    pool = bridge.get_credentials_pool()
+    if pool:
+        account_email = list(pool.keys())[0]
+
+    flow_pid = (flow_project_id or "").strip()
+    if not flow_pid:
+        if not bridge.is_bridge_running():
+            raise RuntimeError("Bridge Server không hoạt động")
+        ext = bridge.get_extension_info()
+        if not ext.get("connected"):
+            raise RuntimeError("Extension chưa kết nối. Hãy mở Chrome có tiện ích FlowsVeo và tab Google Flow")
+
+        # Yêu cầu Extension tạo project trên tab Flow
+        req_id = bridge.request_create_project(name=name.strip())
+        if not req_id:
+            raise RuntimeError("Không thể gửi yêu cầu tạo Project tới Extension")
+
+        res = bridge.wait_project_result(req_id, timeout=35.0)
+        if not res:
+            raise TimeoutError("Hết thời gian chờ Extension tạo Project trên tab Google Flow")
+        if not res.get("ok"):
+            raise RuntimeError(res.get("error") or "Không thể tạo project trên Google Flow")
+
+        flow_pid = res.get("flow_project_id", "").strip()
+        if not flow_pid:
+            raise RuntimeError("Không nhận được mã project ID từ Google Flow")
+
+        if res.get("account_email"):
+            account_email = res["account_email"]
+
+    with SessionLocal() as db:
+        # Hủy active các project cũ
+        db.query(VeoProject).update({VeoProject.is_active: False})
+        new_project = VeoProject(
+            id=str(uuid.uuid4())[:12],
+            name=name.strip() or f"Project {datetime.now().strftime('%d/%m %H:%M')}",
+            flow_project_id=flow_pid,
+            account_email=account_email,
+            is_active=True,
+            video_count=0,
+        )
+        db.add(new_project)
+        db.commit()
+        db.refresh(new_project)
+        return _model_to_project_out(new_project)
+
+
+def select_project(project_id: str) -> VeoProjectOut:
+    """Chọn project làm việc (kích hoạt is_active) và đồng bộ tab Chrome tương ứng."""
+    init_db()
+    with SessionLocal() as db:
+        p = db.query(VeoProject).filter(
+            (VeoProject.id == project_id) | (VeoProject.flow_project_id == project_id)
+        ).first()
+        if not p:
+            raise ValueError(f"Project '{project_id}' không tồn tại")
+        db.query(VeoProject).update({VeoProject.is_active: False})
+        p.is_active = True
+        db.commit()
+        db.refresh(p)
+
+        # Tự động gửi lệnh sang Chrome Extension để chuyển/mở tab dự án này
+        if p.flow_project_id:
+            try:
+                bridge.request_switch_project(p.flow_project_id, p.account_email or "")
+                logger.info("Queued switch_project for flow_project_id: %s", p.flow_project_id)
+            except Exception as ex:
+                logger.warning("Failed to queue switch_project: %s", ex)
+
+        return _model_to_project_out(p)
+
+
+def delete_project(project_id: str) -> bool:
+    """Xóa project khỏi SQLite DB."""
+    init_db()
+    with SessionLocal() as db:
+        p = db.query(VeoProject).filter(
+            (VeoProject.id == project_id) | (VeoProject.flow_project_id == project_id)
+        ).first()
+        if not p:
+            return False
+        was_active = p.is_active
+        db.delete(p)
+        db.commit()
+        if was_active:
+            next_p = db.query(VeoProject).order_by(VeoProject.created_at.desc()).first()
+            if next_p:
+                next_p.is_active = True
+                db.commit()
+        return True
+
+
+def _increment_project_video_count(project_id: str) -> None:
+    try:
+        init_db()
+        with SessionLocal() as db:
+            p = db.query(VeoProject).filter(
+                (VeoProject.id == project_id) | (VeoProject.flow_project_id == project_id)
+            ).first()
+            if p:
+                p.video_count = (p.video_count or 0) + 1
+                db.commit()
+    except Exception as e:
+        logger.warning("Failed to increment video count for project %s: %s", project_id, e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Job Management
 # ─────────────────────────────────────────────────────────────────────────────
 
 def submit_job(request: VeoJobRequest) -> VeoJobOut:
-    """Tạo job mới và bắt đầu xử lý async."""
+    """Tạo job mới và bắt đầu xử lý async. Bắt buộc phải có project được chọn."""
+    active_proj = None
+    if getattr(request, "project_id", None):
+        active_proj = get_project(request.project_id)
+    if not active_proj:
+        active_proj = get_active_project()
+
+    if not active_proj:
+        raise ValueError("Vui lòng tạo hoặc chọn một Project trước khi sử dụng Veo")
+
     job_id = str(uuid.uuid4())[:12]
     now = datetime.now(timezone.utc).isoformat()
 
     job = {
         "job_id": job_id,
+        "project_id": active_proj.id,
+        "flow_project_id": active_proj.flow_project_id,
         "status": JobStatus.PENDING.value,
         "input_mode": request.input_mode.value,
         "prompt": request.prompt,
@@ -303,33 +714,64 @@ def _process_job(job_id: str) -> None:
         job["provider_media_id"] = flow_result.get("media_id")
         job["provider_model_id"] = flow_result.get("provider_model_id")
         _update_job(job, JobStatus.DONE, "Hoàn tất — video đã lưu vào máy")
+        if job.get("project_id"):
+            _increment_project_video_count(job["project_id"])
 
     except Exception as e:
         logger.exception("Job %s failed: %s", job_id, e)
         _update_job(job, JobStatus.ERROR, error=f"Lỗi không xác định: {str(e)}")
 
 
+def _resolve_provider_model_id(job: dict[str, Any]) -> str:
+    """Xác định mã model ID gửi tới Google Flow theo model, thời lượng và tỉ lệ."""
+    model_name = (job.get("model_display_name") or "").lower()
+    dur = int(job.get("duration_seconds") or 6)
+    aspect = job.get("aspect_ratio") or "16:9"
+    is_portrait = (aspect == "9:16")
+
+    if "omni" in model_name or "flash" in model_name:
+        dur_mapped = dur if dur in (4, 6, 8, 10) else 6
+        return f"abra_t2v_{dur_mapped}s"
+
+    if "quality" in model_name:
+        return "veo_3_1_t2v_quality_portrait" if is_portrait else "veo_3_1_t2v_quality"
+
+    if "fast" in model_name:
+        return "veo_3_1_t2v_fast_portrait" if is_portrait else "veo_3_1_t2v_fast"
+
+    # Default: Veo 3.1 - Lite
+    return "veo_3_1_t2v_lite"
+
+
 def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
-    """Chuẩn hóa cấu hình về contract Omni 1.1 Flash 6s (đã xác minh) để gửi tới Google Flow."""
-    expected = {
-        "input_mode": "text_to_video",
-        "model_display_name": "Omni 1.1 Flash",
-        "duration_seconds": 6,
-        "resolution": "720p",
-        "aspect_ratio": "16:9",
-        "num_outputs": 1,
-    }
-    # Tự động chuẩn hóa nếu người dùng chọn model hoặc thời lượng khác
-    mismatches = [key for key, value in expected.items() if job.get(key) != value]
-    if mismatches:
-        logger.info(
-            "Tự động chuẩn hóa job %s sang cấu hình Flow đã xác minh (Omni 1.1 Flash 6s 16:9 720p). Khác biệt cũ: %s",
-            job.get("job_id"),
-            ", ".join(mismatches),
-        )
+    """Chuẩn hóa cấu hình gửi tới Google Flow với thời lượng, tỉ lệ và model ID động."""
+    dur = int(job.get("duration_seconds") or 6)
+    aspect = job.get("aspect_ratio") or "16:9"
+    model_name = job.get("model_display_name") or "Omni 1.1 Flash"
+    res = job.get("resolution") or "720p"
+    mode = job.get("input_mode") or "text_to_video"
+    provider_model_id = _resolve_provider_model_id(job)
+
+    logger.info(
+        "Chuẩn bị Flow request cho job %s: model=%s, provider_model_id=%s, duration=%ds, aspect=%s, res=%s",
+        job.get("job_id"),
+        model_name,
+        provider_model_id,
+        dur,
+        aspect,
+        res,
+    )
+
     return {
         "prompt": job["prompt"],
-        **expected,
+        "project_id": job.get("flow_project_id") or job.get("project_id"),
+        "input_mode": mode,
+        "model_display_name": model_name,
+        "provider_model_id": provider_model_id,
+        "duration_seconds": dur,
+        "resolution": res,
+        "aspect_ratio": aspect,
+        "num_outputs": job.get("num_outputs") or 1,
     }
 
 
@@ -474,6 +916,8 @@ def _update_job(job: dict, status: JobStatus, step: str = "", error: str | None 
 def _job_to_out(job: dict) -> VeoJobOut:
     return VeoJobOut(
         job_id=job["job_id"],
+        project_id=job.get("project_id"),
+        flow_project_id=job.get("flow_project_id"),
         status=job.get("status", "pending"),
         input_mode=job.get("input_mode", "text_to_video"),
         prompt=job.get("prompt", ""),
@@ -573,11 +1017,191 @@ def delete_video(video_id: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Image Generation (Nano Banana - Pinhole)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _model_to_image_item(img: VeoImage) -> VeoImageItem:
+    return VeoImageItem(
+        id=img.id,
+        media_id=img.media_id,
+        prompt=img.prompt,
+        model_display_name=img.model_display_name,
+        model_key=img.model_key,
+        aspect_ratio=img.aspect_ratio,
+        seed=img.seed,
+        image_url=img.image_url,
+        local_path=img.local_path,
+        project_id=img.project_id,
+        created_at=img.created_at.isoformat() if img.created_at else "",
+    )
+
+
+def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
+    """Sinh ảnh từ prompt thông qua Google Flow Nano Banana (RPC ogiZ0b).
+
+    Tách N biến thể thành N request riêng biệt qua bridge, mỗi cái được
+    Extension giải reCAPTCHA độc lập → tránh lỗi PUBLIC_ERROR_UNUSUAL_ACTIVITY
+    do reuse token. Hỗ trợ partial success (2/3 ảnh ok vẫn trả về).
+    """
+    init_db()
+
+    target_flow_pid = ""
+    project_db_id = ""
+    with SessionLocal() as db:
+        if req.project_id:
+            p = db.query(VeoProject).filter(
+                (VeoProject.id == req.project_id) | (VeoProject.flow_project_id == req.project_id)
+            ).first()
+        else:
+            p = db.query(VeoProject).filter(VeoProject.is_active == True).first()
+            if not p:
+                p = db.query(VeoProject).order_by(VeoProject.created_at.desc()).first()
+        if p:
+            target_flow_pid = p.flow_project_id
+            project_db_id = p.id
+
+    count = min(max(req.count, 1), 4)
+    # Scene UUID dùng chung cho tất cả biến thể (giống Flow gốc)
+    shared_scene_uuid = str(uuid.uuid4()).upper()
+
+    raw_images: list[dict] = []
+    errors: list[str] = []
+
+    for i in range(count):
+        if i > 0:
+            # Google Flow official cadence: ~1s delay giữa các biến thể
+            import time as _t
+            _t.sleep(1.0)
+
+        variation_seed = (req.seed + i) if req.seed else None
+        flow_request = {
+            "prompt": req.prompt.strip(),
+            "aspect_ratio": req.aspect_ratio or "16:9",
+            "model_key": req.model_key or "GEM_PIX_2",
+            "model_display_name": req.model_display_name or "Nano Banana Pro",
+            "count": 1,  # Luôn 1 — mỗi request tạo 1 ảnh duy nhất
+            "seed": variation_seed,
+            "project_id": target_flow_pid,
+            "reference_image_ids": req.reference_image_ids or [],
+            "scene_uuid": shared_scene_uuid,
+        }
+
+        req_id = bridge.request_generate_image(flow_request)
+        if not req_id:
+            errors.append(f"Biến thể #{i + 1}: Bridge chưa sẵn sàng hoặc hàng đợi đầy")
+            continue
+
+        bridge_res = bridge.wait_image_result(req_id, timeout=60.0)
+        if not bridge_res:
+            errors.append(f"Biến thể #{i + 1}: Timeout chờ Extension (60s)")
+            continue
+
+        if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
+            err = (
+                bridge_res.get("error")
+                or (bridge_res.get("result") and bridge_res["result"].get("error"))
+                or "Lỗi không xác định"
+            )
+            errors.append(f"Biến thể #{i + 1}: {err}")
+            continue
+
+        variation_images = bridge_res["result"].get("images", [])
+        raw_images.extend(variation_images)
+
+    if not raw_images:
+        combined_err = "; ".join(errors) if errors else "Google Flow không trả về ảnh nào"
+        return VeoImageGenerateResponse(ok=False, error=combined_err)
+
+    # Lưu ảnh thành công vào DB & tải về local
+    created_items: list[VeoImageItem] = []
+    with SessionLocal() as db:
+        for item in raw_images:
+            img_id = str(uuid.uuid4())[:12]
+            cdn_url = item.get("image_url", "")
+            local_rel_path = ""
+
+            if cdn_url:
+                try:
+                    r = requests.get(cdn_url, timeout=20.0)
+                    if r.status_code == 200:
+                        local_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
+                        local_file.write_bytes(r.content)
+                        local_rel_path = str(local_file.relative_to(_BASE_DIR)).replace("\\", "/")
+                except Exception as ex:
+                    logger.warning("Không thể tải ảnh %s về máy cục bộ: %s", img_id, ex)
+
+            new_img = VeoImage(
+                id=img_id,
+                prompt=req.prompt,
+                model_display_name=req.model_display_name or "Nano Banana Pro",
+                model_key=item.get("model_key", req.model_key),
+                aspect_ratio=item.get("aspect_ratio", req.aspect_ratio),
+                seed=item.get("seed", req.seed),
+                media_id=item.get("media_id") or img_id,
+                image_url=cdn_url,
+                local_path=local_rel_path,
+                project_id=project_db_id or target_flow_pid,
+            )
+            db.add(new_img)
+            db.commit()
+            db.refresh(new_img)
+            created_items.append(_model_to_image_item(new_img))
+
+    # Log partial success nếu có
+    if errors:
+        logger.warning(
+            "Image generation partial success: %d/%d ok. Errors: %s",
+            len(created_items), count, "; ".join(errors),
+        )
+
+    return VeoImageGenerateResponse(ok=True, images=created_items)
+
+
+def list_images(project_id: str | None = None) -> list[VeoImageItem]:
+    """Lấy danh sách ảnh đã tạo từ SQLite DB."""
+    init_db()
+    with SessionLocal() as db:
+        q = db.query(VeoImage)
+        if project_id:
+            q = q.filter((VeoImage.project_id == project_id))
+        images = q.order_by(VeoImage.created_at.desc()).limit(100).all()
+        return [_model_to_image_item(img) for img in images]
+
+
+def delete_image(image_id: str) -> bool:
+    """Xóa ảnh khỏi SQLite DB và xóa file local."""
+    init_db()
+    with SessionLocal() as db:
+        img = db.query(VeoImage).filter(VeoImage.id == image_id).first()
+        if not img:
+            return False
+        if img.local_path:
+            local_file = _BASE_DIR / img.local_path
+            local_file.unlink(missing_ok=True)
+        db.delete(img)
+        db.commit()
+        return True
+
+
+def get_image_file_path(image_id: str) -> Path | None:
+    """Lấy đường dẫn file ảnh cục bộ."""
+    local_file = _VEO_IMAGES_DIR / f"{image_id}.jpg"
+    if local_file.exists():
+        return local_file
+    for ext in (".jpg", ".jpeg", ".png", ".webp"):
+        candidate = _VEO_IMAGES_DIR / f"{image_id}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Startup
 # ─────────────────────────────────────────────────────────────────────────────
 
 def startup() -> None:
     """Gọi khi FastAPI startup — khởi tạo jobs và Bridge."""
+    init_db()
     _load_jobs()
     ok = bridge.start_bridge(port=60526)
     if ok:

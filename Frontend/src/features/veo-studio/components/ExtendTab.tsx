@@ -1,51 +1,99 @@
-import { useState } from 'react'
-import { Film, SkipForward } from 'lucide-react'
-import type { VeoCapabilities, VeoHistoryItem, VeoJobRequest } from '../types'
+import { useEffect, useState } from 'react'
+import { Film, SkipForward, ShieldCheck, Zap } from 'lucide-react'
+import type { VeoCapabilities, VeoHistoryItem, VeoJobRequest, VeoProject } from '../types'
 
 interface Props {
   capabilities: VeoCapabilities | null
   history: VeoHistoryItem[]
   onSubmit: (request: VeoJobRequest) => void
   busy: boolean
+  activeProject?: VeoProject | null
 }
 
-export function ExtendTab({ capabilities, history, onSubmit, busy }: Props) {
+export function ExtendTab({ capabilities, history, onSubmit, busy, activeProject }: Props) {
   const [selectedVideo, setSelectedVideo] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [duration, setDuration] = useState(8)
+  const [profileId, setProfileId] = useState('')
 
-  // Chỉ model hỗ trợ extend
-  const extendModels = (capabilities?.models || []).filter(
-    (m) => m.extend_supported === true,
-  )
-  const hasExtendSupport = extendModels.length > 0
+  // Chỉ profiles có input_mode === 'extend'
+  const profiles = (capabilities?.profiles || []).filter((p) => p.input_mode === 'extend')
+  const selectedProfile = profiles.find((p) => p.id === profileId) || profiles[0]
+
+  useEffect(() => {
+    if (profiles.length && !profiles.some((p) => p.id === profileId)) {
+      setProfileId(profiles[0].id)
+    }
+  }, [capabilities, profileId, profiles])
+
+  const durations = selectedProfile
+    ? [...new Set(profiles
+        .filter((p) =>
+          p.model_display_name === selectedProfile.model_display_name &&
+          p.aspect_ratio === selectedProfile.aspect_ratio,
+        )
+        .map((p) => p.duration_seconds))]
+        .sort((a, b) => a - b)
+    : []
+
+  const resolutions = selectedProfile
+    ? [...new Set(profiles
+        .filter((p) =>
+          p.model_display_name === selectedProfile.model_display_name &&
+          p.aspect_ratio === selectedProfile.aspect_ratio &&
+          p.duration_seconds === selectedProfile.duration_seconds,
+        )
+        .map((p) => p.resolution))]
+    : []
+
+  const selectProfile = (predicate: (p: typeof profiles[number]) => boolean) => {
+    const next = profiles.find(predicate)
+    if (next) setProfileId(next.id)
+  }
 
   const handleSubmit = () => {
-    if (!selectedVideo || !prompt.trim()) return
+    if (!selectedVideo || !prompt.trim() || !activeProject || !selectedProfile) return
     onSubmit({
+      project_id: activeProject.id,
       prompt: prompt.trim(),
-      model_display_name: extendModels[0]?.display_name || 'Veo 3.1 - Lite',
+      model_display_name: selectedProfile.model_display_name,
       input_mode: 'extend',
-      aspect_ratio: '16:9',
-      duration_seconds: duration,
-      resolution: '720p',
+      aspect_ratio: selectedProfile.aspect_ratio,
+      duration_seconds: selectedProfile.duration_seconds,
+      resolution: selectedProfile.resolution,
       num_outputs: 1,
       source_video_id: selectedVideo,
       continuation_prompt: prompt.trim(),
     })
   }
 
+  const ProfileBadge = () => {
+    if (!selectedProfile) return null
+    if (selectedProfile.runtime_verified) {
+      return (
+        <span className="veo-badge veo-badge--verified">
+          <ShieldCheck size={12} />
+          Đã xác minh runtime
+        </span>
+      )
+    }
+    return (
+      <span className="veo-badge veo-badge--documented">
+        <Zap size={12} />
+        Theo chuẩn Google Flow
+      </span>
+    )
+  }
+
   return (
     <div className="veo-tab-content">
-      {!hasExtendSupport && (
-        <div className="veo-notice">
-          <span>⚠️</span>
-          <div>
-            <strong>Extend chưa sẵn sàng</strong>
-            <p>Theo Flow Help, chỉ Veo 3.1 Lite hỗ trợ Extend. Cần xác minh runtime trước khi bật.</p>
-          </div>
+      {/* Info notice về Extend */}
+      <div className="veo-notice veo-notice--info">
+        <span>ℹ️</span>
+        <div>
+          <strong>Chỉ Veo 3.1 - Lite hỗ trợ Extend</strong>
+          <p>Nối thêm 4–8 giây vào video đã tạo. Chi phí: 10 credits/lần.</p>
         </div>
-      )}
+      </div>
 
       {/* Source Video */}
       <label className="veo-label">Video nguồn</label>
@@ -79,29 +127,106 @@ export function ExtendTab({ capabilities, history, onSubmit, busy }: Props) {
         onChange={(e) => setPrompt(e.target.value)}
       />
 
-      {/* Duration */}
-      <label className="veo-label">Thời lượng nối thêm</label>
-      <div className="veo-duration-row">
-        {[4, 6, 8].map((d) => (
-          <button
-            key={d}
-            className={`veo-duration-btn ${duration === d ? 'active' : ''}`}
-            onClick={() => setDuration(d)}
-          >
-            +{d}s
-          </button>
-        ))}
-      </div>
+      {selectedProfile && (
+        <>
+          {/* Aspect Ratio */}
+          <label className="veo-label">Tỉ lệ khung hình</label>
+          <div className="veo-aspect-row">
+            {(['16:9', '9:16'] as const).map((ar) => {
+              const available = profiles
+                .filter((p) => p.model_display_name === selectedProfile.model_display_name)
+                .some((p) => p.aspect_ratio === ar)
+              return (
+                <button
+                  key={ar}
+                  className={`veo-aspect-btn ${selectedProfile.aspect_ratio === ar ? 'active' : ''}`}
+                  onClick={() =>
+                    selectProfile(
+                      (p) =>
+                        p.model_display_name === selectedProfile.model_display_name &&
+                        p.aspect_ratio === ar &&
+                        p.duration_seconds === selectedProfile.duration_seconds &&
+                        p.resolution === selectedProfile.resolution,
+                    )
+                  }
+                  disabled={!available}
+                >
+                  <span className={`veo-aspect-icon ${ar === '16:9' ? 'landscape' : 'portrait'}`} />
+                  {ar}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Duration */}
+          <label className="veo-label">Thời lượng nối thêm</label>
+          <div className="veo-duration-row">
+            {durations.map((d) => (
+              <button
+                key={d}
+                className={`veo-duration-btn ${selectedProfile.duration_seconds === d ? 'active' : ''}`}
+                onClick={() =>
+                  selectProfile(
+                    (p) =>
+                      p.model_display_name === selectedProfile.model_display_name &&
+                      p.aspect_ratio === selectedProfile.aspect_ratio &&
+                      p.duration_seconds === d &&
+                      p.resolution === selectedProfile.resolution,
+                  )
+                }
+              >
+                +{d}s
+              </button>
+            ))}
+          </div>
+
+          {/* Resolution */}
+          <label className="veo-label">Độ phân giải</label>
+          <div className="veo-duration-row">
+            {resolutions.map((r) => (
+              <button
+                key={r}
+                className={`veo-duration-btn ${selectedProfile.resolution === r ? 'active' : ''}`}
+                onClick={() =>
+                  selectProfile(
+                    (p) =>
+                      p.model_display_name === selectedProfile.model_display_name &&
+                      p.aspect_ratio === selectedProfile.aspect_ratio &&
+                      p.duration_seconds === selectedProfile.duration_seconds &&
+                      p.resolution === r,
+                  )
+                }
+              >
+                {r}
+                {r === '360p' && <span className="veo-res-tag"> Draft</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Status bar */}
+          <div className="veo-profile-bar">
+            <ProfileBadge />
+            <span className="veo-credit-estimate">{selectedProfile.credit_cost} credits</span>
+          </div>
+        </>
+      )}
 
       {/* Submit */}
       <button
         className="veo-submit-btn"
         onClick={handleSubmit}
-        disabled={busy || !selectedVideo || !prompt.trim() || !hasExtendSupport}
+        disabled={busy || !selectedVideo || !prompt.trim() || !activeProject || !selectedProfile}
       >
         <SkipForward size={16} />
-        {busy ? 'Đang xử lý...' : 'Nối dài video'}
+        {!activeProject
+          ? 'Vui lòng chọn Project'
+          : !selectedVideo
+            ? 'Chưa chọn video nguồn'
+            : busy
+              ? 'Đang xử lý...'
+              : `Nối dài video · ${selectedProfile?.credit_cost ?? '?'} credits`}
       </button>
     </div>
   )
 }
+
