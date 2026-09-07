@@ -11,6 +11,11 @@ import {
   X,
   Copy,
   Check,
+  Cpu,
+  Wand2,
+  Image as ImageIcon,
+  CheckCircle2,
+  Compass,
 } from 'lucide-react'
 import type {
   ImageAspectRatio,
@@ -30,37 +35,60 @@ interface ModelOption {
   key: ImageModelKey
   name: string
   desc: string
-  badge: string
+  badge: 'PRO' | 'BALANCED' | 'FAST'
 }
 
 const MODELS: ModelOption[] = [
   {
     key: 'GEM_PIX_2',
     name: 'Nano Banana Pro',
-    desc: 'Chất lượng cao, 4K texture, chi tiết ánh sáng & vật liệu phức tạp',
+    desc: 'Chất lượng cao nhất, độ chi tiết 4K, xử lý ánh sáng & bố cục phức tạp',
     badge: 'PRO',
   },
   {
     key: 'NARWHAL',
     name: 'Nano Banana 2',
-    desc: 'Cân bằng giữa chất lượng cao và tốc độ sinh ảnh',
-    badge: 'STANDARD',
+    desc: 'Cân bằng lý tưởng giữa chất lượng hình ảnh sắc nét và tốc độ sinh ảnh',
+    badge: 'BALANCED',
   },
   {
     key: 'HARBOR_SEAL',
     name: 'Nano Banana 2 Lite',
     desc: 'Tốc độ cực nhanh (1-2s), tối ưu phác thảo ý tưởng và số lượng lớn',
-    badge: 'LITE',
+    badge: 'FAST',
   },
 ]
 
-const ASPECT_RATIOS: { key: ImageAspectRatio; label: string; iconRatio: string }[] = [
-  { key: '16:9', label: '16:9 Ngang', iconRatio: 'landscape' },
-  { key: '4:3', label: '4:3 Màn ảnh', iconRatio: 'standard' },
-  { key: '1:1', label: '1:1 Vuông', iconRatio: 'square' },
-  { key: '3:4', label: '3:4 Đứng', iconRatio: 'portrait-narrow' },
-  { key: '9:16', label: '9:16 Shorts', iconRatio: 'portrait' },
+const ASPECT_RATIOS: { key: ImageAspectRatio; label: string; desc: string }[] = [
+  { key: '16:9', label: '16:9', desc: 'Ngang chuẩn (1376×768)' },
+  { key: '4:3', label: '4:3', desc: 'Màn ảnh truyền thống' },
+  { key: '1:1', label: '1:1', desc: 'Vuông (1024×1024)' },
+  { key: '3:4', label: '3:4', desc: 'Dọc chân dung' },
+  { key: '9:16', label: '9:16', desc: 'Dọc Shorts/TikTok (768×1376)' },
 ]
+
+const QUICK_PROMPTS = [
+  'Cinematic shot of a cybernetic warrior in neon-lit rain, Tokyo alley reflections, ultra-detailed 8k.',
+  'Hyper-realistic portrait of an astronaut floating in an alien crystal cavern, luminescent flora, studio lighting.',
+  'Commercial product photography of a minimalist luxury watch, soft morning studio lighting, clean bokeh.',
+]
+
+function RatioIcon({ ratio }: { ratio: ImageAspectRatio }) {
+  switch (ratio) {
+    case '16:9':
+      return <span className="veo-ratio-box ratio-16-9" />
+    case '4:3':
+      return <span className="veo-ratio-box ratio-4-3" />
+    case '1:1':
+      return <span className="veo-ratio-box ratio-1-1" />
+    case '3:4':
+      return <span className="veo-ratio-box ratio-3-4" />
+    case '9:16':
+      return <span className="veo-ratio-box ratio-9-16" />
+    default:
+      return <span className="veo-ratio-box ratio-16-9" />
+  }
+}
 
 export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
   // Config state
@@ -127,10 +155,10 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
 
       const res = await api.generateImages(req)
       if (res.ok && res.images.length > 0) {
-        setSuccessMessage(`Đã tạo thành công ${res.images.length} ảnh với 🍌 ${currentModel.name}`)
+        setSuccessMessage(`Đã tạo thành công ${res.images.length} hình ảnh với ${currentModel.name}`)
         setImages((prev) => [...res.images, ...prev])
       } else {
-        setErrorMessage(res.error || 'Tạo ảnh thất bại')
+        setErrorMessage(res.error || 'Tạo ảnh thất bại từ Google Flow')
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Lỗi kết nối khi tạo ảnh')
@@ -146,40 +174,40 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
       return
     }
 
-    // Split lines by numbered prompts: 1., 2., etc.
     const lines = batchText.split('\n')
-    const promptList: string[] = []
-    let currentBuffer = ''
+    const prompts: string[] = []
+    let current = ''
 
-    for (const line of lines) {
-      const match = line.trim().match(/^(\d+)[\.\)]\s*(.*)/)
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (!line) continue
+      const match = line.match(/^(\d+)[\.\)]\s*(.+)/)
       if (match) {
-        if (currentBuffer.trim()) {
-          promptList.push(currentBuffer.trim())
-        }
-        currentBuffer = match[2] || ''
+        if (current) prompts.push(current)
+        current = match[2]
       } else {
-        currentBuffer += (currentBuffer ? '\n' : '') + line
+        if (current) {
+          current += ' ' + line
+        } else {
+          current = line
+        }
       }
     }
-    if (currentBuffer.trim()) {
-      promptList.push(currentBuffer.trim())
-    }
+    if (current) prompts.push(current)
 
-    if (!promptList.length) {
-      setErrorMessage('Không nhận diện được phân cảnh nào. Hãy định dạng: 1. Prompt một, 2. Prompt hai...')
+    if (prompts.length === 0) {
+      setErrorMessage('Không nhận diện được prompt hợp lệ. Hãy bắt đầu mỗi cảnh bằng số thứ tự như "1. ", "2. "')
       return
     }
 
     setGenerating(true)
     setErrorMessage('')
-    setSuccessMessage(`Bắt đầu chạy batch ${promptList.length} ảnh...`)
+    setSuccessMessage(`Đang bắt đầu tạo batch gồm ${prompts.length} cảnh ảnh qua Google Flow...`)
 
     let successCount = 0
     try {
-      for (let i = 0; i < promptList.length; i++) {
-        const p = promptList[i]
-        setSuccessMessage(`Đang tạo ảnh ${i + 1}/${promptList.length}: "${p.slice(0, 40)}..."`)
+      for (let i = 0; i < prompts.length; i++) {
+        const p = prompts[i]
         const req: VeoImageGenerateRequest = {
           prompt: p,
           model_key: selectedModelKey,
@@ -188,15 +216,20 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
           count: variationCount,
           project_id: activeProject?.id,
         }
-        const res = await api.generateImages(req)
-        if (res.ok && res.images.length > 0) {
-          successCount += res.images.length
-          setImages((prev) => [...res.images, ...prev])
+
+        try {
+          const res = await api.generateImages(req)
+          if (res.ok && res.images.length > 0) {
+            successCount += res.images.length
+            setImages((prev) => [...res.images, ...prev])
+          }
+        } catch {
+          // ignore single item error in batch
         }
       }
-      setSuccessMessage(`Hoàn tất batch! Đã tạo thành công ${successCount} ảnh.`)
+      setSuccessMessage(`Đã hoàn thành batch! Đã tạo thành công ${successCount} ảnh.`)
     } catch (err: any) {
-      setErrorMessage(`Lỗi trong quá trình chạy batch: ${err.message}`)
+      setErrorMessage(err.message || 'Lỗi khi thực thi batch ảnh')
     } finally {
       setGenerating(false)
     }
@@ -220,11 +253,11 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
 
   return (
     <div className="veo-image-studio">
-      {/* ─── Studio Ribbon Bar (Top Controls) ─── */}
+      {/* ─── Studio Ribbon Toolbar ─── */}
       <div className="veo-studio-ribbon">
         {/* Model Selector Dropdown */}
         <div className="veo-ribbon-group">
-          <span className="veo-ribbon-label">MODEL ẢNH</span>
+          <span className="veo-ribbon-label">MODEL AI</span>
           <div className="veo-model-dropdown-wrap">
             <button
               type="button"
@@ -232,9 +265,11 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
               onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
             >
               <div className="veo-model-trigger-left">
-                <span className="veo-banana-icon">🍌</span>
+                <Cpu size={14} className="veo-model-icon" />
                 <span className="veo-model-trigger-name">{currentModel.name}</span>
-                <span className="veo-model-badge">{currentModel.badge}</span>
+                <span className={`veo-model-badge badge-${currentModel.badge.toLowerCase()}`}>
+                  {currentModel.badge}
+                </span>
               </div>
               <ChevronDown size={14} className="veo-model-chevron" />
             </button>
@@ -252,9 +287,13 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                     }}
                   >
                     <div className="veo-model-option-head">
-                      <span className="veo-banana-icon">🍌</span>
-                      <span className="veo-model-option-name">{m.name}</span>
-                      <span className="veo-model-badge">{m.badge}</span>
+                      <div className="veo-model-option-title">
+                        <Cpu size={14} className="veo-model-icon" />
+                        <span className="veo-model-option-name">{m.name}</span>
+                      </div>
+                      <span className={`veo-model-badge badge-${m.badge.toLowerCase()}`}>
+                        {m.badge}
+                      </span>
                     </div>
                     <div className="veo-model-option-desc">{m.desc}</div>
                   </button>
@@ -276,8 +315,10 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                 type="button"
                 className={`veo-pill-btn ${aspectRatio === r.key ? 'active' : ''}`}
                 onClick={() => setAspectRatio(r.key)}
+                title={r.desc}
               >
-                {r.key}
+                <RatioIcon ratio={r.key} />
+                <span>{r.label}</span>
               </button>
             ))}
           </div>
@@ -285,9 +326,9 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
 
         <div className="veo-ribbon-divider" />
 
-        {/* Output Count (x1 to x4) */}
+        {/* Output Count (1 to 4) */}
         <div className="veo-ribbon-group">
-          <span className="veo-ribbon-label">SỐ LƯỢNG BIẾN THỂ</span>
+          <span className="veo-ribbon-label">BIẾN THỂ</span>
           <div className="veo-pill-group">
             {[1, 2, 3, 4].map((cnt) => (
               <button
@@ -295,15 +336,16 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                 type="button"
                 className={`veo-pill-btn ${variationCount === cnt ? 'active' : ''}`}
                 onClick={() => setVariationCount(cnt)}
+                title={`Tạo đồng thời ${cnt} biến thể song song`}
               >
-                x{cnt}
+                <span>{cnt}</span>
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* ─── Prompt Workspace ─── */}
+      {/* ─── Prompt Workspace Card ─── */}
       <div className="veo-image-prompt-box">
         <div className="veo-image-prompt-header">
           <div className="veo-image-mode-switch">
@@ -312,20 +354,26 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
               className={`veo-mode-btn ${mode === 'single' ? 'active' : ''}`}
               onClick={() => setMode('single')}
             >
-              Prompt Đơn lẻ
+              <Wand2 size={13} style={{ marginRight: 6 }} />
+              Prompt Đơn Lẻ
             </button>
             <button
               type="button"
               className={`veo-mode-btn ${mode === 'batch' ? 'active' : ''}`}
               onClick={() => setMode('batch')}
             >
-              <Layers size={13} style={{ marginRight: 4 }} />
-              Kịch bản Batch (1., 2., 3...)
+              <Layers size={13} style={{ marginRight: 6 }} />
+              Kịch Bản Hàng Loạt (Batch)
             </button>
           </div>
 
           <div className="veo-image-active-summary">
-            🍌 {currentModel.name} · Tỉ lệ {aspectRatio} · {variationCount} ảnh/lần
+            <span className="veo-summary-dot" />
+            <span>{currentModel.name}</span>
+            <span className="veo-summary-sep">•</span>
+            <span>Tỉ lệ {aspectRatio}</span>
+            <span className="veo-summary-sep">•</span>
+            <span>{variationCount} biến thể/lần</span>
           </div>
         </div>
 
@@ -333,29 +381,32 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
           <div className="veo-image-input-wrap">
             <textarea
               className="veo-image-textarea"
-              placeholder="Bạn muốn tạo những gì? Ví dụ: Chú gấu phi hành gia khám phá sao Hỏa rực rỡ, góc máy điện ảnh 4K..."
+              placeholder="Nhập mô tả hình ảnh chi tiết: bối cảnh, ánh sáng, góc máy, nhân vật, chất liệu, độ phân giải 8K, cinematic..."
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={3}
               disabled={generating}
             />
             <div className="veo-image-action-bar">
-              <span className="veo-credit-hint">Chi phí: 0 tín dụng Google Flow</span>
+              <div className="veo-engine-indicator">
+                <span className="veo-engine-dot online" />
+                <span className="veo-engine-label">Google Flow Image Engine • Sẵn sàng</span>
+              </div>
               <button
                 type="button"
-                className="veo-btn-primary"
+                className="veo-btn-generate"
                 onClick={handleGenerateSingle}
                 disabled={generating || !prompt.trim()}
               >
                 {generating ? (
                   <>
-                    <RefreshCw size={15} className="veo-spin" />
+                    <RefreshCw size={14} className="veo-spin" />
                     <span>Đang tạo ảnh qua Google Flow...</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles size={15} />
-                    <span>Tạo {variationCount} Ảnh (🍌 {currentModel.name})</span>
+                    <Sparkles size={14} />
+                    <span>Tạo {variationCount} Biến Thể ({currentModel.name})</span>
                   </>
                 )}
               </button>
@@ -365,29 +416,29 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
           <div className="veo-image-input-wrap">
             <textarea
               className="veo-image-textarea"
-              placeholder={'1. Phong cảnh hoàng hôn trên biển nhiệt đới\n2. Phi thuyền lơ lửng trên thành phố cyberpunk tương lai\n3. Chân dung cô gái ánh mắt lấp lánh dưới tán lá mùa thu'}
+              placeholder={'1. Phong cảnh hoàng hôn trên biển nhiệt đới, ánh nắng vàng rực rỡ\n2. Phi thuyền lơ lửng trên bầu trời thành phố tương lai cyberpunk, mưa rơi phản chiếu đèn neon\n3. Chân dung chiến binh cổ trang ánh mắt kiên định, góc máy điện ảnh 8K'}
               value={batchText}
               onChange={(e) => setBatchText(e.target.value)}
               rows={5}
               disabled={generating}
             />
             <div className="veo-image-action-bar">
-              <span className="veo-credit-hint">Nhập mỗi dòng bắt đầu bằng số thứ tự (1., 2., 3...)</span>
+              <span className="veo-helper-hint">Mỗi cảnh bắt đầu bằng số thứ tự (ví dụ: 1., 2., 3...)</span>
               <button
                 type="button"
-                className="veo-btn-primary"
+                className="veo-btn-generate"
                 onClick={handleGenerateBatch}
                 disabled={generating || !batchText.trim()}
               >
                 {generating ? (
                   <>
-                    <RefreshCw size={15} className="veo-spin" />
-                    <span>Đang chạy batch ảnh...</span>
+                    <RefreshCw size={14} className="veo-spin" />
+                    <span>Đang xử lý batch ảnh...</span>
                   </>
                 ) : (
                   <>
-                    <Layers size={15} />
-                    <span>Chạy Batch Kịch Bản</span>
+                    <Layers size={14} />
+                    <span>Chạy Kịch Bản Hàng Loạt</span>
                   </>
                 )}
               </button>
@@ -396,28 +447,57 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
         )}
 
         {/* Notifications */}
-        {errorMessage && <div className="veo-error-banner">{errorMessage}</div>}
-        {successMessage && <div className="veo-success-banner">{successMessage}</div>}
+        {errorMessage && (
+          <div className="veo-banner-error">
+            <span>{errorMessage}</span>
+          </div>
+        )}
+        {successMessage && (
+          <div className="veo-banner-success">
+            <CheckCircle2 size={15} />
+            <span>{successMessage}</span>
+          </div>
+        )}
       </div>
 
       {/* ─── Gallery Section ─── */}
       <div className="veo-image-gallery-section">
         <div className="veo-image-gallery-header">
-          <div className="veo-gallery-title">
-            <span>BỘ SƯU TẬP ẢNH ĐÃ TẠO</span>
-            <span className="veo-gallery-count">({images.length})</span>
+          <div className="veo-gallery-title-wrap">
+            <ImageIcon size={16} className="veo-gallery-icon" />
+            <span className="veo-gallery-title">THƯ VIỆN HÌNH ẢNH ĐÃ TẠO</span>
+            <span className="veo-gallery-badge">{images.length}</span>
           </div>
-          <button type="button" className="veo-btn-ghost" onClick={loadImages} disabled={loadingImages}>
-            <RefreshCw size={14} className={loadingImages ? 'veo-spin' : ''} />
+          <button type="button" className="veo-btn-refresh" onClick={loadImages} disabled={loadingImages}>
+            <RefreshCw size={13} className={loadingImages ? 'veo-spin' : ''} />
             <span>Làm mới</span>
           </button>
         </div>
 
         {images.length === 0 ? (
-          <div className="veo-image-empty">
-            <Sparkles size={36} className="veo-empty-icon" />
-            <p>Chưa có hình ảnh nào được tạo trong dự án này.</p>
-            <span>Nhập prompt phía trên và bấm <strong>"Tạo Ảnh"</strong> để bắt đầu.</span>
+          <div className="veo-image-empty-pro">
+            <div className="veo-empty-icon-wrap">
+              <Compass size={28} />
+            </div>
+            <h4>Chưa có hình ảnh nào trong dự án</h4>
+            <p>Nhập mô tả phía trên và bấm <strong>"Tạo Biến Thể"</strong> hoặc thử ngay một trong các ý tưởng mẫu:</p>
+
+            <div className="veo-quick-prompts">
+              {QUICK_PROMPTS.map((qp, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="veo-quick-prompt-btn"
+                  onClick={() => {
+                    setPrompt(qp)
+                    setMode('single')
+                  }}
+                >
+                  <Sparkles size={12} className="veo-quick-icon" />
+                  <span>{qp}</span>
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="veo-image-grid">
@@ -437,32 +517,53 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                   <div className="veo-image-card-overlay">
                     <button
                       type="button"
-                      className="veo-overlay-btn"
-                      title="Phóng to"
+                      className="veo-overlay-action-btn"
+                      title="Xem phóng to"
                       onClick={(e) => {
                         e.stopPropagation()
                         setPreviewImage(item)
                       }}
                     >
-                      <Maximize2 size={15} />
+                      <Maximize2 size={14} />
                     </button>
                     {onSendToVideo && (
                       <button
                         type="button"
-                        className="veo-overlay-btn highlight"
-                        title="Chuyển sang làm Video (Image-to-Video)"
+                        className="veo-overlay-action-btn highlight"
+                        title="Tạo video từ ảnh này (I2V)"
                         onClick={(e) => {
                           e.stopPropagation()
                           onSendToVideo(item)
                         }}
                       >
-                        <Film size={15} />
+                        <Film size={14} />
                       </button>
                     )}
+                    <a
+                      href={api.getImageFileUrl(item.id)}
+                      download={`flow_image_${item.id}.jpg`}
+                      className="veo-overlay-action-btn"
+                      title="Tải ảnh về máy"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Download size={14} />
+                    </a>
+                    <button
+                      type="button"
+                      className="veo-overlay-action-btn danger"
+                      title="Xóa ảnh"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(item.id)
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
-                  <div className="veo-image-card-badges">
-                    <span className="veo-badge-chip">🍌 {item.model_display_name.replace('Nano Banana', '').trim() || 'Pro'}</span>
-                    <span className="veo-badge-chip">{item.aspect_ratio}</span>
+
+                  <div className="veo-card-tags">
+                    <span className="veo-card-tag ratio">{item.aspect_ratio}</span>
+                    <span className="veo-card-tag model">{item.model_display_name || 'Nano Banana'}</span>
                   </div>
                 </div>
 
@@ -473,28 +574,33 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                   <div className="veo-image-card-actions">
                     <button
                       type="button"
-                      className="veo-icon-btn"
-                      title="Sao chép prompt"
+                      className="veo-card-action-btn"
                       onClick={() => handleCopyPrompt(item)}
+                      title="Sao chép prompt"
                     >
-                      {copiedPromptId === item.id ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
+                      {copiedPromptId === item.id ? (
+                        <>
+                          <Check size={12} color="#10b981" />
+                          <span style={{ color: '#10b981' }}>Đã chép</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={12} />
+                          <span>Chép prompt</span>
+                        </>
+                      )}
                     </button>
-                    <a
-                      href={api.getImageFileUrl(item.id)}
-                      download={`nano-banana-${item.id}.jpg`}
-                      className="veo-icon-btn"
-                      title="Tải ảnh về máy"
-                    >
-                      <Download size={13} />
-                    </a>
-                    <button
-                      type="button"
-                      className="veo-icon-btn danger"
-                      title="Xóa ảnh"
-                      onClick={() => handleDelete(item.id)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    {onSendToVideo && (
+                      <button
+                        type="button"
+                        className="veo-card-action-btn video-btn"
+                        onClick={() => onSendToVideo(item)}
+                        title="Chuyển sang làm Video (I2V)"
+                      >
+                        <Film size={12} />
+                        <span>Tạo Video</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -503,12 +609,17 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
         )}
       </div>
 
-      {/* ─── Full-screen Lightbox Modal ─── */}
+      {/* ─── Lightbox Modal ─── */}
       {previewImage && (
         <div className="veo-lightbox-backdrop" onClick={() => setPreviewImage(null)}>
           <div className="veo-lightbox-card" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="veo-lightbox-close" onClick={() => setPreviewImage(null)}>
-              <X size={20} />
+            <button
+              type="button"
+              className="veo-lightbox-close"
+              onClick={() => setPreviewImage(null)}
+              title="Đóng"
+            >
+              <X size={18} />
             </button>
 
             <div className="veo-lightbox-media">
@@ -516,7 +627,7 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                 src={api.getImageFileUrl(previewImage.id)}
                 alt={previewImage.prompt}
                 onError={(e) => {
-                  if (previewImage.image_url) {
+                  if (previewImage.image_url && (e.target as HTMLImageElement).src !== previewImage.image_url) {
                     ;(e.target as HTMLImageElement).src = previewImage.image_url
                   }
                 }}
@@ -525,35 +636,67 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
 
             <div className="veo-lightbox-info">
               <div className="veo-lightbox-meta">
-                <span className="veo-badge-chip">🍌 {previewImage.model_display_name}</span>
-                <span className="veo-badge-chip">{previewImage.aspect_ratio}</span>
-                {previewImage.seed && <span className="veo-badge-chip">Seed: {previewImage.seed}</span>}
+                <span className="veo-lightbox-tag ratio">{previewImage.aspect_ratio}</span>
+                <span className="veo-lightbox-tag model">{previewImage.model_display_name}</span>
+                {previewImage.width && previewImage.height && (
+                  <span className="veo-lightbox-tag dim">
+                    {previewImage.width}×{previewImage.height}
+                  </span>
+                )}
               </div>
 
               <p className="veo-lightbox-prompt">{previewImage.prompt}</p>
 
               <div className="veo-lightbox-actions">
+                <button
+                  type="button"
+                  className="veo-btn-modal-secondary"
+                  onClick={() => handleCopyPrompt(previewImage)}
+                >
+                  {copiedPromptId === previewImage.id ? (
+                    <>
+                      <Check size={14} color="#10b981" />
+                      <span>Đã sao chép prompt</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} />
+                      <span>Sao chép prompt</span>
+                    </>
+                  )}
+                </button>
+
+                <a
+                  href={api.getImageFileUrl(previewImage.id)}
+                  download={`flow_${previewImage.id}.jpg`}
+                  className="veo-btn-modal-secondary"
+                >
+                  <Download size={14} />
+                  <span>Tải ảnh về máy</span>
+                </a>
+
                 {onSendToVideo && (
                   <button
                     type="button"
-                    className="veo-btn-primary"
+                    className="veo-btn-modal-primary"
                     onClick={() => {
                       onSendToVideo(previewImage)
                       setPreviewImage(null)
                     }}
                   >
-                    <Film size={15} />
-                    <span>Dùng ảnh này tạo Video (I2V)</span>
+                    <Film size={14} />
+                    <span>Tạo Video Từ Ảnh Này</span>
                   </button>
                 )}
-                <a
-                  href={api.getImageFileUrl(previewImage.id)}
-                  download={`nano-banana-${previewImage.id}.jpg`}
-                  className="veo-btn-secondary"
+
+                <button
+                  type="button"
+                  className="veo-btn-modal-danger"
+                  onClick={() => handleDelete(previewImage.id)}
+                  title="Xóa ảnh"
                 >
-                  <Download size={15} />
-                  <span>Tải ảnh gốc</span>
-                </a>
+                  <Trash2 size={14} />
+                </button>
               </div>
             </div>
           </div>

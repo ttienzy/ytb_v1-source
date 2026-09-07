@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, FileText, ImagePlus, Palette, SkipForward, Zap, Lock } from 'lucide-react'
+import { Clapperboard, Video, Sparkles, Film, Maximize2, Activity } from 'lucide-react'
 import type {
   VeoBridgeStatus,
   VeoCapabilities,
@@ -20,12 +20,12 @@ import { VideoPlayer } from './components/VideoPlayer'
 import { VideoGallery } from './components/VideoGallery'
 
 type TabKey = 'text' | 'image-gen' | 'image' | 'extend' | 'status'
-const TABS: { key: TabKey; label: string; icon: typeof FileText; enabled: boolean }[] = [
-  { key: 'text', label: 'Tạo Video (Text)', icon: FileText, enabled: true },
-  { key: 'image-gen', label: 'Tạo Ảnh (Nano Banana)', icon: Palette, enabled: true },
-  { key: 'image', label: 'Ảnh sang Video (I2V)', icon: ImagePlus, enabled: true },
-  { key: 'extend', label: 'Mở rộng (Extend)', icon: SkipForward, enabled: true },
-  { key: 'status', label: 'Trạng thái (Status)', icon: Zap, enabled: true },
+const TABS: { key: TabKey; label: string; icon: typeof Video; enabled: boolean }[] = [
+  { key: 'text', label: 'Tạo Video', icon: Video, enabled: true },
+  { key: 'image-gen', label: 'Tạo Ảnh (Studio)', icon: Sparkles, enabled: true },
+  { key: 'image', label: 'Ảnh sang Video', icon: Film, enabled: true },
+  { key: 'extend', label: 'Mở Rộng Video', icon: Maximize2, enabled: true },
+  { key: 'status', label: 'Hệ Thống & Bridge', icon: Activity, enabled: true },
 ]
 
 interface Props {
