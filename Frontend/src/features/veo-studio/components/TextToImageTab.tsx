@@ -17,19 +17,27 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   Compass,
+  AlertCircle,
 } from 'lucide-react'
 import type {
   ImageAspectRatio,
   ImageModelKey,
+  StudioTask,
   VeoImageGenerateRequest,
   VeoImageItem,
   VeoProject,
 } from '../types'
 import * as api from '../services/veoApi'
 
+export type ImageTask = StudioTask
+
 interface Props {
   activeProject?: VeoProject | null
   onSendToVideo?: (imageItem: VeoImageItem) => void
+  studioTasks?: StudioTask[]
+  onRegisterTask?: (task: StudioTask) => void
+  onUpdateTask?: (id: string, patch: Partial<StudioTask>) => void
+  onRemoveTask?: (id: string) => void
 }
 
 interface ModelOption {
@@ -91,7 +99,14 @@ function RatioIcon({ ratio }: { ratio: ImageAspectRatio }) {
   }
 }
 
-export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
+export function TextToImageTab({
+  activeProject,
+  onSendToVideo,
+  studioTasks,
+  onRegisterTask,
+  onUpdateTask,
+  onRemoveTask,
+}: Props) {
   // Config state
   const [selectedModelKey, setSelectedModelKey] = useState<ImageModelKey>('GEM_PIX_2')
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
@@ -102,12 +117,36 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
   const [mode, setMode] = useState<'single' | 'batch'>('single')
   const [prompt, setPrompt] = useState('')
   const [batchText, setBatchText] = useState('')
-
-  // Execution state
-  const [generating, setGenerating] = useState(false)
-  const [variationProgress, setVariationProgress] = useState<{ current: number; total: number } | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+
+  // Active background generation tasks (Preserved across tab switches)
+  const [localTasks, setLocalTasks] = useState<StudioTask[]>([])
+  const tasksToDisplay = studioTasks || localTasks
+
+  const handleRegisterTask = (task: StudioTask) => {
+    if (onRegisterTask) {
+      onRegisterTask(task)
+    } else {
+      setLocalTasks((prev) => [task, ...prev])
+    }
+  }
+
+  const handleUpdateTask = (id: string, patch: Partial<StudioTask>) => {
+    if (onUpdateTask) {
+      onUpdateTask(id, patch)
+    } else {
+      setLocalTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+    }
+  }
+
+  const handleRemoveTask = (id: string) => {
+    if (onRemoveTask) {
+      onRemoveTask(id)
+    } else {
+      setLocalTasks((prev) => prev.filter((t) => t.id !== id))
+    }
+  }
 
   // Gallery state
   const [images, setImages] = useState<VeoImageItem[]>([])
@@ -137,31 +176,59 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
     loadImages()
   }, [activeProject?.id])
 
-  // Handle single generation
-  const handleGenerateSingle = async () => {
-    if (!prompt.trim()) {
+  // Handle single generation (Non-blocking async task)
+  const handleGenerateSingle = () => {
+    const text = prompt.trim()
+    if (!text) {
       setErrorMessage('Vui lòng nhập mô tả hình ảnh (prompt)')
       return
     }
 
-    setGenerating(true)
     setErrorMessage('')
     setSuccessMessage('')
 
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const total = variationCount
-    let successCount = 0
+    const taskModelName = currentModel.name
+    const taskRatio = aspectRatio
+    const taskModelKey = selectedModelKey
     const baseSeed = Math.floor(Math.random() * 1000000000)
 
-    try {
+    const newTask: ImageTask = {
+      id: taskId,
+      type: 'image',
+      prompt: text,
+      modelName: taskModelName,
+      aspectRatio: taskRatio,
+      total,
+      completedCount: 0,
+      status: 'generating',
+      statusText: total > 1 ? `Đang tạo biến thể 1/${total}...` : 'Đang gửi yêu cầu sinh ảnh qua Google Flow...',
+      createdAt: Date.now(),
+    }
+
+    // Đẩy task vào hàng đợi
+    handleRegisterTask(newTask)
+
+    // Chạy ngầm hoàn toàn - KHÔNG disable textarea hay nút bấm
+    ;(async () => {
+      let successCount = 0
+      const errors: string[] = []
+      const allGeneratedImages: VeoImageItem[] = []
+
       for (let i = 0; i < total; i++) {
-        setVariationProgress({ current: i + 1, total })
+        if (i > 0) {
+          handleUpdateTask(taskId, {
+            statusText: `Đang tạo biến thể ${i + 1}/${total}...`,
+          })
+        }
 
         const req: VeoImageGenerateRequest = {
-          prompt: prompt.trim(),
-          model_key: selectedModelKey,
-          model_display_name: currentModel.name,
-          aspect_ratio: aspectRatio,
-          count: 1, // Tạo từng biến thể để cập nhật tiến trình trực tiếp & tránh timeout kết nối
+          prompt: text,
+          model_key: taskModelKey,
+          model_display_name: taskModelName,
+          aspect_ratio: taskRatio,
+          count: 1,
           seed: baseSeed + i,
           project_id: activeProject?.id,
         }
@@ -170,29 +237,39 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
           const res = await api.generateImages(req)
           if (res.ok && res.images.length > 0) {
             successCount += res.images.length
-            // Ngay lập tức cập nhật ảnh mới vào thư viện để người dùng thấy kết quả thời gian thực
+            allGeneratedImages.push(...res.images)
             setImages((prev) => [...res.images, ...prev])
+            handleUpdateTask(taskId, { completedCount: successCount, imageItems: allGeneratedImages })
           } else if (res.error) {
-            setErrorMessage(`Biến thể #${i + 1}: ${res.error}`)
+            errors.push(`Biến thể #${i + 1}: ${res.error}`)
           }
         } catch (itemErr: any) {
-          setErrorMessage(`Biến thể #${i + 1}: ${itemErr.message || 'Lỗi kết nối'}`)
+          errors.push(`Biến thể #${i + 1}: ${itemErr.message || 'Lỗi kết nối'}`)
         }
       }
 
       if (successCount > 0) {
-        setSuccessMessage(`Đã tạo thành công ${successCount}/${total} hình ảnh với ${currentModel.name}`)
+        handleUpdateTask(taskId, {
+          status: 'completed',
+          completedCount: successCount,
+          statusText: `Đã tạo xong ${successCount}/${total} ảnh thành công!`,
+          imageItems: allGeneratedImages,
+        })
+        setTimeout(() => {
+          handleRemoveTask(taskId)
+        }, 8000)
+      } else {
+        handleUpdateTask(taskId, {
+          status: 'error',
+          statusText: 'Tạo ảnh thất bại',
+          error: errors.join('; ') || 'Không nhận được ảnh từ Google Flow',
+        })
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Lỗi kết nối khi tạo ảnh')
-    } finally {
-      setGenerating(false)
-      setVariationProgress(null)
-    }
+    })()
   }
 
-  // Handle batch generation
-  const handleGenerateBatch = async () => {
+  // Handle batch generation (Non-blocking async task)
+  const handleGenerateBatch = () => {
     if (!batchText.trim()) {
       setErrorMessage('Vui lòng nhập danh sách kịch bản ảnh theo số thứ tự (1., 2., ...)')
       return
@@ -224,20 +301,42 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
       return
     }
 
-    setGenerating(true)
     setErrorMessage('')
-    setSuccessMessage(`Đang bắt đầu tạo batch gồm ${prompts.length} cảnh ảnh qua Google Flow...`)
+    setSuccessMessage('')
 
-    let successCount = 0
-    try {
+    const taskId = `batch-${Date.now()}`
+    const totalPrompts = prompts.length
+    const taskModelName = currentModel.name
+    const taskRatio = aspectRatio
+    const taskModelKey = selectedModelKey
+
+    const newTask: ImageTask = {
+      id: taskId,
+      type: 'image',
+      prompt: `[Kịch bản hàng loạt] ${totalPrompts} cảnh ảnh`,
+      modelName: taskModelName,
+      aspectRatio: taskRatio,
+      total: totalPrompts,
+      completedCount: 0,
+      status: 'generating',
+      statusText: `Đang xử lý cảnh 1/${totalPrompts}...`,
+      createdAt: Date.now(),
+    }
+
+    handleRegisterTask(newTask)
+
+    ;(async () => {
+      let successCount = 0
+      const allBatchImages: VeoImageItem[] = []
       for (let i = 0; i < prompts.length; i++) {
-        setVariationProgress({ current: i + 1, total: prompts.length })
-        const p = prompts[i]
+        handleUpdateTask(taskId, {
+          statusText: `Đang xử lý cảnh ${i + 1}/${totalPrompts}: "${prompts[i].slice(0, 35)}..."`,
+        })
         const req: VeoImageGenerateRequest = {
-          prompt: p,
-          model_key: selectedModelKey,
-          model_display_name: currentModel.name,
-          aspect_ratio: aspectRatio,
+          prompt: prompts[i],
+          model_key: taskModelKey,
+          model_display_name: taskModelName,
+          aspect_ratio: taskRatio,
           count: variationCount,
           project_id: activeProject?.id,
         }
@@ -246,19 +345,30 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
           const res = await api.generateImages(req)
           if (res.ok && res.images.length > 0) {
             successCount += res.images.length
+            allBatchImages.push(...res.images)
             setImages((prev) => [...res.images, ...prev])
+            handleUpdateTask(taskId, { completedCount: i + 1, imageItems: allBatchImages })
           }
         } catch {
           // ignore single item error in batch
         }
       }
-      setSuccessMessage(`Đã hoàn thành batch! Đã tạo thành công ${successCount} ảnh.`)
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Lỗi khi thực thi batch ảnh')
-    } finally {
-      setGenerating(false)
-      setVariationProgress(null)
-    }
+
+      if (successCount > 0) {
+        handleUpdateTask(taskId, {
+          status: 'completed',
+          statusText: `Đã hoàn thành ${successCount} ảnh cho kịch bản hàng loạt!`,
+          imageItems: allBatchImages,
+        })
+        setTimeout(() => handleRemoveTask(taskId), 8000)
+      } else {
+        handleUpdateTask(taskId, {
+          status: 'error',
+          statusText: 'Batch thất bại',
+          error: 'Không tạo được ảnh nào trong kịch bản',
+        })
+      }
+    })()
   }
 
   const handleDelete = async (id: string) => {
@@ -411,14 +521,13 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={3}
-              disabled={generating}
             />
             <div className="veo-image-action-bar">
               <div className="veo-engine-indicator">
-                <span className={`veo-engine-dot ${generating ? 'busy' : 'online'}`} />
+                <span className={`veo-engine-dot ${tasksToDisplay.some((t) => t.status === 'generating') ? 'busy' : 'online'}`} />
                 <span className="veo-engine-label">
-                  {generating && variationProgress
-                    ? `Đang tạo biến thể ${variationProgress.current}/${variationProgress.total} qua Google Flow...`
+                  {tasksToDisplay.some((t) => t.status === 'generating')
+                    ? `Đang chạy ${tasksToDisplay.filter((t) => t.status === 'generating').length} tác vụ tạo ảnh ngầm...`
                     : 'Google Flow Image Engine • Sẵn sàng'}
                 </span>
               </div>
@@ -426,23 +535,10 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                 type="button"
                 className="veo-btn-generate"
                 onClick={handleGenerateSingle}
-                disabled={generating || !prompt.trim()}
+                disabled={!prompt.trim()}
               >
-                {generating ? (
-                  <>
-                    <Loader2 size={15} className="veo-spin" />
-                    <span>
-                      {variationProgress
-                        ? `Đang tạo ${variationProgress.current}/${variationProgress.total}...`
-                        : 'Đang tạo ảnh qua Google Flow...'}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={14} />
-                    <span>Tạo {variationCount} Biến Thể ({currentModel.name})</span>
-                  </>
-                )}
+                <Sparkles size={14} />
+                <span>Tạo {variationCount} Biến Thể ({currentModel.name})</span>
               </button>
             </div>
           </div>
@@ -454,7 +550,6 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
               value={batchText}
               onChange={(e) => setBatchText(e.target.value)}
               rows={5}
-              disabled={generating}
             />
             <div className="veo-image-action-bar">
               <span className="veo-helper-hint">Mỗi cảnh bắt đầu bằng số thứ tự (ví dụ: 1., 2., 3...)</span>
@@ -462,25 +557,78 @@ export function TextToImageTab({ activeProject, onSendToVideo }: Props) {
                 type="button"
                 className="veo-btn-generate"
                 onClick={handleGenerateBatch}
-                disabled={generating || !batchText.trim()}
+                disabled={!batchText.trim()}
               >
-                {generating ? (
-                  <>
-                    <Loader2 size={15} className="veo-spin" />
-                    <span>
-                      {variationProgress
-                        ? `Đang xử lý cảnh ${variationProgress.current}/${variationProgress.total}...`
-                        : 'Đang xử lý batch ảnh...'}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Layers size={14} />
-                    <span>Chạy Kịch Bản Hàng Loạt</span>
-                  </>
-                )}
+                <Layers size={14} />
+                <span>Chạy Kịch Bản Hàng Loạt</span>
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ─── Active Background Tasks Progress Queue ─── */}
+        {tasksToDisplay.length > 0 && (
+          <div className="veo-image-tasks-container">
+            {tasksToDisplay.map((task) => {
+              const total = task.total || 1
+              const percent = total > 0 ? Math.min(100, Math.round(((task.completedCount || 0) / total) * 100)) : 0
+              return (
+                <div key={task.id} className={`veo-image-task-card ${task.status}`}>
+                  <div className="veo-image-task-header">
+                    <div className="veo-image-task-info">
+                      <span className="veo-image-task-prompt" title={task.prompt}>
+                        "{task.prompt}"
+                      </span>
+                      <div className="veo-image-task-meta">
+                        <span className="veo-image-task-badge model">{task.modelName}</span>
+                        <span className="veo-image-task-badge">{task.aspectRatio}</span>
+                        {total > 1 && (
+                          <span className="veo-image-task-badge">{total} ảnh</span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="veo-image-task-close"
+                      onClick={() => handleRemoveTask(task.id)}
+                      title="Đóng tiến trình này"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  <div className="veo-image-task-body">
+                    <div className={`veo-image-task-status ${task.status}`}>
+                      {task.status === 'generating' && <Loader2 size={13} className="veo-spin" />}
+                      {task.status === 'completed' && <CheckCircle2 size={13} />}
+                      {task.status === 'error' && <AlertCircle size={13} />}
+                      <span>{task.statusText}</span>
+                      {task.error && <span style={{ color: '#ef4444', marginLeft: 4 }}>({task.error})</span>}
+                    </div>
+                    {task.total != null && task.total > 1 && task.status === 'generating' && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#6366f1' }}>
+                        {task.completedCount}/{task.total}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="veo-image-task-bar-wrap">
+                    <div
+                      className={`veo-image-task-bar ${
+                        task.status === 'completed'
+                          ? 'completed'
+                          : task.status === 'error'
+                          ? 'error'
+                          : task.total != null && task.total > 1
+                          ? ''
+                          : 'indeterminate'
+                      }`}
+                      style={task.total != null && task.total > 1 && task.status === 'generating' ? { width: `${percent}%` } : undefined}
+                    />
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 

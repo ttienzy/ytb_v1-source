@@ -592,10 +592,7 @@ async function solveRecaptcha(request) {
   if (request.captcha_action && typeof request.captcha_action === 'string') {
     action = request.captcha_action.trim();
   } else if (request.action && typeof request.action === 'string') {
-    const act = request.action.trim();
-    if (act === 'IMAGE_GENERATION' || act === 'VIDEO_GENERATION' || act === 'USER_GENERATION') {
-      action = act;
-    }
+    action = request.action.trim();
   } else if (harvestCfg.c?.da) {
     action = String(harvestCfg.c.da).trim();
   }
@@ -1092,11 +1089,23 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
 
     // Dynamic model ID resolution
     function resolveModelId(req) {
-      if (req.provider_model_id) return req.provider_model_id;
+      const isFrames = req.input_mode === 'frames';
+      const isIngredients = req.input_mode === 'ingredients';
+      if (req.provider_model_id && (!isFrames || !req.provider_model_id.includes('_t2v_')) && (!isIngredients || !req.provider_model_id.includes('_t2v_'))) {
+        return req.provider_model_id;
+      }
       const modelName = (req.model_display_name || '').toLowerCase();
-      const dur = [4, 6, 8, 10].includes(Number(req.duration_seconds)) ? Number(req.duration_seconds) : 6;
+      const dur = [4, 5, 6, 8, 10].includes(Number(req.duration_seconds)) ? Number(req.duration_seconds) : 6;
       const isPortrait = req.aspect_ratio === '9:16';
 
+      if (isIngredients) {
+        return `abra_r2v_${dur}s`;
+      }
+      if (isFrames) {
+        return req.end_image_base64
+          ? `omni_flash_i2v_${dur}s_first_last`
+          : `omni_flash_i2v_${dur}s_first`;
+      }
       if (modelName.includes('omni') || modelName.includes('flash')) {
         return `abra_t2v_${dur}s`;
       }
@@ -1298,23 +1307,191 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
       return null;
     }
 
+    async function uploadImageToFlow(base64Data, mimeType, filename) {
+      if (!base64Data) return null;
+      try {
+        const rawBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+        const headerProto = [
+          null, 22, null, null, null, projectId, null, null, null, null,
+          captchaToken ? [captchaToken, 1] : null,
+        ];
+        const maseQPayload = [
+          headerProto,
+          rawBase64,
+          mimeType || 'image/png',
+          true,
+          null,
+          null,
+          null,
+          false,
+          filename || 'frame.png',
+        ];
+
+        let resp = null;
+        try {
+          resp = await callRpc('maseQ', maseQPayload);
+        } catch (rpcErr) {
+          // Retry without captcha slot if rejected
+          if (headerProto[10]) {
+            headerProto[10] = null;
+            resp = await callRpc('maseQ', maseQPayload);
+          } else {
+            throw rpcErr;
+          }
+        }
+
+        function findMediaIdInResponse(node) {
+          if (!node) return null;
+          if (typeof node === 'string' &&
+              node !== projectId &&
+              (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(node) || node.includes('media') || node.includes('frame'))) {
+            return node;
+          }
+          if (Array.isArray(node)) {
+            for (const item of node) {
+              const found = findMediaIdInResponse(item);
+              if (found) return found;
+            }
+          }
+          if (typeof node === 'object') {
+            for (const val of Object.values(node)) {
+              const found = findMediaIdInResponse(val);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const uploadedMediaId = findMediaIdInResponse(resp);
+        if (!uploadedMediaId) {
+          throw new Error('maseQ response did not contain a valid mediaId: ' + JSON.stringify(resp).slice(0, 200));
+        }
+        return uploadedMediaId;
+      } catch (err) {
+        throw new Error(`Lỗi tải ảnh lên Google Flow (maseQ): ${err.message}`);
+      }
+    }
+
+    let startFrameMediaId = null;
+    let endFrameMediaId = null;
+    const ingredientMediaIds = [];
+
+    const isFrames = flowRequest?.input_mode === 'frames';
+    const isIngredients = flowRequest?.input_mode === 'ingredients';
+
+    if (isFrames) {
+      if (flowRequest.image_base64) {
+        startFrameMediaId = await uploadImageToFlow(
+          flowRequest.image_base64,
+          flowRequest.image_mime,
+          flowRequest.image_name || 'start_frame.png'
+        );
+      }
+      if (flowRequest.end_image_base64) {
+        endFrameMediaId = await uploadImageToFlow(
+          flowRequest.end_image_base64,
+          flowRequest.end_image_mime,
+          flowRequest.end_image_name || 'end_frame.png'
+        );
+      }
+    } else if (isIngredients) {
+      const ingList = Array.isArray(flowRequest?.ingredient_images) ? flowRequest.ingredient_images.slice() : [];
+      if (ingList.length === 0 && flowRequest?.image_base64) {
+        ingList.push({
+          base64: flowRequest.image_base64,
+          mime: flowRequest.image_mime,
+          filename: flowRequest.image_name || 'ingredient_1.png',
+        });
+      }
+      for (let i = 0; i < ingList.length; i++) {
+        const item = ingList[i];
+        if (item?.base64) {
+          const mid = await uploadImageToFlow(
+            item.base64,
+            item.mime || 'image/png',
+            item.filename || `ingredient_${i + 1}.png`
+          );
+          if (mid) {
+            ingredientMediaIds.push(mid);
+          }
+        }
+      }
+      if (ingredientMediaIds.length === 0) {
+        throw new Error('Chế độ Ingredients yêu cầu ít nhất 1 ảnh tham chiếu đã tải lên thành công');
+      }
+    }
+
+    const rpcId = isIngredients ? 'MZZa6b' : (isFrames ? 'nprQif' : 'YhhmEf');
+
     const requestUuidA = (crypto.randomUUID ? crypto.randomUUID() : 'AD722819-13F6-46E3-A074-9CA0266A4FE0').toUpperCase();
     const requestUuidB = (crypto.randomUUID ? crypto.randomUUID() : '4C8832DC-AD37-4C11-859E-DCFD4FB4903E').toUpperCase();
     const sceneUuid = (crypto.randomUUID ? crypto.randomUUID() : '154922EC-9CE9-4413-A9C0-B2664F7FFB7B').toUpperCase();
     // Google Flow Aspect Ratio Enum: 2 = 16:9 (Landscape), 1 = 9:16 (Portrait)
     const aspectEnum = flowRequest?.aspect_ratio === '16:9' ? 2 : 1;
-    const createPayload = [
-      [[
-        [null, null, [[[flowRequest.prompt.trim()]]]],
-        modelId,
-        aspectEnum,
-        null,
-        [null, null, null, null, requestUuidA, requestUuidB],
-      ]],
-      [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
-      [sceneUuid, 2],
-    ];
-    const created = findMediaAsset(await callRpc('YhhmEf', createPayload));
+
+    let createPayload = null;
+    if (isIngredients) {
+      // Chuẩn Google Flow HAR flow.google_2.har: MZZa6b nhận mảng reference slots [[null, id1], [null, id2]] ở index 1
+      const refSlots = ingredientMediaIds.map((id) => [null, id]);
+      createPayload = [
+        [[
+          [null, null, [[[flowRequest.prompt.trim()]]]],
+          refSlots,
+          modelId,
+          aspectEnum,
+          null,
+          [null, null, null, null, requestUuidA, requestUuidB],
+        ]],
+        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+        [sceneUuid, 2],
+      ];
+    } else if (isFrames) {
+      // Chuẩn Google Flow HAR: nprQif nhận slot start/end ở index 4 và index 5
+      // 9:16 portrait dùng crop box [null, 0.341796875, 1, 0.658203125], 16:9 dùng [null, 0, 1, 1]
+      const cropCoords = aspectEnum === 1 ? [null, 0.341796875, 1, 0.658203125] : [null, 0, 1, 1];
+      const startSlot = startFrameMediaId ? [null, startFrameMediaId, null, null, null, cropCoords] : null;
+      const endSlot = endFrameMediaId ? [null, endFrameMediaId, null, null, null, cropCoords] : null;
+      createPayload = [
+        [[
+          [null, null, [[[flowRequest.prompt.trim()]]]],
+          modelId,
+          aspectEnum,
+          null,
+          startSlot,
+          endSlot,
+          [null, null, null, null, requestUuidA, requestUuidB],
+        ]],
+        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+        [sceneUuid, 2],
+      ];
+    } else {
+      createPayload = [
+        [[
+          [null, null, [[[flowRequest.prompt.trim()]]]],
+          modelId,
+          aspectEnum,
+          null,
+          [null, null, null, null, requestUuidA, requestUuidB],
+        ]],
+        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+        [sceneUuid, 2],
+      ];
+    }
+
+    let created = null;
+    try {
+      created = findMediaAsset(await callRpc(rpcId, createPayload));
+    } catch (rpcErr) {
+      // Fallback nếu Google Flow từ chối model ID cho text-to-video
+      if (modelId.includes('_i2v_') && !isFrames && !isIngredients) {
+        const fallbackModelId = modelId.replace('_i2v_', '_t2v_');
+        createPayload[0][0][1] = fallbackModelId;
+        created = findMediaAsset(await callRpc(rpcId, createPayload));
+      } else {
+        throw rpcErr;
+      }
+    }
+
     const mediaId = created?.[0];
     if (!mediaId) throw new Error('Flow create response did not contain a media id');
 

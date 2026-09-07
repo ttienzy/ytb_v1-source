@@ -40,11 +40,11 @@ export function VideoPlayer({ activeJob, onClose }: Props) {
     <div className="veo-player">
       {/* Video preview */}
       <div className={`veo-player-screen ${activeJob.aspect_ratio === '9:16' ? 'portrait' : ''}`}>
-        {isDone && activeJob.output_files.length > 0 ? (
+        {isDone && ((activeJob.output_files && activeJob.output_files.length > 0) || activeJob.job_id) ? (
           <video
             controls
             autoPlay
-            src={getVideoStreamUrl(activeJob.output_files[0])}
+            src={getVideoStreamUrl(activeJob.output_files?.[0] || activeJob.job_id)}
             className="veo-player-video"
           />
         ) : (

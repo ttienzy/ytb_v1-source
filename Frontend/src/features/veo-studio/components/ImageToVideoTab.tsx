@@ -15,17 +15,24 @@ import {
   Layers,
   HelpCircle,
 } from 'lucide-react'
-import type { VeoCapabilities, VeoImageItem, VeoJobRequest, VeoProject } from '../types'
+import type { VeoCapabilities, VeoImageItem, VeoJobRequest, VeoProject, VeoJobOut, VideoTask } from '../types'
 import * as api from '../services/veoApi'
+import { ActiveVideoTasksQueue } from './ActiveVideoTasksQueue'
 
 interface Props {
   capabilities: VeoCapabilities | null
-  onSubmit: (request: VeoJobRequest) => void
+  onSubmit: (request: VeoJobRequest) => Promise<VeoJobOut | null> | void
   busy: boolean
   activeProject?: VeoProject | null
   initialImagePath?: string | null
   initialImagePreview?: string | null
   initialPrompt?: string
+  studioTasks?: VideoTask[]
+  onRegisterTask?: (task: VideoTask) => void
+  onUpdateTask?: (id: string, patch: Partial<VideoTask>) => void
+  onRemoveTask?: (id: string) => void
+  onVideoDone?: () => void
+  onPreviewJob?: (job: VeoJobOut) => void
 }
 
 interface ImageSlotData {
@@ -44,6 +51,12 @@ export function ImageToVideoTab({
   initialImagePath,
   initialImagePreview,
   initialPrompt,
+  studioTasks,
+  onRegisterTask,
+  onUpdateTask,
+  onRemoveTask,
+  onVideoDone,
+  onPreviewJob,
 }: Props) {
   const [inputMode, setInputMode] = useState<'frames' | 'ingredients'>('frames')
   const [profileId, setProfileId] = useState('')
@@ -234,39 +247,142 @@ export function ImageToVideoTab({
     else if (target === 'style') setIngredientSlots((prev) => ({ ...prev, style: null }))
   }
 
+  // ─── Active Background Video Tasks Queue ───
+  const [localTasks, setLocalTasks] = useState<VideoTask[]>([])
+  const tasksToDisplay = studioTasks || localTasks
+
+  const handleRegisterTask = (task: VideoTask) => {
+    if (onRegisterTask) {
+      onRegisterTask(task)
+    } else {
+      setLocalTasks((prev) => [task, ...prev])
+    }
+  }
+
+  const handleUpdateTask = (id: string, patch: Partial<VideoTask>) => {
+    if (onUpdateTask) {
+      onUpdateTask(id, patch)
+    } else {
+      setLocalTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+    }
+  }
+
+  const handleRemoveTask = (id: string) => {
+    if (onRemoveTask) {
+      onRemoveTask(id)
+    } else {
+      setLocalTasks((prev) => prev.filter((t) => t.id !== id))
+    }
+  }
+
+  const pollJob = (taskId: string, jobId: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const job = await api.getJobStatus(jobId)
+        if (!job) return
+
+        if (job.status === 'done') {
+          clearInterval(interval)
+          handleUpdateTask(taskId, {
+            status: 'completed',
+            statusText: 'Đã hoàn tất video!',
+            jobOut: job,
+          })
+          onVideoDone?.()
+          setTimeout(() => handleRemoveTask(taskId), 10000)
+        } else if (job.status === 'error') {
+          clearInterval(interval)
+          handleUpdateTask(taskId, {
+            status: 'error',
+            statusText: 'Lỗi tạo video',
+            error: job.error_message || 'Google Flow từ chối tạo video',
+            jobOut: job,
+          })
+        } else {
+          handleUpdateTask(taskId, {
+            status: job.status as any,
+            statusText: job.current_step || 'Đang tạo video...',
+            jobOut: job,
+          })
+        }
+      } catch {
+        // ignore polling error
+      }
+    }, 2000)
+  }
+
   // ─── Submit ───
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!prompt.trim() || !activeProject || !selectedProfile) return
 
     let imagePath: string | null = null
     let endImagePath: string | null = null
     const ingredientPaths: string[] = []
+    let modeLabel = 'Khung hình'
 
     if (inputMode === 'frames') {
       if (!firstFrame) return
       imagePath = firstFrame.path
       endImagePath = endFrame ? endFrame.path : null
+      modeLabel = endFrame ? 'Khung hình (Start → End)' : 'Khung hình (Start)'
     } else {
       if (ingredientSlots.subject) ingredientPaths.push(ingredientSlots.subject.path)
       if (ingredientSlots.scene) ingredientPaths.push(ingredientSlots.scene.path)
       if (ingredientSlots.style) ingredientPaths.push(ingredientSlots.style.path)
       if (ingredientPaths.length === 0) return
       imagePath = ingredientPaths[0] // fallback
+      modeLabel = `Thành phần (${ingredientPaths.length} ảnh)`
     }
 
-    onSubmit({
-      project_id: activeProject.id,
+    const taskId = `img2vid-${Date.now()}`
+    const newTask: VideoTask = {
+      id: taskId,
+      type: 'video',
       prompt: prompt.trim(),
-      model_display_name: selectedProfile.model_display_name,
-      input_mode: selectedProfile.input_mode,
-      aspect_ratio: selectedProfile.aspect_ratio,
-      duration_seconds: selectedProfile.duration_seconds,
-      resolution: selectedProfile.resolution,
-      num_outputs: selectedProfile.num_outputs,
-      image_path: imagePath,
-      end_image_path: endImagePath,
-      ingredient_image_paths: ingredientPaths,
-    })
+      modelName: selectedProfile.model_display_name,
+      aspectRatio: selectedProfile.aspect_ratio,
+      duration: selectedProfile.duration_seconds,
+      modeLabel,
+      status: 'queued',
+      statusText: 'Đang gửi yêu cầu khởi tạo job...',
+      createdAt: Date.now(),
+    }
+
+    handleRegisterTask(newTask)
+
+    try {
+      const job = await onSubmit({
+        project_id: activeProject.id,
+        prompt: prompt.trim(),
+        model_display_name: selectedProfile.model_display_name,
+        input_mode: selectedProfile.input_mode,
+        aspect_ratio: selectedProfile.aspect_ratio,
+        duration_seconds: selectedProfile.duration_seconds,
+        resolution: selectedProfile.resolution,
+        num_outputs: selectedProfile.num_outputs,
+        image_path: imagePath,
+        end_image_path: endImagePath,
+        ingredient_image_paths: ingredientPaths,
+      })
+
+      if (job?.job_id) {
+        handleUpdateTask(taskId, {
+          jobId: job.job_id,
+          status: 'captcha',
+          statusText: job.current_step || 'Đang xử lý reCAPTCHA...',
+          jobOut: job,
+        })
+        if (!onRegisterTask) {
+          pollJob(taskId, job.job_id)
+        }
+      }
+    } catch (err: any) {
+      handleUpdateTask(taskId, {
+        status: 'error',
+        statusText: 'Không thể tạo job',
+        error: err.message || 'Lỗi kết nối',
+      })
+    }
   }
 
   // Đếm số lượng ảnh đã chọn
@@ -825,7 +941,6 @@ export function ImageToVideoTab({
         className="veo-submit-btn"
         onClick={handleSubmit}
         disabled={
-          busy ||
           !prompt.trim() ||
           !activeProject ||
           !selectedProfile ||
@@ -840,12 +955,17 @@ export function ImageToVideoTab({
             ? 'Vui lòng chọn Frame bắt đầu'
             : inputMode === 'ingredients' && ingredientCount === 0
               ? 'Vui lòng chọn ít nhất 1 ảnh thành phần'
-              : busy
-                ? 'Đang xử lý...'
-                : inputMode === 'frames'
-                  ? `Tạo Video Khung Hình ${endFrame ? '(Start → End)' : '(Start)'} · ${selectedProfile?.credit_cost ?? '?'} credits`
-                  : `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`}
+              : inputMode === 'frames'
+                ? `Tạo Video Khung Hình ${endFrame ? '(Start → End)' : '(Start)'} · ${selectedProfile?.credit_cost ?? '?'} credits`
+                : `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`}
       </button>
+
+      {/* Active Tasks Queue */}
+      <ActiveVideoTasksQueue
+        tasks={tasksToDisplay}
+        onRemoveTask={handleRemoveTask}
+        onPreviewJob={onPreviewJob}
+      />
 
       {/* ─── MODAL CHỌN ẢNH TỪ THƯ VIỆN VEO STUDIO ─── */}
       {libraryModalOpen && (

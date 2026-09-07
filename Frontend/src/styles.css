@@ -16401,6 +16401,201 @@ input[type="checkbox"],
   gap: 6px;
 }
 
+/* ─── Image Tasks Progress Queue ─────────────────────────────────────────── */
+.veo-image-tasks-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.veo-image-task-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #6366f1;
+  border-radius: 10px;
+  padding: 11px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: veoTaskSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.3s ease;
+}
+
+.veo-image-task-card.completed {
+  border-left-color: #10b981;
+  background: #f0fdf4;
+}
+
+.veo-image-task-card.error {
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+
+@keyframes veoTaskSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.veo-image-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.veo-image-task-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.veo-image-task-prompt {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+.veo-image-task-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.veo-image-task-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.veo-image-task-badge.model {
+  background: #ede9fe;
+  color: #6366f1;
+}
+
+.veo-image-task-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.veo-image-task-close:hover {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.veo-image-task-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.veo-image-task-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.veo-image-task-status.generating {
+  color: #6366f1;
+}
+
+.veo-image-task-status.completed {
+  color: #10b981;
+}
+
+.veo-image-task-status.error {
+  color: #ef4444;
+}
+
+.veo-image-task-bar-wrap {
+  width: 100%;
+  height: 5px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.veo-image-task-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.veo-image-task-bar.indeterminate {
+  width: 40%;
+  animation: veoTaskIndeterminate 1.5s infinite ease-in-out;
+}
+
+.veo-image-task-bar.completed {
+  width: 100%;
+  background: #10b981;
+}
+
+.veo-image-task-bar.error {
+  width: 100%;
+  background: #ef4444;
+}
+
+@keyframes veoTaskIndeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.veo-task-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #10b981;
+  color: #ffffff;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.veo-task-preview-btn:hover {
+  background: #059669;
+  transform: translateY(-1px);
+}
+
 /* Gallery Section */
 .veo-image-gallery-section {
   background: #ffffff;
@@ -16775,10 +16970,12 @@ input[type="checkbox"],
   overflow: hidden;
 }
 
-.veo-lightbox-media img {
+.veo-lightbox-media img,
+.veo-lightbox-media video {
   max-width: 100%;
-  max-height: 62vh;
+  max-height: 65vh;
   object-fit: contain;
+  outline: none;
 }
 
 .veo-lightbox-info {
@@ -17431,3 +17628,382 @@ input[type="checkbox"],
 }
 
 .audio-bgm-toggle input { width: 17px; height: 17px; margin: 0; accent-color: #6366f1; }
+
+/* ─── Veo Studio Bottom-Right Floating Toast Dock (Light Tint UI) ─────── */
+.veo-toast-dock {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 390px;
+  max-width: calc(100vw - 48px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  font-family: inherit;
+}
+
+.veo-toast-dock > * {
+  pointer-events: auto;
+}
+
+.veo-toast-dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 247, 255, 0.96) 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid #e0e7ff;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.1), 0 2px 6px rgba(0, 0, 0, 0.04);
+  color: #1e293b;
+  animation: veoToastSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.veo-toast-dock-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.veo-dock-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6366f1;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.6);
+  animation: veoPulseGlowLight 1.5s infinite ease-in-out;
+  flex-shrink: 0;
+}
+
+@keyframes veoPulseGlowLight {
+  0%, 100% { transform: scale(1); opacity: 0.85; box-shadow: 0 0 6px rgba(99, 102, 241, 0.4); }
+  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 12px rgba(99, 102, 241, 0.8); }
+}
+
+.veo-toast-dock-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.veo-dock-done-tag {
+  padding: 2px 7px;
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  border-radius: 99px;
+  font-size: 9.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.veo-toast-dock-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.veo-dock-clear-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.veo-dock-clear-btn:hover {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+.veo-dock-min-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.veo-dock-min-btn:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.veo-toast-dock-body {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.veo-toast-dock-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.veo-toast-dock-body::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 99px;
+}
+
+.veo-task-toast {
+  position: relative;
+  background: linear-gradient(165deg, #ffffff 0%, #fbfcfe 65%, #f4f7ff 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 25px -4px rgba(15, 23, 42, 0.09), 0 3px 10px -2px rgba(99, 102, 241, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: veoToastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.2s ease;
+}
+
+.veo-task-toast.type-video {
+  border-left: 3.5px solid #6366f1;
+}
+
+.veo-task-toast.type-image {
+  border-left: 3.5px solid #a855f7;
+}
+
+.veo-task-toast.completed {
+  border-left-color: #10b981;
+  background: linear-gradient(165deg, #ffffff 0%, #f0fdf4 100%);
+  border-color: #bbf7d0;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.12);
+}
+
+.veo-task-toast.error {
+  border-left-color: #ef4444;
+  background: linear-gradient(165deg, #ffffff 0%, #fef2f2 100%);
+  border-color: #fecaca;
+  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.12);
+}
+
+@keyframes veoToastSlideIn {
+  from {
+    transform: translateY(20px) scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.veo-toast-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.veo-toast-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.veo-toast-type-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.veo-toast-type-tag.video {
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+}
+
+.veo-toast-type-tag.image {
+  background: #faf5ff;
+  color: #7e22ce;
+  border: 1px solid #e9d5ff;
+}
+
+.veo-toast-meta-tag {
+  padding: 1px 6px;
+  background: #f8fafc;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.veo-toast-meta-tag.mode {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.veo-toast-meta-tag.model {
+  background: #f5f3ff;
+  color: #6d28d9;
+  border: 1px solid #ede9fe;
+}
+
+.veo-toast-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.veo-toast-close:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.veo-toast-prompt {
+  margin: 0;
+  font-size: 11.5px;
+  color: #1e293b;
+  line-height: 1.4;
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.veo-toast-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.veo-toast-status-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.veo-toast-status-msg.completed {
+  color: #059669;
+}
+
+.veo-toast-status-msg.error {
+  color: #dc2626;
+}
+
+.veo-toast-error-detail {
+  color: #ef4444;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.veo-toast-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3.5px 10px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.veo-toast-action-btn.video {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+}
+
+.veo-toast-action-btn.video:hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.35);
+}
+
+.veo-toast-action-btn.image {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #ffffff;
+}
+
+.veo-toast-action-btn.image:hover {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(99, 102, 241, 0.35);
+}
+
+.veo-toast-bar-track {
+  width: 100%;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 99px;
+  overflow: hidden;
+  position: relative;
+}
+
+.veo-toast-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899);
+  transition: width 0.3s ease;
+}
+
+.veo-toast-bar-fill.indeterminate {
+  width: 40%;
+  animation: veoTaskIndeterminate 1.5s infinite ease-in-out;
+}
+
+.veo-toast-bar-fill.completed {
+  width: 100%;
+  background: #10b981;
+}
+
+.veo-toast-bar-fill.error {
+  width: 100%;
+  background: #ef4444;
+}

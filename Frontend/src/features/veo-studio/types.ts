@@ -211,6 +211,8 @@ export interface VeoImageItem {
   local_path: string
   project_id: string
   created_at: string
+  width?: number
+  height?: number
 }
 
 export interface VeoImageGenerateRequest {
@@ -229,5 +231,31 @@ export interface VeoImageGenerateResponse {
   images: VeoImageItem[]
   error?: string
 }
+
+// ─── Studio Background Tasks (Unified Toasts & Tasks) ───────────────────────
+
+export type StudioTaskType = 'image' | 'video'
+
+export interface StudioTask {
+  id: string
+  type: StudioTaskType
+  jobId?: string
+  prompt: string
+  modelName: string
+  aspectRatio: string
+  duration?: number
+  modeLabel?: string
+  total?: number
+  completedCount?: number
+  status: 'queued' | 'captcha' | 'submitting' | 'generating' | 'downloading' | 'completed' | 'error'
+  statusText: string
+  createdAt: number
+  error?: string
+  jobOut?: VeoJobOut
+  imageItems?: VeoImageItem[]
+}
+
+export type VideoTask = StudioTask
+
 
 

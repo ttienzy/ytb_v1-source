@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, Video, Sparkles, Film, Maximize2, Activity } from 'lucide-react'
+import { Clapperboard, Video, Sparkles, Film, Activity, Download, X, Send } from 'lucide-react'
 import type {
+  StudioTask,
   VeoBridgeStatus,
   VeoCapabilities,
   VeoHistoryItem,
@@ -14,17 +15,17 @@ import { ProjectSelector } from './components/ProjectSelector'
 import { TextToVideoTab } from './components/TextToVideoTab'
 import { TextToImageTab } from './components/TextToImageTab'
 import { ImageToVideoTab } from './components/ImageToVideoTab'
-import { ExtendTab } from './components/ExtendTab'
 import { StatusTab } from './components/StatusTab'
 import { VideoPlayer } from './components/VideoPlayer'
 import { VideoGallery } from './components/VideoGallery'
+import { StudioTaskToastDock } from './components/StudioTaskToastDock'
+import { StudioErrorBoundary } from './components/StudioErrorBoundary'
 
-type TabKey = 'text' | 'image-gen' | 'image' | 'extend' | 'status'
+type TabKey = 'text' | 'image-gen' | 'image' | 'status'
 const TABS: { key: TabKey; label: string; icon: typeof Video; enabled: boolean }[] = [
   { key: 'text', label: 'Tạo Video', icon: Video, enabled: true },
   { key: 'image-gen', label: 'Tạo Ảnh (Studio)', icon: Sparkles, enabled: true },
   { key: 'image', label: 'Ảnh sang Video', icon: Film, enabled: true },
-  { key: 'extend', label: 'Mở Rộng Video', icon: Maximize2, enabled: true },
   { key: 'status', label: 'Hệ Thống & Bridge', icon: Activity, enabled: true },
 ]
 
@@ -46,7 +47,27 @@ export function VeoStudioPage({ setActivePage }: Props) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [forwardedImage, setForwardedImage] = useState<{ path: string; preview: string; prompt: string } | null>(null)
+  const [studioTasks, setStudioTasks] = useState<StudioTask[]>([])
+  const [previewImage, setPreviewImage] = useState<VeoImageItem | null>(null)
+  const [previewVideo, setPreviewVideo] = useState<VeoJobOut | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const handlePreviewJob = useCallback((job: VeoJobOut) => {
+    setActiveJob(job)
+    setPreviewVideo(job)
+  }, [])
+
+  const addStudioTask = useCallback((task: StudioTask) => {
+    setStudioTasks((prev) => [task, ...prev.filter((t) => t.id !== task.id)])
+  }, [])
+
+  const updateStudioTask = useCallback((id: string, patch: Partial<StudioTask>) => {
+    setStudioTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  }, [])
+
+  const removeStudioTask = useCallback((id: string) => {
+    setStudioTasks((prev) => prev.filter((t) => t.id !== id))
+  }, [])
 
   const handleSendImageToVideo = (imageItem: VeoImageItem) => {
     setForwardedImage({
@@ -110,6 +131,50 @@ export function VeoStudioPage({ setActivePage }: Props) {
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [activeJob?.job_id, activeJob?.status, loadHistory, loadProjects])
 
+  // Persistent video tasks polling across tab switches
+  useEffect(() => {
+    const activeVideoTasks = studioTasks.filter(
+      (t) => t.type === 'video' && t.jobId && t.status !== 'completed' && t.status !== 'error',
+    )
+    if (activeVideoTasks.length === 0) return
+
+    const interval = setInterval(async () => {
+      for (const t of activeVideoTasks) {
+        try {
+          const job = await api.getJobStatus(t.jobId!)
+          if (!job) continue
+
+          if (job.status === 'done') {
+            updateStudioTask(t.id, {
+              status: 'completed',
+              statusText: 'Đã hoàn tất video!',
+              jobOut: job,
+            })
+            loadHistory()
+            loadProjects()
+          } else if (job.status === 'error') {
+            updateStudioTask(t.id, {
+              status: 'error',
+              statusText: 'Lỗi tạo video',
+              error: job.error_message || 'Google Flow từ chối tạo video',
+              jobOut: job,
+            })
+          } else {
+            updateStudioTask(t.id, {
+              status: job.status as any,
+              statusText: job.current_step || 'Đang tạo video trên Cloud...',
+              jobOut: job,
+            })
+          }
+        } catch {
+          // ignore error
+        }
+      }
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [studioTasks, loadHistory, loadProjects, updateStudioTask])
+
   // Project handlers
   const handleSelectProject = async (projectId: string) => {
     try {
@@ -146,10 +211,10 @@ export function VeoStudioPage({ setActivePage }: Props) {
   }
 
   // Submit job (enforces active project)
-  const handleSubmit = async (request: VeoJobRequest) => {
+  const handleSubmit = async (request: VeoJobRequest): Promise<VeoJobOut | null> => {
     if (!activeProject) {
       setMessage('⚠️ Vui lòng tạo hoặc chọn một Project trước khi tạo video')
-      return
+      return null
     }
 
     setBusy(true)
@@ -162,8 +227,10 @@ export function VeoStudioPage({ setActivePage }: Props) {
       setActiveJob(job)
       setJobs((prev) => [job, ...prev])
       setMessage(`Job ${job.job_id} đã tạo trong project "${activeProject.name}"`)
+      return job
     } catch (e: any) {
       setMessage(e.message || 'Tạo job thất bại')
+      throw e
     } finally {
       setBusy(false)
     }
@@ -177,7 +244,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
 
   const handleSelectHistory = (item: VeoHistoryItem) => {
     // Create a synthetic "done" job for preview
-    setActiveJob({
+    const job: VeoJobOut = {
       job_id: item.video_id,
       status: 'done',
       input_mode: item.input_mode as any,
@@ -192,7 +259,8 @@ export function VeoStudioPage({ setActivePage }: Props) {
       output_files: [item.video_id],
       created_at: item.created_at,
       updated_at: item.created_at,
-    })
+    }
+    handlePreviewJob(job)
   }
 
   return (
@@ -257,24 +325,36 @@ export function VeoStudioPage({ setActivePage }: Props) {
                 </p>
               </div>
             ) : (
-              <>
+              <StudioErrorBoundary key={activeTab}>
                 {activeTab === 'text' && (
                   <TextToVideoTab
                     capabilities={capabilities}
                     onSubmit={handleSubmit}
                     busy={busy}
                     activeProject={activeProject}
+                    studioTasks={studioTasks.filter((t) => t.type === 'video')}
+                    onRegisterTask={addStudioTask}
+                    onUpdateTask={updateStudioTask}
+                    onRemoveTask={removeStudioTask}
                     onBatchVideoDone={() => {
                       loadHistory()
                       loadProjects()
                     }}
-                    onPreviewJob={(job) => setActiveJob(job)}
+                    onVideoDone={() => {
+                      loadHistory()
+                      loadProjects()
+                    }}
+                    onPreviewJob={handlePreviewJob}
                   />
                 )}
                 {activeTab === 'image-gen' && (
                   <TextToImageTab
                     activeProject={activeProject}
                     onSendToVideo={handleSendImageToVideo}
+                    studioTasks={studioTasks.filter((t) => t.type === 'image')}
+                    onRegisterTask={addStudioTask}
+                    onUpdateTask={updateStudioTask}
+                    onRemoveTask={removeStudioTask}
                   />
                 )}
                 {activeTab === 'image' && (
@@ -286,15 +366,15 @@ export function VeoStudioPage({ setActivePage }: Props) {
                     initialImagePath={forwardedImage?.path}
                     initialImagePreview={forwardedImage?.preview}
                     initialPrompt={forwardedImage?.prompt}
-                  />
-                )}
-                {activeTab === 'extend' && (
-                  <ExtendTab
-                    capabilities={capabilities}
-                    history={history}
-                    onSubmit={handleSubmit}
-                    busy={busy}
-                    activeProject={activeProject}
+                    studioTasks={studioTasks.filter((t) => t.type === 'video')}
+                    onRegisterTask={addStudioTask}
+                    onUpdateTask={updateStudioTask}
+                    onRemoveTask={removeStudioTask}
+                    onVideoDone={() => {
+                      loadHistory()
+                      loadProjects()
+                    }}
+                    onPreviewJob={handlePreviewJob}
                   />
                 )}
                 {activeTab === 'status' && (
@@ -304,7 +384,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
                     onRefresh={loadStatus}
                   />
                 )}
-              </>
+              </StudioErrorBoundary>
             )}
           </div>
         </section>
@@ -330,6 +410,129 @@ export function VeoStudioPage({ setActivePage }: Props) {
           />
         </aside>
       </div>
+
+      {/* Floating Bottom-Right Task Monitoring Toasts */}
+      <StudioTaskToastDock
+        tasks={studioTasks}
+        onRemoveTask={removeStudioTask}
+        onPreviewJob={handlePreviewJob}
+        onPreviewImage={(img) => setPreviewImage(img)}
+      />
+
+      {/* Global Image Preview Lightbox (Accessible from toasts across any tab) */}
+      {previewImage && (
+        <div className="veo-lightbox-backdrop" onClick={() => setPreviewImage(null)}>
+          <div className="veo-lightbox-card" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="veo-lightbox-close"
+              onClick={() => setPreviewImage(null)}
+              title="Đóng (ESC)"
+            >
+              <X size={16} />
+            </button>
+            <div className="veo-lightbox-media">
+              <img src={api.getImageFileUrl(previewImage.id)} alt={previewImage.prompt} />
+            </div>
+            <div className="veo-lightbox-info">
+              <div className="veo-lightbox-meta">
+                <span className="veo-lightbox-tag ratio">{previewImage.aspect_ratio}</span>
+                <span className="veo-lightbox-tag model">{previewImage.model_display_name || 'Nano Banana'}</span>
+              </div>
+              <p className="veo-lightbox-prompt">{previewImage.prompt}</p>
+              <div className="veo-lightbox-actions">
+                <a
+                  href={api.getImageFileUrl(previewImage.id)}
+                  download={`flow_${previewImage.id}.jpg`}
+                  className="veo-btn-modal-secondary"
+                >
+                  <Download size={14} />
+                  <span>Tải ảnh về máy</span>
+                </a>
+                <button
+                  type="button"
+                  className="veo-btn-modal-primary"
+                  onClick={() => {
+                    handleSendImageToVideo(previewImage)
+                    setPreviewImage(null)
+                  }}
+                >
+                  <Film size={14} />
+                  <span>Tạo Video Từ Ảnh Này</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Video Preview Lightbox (Accessible from toasts across any tab & gallery) */}
+      {previewVideo && (
+        <div className="veo-lightbox-backdrop" onClick={() => setPreviewVideo(null)}>
+          <div className="veo-lightbox-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 840 }}>
+            <button
+              type="button"
+              className="veo-lightbox-close"
+              onClick={() => setPreviewVideo(null)}
+              title="Đóng (ESC)"
+            >
+              <X size={16} />
+            </button>
+            <div className="veo-lightbox-media">
+              <video
+                src={api.getVideoStreamUrl(previewVideo.output_files?.[0] || previewVideo.job_id)}
+                controls
+                autoPlay
+                loop
+                className="veo-lightbox-video"
+              />
+            </div>
+            <div className="veo-lightbox-info">
+              <div className="veo-lightbox-meta">
+                <span className="veo-lightbox-tag ratio">{previewVideo.aspect_ratio}</span>
+                <span className="veo-lightbox-tag model">{previewVideo.model_display_name}</span>
+                {previewVideo.duration_seconds > 0 && (
+                  <span className="veo-lightbox-tag dim">{previewVideo.duration_seconds}s</span>
+                )}
+                <span className="veo-lightbox-tag dim">{previewVideo.resolution || '720p'}</span>
+              </div>
+              <p className="veo-lightbox-prompt">{previewVideo.prompt}</p>
+              <div className="veo-lightbox-actions">
+                <a
+                  href={api.getVideoStreamUrl(previewVideo.output_files?.[0] || previewVideo.job_id)}
+                  download={`flow_video_${previewVideo.job_id}.mp4`}
+                  className="veo-btn-modal-secondary"
+                >
+                  <Download size={14} />
+                  <span>Tải video MP4</span>
+                </a>
+                <button
+                  type="button"
+                  className="veo-btn-modal-primary"
+                  onClick={() => {
+                    setActivePage('Video')
+                    setPreviewVideo(null)
+                  }}
+                >
+                  <Film size={14} />
+                  <span>Chuyển sang Video Editor</span>
+                </button>
+                <button
+                  type="button"
+                  className="veo-btn-modal-secondary"
+                  onClick={() => {
+                    setActivePage('Lên lịch Youtube')
+                    setPreviewVideo(null)
+                  }}
+                >
+                  <Send size={14} />
+                  <span>Lên lịch Youtube</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

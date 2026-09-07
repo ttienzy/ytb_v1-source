@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles, ShieldCheck, Zap, Layers, FileEdit } from 'lucide-react'
-import type { BatchSceneItem, VeoCapabilities, VeoJobOut, VeoJobRequest, VeoProject } from '../types'
+import type { BatchSceneItem, VeoCapabilities, VeoJobOut, VeoJobRequest, VeoProject, VideoTask } from '../types'
 import * as api from '../services/veoApi'
 import { ConcurrencySelector } from './ConcurrencySelector'
 import { BatchScriptEditor } from './BatchScriptEditor'
 import { BatchQueueMonitor } from './BatchQueueMonitor'
+import { ActiveVideoTasksQueue } from './ActiveVideoTasksQueue'
 
 interface Props {
   capabilities: VeoCapabilities | null
-  onSubmit: (request: VeoJobRequest) => void
+  onSubmit: (request: VeoJobRequest) => Promise<VeoJobOut | null> | void
   busy: boolean
   activeProject?: VeoProject | null
+  studioTasks?: VideoTask[]
+  onRegisterTask?: (task: VideoTask) => void
+  onUpdateTask?: (id: string, patch: Partial<VideoTask>) => void
+  onRemoveTask?: (id: string) => void
   onBatchVideoDone?: () => void
+  onVideoDone?: () => void
   onPreviewJob?: (job: VeoJobOut) => void
 }
 
@@ -22,7 +28,12 @@ export function TextToVideoTab({
   onSubmit,
   busy,
   activeProject,
+  studioTasks,
+  onRegisterTask,
+  onUpdateTask,
+  onRemoveTask,
   onBatchVideoDone,
+  onVideoDone,
   onPreviewJob,
 }: Props) {
   // Mode: Đơn lẻ vs Kịch bản đa luồng
@@ -109,19 +120,121 @@ export function TextToVideoTab({
     setScenes((prev) => prev.map((s) => ({ ...s, durationSeconds: d })))
   }
 
-  // Submit đơn lẻ
-  const handleSubmitSingle = () => {
+  // ─── Active Background Video Tasks Queue (Đơn Lẻ) ───
+  const [localTasks, setLocalTasks] = useState<VideoTask[]>([])
+  const tasksToDisplay = studioTasks || localTasks
+
+  const handleRegisterTask = (task: VideoTask) => {
+    if (onRegisterTask) {
+      onRegisterTask(task)
+    } else {
+      setLocalTasks((prev) => [task, ...prev])
+    }
+  }
+
+  const handleUpdateTask = (id: string, patch: Partial<VideoTask>) => {
+    if (onUpdateTask) {
+      onUpdateTask(id, patch)
+    } else {
+      setLocalTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+    }
+  }
+
+  const handleRemoveTask = (id: string) => {
+    if (onRemoveTask) {
+      onRemoveTask(id)
+    } else {
+      setLocalTasks((prev) => prev.filter((t) => t.id !== id))
+    }
+  }
+
+  const pollJob = (taskId: string, jobId: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const job = await api.getJobStatus(jobId)
+        if (!job) return
+
+        if (job.status === 'done') {
+          clearInterval(interval)
+          handleUpdateTask(taskId, {
+            status: 'completed',
+            statusText: 'Đã hoàn tất video!',
+            jobOut: job,
+          })
+          onVideoDone?.()
+          onBatchVideoDone?.()
+          setTimeout(() => handleRemoveTask(taskId), 10000)
+        } else if (job.status === 'error') {
+          clearInterval(interval)
+          handleUpdateTask(taskId, {
+            status: 'error',
+            statusText: 'Lỗi tạo video',
+            error: job.error_message || 'Google Flow từ chối tạo video',
+            jobOut: job,
+          })
+        } else {
+          handleUpdateTask(taskId, {
+            status: job.status as any,
+            statusText: job.current_step || 'Đang tạo video...',
+            jobOut: job,
+          })
+        }
+      } catch {
+        // ignore polling error
+      }
+    }, 2000)
+  }
+
+  // Submit đơn lẻ (Non-blocking: thêm vào active queue ngay)
+  const handleSubmitSingle = async () => {
     if (!prompt.trim() || !activeProject || !selectedProfile) return
-    onSubmit({
-      project_id: activeProject.id,
+
+    const taskId = `t2v-${Date.now()}`
+    const newTask: VideoTask = {
+      id: taskId,
+      type: 'video',
       prompt: prompt.trim(),
-      model_display_name: selectedProfile.model_display_name,
-      input_mode: selectedProfile.input_mode,
-      aspect_ratio: selectedProfile.aspect_ratio,
-      duration_seconds: selectedProfile.duration_seconds,
-      resolution: selectedProfile.resolution,
-      num_outputs: selectedProfile.num_outputs,
-    })
+      modelName: selectedProfile.model_display_name,
+      aspectRatio: selectedProfile.aspect_ratio,
+      duration: selectedProfile.duration_seconds,
+      modeLabel: 'Văn bản sang Video',
+      status: 'queued',
+      statusText: 'Đang gửi yêu cầu khởi tạo job...',
+      createdAt: Date.now(),
+    }
+
+    handleRegisterTask(newTask)
+
+    try {
+      const job = await onSubmit({
+        project_id: activeProject.id,
+        prompt: prompt.trim(),
+        model_display_name: selectedProfile.model_display_name,
+        input_mode: selectedProfile.input_mode,
+        aspect_ratio: selectedProfile.aspect_ratio,
+        duration_seconds: selectedProfile.duration_seconds,
+        resolution: selectedProfile.resolution,
+        num_outputs: selectedProfile.num_outputs,
+      })
+
+      if (job?.job_id) {
+        handleUpdateTask(taskId, {
+          jobId: job.job_id,
+          status: 'captcha',
+          statusText: job.current_step || 'Đang xử lý reCAPTCHA...',
+          jobOut: job,
+        })
+        if (!onRegisterTask) {
+          pollJob(taskId, job.job_id)
+        }
+      }
+    } catch (err: any) {
+      handleUpdateTask(taskId, {
+        status: 'error',
+        statusText: 'Không thể tạo job',
+        error: err.message || 'Lỗi kết nối',
+      })
+    }
   }
 
   // ─── ĐIỀU PHỐI HÀNG ĐỢI ĐA LUỒNG (BATCH DISPATCHER) ───────────────────────
@@ -430,7 +543,6 @@ export function TextToVideoTab({
             placeholder="A cinematic close-up of an ancient samurai standing in neon-lit cyberpunk Tokyo during rain, reflections on wet asphalt, 4K quality..."
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            disabled={busy}
           />
 
           {!selectedProfile ? (
@@ -457,7 +569,7 @@ export function TextToVideoTab({
                         p.resolution === selectedProfile.resolution,
                     )
                   }
-                  disabled={!aspectRatios.includes('16:9') || busy}
+                  disabled={!aspectRatios.includes('16:9')}
                 >
                   <span className="veo-aspect-icon landscape" />
                   16:9
@@ -473,7 +585,7 @@ export function TextToVideoTab({
                         p.resolution === selectedProfile.resolution,
                     )
                   }
-                  disabled={!aspectRatios.includes('9:16') || busy}
+                  disabled={!aspectRatios.includes('9:16')}
                 >
                   <span className="veo-aspect-icon portrait" />
                   9:16
@@ -496,7 +608,6 @@ export function TextToVideoTab({
                           p.resolution === selectedProfile.resolution,
                       )
                     }
-                    disabled={busy}
                   >
                     {d}s
                   </button>
@@ -519,7 +630,6 @@ export function TextToVideoTab({
                           p.resolution === r,
                       )
                     }
-                    disabled={busy}
                   >
                     {r}
                     {r === '360p' && <span className="veo-res-tag"> Draft</span>}
@@ -539,15 +649,20 @@ export function TextToVideoTab({
               <button
                 className="veo-submit-btn"
                 onClick={handleSubmitSingle}
-                disabled={busy || !prompt.trim() || !activeProject || !selectedProfile}
+                disabled={!prompt.trim() || !activeProject || !selectedProfile}
               >
                 <Sparkles size={16} />
                 {!activeProject
                   ? 'Vui lòng chọn Project'
-                  : busy
-                    ? 'Đang xử lý...'
-                    : `Tạo Video · ${selectedProfile.credit_cost} credits`}
+                  : `Tạo Video · ${selectedProfile.credit_cost} credits`}
               </button>
+
+              {/* Active Tasks Queue */}
+              <ActiveVideoTasksQueue
+                tasks={tasksToDisplay}
+                onRemoveTask={handleRemoveTask}
+                onPreviewJob={onPreviewJob}
+              />
             </>
           )}
         </>

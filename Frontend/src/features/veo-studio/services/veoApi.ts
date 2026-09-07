@@ -119,8 +119,10 @@ export async function deleteVideo(videoId: string): Promise<boolean> {
   return resp.ok
 }
 
-export function getVideoStreamUrl(videoId: string): string {
-  return `${BASE}/history/${videoId}/file`
+export function getVideoStreamUrl(videoIdOrPath: string): string {
+  if (!videoIdOrPath) return ''
+  const cleanId = videoIdOrPath.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || videoIdOrPath
+  return `${BASE}/history/${encodeURIComponent(cleanId)}/file`
 }
 
 // ─── Upload ─────────────────────────────────────────────────────────────────

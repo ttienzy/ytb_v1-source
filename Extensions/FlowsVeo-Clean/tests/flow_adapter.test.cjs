@@ -27,7 +27,10 @@ function asset(status, videoUrl = null) {
 function harness() {
   const calls = [];
   const replies = {
+    maseQ: [['uploaded-frame-media-id', 'project-test']],
     YhhmEf: [asset(2)],
+    nprQif: [asset(2)],
+    MZZa6b: [asset(2)],
     jwpduf: [asset(3)],
     as29s: [asset(3, 'https://flow-content.google/result.mp4?Signature=test')],
   };
@@ -38,10 +41,25 @@ function harness() {
       pathname: '/u/1/project/project-test',
     },
     document: { documentElement: { lang: 'en-US' } },
-    URL, URLSearchParams, AbortSignal,
+    URL, URLSearchParams, AbortSignal, Blob, atob, Uint8Array,
     crypto: { randomUUID: (() => { let n = 0; return () => `uuid-${++n}`; })() },
     setTimeout: (callback) => { callback(); return 1; }, clearTimeout() {},
     fetch: async (url, options) => {
+      if (url.includes('/upload/')) {
+        const cmd = options?.headers?.['x-goog-upload-command'];
+        if (cmd === 'start') {
+          return {
+            ok: true, status: 200,
+            headers: {
+              get: (h) => (h.toLowerCase() === 'x-goog-upload-url' ? 'https://flow.google.com/upload/session-mock' : null),
+            },
+          };
+        }
+        return {
+          ok: true, status: 200,
+          json: async () => ({ mediaId: 'uploaded-frame-media-id' }),
+        };
+      }
       const rpcId = new URL(url).searchParams.get('rpcids');
       const form = new URLSearchParams(options.body);
       calls.push({ rpcId, url, options, outer: JSON.parse(form.get('f.req')), at: form.get('at') });
@@ -132,3 +150,60 @@ test('adapter requires a logged-in Flow project session', async () => {
   assert.match(result.error, /prompt is empty/);
   assert.equal(h.calls.length, 0);
 });
+
+test('adapter uploads frames and dispatches nprQif with frame media asset slots', async () => {
+  const h = harness();
+  const framesReq = {
+    ...verifiedRequest(),
+    input_mode: 'frames',
+    prompt: 'cá chép hóa rồng',
+    image_base64: Buffer.from('FAKE_CARP_IMAGE').toString('base64'),
+    image_mime: 'image/png',
+    image_name: 'carp.png',
+    end_image_base64: Buffer.from('FAKE_DRAGON_IMAGE').toString('base64'),
+    end_image_mime: 'image/png',
+    end_image_name: 'dragon.png',
+  };
+  const result = await h.run(framesReq);
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.length, 5);
+  assert.equal(h.calls[0].rpcId, 'maseQ');
+  assert.equal(h.calls[1].rpcId, 'maseQ');
+  assert.equal(h.calls[2].rpcId, 'nprQif');
+  const createPayload = JSON.parse(h.calls[2].outer[0][0][1]);
+  assert.equal(createPayload[0][0][1], 'omni_flash_i2v_6s_first_last');
+  const startSlot = createPayload[0][0][4];
+  const endSlot = createPayload[0][0][5];
+  assert.deepEqual(startSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
+  assert.deepEqual(endSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
+  assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép hóa rồng');
+});
+
+test('adapter uploads ingredient images and dispatches MZZa6b with reference asset slots', async () => {
+  const h = harness();
+  const ingrReq = {
+    ...verifiedRequest(),
+    input_mode: 'ingredients',
+    prompt: 'cá chép hóa rồng',
+    ingredient_images: [
+      { base64: Buffer.from('FAKE_IMG_1').toString('base64'), mime: 'image/png', filename: 'subject.png' },
+      { base64: Buffer.from('FAKE_IMG_2').toString('base64'), mime: 'image/png', filename: 'scene.png' },
+    ],
+  };
+  const result = await h.run(ingrReq);
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.length, 5);
+  assert.equal(h.calls[0].rpcId, 'maseQ');
+  assert.equal(h.calls[1].rpcId, 'maseQ');
+  assert.equal(h.calls[2].rpcId, 'MZZa6b');
+  const createPayload = JSON.parse(h.calls[2].outer[0][0][1]);
+  assert.equal(createPayload[0][0][2], 'abra_r2v_6s');
+  const refSlots = createPayload[0][0][1];
+  assert.deepEqual(refSlots, [
+    [null, 'uploaded-frame-media-id'],
+    [null, 'uploaded-frame-media-id'],
+  ]);
+  assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép hóa rồng');
+});
+
+

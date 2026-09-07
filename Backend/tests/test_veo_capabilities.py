@@ -72,5 +72,81 @@ class VeoCapabilitiesTests(unittest.TestCase):
         self.assertEqual(req["project_id"], "proj-xyz")
 
 
+    def test_resolve_provider_model_id_frames_mode(self):
+        job = {
+            "model_display_name": "Omni 1.1 Flash",
+            "duration_seconds": 10,
+            "aspect_ratio": "9:16",
+            "input_mode": "frames",
+        }
+        self.assertEqual(service._resolve_provider_model_id(job), "omni_flash_i2v_10s_first")
+
+    def test_build_verified_flow_request_frames_encoding(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"FAKE_PNG_IMAGE_BYTES_12345")
+            tmp_path = f.name
+
+        try:
+            job = {
+                "prompt": "cá chép hóa rồng",
+                "model_display_name": "Omni 1.1 Flash",
+                "duration_seconds": 10,
+                "aspect_ratio": "9:16",
+                "resolution": "720p",
+                "input_mode": "frames",
+                "flow_project_id": "proj-xyz",
+                "num_outputs": 1,
+                "image_path": tmp_path,
+                "end_image_path": None,
+            }
+            req = service._build_verified_flow_request(job)
+            self.assertEqual(req["input_mode"], "frames")
+            self.assertEqual(req["provider_model_id"], "omni_flash_i2v_10s_first")
+            self.assertIsNotNone(req["image_base64"])
+            self.assertEqual(req["image_mime"], "image/png")
+            self.assertIsNone(req["end_image_base64"])
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    def test_resolve_provider_model_id_ingredients_mode(self):
+        job = {
+            "model_display_name": "Omni 1.1 Flash",
+            "duration_seconds": 10,
+            "aspect_ratio": "9:16",
+            "input_mode": "ingredients",
+        }
+        self.assertEqual(service._resolve_provider_model_id(job), "abra_r2v_10s")
+
+    def test_build_verified_flow_request_ingredients_encoding(self):
+        import tempfile
+        tmp_files = []
+        for i in range(3):
+            with tempfile.NamedTemporaryFile(suffix=f"_{i}.png", delete=False) as f:
+                f.write(f"FAKE_INGREDIENT_BYTES_{i}".encode("utf-8"))
+                tmp_files.append(f.name)
+
+        try:
+            job = {
+                "prompt": "cá chép bơi trong hồ nước",
+                "model_display_name": "Omni 1.1 Flash",
+                "duration_seconds": 10,
+                "aspect_ratio": "9:16",
+                "resolution": "720p",
+                "input_mode": "ingredients",
+                "flow_project_id": "proj-xyz",
+                "num_outputs": 1,
+                "ingredient_image_paths": tmp_files,
+            }
+            req = service._build_verified_flow_request(job)
+            self.assertEqual(req["input_mode"], "ingredients")
+            self.assertEqual(req["provider_model_id"], "abra_r2v_10s")
+            self.assertEqual(len(req["ingredient_images"]), 3)
+            self.assertTrue(all("base64" in item for item in req["ingredient_images"]))
+        finally:
+            for p in tmp_files:
+                Path(p).unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,8 +7,10 @@ Chưa có contract Flow xác minh → adapter dispatch là placeholder.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import mimetypes
 import os
 import subprocess
 import time
@@ -51,11 +53,13 @@ logger = logging.getLogger("veo.service")
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Backend/
 _VEO_DATA_DIR = _BASE_DIR / "Data" / "media" / "veo_outputs"
 _VEO_IMAGES_DIR = _BASE_DIR / "Data" / "media" / "veo_images"
+_VEO_UPLOADS_DIR = _BASE_DIR / "Data" / "media" / "veo_uploads"
 _VEO_JOBS_FILE = _BASE_DIR / "Data" / "veo_jobs.json"
 
 # Ensure directories exist
 _VEO_DATA_DIR.mkdir(parents=True, exist_ok=True)
 _VEO_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+_VEO_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -713,7 +717,7 @@ def _process_job(job_id: str) -> None:
 
         _update_job(job, JobStatus.DOWNLOADING, "Đang tải video từ Flow...")
         output_path = _download_flow_video(job, flow_result)
-        job["output_files"] = [str(output_path)]
+        job["output_files"] = [output_path.name]
         job["provider_media_id"] = flow_result.get("media_id")
         job["provider_model_id"] = flow_result.get("provider_model_id")
         _update_job(job, JobStatus.DONE, "Hoàn tất — video đã lưu vào máy")
@@ -725,29 +729,75 @@ def _process_job(job_id: str) -> None:
         _update_job(job, JobStatus.ERROR, error=f"Lỗi không xác định: {str(e)}")
 
 
+def _encode_image_file(path_str: str | None) -> dict[str, Any] | None:
+    """Đọc file ảnh từ đĩa và mã hóa base64 kèm MIME type."""
+    if not path_str:
+        return None
+    p = Path(path_str)
+    if not p.exists() or not p.is_file():
+        for candidate_dir in (_VEO_UPLOADS_DIR, _VEO_IMAGES_DIR, _VEO_DATA_DIR):
+            candidate = candidate_dir / p.name
+            if candidate.exists() and candidate.is_file():
+                p = candidate
+                break
+    if not p.exists() or not p.is_file():
+        logger.warning("Không tìm thấy file ảnh tại: %s", path_str)
+        return None
+    try:
+        data = p.read_bytes()
+        mime, _ = mimetypes.guess_type(str(p))
+        if not mime:
+            mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+        return {
+            "base64": base64.b64encode(data).decode("utf-8"),
+            "mime": mime,
+            "filename": p.name,
+            "size": len(data),
+        }
+    except Exception as e:
+        logger.error("Lỗi khi đọc file ảnh %s: %s", path_str, e)
+        return None
+
+
 def _resolve_provider_model_id(job: dict[str, Any]) -> str:
-    """Xác định mã model ID gửi tới Google Flow theo model, thời lượng và tỉ lệ."""
+    """Xác định mã model ID gửi tới Google Flow theo model, thời lượng, tỉ lệ và input mode."""
     model_name = (job.get("model_display_name") or "").lower()
     dur = int(job.get("duration_seconds") or 6)
     aspect = job.get("aspect_ratio") or "16:9"
     is_portrait = (aspect == "9:16")
+    input_mode = (job.get("input_mode") or "text_to_video").lower()
+    is_frames = (input_mode == "frames")
+    is_ingredients = (input_mode == "ingredients")
 
     if "omni" in model_name or "flash" in model_name:
         dur_mapped = dur if dur in (4, 6, 8, 10) else 6
+        if is_ingredients:
+            return f"abra_r2v_{dur_mapped}s"
+        if is_frames:
+            has_end = bool(job.get("end_image_path"))
+            suffix = "first_last" if has_end else "first"
+            return f"omni_flash_i2v_{dur_mapped}s_{suffix}"
         return f"abra_t2v_{dur_mapped}s"
 
     if "quality" in model_name:
+        if is_frames:
+            return "veo_3_1_i2v_quality_portrait" if is_portrait else "veo_3_1_i2v_quality"
         return "veo_3_1_t2v_quality_portrait" if is_portrait else "veo_3_1_t2v_quality"
 
     if "fast" in model_name:
+        if is_frames:
+            return "veo_3_1_i2v_fast_portrait" if is_portrait else "veo_3_1_i2v_fast"
         return "veo_3_1_t2v_fast_portrait" if is_portrait else "veo_3_1_t2v_fast"
 
-    # Default: Veo 3.1 - Lite
-    return "veo_3_1_t2v_lite"
+    # Default: Veo 3.1 - Lite / Fallback
+    if is_ingredients:
+        dur_mapped = dur if dur in (4, 6, 8, 10) else 6
+        return f"abra_r2v_{dur_mapped}s"
+    return "veo_3_1_i2v_lite" if is_frames else "veo_3_1_t2v_lite"
 
 
 def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
-    """Chuẩn hóa cấu hình gửi tới Google Flow với thời lượng, tỉ lệ và model ID động."""
+    """Chuẩn hóa cấu hình gửi tới Google Flow với thời lượng, tỉ lệ, base64 frames và model ID động."""
     dur = int(job.get("duration_seconds") or 6)
     aspect = job.get("aspect_ratio") or "16:9"
     model_name = job.get("model_display_name") or "Omni 1.1 Flash"
@@ -755,14 +805,29 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     mode = job.get("input_mode") or "text_to_video"
     provider_model_id = _resolve_provider_model_id(job)
 
+    start_frame_data = _encode_image_file(job.get("image_path"))
+    end_frame_data = _encode_image_file(job.get("end_image_path"))
+
+    ingredient_data_list = []
+    for ipath in (job.get("ingredient_image_paths") or []):
+        enc = _encode_image_file(ipath)
+        if enc:
+            ingredient_data_list.append(enc)
+
+    if mode == "ingredients" and not ingredient_data_list and start_frame_data:
+        ingredient_data_list.append(start_frame_data)
+
     logger.info(
-        "Chuẩn bị Flow request cho job %s: model=%s, provider_model_id=%s, duration=%ds, aspect=%s, res=%s",
+        "Chuẩn bị Flow request cho job %s: mode=%s, model=%s, provider_model_id=%s, duration=%ds, aspect=%s, has_start_frame=%s, has_end_frame=%s, num_ingredients=%d",
         job.get("job_id"),
+        mode,
         model_name,
         provider_model_id,
         dur,
         aspect,
-        res,
+        bool(start_frame_data),
+        bool(end_frame_data),
+        len(ingredient_data_list),
     )
 
     return {
@@ -778,6 +843,14 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         "image_path": job.get("image_path"),
         "end_image_path": job.get("end_image_path"),
         "ingredient_image_paths": job.get("ingredient_image_paths") or [],
+        # Base64 encoded payload cho Extension tải lên Google Flow
+        "image_base64": start_frame_data["base64"] if start_frame_data else None,
+        "image_mime": start_frame_data["mime"] if start_frame_data else None,
+        "image_name": start_frame_data["filename"] if start_frame_data else None,
+        "end_image_base64": end_frame_data["base64"] if end_frame_data else None,
+        "end_image_mime": end_frame_data["mime"] if end_frame_data else None,
+        "end_image_name": end_frame_data["filename"] if end_frame_data else None,
+        "ingredient_images": ingredient_data_list,
     }
 
 
@@ -896,7 +969,7 @@ def _recover_current_scene(job_id: str) -> None:
         if not result.get("video_url"):
             raise RuntimeError("Scene Flow không cung cấp URL video")
         output_path = _download_flow_video(job, result)
-        job["output_files"] = [str(output_path)]
+        job["output_files"] = [output_path.name]
         job["provider_media_id"] = result.get("media_id")
         job["provider_model_id"] = result.get("provider_model_id") or "abra_t2v_6s"
         _update_job(job, JobStatus.DONE, "Hoàn tất — video đã khôi phục và lưu vào máy")
@@ -1004,11 +1077,18 @@ def get_history() -> list[VeoHistoryItem]:
 
 
 def get_video_path(video_id: str) -> Path | None:
-    """Tìm file video theo ID trong thư mục outputs."""
+    """Tìm file video theo ID hoặc tên file trong thư mục outputs."""
+    clean_id = Path(video_id).stem
     for ext in (".mp4", ".webm", ".mkv"):
-        path = _VEO_DATA_DIR / f"{video_id}{ext}"
+        path = _VEO_DATA_DIR / f"{clean_id}{ext}"
         if path.exists():
             return path
+    try:
+        direct = Path(video_id)
+        if direct.exists() and direct.is_file():
+            return direct
+    except Exception:
+        pass
     return None
 
 
@@ -1099,9 +1179,9 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
             errors.append(f"Biến thể #{i + 1}: Bridge chưa sẵn sàng hoặc hàng đợi đầy")
             continue
 
-        bridge_res = bridge.wait_image_result(req_id, timeout=60.0)
+        bridge_res = bridge.wait_image_result(req_id, timeout=180.0)
         if not bridge_res:
-            errors.append(f"Biến thể #{i + 1}: Timeout chờ Extension (60s)")
+            errors.append(f"Biến thể #{i + 1}: Timeout chờ Extension (180s)")
             continue
 
         if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
