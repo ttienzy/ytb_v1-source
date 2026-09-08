@@ -112,6 +112,12 @@ export function StudioTaskToastDock({
                       <span>{isVideo ? 'Video' : 'Ảnh'}</span>
                     </span>
 
+                    {task.variationTotal && task.variationTotal > 1 && (
+                      <span className="veo-toast-meta-tag variation-tag">
+                        Biến thể {task.variationIndex ?? 1}/{task.variationTotal}
+                      </span>
+                    )}
+
                     {task.modeLabel && (
                       <span className="veo-toast-meta-tag mode">{task.modeLabel}</span>
                     )}

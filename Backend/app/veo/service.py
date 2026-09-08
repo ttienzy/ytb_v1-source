@@ -17,6 +17,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+import threading
 from threading import Thread
 from typing import Any
 from urllib.parse import urlparse
@@ -67,14 +68,16 @@ _VEO_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _jobs: dict[str, dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
 
 
 def _save_jobs() -> None:
     """Persist jobs to disk."""
     try:
-        serializable = {}
-        for jid, job in _jobs.items():
-            serializable[jid] = {k: v for k, v in job.items() if k != "_thread"}
+        with _jobs_lock:
+            serializable = {}
+            for jid, job in _jobs.items():
+                serializable[jid] = {k: v for k, v in job.items() if k != "_thread"}
         _VEO_JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
         _VEO_JOBS_FILE.write_text(
             json.dumps(serializable, ensure_ascii=False, indent=2),

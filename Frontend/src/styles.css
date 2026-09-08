@@ -17868,10 +17868,43 @@ input[type="checkbox"],
   border: 1px solid #bae6fd;
 }
 
+.veo-toast-meta-tag.variation-tag {
+  background: #fdf2f8;
+  color: #db2777;
+  border: 1px solid #fbcfe8;
+  font-weight: 700;
+}
+
 .veo-toast-meta-tag.model {
   background: #f5f3ff;
   color: #6d28d9;
   border: 1px solid #ede9fe;
+}
+
+/* ── Single Ribbon Toolbar & Variation Selector ── */
+.veo-studio-ribbon.single-ribbon {
+  margin-top: 10px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.veo-variation-selector .veo-variation-btn {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 4px 11px;
+}
+
+.veo-variation-selector .veo-variation-btn.active {
+  background: #4f46e5;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.3);
 }
 
 .veo-toast-close {

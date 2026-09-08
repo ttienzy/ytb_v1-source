@@ -3,6 +3,7 @@ import { Sparkles, ShieldCheck, Zap, Layers, FileEdit } from 'lucide-react'
 import type { BatchSceneItem, VeoCapabilities, VeoJobOut, VeoJobRequest, VeoProject, VideoTask } from '../types'
 import * as api from '../services/veoApi'
 import { ConcurrencySelector } from './ConcurrencySelector'
+import { VariationSelector } from './VariationSelector'
 import { BatchScriptEditor } from './BatchScriptEditor'
 import { BatchQueueMonitor } from './BatchQueueMonitor'
 import { ActiveVideoTasksQueue } from './ActiveVideoTasksQueue'
@@ -42,6 +43,9 @@ export function TextToVideoTab({
   // Cấu hình đơn lẻ
   const [prompt, setPrompt] = useState('')
   const [profileId, setProfileId] = useState('')
+  const [variationCount, setVariationCount] = useState<number>(1)
+  const [singleConcurrency, setSingleConcurrency] = useState<number>(2)
+  const [isSubmittingSingle, setIsSubmittingSingle] = useState(false)
 
   // Cấu hình đa luồng (Batch)
   const [concurrency, setConcurrency] = useState<number>(2)
@@ -185,61 +189,104 @@ export function TextToVideoTab({
     }, 2000)
   }
 
-  // Submit đơn lẻ (Non-blocking: thêm vào active queue ngay)
-  const handleSubmitSingle = async () => {
-    if (!prompt.trim() || !activeProject || !selectedProfile) return
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-    const taskId = `t2v-${Date.now()}`
-    const newTask: VideoTask = {
-      id: taskId,
-      type: 'video',
-      prompt: prompt.trim(),
-      modelName: selectedProfile.model_display_name,
-      aspectRatio: selectedProfile.aspect_ratio,
-      duration: selectedProfile.duration_seconds,
-      modeLabel: 'Văn bản sang Video',
-      status: 'queued',
-      statusText: 'Đang gửi yêu cầu khởi tạo job...',
-      createdAt: Date.now(),
+  // Submit đơn lẻ hoặc đa biến thể (Non-blocking worker queue với luồng song song)
+  const handleSubmitSingle = async () => {
+    if (!prompt.trim() || !activeProject || !selectedProfile || isSubmittingSingle) return
+
+    setIsSubmittingSingle(true)
+    const totalVariants = variationCount
+
+    const variantTasks: { index: number; taskId: string }[] = []
+    for (let i = 1; i <= totalVariants; i++) {
+      const taskId = `t2v-${Date.now()}-${i}`
+      const newTask: VideoTask = {
+        id: taskId,
+        type: 'video',
+        prompt: prompt.trim(),
+        modelName: selectedProfile.model_display_name,
+        aspectRatio: selectedProfile.aspect_ratio,
+        duration: selectedProfile.duration_seconds,
+        modeLabel: totalVariants > 1 ? `Văn bản (Biến thể ${i}/${totalVariants})` : 'Văn bản sang Video',
+        variationIndex: i,
+        variationTotal: totalVariants,
+        status: 'queued',
+        statusText: totalVariants > 1 ? `Chờ khởi tạo biến thể ${i}/${totalVariants}...` : 'Đang gửi yêu cầu khởi tạo job...',
+        createdAt: Date.now() + i,
+      }
+      handleRegisterTask(newTask)
+      variantTasks.push({ index: i, taskId })
     }
 
-    handleRegisterTask(newTask)
+    const queue = [...variantTasks]
+    const effectiveConcurrency = Math.min(singleConcurrency, totalVariants)
 
-    try {
-      const job = await onSubmit({
-        project_id: activeProject.id,
-        prompt: prompt.trim(),
-        model_display_name: selectedProfile.model_display_name,
-        input_mode: selectedProfile.input_mode,
-        aspect_ratio: selectedProfile.aspect_ratio,
-        duration_seconds: selectedProfile.duration_seconds,
-        resolution: selectedProfile.resolution,
-        num_outputs: selectedProfile.num_outputs,
-      })
+    const worker = async () => {
+      while (queue.length > 0) {
+        const item = queue.shift()
+        if (!item) break
 
-      if (job?.job_id) {
-        handleUpdateTask(taskId, {
-          jobId: job.job_id,
-          status: 'captcha',
-          statusText: job.current_step || 'Đang xử lý reCAPTCHA...',
-          jobOut: job,
+        handleUpdateTask(item.taskId, {
+          status: 'submitting',
+          statusText: totalVariants > 1 ? `Đang gửi biến thể ${item.index}/${totalVariants}...` : 'Đang gửi yêu cầu...',
         })
-        if (!onRegisterTask) {
-          pollJob(taskId, job.job_id)
+
+        try {
+          const seed = Math.floor(Math.random() * 2147483647)
+          const job = await onSubmit({
+            project_id: activeProject.id,
+            prompt: prompt.trim(),
+            model_display_name: selectedProfile.model_display_name,
+            input_mode: selectedProfile.input_mode,
+            aspect_ratio: selectedProfile.aspect_ratio,
+            duration_seconds: selectedProfile.duration_seconds,
+            resolution: selectedProfile.resolution,
+            num_outputs: selectedProfile.num_outputs,
+            seed,
+          })
+
+          if (job?.job_id) {
+            handleUpdateTask(item.taskId, {
+              jobId: job.job_id,
+              status: 'captcha',
+              statusText: job.current_step || (totalVariants > 1 ? `Biến thể ${item.index} đang render...` : 'Đang xử lý reCAPTCHA...'),
+              jobOut: job,
+            })
+            if (!onRegisterTask) {
+              pollJob(item.taskId, job.job_id)
+            }
+          } else {
+            handleUpdateTask(item.taskId, {
+              status: 'error',
+              statusText: 'Không nhận được job_id từ server',
+              error: 'Flow bridge không phản hồi',
+            })
+          }
+        } catch (err: any) {
+          handleUpdateTask(item.taskId, {
+            status: 'error',
+            statusText: 'Lỗi gửi biến thể',
+            error: err.message || 'Lỗi kết nối',
+          })
+        }
+
+        // Delay 1.5s giữa các lần xin token reCAPTCHA để bảo vệ an toàn tài khoản
+        if (queue.length > 0) {
+          await sleep(1500)
         }
       }
-    } catch (err: any) {
-      handleUpdateTask(taskId, {
-        status: 'error',
-        statusText: 'Không thể tạo job',
-        error: err.message || 'Lỗi kết nối',
-      })
+    }
+
+    try {
+      const workers = Array.from({ length: effectiveConcurrency }, () => worker())
+      await Promise.all(workers)
+    } finally {
+      setIsSubmittingSingle(false)
     }
   }
 
   // ─── ĐIỀU PHỐI HÀNG ĐỢI ĐA LUỒNG (BATCH DISPATCHER) ───────────────────────
-
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
   const updateScene = (id: string, patch: Partial<BatchSceneItem>) => {
     scenesRef.current = scenesRef.current.map((s) => (s.id === id ? { ...s, ...patch } : s))
@@ -637,11 +684,27 @@ export function TextToVideoTab({
                 ))}
               </div>
 
+              {/* Variations & Concurrency Ribbon */}
+              <div className="veo-studio-ribbon single-ribbon">
+                <VariationSelector
+                  value={variationCount}
+                  onChange={setVariationCount}
+                  disabled={isSubmittingSingle}
+                />
+                {variationCount > 1 && (
+                  <ConcurrencySelector
+                    concurrency={singleConcurrency}
+                    onChange={setSingleConcurrency}
+                    disabled={isSubmittingSingle}
+                  />
+                )}
+              </div>
+
               {/* Status bar */}
               <div className="veo-profile-bar">
                 <ProfileBadge />
                 <span className="veo-credit-estimate">
-                  {selectedProfile.credit_cost} credits
+                  {selectedProfile.credit_cost * variationCount} credits {variationCount > 1 ? `(${variationCount} biến thể)` : ''}
                 </span>
               </div>
 
@@ -649,12 +712,16 @@ export function TextToVideoTab({
               <button
                 className="veo-submit-btn"
                 onClick={handleSubmitSingle}
-                disabled={!prompt.trim() || !activeProject || !selectedProfile}
+                disabled={!prompt.trim() || !activeProject || !selectedProfile || isSubmittingSingle}
               >
                 <Sparkles size={16} />
                 {!activeProject
                   ? 'Vui lòng chọn Project'
-                  : `Tạo Video · ${selectedProfile.credit_cost} credits`}
+                  : isSubmittingSingle
+                    ? `Đang gửi ${variationCount} biến thể...`
+                    : variationCount > 1
+                      ? `Tạo ${variationCount} Biến Thể · ${selectedProfile.credit_cost * variationCount} credits`
+                      : `Tạo Video · ${selectedProfile.credit_cost} credits`}
               </button>
 
               {/* Active Tasks Queue */}

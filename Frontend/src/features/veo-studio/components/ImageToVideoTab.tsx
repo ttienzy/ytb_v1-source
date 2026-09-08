@@ -17,6 +17,8 @@ import {
 } from 'lucide-react'
 import type { VeoCapabilities, VeoImageItem, VeoJobRequest, VeoProject, VeoJobOut, VideoTask } from '../types'
 import * as api from '../services/veoApi'
+import { ConcurrencySelector } from './ConcurrencySelector'
+import { VariationSelector } from './VariationSelector'
 import { ActiveVideoTasksQueue } from './ActiveVideoTasksQueue'
 
 interface Props {
@@ -61,6 +63,9 @@ export function ImageToVideoTab({
   const [inputMode, setInputMode] = useState<'frames' | 'ingredients'>('frames')
   const [profileId, setProfileId] = useState('')
   const [prompt, setPrompt] = useState(initialPrompt || '')
+  const [variationCount, setVariationCount] = useState<number>(1)
+  const [concurrency, setConcurrency] = useState<number>(2)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // ─── Frames Mode (Tối đa 2 ảnh: Frame đầu & Frame cuối) ───
   const [firstFrame, setFirstFrame] = useState<ImageSlotData | null>(
@@ -311,77 +316,122 @@ export function ImageToVideoTab({
     }, 2000)
   }
 
-  // ─── Submit ───
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  // ─── Submit (Đơn lẻ hoặc Đa biến thể với luồng song song) ───
   const handleSubmit = async () => {
-    if (!prompt.trim() || !activeProject || !selectedProfile) return
+    if (!prompt.trim() || !activeProject || !selectedProfile || isSubmitting) return
 
     let imagePath: string | null = null
     let endImagePath: string | null = null
     const ingredientPaths: string[] = []
-    let modeLabel = 'Khung hình'
+    let baseModeLabel = 'Khung hình'
 
     if (inputMode === 'frames') {
       if (!firstFrame) return
       imagePath = firstFrame.path
       endImagePath = endFrame ? endFrame.path : null
-      modeLabel = endFrame ? 'Khung hình (Start → End)' : 'Khung hình (Start)'
+      baseModeLabel = endFrame ? 'Khung hình (Start → End)' : 'Khung hình (Start)'
     } else {
       if (ingredientSlots.subject) ingredientPaths.push(ingredientSlots.subject.path)
       if (ingredientSlots.scene) ingredientPaths.push(ingredientSlots.scene.path)
       if (ingredientSlots.style) ingredientPaths.push(ingredientSlots.style.path)
       if (ingredientPaths.length === 0) return
       imagePath = ingredientPaths[0] // fallback
-      modeLabel = `Thành phần (${ingredientPaths.length} ảnh)`
+      baseModeLabel = `Thành phần (${ingredientPaths.length} ảnh)`
     }
 
-    const taskId = `img2vid-${Date.now()}`
-    const newTask: VideoTask = {
-      id: taskId,
-      type: 'video',
-      prompt: prompt.trim(),
-      modelName: selectedProfile.model_display_name,
-      aspectRatio: selectedProfile.aspect_ratio,
-      duration: selectedProfile.duration_seconds,
-      modeLabel,
-      status: 'queued',
-      statusText: 'Đang gửi yêu cầu khởi tạo job...',
-      createdAt: Date.now(),
-    }
+    setIsSubmitting(true)
+    const totalVariants = variationCount
 
-    handleRegisterTask(newTask)
-
-    try {
-      const job = await onSubmit({
-        project_id: activeProject.id,
+    const variantTasks: { index: number; taskId: string }[] = []
+    for (let i = 1; i <= totalVariants; i++) {
+      const taskId = `img2vid-${Date.now()}-${i}`
+      const newTask: VideoTask = {
+        id: taskId,
+        type: 'video',
         prompt: prompt.trim(),
-        model_display_name: selectedProfile.model_display_name,
-        input_mode: selectedProfile.input_mode,
-        aspect_ratio: selectedProfile.aspect_ratio,
-        duration_seconds: selectedProfile.duration_seconds,
-        resolution: selectedProfile.resolution,
-        num_outputs: selectedProfile.num_outputs,
-        image_path: imagePath,
-        end_image_path: endImagePath,
-        ingredient_image_paths: ingredientPaths,
-      })
+        modelName: selectedProfile.model_display_name,
+        aspectRatio: selectedProfile.aspect_ratio,
+        duration: selectedProfile.duration_seconds,
+        modeLabel: totalVariants > 1 ? `${baseModeLabel} (Biến thể ${i}/${totalVariants})` : baseModeLabel,
+        variationIndex: i,
+        variationTotal: totalVariants,
+        status: 'queued',
+        statusText: totalVariants > 1 ? `Chờ khởi tạo biến thể ${i}/${totalVariants}...` : 'Đang gửi yêu cầu khởi tạo job...',
+        createdAt: Date.now() + i,
+      }
+      handleRegisterTask(newTask)
+      variantTasks.push({ index: i, taskId })
+    }
 
-      if (job?.job_id) {
-        handleUpdateTask(taskId, {
-          jobId: job.job_id,
-          status: 'captcha',
-          statusText: job.current_step || 'Đang xử lý reCAPTCHA...',
-          jobOut: job,
+    const queue = [...variantTasks]
+    const effectiveConcurrency = Math.min(concurrency, totalVariants)
+
+    const worker = async () => {
+      while (queue.length > 0) {
+        const item = queue.shift()
+        if (!item) break
+
+        handleUpdateTask(item.taskId, {
+          status: 'submitting',
+          statusText: totalVariants > 1 ? `Đang gửi biến thể ${item.index}/${totalVariants}...` : 'Đang gửi yêu cầu...',
         })
-        if (!onRegisterTask) {
-          pollJob(taskId, job.job_id)
+
+        try {
+          const seed = Math.floor(Math.random() * 2147483647)
+          const job = await onSubmit({
+            project_id: activeProject.id,
+            prompt: prompt.trim(),
+            model_display_name: selectedProfile.model_display_name,
+            input_mode: selectedProfile.input_mode,
+            aspect_ratio: selectedProfile.aspect_ratio,
+            duration_seconds: selectedProfile.duration_seconds,
+            resolution: selectedProfile.resolution,
+            num_outputs: selectedProfile.num_outputs,
+            image_path: imagePath,
+            end_image_path: endImagePath,
+            ingredient_image_paths: ingredientPaths,
+            seed,
+          })
+
+          if (job?.job_id) {
+            handleUpdateTask(item.taskId, {
+              jobId: job.job_id,
+              status: 'captcha',
+              statusText: job.current_step || (totalVariants > 1 ? `Biến thể ${item.index} đang render...` : 'Đang xử lý reCAPTCHA...'),
+              jobOut: job,
+            })
+            if (!onRegisterTask) {
+              pollJob(item.taskId, job.job_id)
+            }
+          } else {
+            handleUpdateTask(item.taskId, {
+              status: 'error',
+              statusText: 'Không nhận được job_id từ server',
+              error: 'Flow bridge không phản hồi',
+            })
+          }
+        } catch (err: any) {
+          handleUpdateTask(item.taskId, {
+            status: 'error',
+            statusText: 'Lỗi gửi biến thể',
+            error: err.message || 'Lỗi kết nối',
+          })
+        }
+
+        // Delay an toàn 1.5s giữa các lần xin token reCAPTCHA
+        if (queue.length > 0) {
+          await sleep(1500)
         }
       }
-    } catch (err: any) {
-      handleUpdateTask(taskId, {
-        status: 'error',
-        statusText: 'Không thể tạo job',
-        error: err.message || 'Lỗi kết nối',
-      })
+    }
+
+    try {
+      const workers = Array.from({ length: effectiveConcurrency }, () => worker())
+      await Promise.all(workers)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -928,10 +978,28 @@ export function ImageToVideoTab({
             ))}
           </div>
 
+          {/* Variations & Concurrency Ribbon */}
+          <div className="veo-studio-ribbon single-ribbon">
+            <VariationSelector
+              value={variationCount}
+              onChange={setVariationCount}
+              disabled={isSubmitting}
+            />
+            {variationCount > 1 && (
+              <ConcurrencySelector
+                concurrency={concurrency}
+                onChange={setConcurrency}
+                disabled={isSubmitting}
+              />
+            )}
+          </div>
+
           {/* Status bar */}
           <div className="veo-profile-bar">
             <ProfileBadge />
-            <span className="veo-credit-estimate">{selectedProfile.credit_cost} credits</span>
+            <span className="veo-credit-estimate">
+              {(selectedProfile.credit_cost ?? 0) * variationCount} credits {variationCount > 1 ? `(${variationCount} biến thể)` : ''}
+            </span>
           </div>
         </>
       )}
@@ -944,6 +1012,7 @@ export function ImageToVideoTab({
           !prompt.trim() ||
           !activeProject ||
           !selectedProfile ||
+          isSubmitting ||
           (inputMode === 'frames' && !firstFrame) ||
           (inputMode === 'ingredients' && ingredientCount === 0)
         }
@@ -951,13 +1020,17 @@ export function ImageToVideoTab({
         <Sparkles size={16} />
         {!activeProject
           ? 'Vui lòng chọn Project'
-          : inputMode === 'frames' && !firstFrame
-            ? 'Vui lòng chọn Frame bắt đầu'
-            : inputMode === 'ingredients' && ingredientCount === 0
-              ? 'Vui lòng chọn ít nhất 1 ảnh thành phần'
-              : inputMode === 'frames'
-                ? `Tạo Video Khung Hình ${endFrame ? '(Start → End)' : '(Start)'} · ${selectedProfile?.credit_cost ?? '?'} credits`
-                : `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`}
+          : isSubmitting
+            ? `Đang gửi ${variationCount} biến thể...`
+            : inputMode === 'frames' && !firstFrame
+              ? 'Vui lòng chọn Frame bắt đầu'
+              : inputMode === 'ingredients' && ingredientCount === 0
+                ? 'Vui lòng chọn ít nhất 1 ảnh thành phần'
+                : variationCount > 1
+                  ? `Tạo ${variationCount} Biến Thể ${inputMode === 'frames' ? 'Khung Hình' : 'Thành Phần'} · ${(selectedProfile?.credit_cost ?? 0) * variationCount} credits`
+                  : inputMode === 'frames'
+                    ? `Tạo Video Khung Hình ${endFrame ? '(Start → End)' : '(Start)'} · ${selectedProfile?.credit_cost ?? '?'} credits`
+                    : `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`}
       </button>
 
       {/* Active Tasks Queue */}

@@ -251,7 +251,10 @@ export interface StudioTask {
   statusText: string
   createdAt: number
   error?: string
+  variationIndex?: number
+  variationTotal?: number
   jobOut?: VeoJobOut
+  videoJobs?: VeoJobOut[]
   imageItems?: VeoImageItem[]
 }
 
