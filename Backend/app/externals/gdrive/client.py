@@ -131,6 +131,27 @@ class GDriveClient:
             "url": f.get("webViewLink", f"https://drive.google.com/drive/folders/{f.get('id')}"),
         }
 
+    def get_or_create_child_folder(self, folder_name: str, parent_id: str) -> dict[str, str]:
+        """Tìm hoặc tạo một thư mục con trực tiếp trong parent_id."""
+        clean_name = folder_name.strip() or "Untitled"
+        escaped = clean_name.replace("'", "\\'")
+        query = (
+            f"name = '{escaped}' and mimeType = 'application/vnd.google-apps.folder' "
+            f"and trashed = false and '{parent_id}' in parents"
+        )
+        result = self.service.files().list(
+            q=query, spaces="drive", fields="files(id, name, webViewLink)", pageSize=1
+        ).execute()
+        files = result.get("files", [])
+        if files:
+            folder = files[0]
+            return {
+                "id": folder.get("id", ""),
+                "name": folder.get("name", clean_name),
+                "url": folder.get("webViewLink", f"https://drive.google.com/drive/folders/{folder.get('id')}"),
+            }
+        return self.create_folder(clean_name, parent_id=parent_id)
+
     def rename_folder(self, folder_id: str, folder_name: str) -> dict[str, str]:
         """Đổi tên một folder Google Drive mà không thay đổi vị trí hoặc ID."""
         self._ensure_valid_token()
@@ -210,27 +231,54 @@ class GDriveClient:
         folder_id: str | None = None,
         search: str = "",
         page_size: int = 100,
+        recursive: bool = True,
     ) -> list[dict[str, Any]]:
-        """Lấy danh sách file video trong một thư mục Google Drive."""
+        """Lấy danh sách video trong folder và các folder con."""
         self._ensure_valid_token()
-        clauses = ["trashed = false", "(mimeType contains 'video/' or name contains '.mp4')"]
-        if folder_id:
-            clauses.append(f"'{folder_id}' in parents")
-        if search and search.strip():
-            clean_search = search.strip().replace("'", "\\'")
-            clauses.append(f"name contains '{clean_search}'")
+        folder_ids = [folder_id] if folder_id else [None]
+        if folder_id and recursive:
+            index = 0
+            while index < len(folder_ids):
+                parent_id = folder_ids[index]
+                index += 1
+                folder_query = (
+                    "mimeType = 'application/vnd.google-apps.folder' and trashed = false "
+                    f"and '{parent_id}' in parents"
+                )
+                folders = self.service.files().list(
+                    q=folder_query,
+                    spaces="drive",
+                    fields="files(id)",
+                    pageSize=page_size,
+                ).execute().get("files", [])
+                folder_ids.extend(f.get("id") for f in folders if f.get("id"))
 
-        query = " and ".join(clauses)
-        res = self.service.files().list(
-            q=query,
-            spaces="drive",
-            fields="files(id, name, size, mimeType, webViewLink, thumbnailLink, createdTime, videoMediaMetadata)",
-            pageSize=page_size,
-            orderBy="createdTime desc",
-        ).execute()
+        out_by_id: dict[str, dict[str, Any]] = {}
+        for current_folder_id in folder_ids:
+            clauses = [
+                "trashed = false",
+                "mimeType != 'application/vnd.google-apps.folder'",
+                "(mimeType contains 'video/' or name contains '.mp4')",
+            ]
+            if current_folder_id:
+                clauses.append(f"'{current_folder_id}' in parents")
+            if search and search.strip():
+                clean_search = search.strip().replace("'", "\\'")
+                clauses.append(f"name contains '{clean_search}'")
+            query = " and ".join(clauses)
+            res = self.service.files().list(
+                q=query,
+                spaces="drive",
+                fields="files(id, name, size, mimeType, webViewLink, thumbnailLink, createdTime, videoMediaMetadata)",
+                pageSize=page_size,
+                orderBy="createdTime desc",
+            ).execute()
+            for f in res.get("files", []):
+                if f.get("id") and f.get("mimeType") != "application/vnd.google-apps.folder":
+                    out_by_id[f["id"]] = f
 
         out = []
-        for f in res.get("files", []):
+        for f in out_by_id.values():
             vmeta = f.get("videoMediaMetadata") or {}
             dur_ms = vmeta.get("durationMillis")
             dur_sec = max(1, round(float(dur_ms) / 1000)) if dur_ms else 10  # Làm tròn chuẩn xác (9.6s-9.9s -> 10s)

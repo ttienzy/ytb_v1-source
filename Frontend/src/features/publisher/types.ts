@@ -25,6 +25,14 @@ export type DriveVideo = {
   }[]
 }
 
+export type DriveVideoList = {
+  folder_id: string
+  folder_name: string
+  folders: DriveFolder[]
+  videos: DriveVideo[]
+  total: number
+}
+
 export type PippitFacebookPage = {
   page_id: string
   page_name: string

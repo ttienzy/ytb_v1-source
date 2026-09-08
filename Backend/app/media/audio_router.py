@@ -3,7 +3,7 @@ from urllib.parse import quote
 import asyncio
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.db import get_db
@@ -22,15 +22,134 @@ class RunBody(BaseModel):
     aspect: str = "9:16"
     bgm_random: bool = True
     bgm_enabled: bool = True
+    auto_upload_drive: bool = False
+    delete_local_after_upload: bool = False
 
 class TestRunBody(BaseModel):
     text: str
     voice_id: str = "Adam"
     aspect: str = "9:16"
 
+class AudioDriveRequest(BaseModel):
+    file_names: list[str] = Field(min_length=1, max_length=100)
+    auto_delete_local: bool = True
+
+class AudioLocalDeleteRequest(BaseModel):
+    file_names: list[str] = Field(min_length=1, max_length=100)
+
+AUDIO_DRIVE_JOBS: dict[str, dict] = {}
+
+def _audio_metadata() -> dict[str, dict]:
+    try:
+        import json
+        return {item["file_name"]: item for item in json.loads(audio_workflow.AUDIO_MANIFEST.read_text(encoding="utf-8"))}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+def _safe_audio_files(file_names: list[str]) -> list[tuple[str, Path, dict]]:
+    metadata = _audio_metadata()
+    result = []
+    for filename in dict.fromkeys(file_names):
+        path = audio_workflow.AUDIO_DIR / Path(filename).name
+        if Path(filename).name != filename or path.parent != audio_workflow.AUDIO_DIR:
+            raise HTTPException(400, "Tên file video không hợp lệ.")
+        if not path.exists():
+            raise HTTPException(404, f"Không tìm thấy video local: {filename}")
+        result.append((filename, path, metadata.get(filename, {})))
+    return result
+
+def _remove_audio_local(filename: str, path: Path) -> None:
+    path.unlink(missing_ok=True)
+    metadata = _audio_metadata()
+    thumb = metadata.get(filename, {}).get("thumbnail_name")
+    if thumb:
+        (audio_workflow.AUDIO_THUMBNAIL_DIR / Path(thumb).name).unlink(missing_ok=True)
+
+def _drive_video_name(meta: dict) -> str:
+    story_name = audio_workflow._safe_name(meta.get("story_name") or "Video_Audio")
+    chapter_number = meta.get("chapter_number") or 1
+    return f"{story_name}_Phần_{chapter_number}.mp4"
+
+def _unique_drive_video_name(client, filename: str, folder_id: str) -> str:
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix or ".mp4"
+    candidate = f"{stem}{suffix}"
+    index = 1
+    while client.find_file_in_folder(candidate, folder_id):
+        candidate = f"{stem} ({index}){suffix}"
+        index += 1
+    return candidate
+
+def _upload_outputs_worker(job_id: str, body: AudioDriveRequest) -> None:
+    from app.externals.gdrive import service as gdrive_service
+    cfg = gdrive_service.get_gdrive_config()
+    root_id = gdrive_service.get_workflow_folder_id("audio") or cfg.get("folder_id")
+    client = gdrive_service.get_client()
+    job = AUDIO_DRIVE_JOBS[job_id]
+    for filename, path, meta in _safe_audio_files(body.file_names):
+        item = next(entry for entry in job["items"] if entry["file_name"] == filename)
+        try:
+            history_item = audio_workflow.find_history_item(meta.get("story_slug"), meta.get("story_name"), meta.get("chapter_number"))
+            if meta.get("drive_uploaded") or (history_item and history_item.get("drive_uploaded")):
+                item.update(status="already_uploaded", percent=100, drive_url=meta.get("drive_url"))
+                continue
+            item.update(status="uploading", percent=0)
+            def progress(done: int, total: int, current=item) -> None:
+                current["percent"] = min(99, round(done * 100 / total)) if total else 0
+            story_folder = client.get_or_create_child_folder(meta.get("story_name") or "Video Audio khác", root_id)
+            chapter_name = f"Chương {meta['chapter_number']}" if meta.get("chapter_number") else "Video khác"
+            drive_name = _unique_drive_video_name(client, _drive_video_name(meta), story_folder["id"])
+            result = client.upload_file_resumable(path, folder_id=story_folder["id"], custom_name=drive_name, progress_callback=progress)
+            item.update(status="done", percent=100, drive_url=result.get("web_view_link"))
+            audio_workflow.record_drive_upload(meta, result)
+            if body.auto_delete_local:
+                _remove_audio_local(filename, path)
+                item["deleted"] = True
+        except Exception as exc:  # keep other selected videos running
+            item.update(status="error", percent=0, error=str(exc))
+    job["status"] = "completed"
+
+@router.post("/outputs/upload-drive", status_code=202)
+def upload_outputs_to_drive(body: AudioDriveRequest, background_tasks: BackgroundTasks):
+    """Bắt đầu upload các video Audio theo cấu trúc Truyện/Chương."""
+    from app.externals.gdrive import service as gdrive_service
+    if not gdrive_service.get_client():
+        raise HTTPException(400, "Google Drive chưa được kết nối. Vui lòng vào Cài đặt để kết nối.")
+    cfg = gdrive_service.get_gdrive_config()
+    if not (gdrive_service.get_workflow_folder_id("audio") or cfg.get("folder_id")):
+        raise HTTPException(400, "Chưa cấu hình thư mục Google Drive cho Audio.")
+    files = _safe_audio_files(body.file_names)
+    import uuid
+    job_id = uuid.uuid4().hex[:12]
+    AUDIO_DRIVE_JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "items": [{"file_name": filename, "status": "queued", "percent": 0} for filename, _, _ in files],
+    }
+    background_tasks.add_task(_upload_outputs_worker, job_id, body)
+    return {"job_id": job_id, **AUDIO_DRIVE_JOBS[job_id]}
+
+@router.get("/outputs/upload-drive/{job_id}")
+def upload_outputs_status(job_id: str):
+    job = AUDIO_DRIVE_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Không tìm thấy tiến trình upload.")
+    return job
+
+@router.post("/outputs/delete-local")
+def delete_audio_outputs_local(body: AudioLocalDeleteRequest):
+    deleted = []
+    for filename, path, _ in _safe_audio_files(body.file_names):
+        _remove_audio_local(filename, path)
+        deleted.append(filename)
+    return {"ok": True, "deleted": deleted}
+
 @router.get("/stories")
 def stories(db: Session = Depends(get_db)):
-    return [{"story_slug": s.story_slug, "name": s.name, "thumbnail_name": audio_workflow.thumbnail_path(s.story_slug).name if audio_workflow.thumbnail_path(s.story_slug) else None, "chapters": [{"chapter_number": c.chapter_number, "title": c.title} for c in db.query(CrawledChapter).filter_by(story_slug=s.story_slug).order_by(CrawledChapter.chapter_number).all()]} for s in db.query(CrawledStory).order_by(CrawledStory.name).all()]
+    history = [item for item in audio_workflow.history() if item.get("status") in {"completed", "uploaded"}]
+    by_key = {(item.get("story_slug"), item.get("chapter_number")): item for item in history}
+    by_name = {(item.get("story_name"), item.get("chapter_number")): item for item in history}
+    return [{"story_slug": s.story_slug, "name": s.name, "thumbnail_name": audio_workflow.thumbnail_path(s.story_slug).name if audio_workflow.thumbnail_path(s.story_slug) else None, "chapters": [{"chapter_number": c.chapter_number, "title": c.title, "completed": bool(by_key.get((s.story_slug, c.chapter_number)) or by_name.get((s.name, c.chapter_number))), "drive_uploaded": bool(((by_key.get((s.story_slug, c.chapter_number)) or by_name.get((s.name, c.chapter_number)) or {}).get("drive_uploaded")))} for c in db.query(CrawledChapter).filter_by(story_slug=s.story_slug).order_by(CrawledChapter.chapter_number).all()]} for s in db.query(CrawledStory).order_by(CrawledStory.name).all()]
 
 @router.post("/stories/{story_slug}/thumbnail")
 async def upload_thumbnail(story_slug: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -89,8 +208,8 @@ async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = De
             if not valid_tracks: raise HTTPException(400, "Bạn đã bật nhạc nền nhưng thư viện nhạc chưa có bài nào hợp lệ.")
             bgm_pool = [Path(t.file_path) for t in valid_tracks]
         job_id = audio_workflow.create("Queue Audio", "Nhiều truyện", total_chapters)
-        queue_data = [(story.name, chapters, audio_workflow.thumbnail_path(story.story_slug)) for story, chapters in queue]
-        background_tasks.add_task(audio_workflow.run_queue, job_id, queue_data, body.voice_id, body.aspect, bgm_pool)
+        queue_data = [(story.story_slug, story.name, chapters, audio_workflow.thumbnail_path(story.story_slug)) for story, chapters in queue]
+        background_tasks.add_task(audio_workflow.run_queue, job_id, queue_data, body.voice_id, body.aspect, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload)
         return {"job_id": job_id}
 
     story = db.get(CrawledStory, body.story_slug)
@@ -116,9 +235,9 @@ async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = De
         bgm_pool = [Path(t.file_path) for t in valid_tracks]
     job_id = audio_workflow.create(story.name, chapters[0].title, len(chapters))
     if len(chapters) == 1:
-        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool)
+        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload, story.story_slug)
     else:
-        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect, thumbnail, bgm_pool)
+        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload, story.story_slug)
     return {"job_id": job_id}
 
 @router.post("/test-run", status_code=202)

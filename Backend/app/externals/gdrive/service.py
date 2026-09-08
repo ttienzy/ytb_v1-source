@@ -699,12 +699,15 @@ def list_videos(folder_id: str | None = None, search: str = "") -> GDriveVideoLi
             pass
 
     try:
-        raw_videos = client.list_videos(folder_id=target_id if target_id else None, search=search)
+        raw_videos = client.list_videos(folder_id=target_id if target_id else None, search=search, recursive=False)
+        raw_folders = client.list_folders(parent_id=target_id or "root")
+        folder_items = [GDriveFolderItem(**folder) for folder in raw_folders]
         video_items = [GDriveVideoItem(**v) for v in raw_videos]
         enrich_videos_with_published_channels(video_items)
         return GDriveVideoListResponse(
             folder_id=target_id,
             folder_name=folder_name,
+            folders=folder_items,
             videos=video_items,
             total=len(video_items),
         )

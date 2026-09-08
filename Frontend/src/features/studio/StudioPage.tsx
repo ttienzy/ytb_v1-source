@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Clock3,
   ExternalLink,
+  HardDriveUpload,
   Headphones,
   KeyRound,
   Layers,
@@ -48,19 +49,27 @@ export function StudioPage({
   const [submitting, setSubmitting] = useState(false)
   const [mode, setMode] = useState<'single' | 'batch'>(initialUrls && initialUrls.length > 0 ? 'batch' : 'single')
   const [selectedWorkflow, setSelectedWorkflow] = useState<'youtube' | 'audio'>('youtube')
-  const [audioStories, setAudioStories] = useState<Array<{ story_slug: string; name: string; thumbnail_name?: string | null; chapters: Array<{ chapter_number: number; title: string }> }>>([])
+  const [audioStories, setAudioStories] = useState<Array<{ story_slug: string; name: string; thumbnail_name?: string | null; chapters: Array<{ chapter_number: number; title: string; completed?: boolean; drive_uploaded?: boolean }> }>>([])
   const [audioStory, setAudioStory] = useState('')
   const [audioChapter, setAudioChapter] = useState<number | ''>('')
   const [audioMode, setAudioMode] = useState<'single' | 'batch'>('single')
+  const [audioQueueFilter, setAudioQueueFilter] = useState<'all' | 'completed' | 'pending' | 'active'>('all')
   const [audioBatchQueue, setAudioBatchQueue] = useState<Array<{ story_slug: string; chapter_numbers: number[] }>>([])
   const [audioThumbnailBusy, setAudioThumbnailBusy] = useState(false)
   const [audioVoice, setAudioVoice] = useState('')
   const [audioPresets, setAudioPresets] = useState<Array<{ name: string; description?: string }>>([])
   const [audioAspect, setAudioAspect] = useState<'9:16' | '16:9'>('9:16')
   const [audioBgmEnabled, setAudioBgmEnabled] = useState(true)
+  const [audioAutoUploadDrive, setAudioAutoUploadDrive] = useState(false)
   const [audioJob, setAudioJob] = useState<Record<string, any> | null>(null)
   const [audioOutputs, setAudioOutputs] = useState<Array<{ file_name: string; name: string; duration_sec: number; created_at: string; story_name?: string; chapter_number?: number; chapter_title?: string; thumbnail_name?: string | null }>>([])
   const [selectedAudioOutputStory, setSelectedAudioOutputStory] = useState<string | null>(null)
+  const [audioDriveOpen, setAudioDriveOpen] = useState(false)
+  const [audioDriveMode, setAudioDriveMode] = useState<'upload' | 'delete'>('upload')
+  const [audioDriveSelected, setAudioDriveSelected] = useState<string[]>([])
+  const [audioDriveAutoDelete, setAudioDriveAutoDelete] = useState(true)
+  const [audioDriveProgress, setAudioDriveProgress] = useState<Array<{ file_name: string; status: string; percent: number; error?: string }>>([])
+  const [audioDriveBusy, setAudioDriveBusy] = useState(false)
   const [audioError, setAudioError] = useState('')
   const [audioBusy, setAudioBusy] = useState(false)
   const [audioTestText, setAudioTestText] = useState('')
@@ -181,6 +190,16 @@ export function StudioPage({
   }, [audioJob?.job_id, audioJob?.status])
 
   const selectedAudioStory = audioStories.find(s => s.story_slug === audioStory)
+  const sortedAudioStories = useMemo(() => [...audioStories].sort((a, b) => {
+    const aDone = a.chapters.length > 0 && a.chapters.every(chapter => chapter.completed)
+    const bDone = b.chapters.length > 0 && b.chapters.every(chapter => chapter.completed)
+    if (aDone !== bDone) return aDone ? 1 : -1
+    return a.name.localeCompare(b.name, 'vi')
+  }), [audioStories])
+  const sortedAudioChapters = useMemo(() => selectedAudioStory ? [...selectedAudioStory.chapters].sort((a, b) => {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1
+    return a.chapter_number - b.chapter_number
+  }) : [], [selectedAudioStory])
   const audioOutputGroups = useMemo(() => {
     const groups = new Map<string, typeof audioOutputs>()
     audioOutputs.forEach(item => {
@@ -189,8 +208,64 @@ export function StudioPage({
     })
     return Array.from(groups, ([story_name, videos]) => ({ story_name, videos }))
   }, [audioOutputs])
-  const completedChaptersForStory = (storyName: string) => new Set(audioOutputs.filter(item => item.story_name === storyName && item.chapter_number).map(item => item.chapter_number as number))
+  function openAudioDrive(mode: 'upload' | 'delete') {
+    setAudioDriveMode(mode)
+    setAudioDriveAutoDelete(true)
+    const files = audioOutputGroups.flatMap(group => group.videos.map(video => video.file_name))
+    setAudioDriveSelected(files)
+    setAudioDriveProgress(files.map(file_name => ({ file_name, status: 'queued', percent: 0 })))
+    setAudioDriveOpen(true)
+  }
+  async function submitAudioDriveAction() {
+    if (!audioDriveSelected.length) return
+    setAudioDriveBusy(true)
+    try {
+      const endpoint = audioDriveMode === 'upload' ? '/api/audio/outputs/upload-drive' : '/api/audio/outputs/delete-local'
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_names: audioDriveSelected, ...(audioDriveMode === 'upload' ? { auto_delete_local: audioDriveAutoDelete } : {}) }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Không thể xử lý video.')
+      if (audioDriveMode === 'upload') {
+        let status = data
+        setAudioDriveProgress(status.items || [])
+        while (status.status !== 'completed') {
+          await new Promise(resolve => setTimeout(resolve, 500))
+          const statusResponse = await fetch(`${API_URL}/api/audio/outputs/upload-drive/${data.job_id}`)
+          if (!statusResponse.ok) throw new Error('Không thể đọc tiến độ upload.')
+          status = await statusResponse.json()
+          setAudioDriveProgress(status.items || [])
+        }
+        const failed = (status.items || []).filter((item: { status: string; error?: string }) => item.status === 'error')
+        setAudioError(failed.length ? `${failed.length} video upload lỗi: ${failed[0].error}` : '')
+      } else {
+        setAudioError('')
+      }
+      const latest = await fetch(`${API_URL}/api/audio/outputs`)
+      if (latest.ok) setAudioOutputs(await latest.json())
+      setAudioDriveOpen(false)
+    } catch (error) {
+      setAudioError(error instanceof Error ? error.message : 'Không thể xử lý video Audio.')
+    } finally {
+      setAudioDriveBusy(false)
+    }
+  }
+  const completedChaptersForStory = (storyName: string) => {
+    const story = audioStories.find(item => item.name === storyName)
+    const fromHistory = story?.chapters.filter(chapter => chapter.completed).map(chapter => chapter.chapter_number) || []
+    const fromLocal = audioOutputs.filter(item => item.story_name === storyName && item.chapter_number).map(item => item.chapter_number as number)
+    return new Set([...fromHistory, ...fromLocal])
+  }
   const isStoryCompleted = (story: typeof audioStories[number]) => story.chapters.length > 0 && story.chapters.every(chapter => completedChaptersForStory(story.name).has(chapter.chapter_number))
+  const filteredAudioStories = useMemo(() => sortedAudioStories.filter(story => {
+    const completed = isStoryCompleted(story)
+    const active = audioBatchQueue.some(item => item.story_slug === story.story_slug) || audioJob?.current_story === story.name
+    if (audioQueueFilter === 'completed') return completed
+    if (audioQueueFilter === 'pending') return !completed && !active
+    if (audioQueueFilter === 'active') return active
+    return true
+  }), [sortedAudioStories, audioQueueFilter, audioBatchQueue, audioJob?.current_story, audioOutputs, audioStories])
   const isStoryQueued = (storySlug: string) => audioBatchQueue.some(item => item.story_slug === storySlug)
   const toggleBatchStory = (story: typeof audioStories[number]) => {
     setAudioBatchQueue(current => {
@@ -211,7 +286,7 @@ export function StudioPage({
   }
   const audioStepState = (key: string) => {
     if (!audioJob) return 'pending'
-    const order = ['voice', 'duration', 'image', 'merge', 'mux', ...(audioBgmEnabled ? ['bgm'] : []), 'done']
+    const order = ['voice', 'duration', 'image', 'merge', 'mux', ...(audioBgmEnabled ? ['bgm'] : []), ...(audioAutoUploadDrive ? ['drive'] : []), 'done']
     const current = order.indexOf(audioJob.step)
     const index = order.indexOf(key)
     if (audioJob.status === 'error' && index === current) return 'error'
@@ -231,7 +306,7 @@ export function StudioPage({
     if (audioMode === 'batch' && audioBatchQueue.some(item => !audioStories.find(story => story.story_slug === item.story_slug)?.thumbnail_name)) { setAudioError('Mỗi truyện trong queue phải có thumbnail.'); return }
     setAudioBusy(true); setAudioError(''); setAudioJob(null)
     try {
-      const response = await fetch(`${API_URL}/api/audio/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_slug: audioStory, ...(audioMode === 'batch' ? { batch_items: audioBatchQueue } : { chapter_number: audioChapter }), voice_id: audioVoice, aspect: audioAspect, bgm_random: true, bgm_enabled: audioBgmEnabled }) })
+      const response = await fetch(`${API_URL}/api/audio/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_slug: audioStory, ...(audioMode === 'batch' ? { batch_items: audioBatchQueue } : { chapter_number: audioChapter }), voice_id: audioVoice, aspect: audioAspect, bgm_random: true, bgm_enabled: audioBgmEnabled, auto_upload_drive: audioAutoUploadDrive, delete_local_after_upload: audioAutoUploadDrive }) })
       const data = await response.json(); if (!response.ok) throw new Error(data.detail || `Lỗi ${response.status}`)
       setAudioJob(data)
     } catch (error) { setAudioError(error instanceof Error ? error.message : 'Không thể khởi động workflow Audio.') }
@@ -946,7 +1021,7 @@ export function StudioPage({
           </div>
           <div className="settings-card audio-form-card">
             <div className="audio-form-grid">
-              {audioMode === 'single' ? <><label>Truyện đã crawl<select value={audioStory} onChange={e => { const nextStory = audioStories.find(s => s.story_slug === e.target.value); setAudioStory(e.target.value); setAudioChapter(nextStory?.chapters[0]?.chapter_number ?? '') }}><option value="">-- Chọn truyện --</option>{audioStories.map(s => <option key={s.story_slug} value={s.story_slug}>{s.name} ({s.chapters.length} chương)</option>)}</select></label><label>Chương<select value={audioChapter} onChange={e => setAudioChapter(e.target.value ? Number(e.target.value) : '')}><option value="">-- Chọn chương --</option>{selectedAudioStory?.chapters.map(c => <option key={c.chapter_number} value={c.chapter_number}>Chương {c.chapter_number} · {c.title}</option>)}</select></label></> : <div className="audio-batch-selector"><div className="audio-batch-selector-head"><strong>Queue truyện và chương</strong><small>{audioBatchQueue.length}/10 truyện</small></div><div className="audio-story-queue-list">{audioStories.map(story => { const queued = audioBatchQueue.find(item => item.story_slug === story.story_slug); const completed = completedChaptersForStory(story.name); return <div className={`audio-queue-story ${queued ? 'selected' : ''}`} key={story.story_slug}><div className="audio-queue-story-head"><button type="button" className="audio-queue-story-toggle" onClick={() => toggleBatchStory(story)} disabled={!queued && audioBatchQueue.length >= 10}><input type="checkbox" readOnly checked={Boolean(queued)} /><span>{story.name}</span></button>{isStoryCompleted(story) ? <em className="audio-completed-badge">Đã hoàn thành</em> : <small>{completed.size}/{story.chapters.length} chương đã xong</small>}</div><div className="audio-queue-thumbnail">{story.thumbnail_name ? <img src={`${API_URL}/api/audio/thumbnails/${encodeURIComponent(story.thumbnail_name)}`} alt={`Thumbnail ${story.name}`} /> : <span>Chưa có thumbnail</span>}<label className="secondary-button audio-queue-thumbnail-button">{story.thumbnail_name ? 'Đổi ảnh' : 'Chọn thumbnail'}<input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={audioThumbnailBusy} onChange={e => { const file = e.target.files?.[0]; if (file) uploadAudioThumbnail(story.story_slug, file); e.currentTarget.value = '' }} /></label></div>{queued && <div className="audio-queue-chapters">{story.chapters.map(chapter => <label key={chapter.chapter_number} className={completed.has(chapter.chapter_number) ? 'completed' : ''}><input type="checkbox" checked={queued.chapter_numbers.includes(chapter.chapter_number)} onChange={() => toggleBatchChapter(story.story_slug, chapter.chapter_number)} /><span>Chương {chapter.chapter_number}</span><small>{chapter.title}{completed.has(chapter.chapter_number) ? ' · Đã hoàn thành' : ''}</small></label>)}</div>}</div> })}</div></div>}
+              {audioMode === 'single' ? <><label>Truyện đã crawl<select value={audioStory} onChange={e => { const nextStory = audioStories.find(s => s.story_slug === e.target.value); setAudioStory(e.target.value); setAudioChapter(nextStory?.chapters.find(chapter => !chapter.completed)?.chapter_number ?? nextStory?.chapters[0]?.chapter_number ?? '') }}><option value="">-- Chọn truyện --</option>{sortedAudioStories.map(s => <option key={s.story_slug} value={s.story_slug}>{s.name} ({s.chapters.filter(c => !c.completed).length}/{s.chapters.length} chương chưa làm)</option>)}</select></label><label>Chương<select value={audioChapter} onChange={e => setAudioChapter(e.target.value ? Number(e.target.value) : '')}><option value="">-- Chọn chương --</option>{sortedAudioChapters.map(c => <option key={c.chapter_number} value={c.chapter_number}>Chương {c.chapter_number} · {c.title}{c.completed ? (c.drive_uploaded ? ' · Đã upload Drive' : ' · Đã hoàn thành') : ''}</option>)}</select></label></> : <div className="audio-batch-selector"><div className="audio-batch-selector-head"><strong>Queue truyện và chương</strong><div className="audio-queue-filter"><label htmlFor="audio-status-filter">Trạng thái</label><select id="audio-status-filter" value={audioQueueFilter} onChange={e => setAudioQueueFilter(e.target.value as typeof audioQueueFilter)}><option value="all">Tất cả</option><option value="completed">Đã hoàn thành</option><option value="pending">Chưa hoàn thành</option><option value="active">Đang hoàn thành</option></select><small>{audioBatchQueue.length}/10 truyện</small></div></div><div className="audio-story-queue-list">{filteredAudioStories.map(story => { const queued = audioBatchQueue.find(item => item.story_slug === story.story_slug); const completed = completedChaptersForStory(story.name); return <div className={`audio-queue-story ${queued ? 'selected' : ''}`} key={story.story_slug}><div className="audio-queue-story-head"><button type="button" className="audio-queue-story-toggle" onClick={() => toggleBatchStory(story)} disabled={!queued && audioBatchQueue.length >= 10}><input type="checkbox" readOnly checked={Boolean(queued)} /><span>{story.name}</span></button>{isStoryCompleted(story) ? <em className="audio-completed-badge">Đã hoàn thành</em> : queued ? <em className="audio-active-badge">Đang hoàn thành</em> : <small>{completed.size}/{story.chapters.length} chương đã xong</small>}</div><div className="audio-queue-thumbnail">{story.thumbnail_name ? <img src={`${API_URL}/api/audio/thumbnails/${encodeURIComponent(story.thumbnail_name)}`} alt={`Thumbnail ${story.name}`} /> : <span>Chưa có thumbnail</span>}<label className="secondary-button audio-queue-thumbnail-button">{story.thumbnail_name ? 'Đổi ảnh' : 'Chọn thumbnail'}<input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={audioThumbnailBusy} onChange={e => { const file = e.target.files?.[0]; if (file) uploadAudioThumbnail(story.story_slug, file); e.currentTarget.value = '' }} /></label></div>{queued && <div className="audio-queue-chapters">{[...story.chapters].sort((a, b) => { if (a.completed !== b.completed) return a.completed ? 1 : -1; return a.chapter_number - b.chapter_number }).map(chapter => <label key={chapter.chapter_number} className={completed.has(chapter.chapter_number) ? 'completed' : ''}><input type="checkbox" disabled={completed.has(chapter.chapter_number)} checked={queued.chapter_numbers.includes(chapter.chapter_number)} onChange={() => toggleBatchChapter(story.story_slug, chapter.chapter_number)} /><span>Chương {chapter.chapter_number}</span><small>{chapter.title}{completed.has(chapter.chapter_number) ? (chapter.drive_uploaded ? ' · Đã upload Drive' : ' · Đã hoàn thành') : ''}</small></label>)}</div>}</div> })}</div></div>}
               <label>Giọng đọc<select value={audioVoice} onChange={e => setAudioVoice(e.target.value)}><option value="">-- Chọn giọng --</option>{clonedVoices.length > 0 && <optgroup label="Giọng đã clone">{clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}</optgroup>}{audioPresets.length > 0 && <optgroup label="Preset VieNeu">{audioPresets.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}</optgroup>}</select></label>
               <label>Khổ video<select value={audioAspect} onChange={e => setAudioAspect(e.target.value as '9:16' | '16:9')}><option value="9:16">Dọc 9:16</option><option value="16:9">Ngang 16:9</option></select></label>
             </div>
@@ -957,14 +1032,16 @@ export function StudioPage({
             </div>}
             <label className="audio-bgm-toggle"><input type="checkbox" checked={audioBgmEnabled} disabled={audioBusy || audioJob?.status === 'queued' || audioJob?.status === 'running'} onChange={e => setAudioBgmEnabled(e.target.checked)} /><Music size={15} /> Thêm nhạc nền vào video</label>
             {audioBgmEnabled && <div className="audio-bgm-note"><Music size={15} /> Workflow sẽ tự chọn ngẫu nhiên 1 bài từ tab “Thư viện nhạc” và mix nhỏ dưới giọng đọc.</div>}
+            <label className="audio-drive-auto-toggle"><input type="checkbox" checked={audioAutoUploadDrive} disabled={audioBusy || audioJob?.status === 'queued' || audioJob?.status === 'running'} onChange={e => setAudioAutoUploadDrive(e.target.checked)} /><HardDriveUpload size={15} /> Tự động upload lên Google Drive và xóa local sau khi thành công</label>
             <p className="audio-output-path">Video hoàn tất sẽ lưu tại <code>D:\MMO\ytb_v1\Data\media\videos\Viaudio</code></p>
             <button type="button" className="primary-button" onClick={startAudioWorkflow} disabled={audioBusy || (audioJob?.status === 'running' || audioJob?.status === 'queued')}><Headphones size={15} /> {audioBusy ? 'Đang khởi động…' : 'Bắt đầu Workflow Audio'}</button>
             {audioError && <div className="audio-error"><AlertCircle size={15} /> {audioError}</div>}
           </div>
-          {audioJob && <div className="settings-card audio-progress-card"><h3>Tiến trình workflow</h3><div className="audio-flowchart"><div className="audio-flow-row audio-flow-start">{audioNode('voice', '01', 'Chuyển nội dung thành voice')}<i className="audio-flow-arrow right" />{audioNode('duration', '02', 'Lấy thời lượng voice')}</div><div className="audio-flow-connector down" />{audioNode('image', '03', 'Xử lý thumbnail + label')}<div className="audio-flow-connector down" />{audioNode('merge', '04', 'Gộp video theo thời lượng')}<div className="audio-flow-connector down" />{audioNode('mux', '05', 'Ghép voice vào video')}{audioBgmEnabled && <><div className="audio-flow-connector down" />{audioNode('bgm', '06', 'Mix nhạc nền ngẫu nhiên')}</>}<div className="audio-flow-connector down" />{audioNode('done', audioBgmEnabled ? '07' : '06', 'Hoàn thành video')}</div><div className="audio-progress-track"><div style={{ width: `${audioJob.progress || 0}%` }} /></div>{audioJob.status === 'running' && audioJob.total_chapters > 1 && <p className="audio-progress-chapters">Đã hoàn thành {audioJob.completed_chapters || 0}/{audioJob.total_chapters} chương · đang xử lý chương {audioJob.current_chapter}</p>}{audioJob.status === 'completed' && <p className="audio-success">{audioJob.message} Các video đã được thêm vào nhóm của truyện.</p>}</div>}
+          {audioJob && <div className="settings-card audio-progress-card"><h3>Tiến trình workflow</h3><div className="audio-flowchart"><div className="audio-flow-row audio-flow-start">{audioNode('voice', '01', 'Chuyển nội dung thành voice')}<i className="audio-flow-arrow right" />{audioNode('duration', '02', 'Lấy thời lượng voice')}</div><div className="audio-flow-connector down" />{audioNode('image', '03', 'Xử lý thumbnail + label')}<div className="audio-flow-connector down" />{audioNode('merge', '04', 'Gộp video theo thời lượng')}<div className="audio-flow-connector down" />{audioNode('mux', '05', 'Ghép voice vào video')}{audioBgmEnabled && <><div className="audio-flow-connector down" />{audioNode('bgm', '06', 'Mix nhạc nền ngẫu nhiên')}</>}{audioAutoUploadDrive && <><div className="audio-flow-connector down" />{audioNode('drive', audioBgmEnabled ? '07' : '06', 'Upload Google Drive + xóa local')}</>}<div className="audio-flow-connector down" />{audioNode('done', audioAutoUploadDrive ? (audioBgmEnabled ? '08' : '07') : (audioBgmEnabled ? '07' : '06'), 'Hoàn thành video')}</div><div className="audio-progress-track"><div style={{ width: `${audioJob.progress || 0}%` }} /></div>{audioJob.status === 'running' && audioJob.total_chapters > 1 && <p className="audio-progress-chapters">Đã hoàn thành {audioJob.completed_chapters || 0}/{audioJob.total_chapters} chương · đang xử lý chương {audioJob.current_chapter}</p>}{audioJob.status === 'completed' && <p className="audio-success">{audioJob.message} Các video đã được thêm vào nhóm của truyện.</p>}</div>}
           <div className="settings-card audio-test-card"><div className="video-section-head"><div><p className="overline">TEST WORKFLOW</p><h2>Test nhanh bằng text</h2><p>Dán nội dung bất kỳ để kiểm tra toàn bộ luồng Audio.</p></div></div><textarea value={audioTestText} onChange={e => setAudioTestText(e.target.value)} placeholder="Dán nội dung chương hoặc đoạn text muốn test tại đây…" rows={7} disabled={audioTestBusy} /><div className="audio-test-actions"><small>Dùng giọng preset mặc định · Video nền khổ dọc 9:16</small><button type="button" className="primary-button" onClick={startAudioTest} disabled={audioTestBusy || Boolean(audioJob && (audioJob.status === 'queued' || audioJob.status === 'running'))}><Headphones size={15} /> {audioTestBusy ? 'Đang khởi động…' : 'Chạy test workflow'}</button></div></div>
-          <div className="settings-card audio-output-gallery"><div className="video-section-head"><div><h2>Video Audio hoàn tất <span className="done-count">{audioOutputs.length}</span></h2><p>Video được nhóm theo tên truyện. Bấm vào một truyện để xem các chương.</p></div></div>{audioOutputs.length === 0 ? <div className="video-empty">Chưa có video Audio hoàn tất.</div> : <div className="audio-story-output-grid">{audioOutputGroups.map(group => <button type="button" className="audio-story-output-card" key={group.story_name} onClick={() => setSelectedAudioOutputStory(group.story_name)}><span className="audio-story-output-icon"><Play size={19} fill="currentColor" /></span><span className="audio-story-output-copy"><strong>{group.story_name}</strong><small>{group.videos.length} video · {group.videos.filter(v => v.chapter_number).map(v => `Chương ${v.chapter_number}`).join(', ') || 'Video đã hoàn tất'}</small></span><ArrowRight size={16} /></button>)}</div>}</div>
+          <div className="settings-card audio-output-gallery"><div className="video-section-head"><div><h2>Video Audio hoàn tất <span className="done-count">{audioOutputs.length}</span></h2><p>Video được nhóm theo tên truyện. Bấm vào một truyện để xem các chương.</p></div><div className="audio-output-actions"><button type="button" className="primary-button" onClick={() => openAudioDrive('upload')} disabled={!audioOutputs.length}><HardDriveUpload size={14} /> Đẩy lên ggdrive</button><button type="button" className="secondary-button" onClick={() => openAudioDrive('delete')} disabled={!audioOutputs.length}><Trash2 size={14} /> Xóa ở local</button></div></div>{audioOutputs.length === 0 ? <div className="video-empty">Chưa có video Audio hoàn tất.</div> : <div className="audio-story-output-grid">{audioOutputGroups.map(group => <div className="audio-story-output-card" key={group.story_name}><button type="button" className="audio-story-output-main" onClick={() => setSelectedAudioOutputStory(group.story_name)}><span className="audio-story-output-icon"><Play size={19} fill="currentColor" /></span><span className="audio-story-output-copy"><strong>{group.story_name}</strong><small>{group.videos.length} video · {group.videos.filter(v => v.chapter_number).map(v => `Chương ${v.chapter_number}`).join(', ') || 'Video đã hoàn tất'}</small></span><ArrowRight size={16} /></button></div>)}</div>}</div>
           {selectedAudioOutputStory && <div className="video-modal-backdrop" onClick={() => setSelectedAudioOutputStory(null)}><div className="video-modal audio-story-output-modal" onClick={e => e.stopPropagation()}><div className="video-modal-head"><strong>{selectedAudioOutputStory}</strong><button type="button" className="icon-button" onClick={() => setSelectedAudioOutputStory(null)} aria-label="Đóng"><X size={18} /></button></div><div className="audio-story-video-list">{audioOutputGroups.find(g => g.story_name === selectedAudioOutputStory)?.videos.map(item => <div className="audio-story-video-item" key={item.file_name}><video controls preload="metadata" poster={item.thumbnail_name ? `${API_URL}/api/audio/thumbnails/${encodeURIComponent(item.thumbnail_name)}` : undefined} src={`${API_URL}/api/audio/outputs/${encodeURIComponent(item.file_name)}`} /><div><strong>{item.chapter_number ? `Chương ${item.chapter_number}` : item.name}</strong><small>{item.chapter_title || item.name} · {Math.round(item.duration_sec)} giây</small></div></div>)}</div></div></div>}
+          {audioDriveOpen && <div className="video-modal-backdrop" onClick={() => !audioDriveBusy && setAudioDriveOpen(false)}><div className="video-modal audio-drive-modal" onClick={e => e.stopPropagation()}><div className="video-modal-head"><strong>{audioDriveMode === 'upload' ? 'Đẩy video Audio lên Google Drive' : 'Xóa video Audio ở local'}</strong><button type="button" className="icon-button" onClick={() => setAudioDriveOpen(false)} disabled={audioDriveBusy} aria-label="Đóng"><X size={18} /></button></div><div className="audio-drive-body">{audioDriveMode === 'upload' && <p className="audio-drive-note">Chọn video của một hoặc nhiều truyện. Video sẽ được lưu trực tiếp theo cấu trúc <strong>Audio / Tên truyện / video.mp4</strong>; số chương đã nằm trong tên file.</p>}<div className="audio-drive-selection-actions"><button type="button" onClick={() => setAudioDriveSelected(audioOutputGroups.flatMap(group => group.videos.map(video => video.file_name)))} disabled={audioDriveBusy}>Chọn tất cả</button><button type="button" onClick={() => setAudioDriveSelected([])} disabled={audioDriveBusy}>Bỏ chọn</button></div><div className="audio-drive-video-list">{audioOutputGroups.map(group => <div className="audio-drive-story-group" key={group.story_name}><div className="audio-drive-story-heading"><strong>{group.story_name}</strong><span>{group.videos.filter(video => audioDriveSelected.includes(video.file_name)).length}/{group.videos.length} video</span></div>{group.videos.map(video => { const progress = audioDriveProgress.find(item => item.file_name === video.file_name); return <label key={video.file_name} className="audio-drive-video"><input type="checkbox" checked={audioDriveSelected.includes(video.file_name)} onChange={() => setAudioDriveSelected(current => current.includes(video.file_name) ? current.filter(name => name !== video.file_name) : [...current, video.file_name])} /><div className="audio-drive-video-copy"><strong>{video.chapter_number ? `Chương ${video.chapter_number}` : video.name}</strong><small>{progress?.status === 'uploading' ? `Đang upload… ${progress.percent}%` : progress?.status === 'done' ? 'Upload thành công' : progress?.status === 'error' ? `Upload lỗi: ${progress.error || 'Không xác định'}` : (video.chapter_title || video.name)}</small>{audioDriveMode === 'upload' && progress && <div className="audio-drive-progress"><div style={{ width: `${progress.percent}%` }} /></div>}</div></label> })}</div>)}</div><div className="audio-drive-footer"><div className="audio-drive-footer-left"><span>Đã chọn {audioDriveSelected.length}/{audioOutputs.length} video</span>{audioDriveMode === 'upload' && <label className="audio-drive-auto-delete"><input type="checkbox" checked={audioDriveAutoDelete} onChange={e => setAudioDriveAutoDelete(e.target.checked)} /> Xóa local sau khi upload thành công</label>}</div><button type="button" className={audioDriveMode === 'upload' ? 'primary-button' : 'danger-button'} onClick={submitAudioDriveAction} disabled={audioDriveBusy || !audioDriveSelected.length}>{audioDriveBusy ? <Loader2 size={14} className="spin" /> : audioDriveMode === 'upload' ? <HardDriveUpload size={14} /> : <Trash2 size={14} />}{audioDriveMode === 'upload' ? 'Đẩy lên ggdrive' : 'Xóa ở local'}</button></div></div></div></div>}
         </div>
       )}
     </section>
