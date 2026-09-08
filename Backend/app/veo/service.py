@@ -820,6 +820,13 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     if mode == "ingredients" and not ingredient_data_list and start_frame_data:
         ingredient_data_list.append(start_frame_data)
 
+    if mode == "ingredients" and not ingredient_data_list:
+        mode = "text_to_video"
+        provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
+    elif mode == "frames" and not start_frame_data and not end_frame_data:
+        mode = "text_to_video"
+        provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
+
     logger.info(
         "Chuẩn bị Flow request cho job %s: mode=%s, model=%s, provider_model_id=%s, duration=%ds, aspect=%s, has_start_frame=%s, has_end_frame=%s, num_ingredients=%d",
         job.get("job_id"),

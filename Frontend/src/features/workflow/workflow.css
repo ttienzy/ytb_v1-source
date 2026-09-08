@@ -1,0 +1,530 @@
+/* Workflow Canvas & Custom Node Styles - Modern Clean Light Theme */
+
+.content-wrap:has(.workflow-container) {
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 58px);
+}
+
+.workflow-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  background: #f8fafc;
+  color: #1e293b;
+  position: relative;
+  overflow: hidden;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* Canvas Toolbar */
+.workflow-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  z-index: 10;
+  gap: 12px;
+}
+
+.workflow-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workflow-title-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4338ca;
+  background: linear-gradient(135deg, #eef2ff, #f5f3ff);
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #c7d2fe;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.12);
+}
+
+.workflow-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.wf-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  transform: translateY(-1px);
+}
+
+.wf-btn-primary {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  border-color: #4f46e5;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.25);
+}
+
+.wf-btn-primary:hover {
+  background: linear-gradient(135deg, #4f46e5, #4338ca);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+  color: #ffffff;
+}
+
+.wf-btn-accent {
+  background: linear-gradient(135deg, #ec4899, #e11d48);
+  border-color: #e11d48;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(225, 29, 72, 0.25);
+}
+
+.wf-btn-accent:hover {
+  background: linear-gradient(135deg, #db2777, #be123c);
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.35);
+  color: #ffffff;
+}
+
+/* React Flow Canvas Custom Overrides */
+.react-flow__renderer {
+  background: #f8fafc;
+}
+
+.react-flow__controls {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08) !important;
+}
+
+.react-flow__controls-button {
+  background: #ffffff !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  color: #64748b !important;
+  fill: #64748b !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  fill: #0f172a !important;
+}
+
+.react-flow__minimap {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Clean Vibrant Edges */
+.react-flow__edge-path {
+  stroke-width: 2.5px;
+  stroke: #6366f1;
+  filter: drop-shadow(0 1px 3px rgba(99, 102, 241, 0.3));
+  transition: stroke 0.2s, stroke-width 0.2s;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #ec4899;
+  stroke-width: 3.5px;
+  filter: drop-shadow(0 2px 6px rgba(236, 72, 153, 0.5));
+}
+
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 6;
+  animation: edgePulse 20s linear infinite;
+}
+
+@keyframes edgePulse {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Custom Node Base Card - Light Theme */
+.wf-node-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
+  color: #1e293b;
+  font-size: 13px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: visible;
+  position: relative;
+}
+
+.wf-node-card:hover {
+  border-color: #c7d2fe;
+  box-shadow: 0 12px 28px -4px rgba(15, 23, 42, 0.1), 0 4px 8px -2px rgba(99, 102, 241, 0.08);
+}
+
+.wf-node-card.selected {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25), 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+/* Node Header */
+.wf-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+}
+
+.wf-node-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-node-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.wf-icon-purple {
+  background: #f5f3ff;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
+}
+
+.wf-icon-blue {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+.wf-icon-emerald {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.wf-icon-rose {
+  background: #fff1f2;
+  color: #e11d48;
+  border: 1px solid #fecdd3;
+}
+
+.wf-node-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.wf-node-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wf-badge-gpt {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.wf-badge-veo {
+  background: #fff1f2;
+  color: #e11d48;
+  border: 1px solid #fecdd3;
+}
+
+.wf-badge-assets {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+/* Node Content Body */
+.wf-node-body {
+  padding: 12px 14px;
+  background: #ffffff;
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
+}
+
+/* Custom Handles */
+.wf-handle {
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 50% !important;
+  background: #6366f1 !important;
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 0 0 1px #cbd5e1, 0 1px 4px rgba(99, 102, 241, 0.4) !important;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s;
+  z-index: 10;
+}
+
+.wf-handle:hover {
+  transform: scale(1.4);
+  background: #ec4899 !important;
+  box-shadow: 0 0 0 2px #fbcfe8, 0 2px 8px rgba(236, 72, 153, 0.6) !important;
+}
+
+.wf-handle-source {
+  right: -6px !important;
+}
+
+.wf-handle-target {
+  left: -6px !important;
+}
+
+/* Asset Input Node Specifics */
+.wf-asset-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wf-asset-slot {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  min-height: 95px;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+}
+
+.wf-asset-slot:hover {
+  border-color: #6366f1;
+  background: #f1f5f9;
+}
+
+.wf-asset-preview-img {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.wf-asset-slot-label {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+  color: #334155;
+}
+
+.wf-asset-slot-sub {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+/* Scene Video Node Specifics */
+.wf-scene-preview-container {
+  width: 100%;
+  height: 125px;
+  background: #0f172a;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 8px;
+}
+
+.wf-scene-preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wf-render-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  backdrop-filter: blur(4px);
+}
+
+.wf-render-progress-bar {
+  width: 80%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.wf-render-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ec4899, #8b5cf6);
+  transition: width 0.3s ease;
+}
+
+.wf-badge-duration {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(15, 23, 42, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #f1f5f9;
+  backdrop-filter: blur(4px);
+}
+
+/* Textarea & Inputs in Nodes */
+.wf-input-textarea {
+  width: 100%;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 55px;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.wf-input-textarea:focus {
+  background: #ffffff;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+/* Timeline Export Strip */
+.wf-timeline-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8fafc;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  overflow-x: auto;
+}
+
+.wf-timeline-item {
+  width: 60px;
+  height: 45px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Node Header Delete Button */
+.wf-node-del-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wf-node-del-btn:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #dc2626;
+  transform: scale(1.1);
+}
+
+/* Edge Hover Delete Button */
+.wf-edge-btn-wrapper {
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1000;
+}
+
+.react-flow__edge:hover .wf-edge-btn-wrapper,
+.react-flow__edge.selected .wf-edge-btn-wrapper,
+.wf-edge-btn-wrapper.is-selected,
+.wf-edge-btn-wrapper:hover {
+  opacity: 1;
+}
+
+.wf-edge-del-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wf-edge-del-btn:hover {
+  background: #fee2e2;
+  border-color: #f87171;
+  color: #b91c1c;
+  transform: scale(1.2);
+}

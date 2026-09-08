@@ -326,19 +326,28 @@ export function ImageToVideoTab({
     let endImagePath: string | null = null
     const ingredientPaths: string[] = []
     let baseModeLabel = 'Khung hình'
+    let effectiveInputMode: 'frames' | 'ingredients' | 'text_to_video' = inputMode
 
     if (inputMode === 'frames') {
-      if (!firstFrame) return
-      imagePath = firstFrame.path
-      endImagePath = endFrame ? endFrame.path : null
-      baseModeLabel = endFrame ? 'Khung hình (Start → End)' : 'Khung hình (Start)'
+      if (firstFrame) {
+        imagePath = firstFrame.path
+        endImagePath = endFrame ? endFrame.path : null
+        baseModeLabel = endFrame ? 'Khung hình (Start → End)' : 'Khung hình (Start)'
+      } else {
+        effectiveInputMode = 'text_to_video'
+        baseModeLabel = 'Khung hình (chỉ Prompt)'
+      }
     } else {
       if (ingredientSlots.subject) ingredientPaths.push(ingredientSlots.subject.path)
       if (ingredientSlots.scene) ingredientPaths.push(ingredientSlots.scene.path)
       if (ingredientSlots.style) ingredientPaths.push(ingredientSlots.style.path)
-      if (ingredientPaths.length === 0) return
-      imagePath = ingredientPaths[0] // fallback
-      baseModeLabel = `Thành phần (${ingredientPaths.length} ảnh)`
+      if (ingredientPaths.length > 0) {
+        imagePath = ingredientPaths[0] // fallback
+        baseModeLabel = `Thành phần (${ingredientPaths.length} ảnh)`
+      } else {
+        effectiveInputMode = 'text_to_video'
+        baseModeLabel = 'Thành phần (chỉ Prompt)'
+      }
     }
 
     setIsSubmitting(true)
@@ -384,7 +393,7 @@ export function ImageToVideoTab({
             project_id: activeProject.id,
             prompt: prompt.trim(),
             model_display_name: selectedProfile.model_display_name,
-            input_mode: selectedProfile.input_mode,
+            input_mode: effectiveInputMode,
             aspect_ratio: selectedProfile.aspect_ratio,
             duration_seconds: selectedProfile.duration_seconds,
             resolution: selectedProfile.resolution,
@@ -645,7 +654,7 @@ export function ImageToVideoTab({
               <span className="veo-ingr-badge">{ingredientCount}/3</span>
             </div>
             <span className="veo-ingr-help">
-              Google Flow kết hợp tối đa 3 thành phần để tạo tính nhất quán cho cảnh
+              Google Flow kết hợp tối đa 3 thành phần. Mỗi ô đều là tùy chọn: nạp từ 1 đến 3 ảnh bất kỳ (không bắt buộc phải đủ cả 3).
             </span>
           </div>
 
@@ -657,7 +666,10 @@ export function ImageToVideoTab({
                   <User size={13} className="veo-slot-role-icon subject" />
                   <strong>1. Chủ thể / Nhân vật</strong>
                 </div>
-                {ingredientSlots.subject && <Check size={13} className="veo-slot-check" />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="veo-slot-tag optional">Tùy chọn</span>
+                  {ingredientSlots.subject && <Check size={13} className="veo-slot-check" />}
+                </div>
               </div>
               <p className="veo-slot-desc">Giữ khuôn mặt, nhận diện hoặc trang phục nhân vật</p>
 
@@ -715,7 +727,10 @@ export function ImageToVideoTab({
                   <ImageIcon size={13} className="veo-slot-role-icon scene" />
                   <strong>2. Bối cảnh / Không gian</strong>
                 </div>
-                {ingredientSlots.scene && <Check size={13} className="veo-slot-check" />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="veo-slot-tag optional">Tùy chọn</span>
+                  {ingredientSlots.scene && <Check size={13} className="veo-slot-check" />}
+                </div>
               </div>
               <p className="veo-slot-desc">Địa điểm, môi trường xung quanh hoặc khung cảnh</p>
 
@@ -773,7 +788,10 @@ export function ImageToVideoTab({
                   <Palette size={13} className="veo-slot-role-icon style" />
                   <strong>3. Phong cách / Vật thể</strong>
                 </div>
-                {ingredientSlots.style && <Check size={13} className="veo-slot-check" />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="veo-slot-tag optional">Tùy chọn</span>
+                  {ingredientSlots.style && <Check size={13} className="veo-slot-check" />}
+                </div>
               </div>
               <p className="veo-slot-desc">Tông màu mỹ thuật, ánh sáng hoặc đạo cụ chi tiết</p>
 
@@ -1012,9 +1030,7 @@ export function ImageToVideoTab({
           !prompt.trim() ||
           !activeProject ||
           !selectedProfile ||
-          isSubmitting ||
-          (inputMode === 'frames' && !firstFrame) ||
-          (inputMode === 'ingredients' && ingredientCount === 0)
+          isSubmitting
         }
       >
         <Sparkles size={16} />
@@ -1022,15 +1038,19 @@ export function ImageToVideoTab({
           ? 'Vui lòng chọn Project'
           : isSubmitting
             ? `Đang gửi ${variationCount} biến thể...`
-            : inputMode === 'frames' && !firstFrame
-              ? 'Vui lòng chọn Frame bắt đầu'
-              : inputMode === 'ingredients' && ingredientCount === 0
-                ? 'Vui lòng chọn ít nhất 1 ảnh thành phần'
-                : variationCount > 1
-                  ? `Tạo ${variationCount} Biến Thể ${inputMode === 'frames' ? 'Khung Hình' : 'Thành Phần'} · ${(selectedProfile?.credit_cost ?? 0) * variationCount} credits`
-                  : inputMode === 'frames'
+            : variationCount > 1
+              ? `Tạo ${variationCount} Biến Thể ${
+                  inputMode === 'frames'
+                    ? (firstFrame ? 'Khung Hình' : 'từ Prompt')
+                    : (ingredientCount > 0 ? `từ ${ingredientCount} Thành Phần` : 'từ Prompt')
+                } · ${(selectedProfile?.credit_cost ?? 0) * variationCount} credits`
+              : inputMode === 'frames'
+                ? (firstFrame
                     ? `Tạo Video Khung Hình ${endFrame ? '(Start → End)' : '(Start)'} · ${selectedProfile?.credit_cost ?? '?'} credits`
-                    : `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`}
+                    : `Tạo Video từ Prompt · ${selectedProfile?.credit_cost ?? '?'} credits`)
+                : (ingredientCount > 0
+                    ? `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`
+                    : `Tạo Video từ Prompt · ${selectedProfile?.credit_cost ?? '?'} credits`)}
       </button>
 
       {/* Active Tasks Queue */}

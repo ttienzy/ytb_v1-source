@@ -12,6 +12,7 @@ import {
   Video,
   Settings,
   Tv,
+  Workflow as WorkflowIcon,
 } from 'lucide-react'
 
 export const API_URL = 'http://127.0.0.1:8000'
@@ -25,6 +26,7 @@ export const navigation: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard },
   { label: 'Khám Phá Kênh', icon: Compass },
   { label: 'Crawl truyện', icon: BookOpen },
+  { label: 'AI Workflow', icon: WorkflowIcon },
   { label: 'Workflow', icon: PlaySquare },
   { label: 'Veo Studio', icon: Clapperboard },
   { label: 'Video', icon: Video },

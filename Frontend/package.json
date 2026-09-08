@@ -18,6 +18,7 @@
     "package": "npm run build && electron-builder"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.6",
     "lucide-react": "^1.33.0",
     "react": "latest",
     "react-dom": "latest"
@@ -67,7 +68,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

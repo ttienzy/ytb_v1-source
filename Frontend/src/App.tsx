@@ -16,6 +16,7 @@ import { WatermarkPage } from './features/watermark/WatermarkPage'
 import { VideoPage } from './features/video/VideoPage'
 import { VeoStudioPage } from './features/veo-studio/VeoStudioPage'
 import { YouTubePublisherPage } from './features/youtube-publisher/YouTubePublisherPage'
+import { WorkflowPage } from './features/workflow/WorkflowPage'
 
 export function App() {
   const [activePage, setActivePage] = useState('Khám Phá Kênh')
@@ -154,6 +155,8 @@ export function App() {
             <VideoPage />
           ) : activePage === 'Veo Studio' ? (
             <VeoStudioPage setActivePage={setActivePage} />
+          ) : activePage === 'AI Workflow' ? (
+            <WorkflowPage />
           ) : activePage === 'Lên lịch Pippit' ? (
             <PublisherPage />
           ) : activePage === 'Lên lịch Youtube' ? (

@@ -1,11 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
+import http from 'node:http'
 
 let mainWindow: BrowserWindow | null = null
+let routerDashboardWindow: BrowserWindow | null = null
+let routerProcess: ChildProcess | null = null
 const backendProcesses: ChildProcess[] = []
 
 /** Diệt cả cây tiến trình trên Windows / Linux khi app thoát */
@@ -113,9 +116,111 @@ ipcMain.handle('video:save-file', async (_event, payload: { folder: string; name
   return target
 })
 
+function is9RouterRunning(port = 20128): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}`, (res) => {
+      resolve(true)
+      res.resume()
+    })
+    req.on('error', () => resolve(false))
+    req.setTimeout(1200, () => {
+      req.destroy()
+      resolve(false)
+    })
+  })
+}
+
+async function start9Router(port = 20128): Promise<boolean> {
+  if (await is9RouterRunning(port)) return true
+
+  try {
+    const proc = spawn('9router', ['-p', String(port), '-t', '-n'], {
+      windowsHide: true,
+      stdio: 'ignore',
+      shell: true,
+    })
+    proc.on('error', (err) => console.error('[9router] Spawn error:', err))
+    backendProcesses.push(proc)
+    routerProcess = proc
+
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 400))
+      if (await is9RouterRunning(port)) {
+        console.log(`[9router] Ready on port ${port}`)
+        return true
+      }
+    }
+  } catch (err) {
+    console.error('[9router] Failed to start:', err)
+  }
+  return false
+}
+
+ipcMain.handle('open-9router-dashboard', async () => {
+  // 1. Khởi động 9router nếu chưa chạy
+  await start9Router(20128)
+
+  // 2. Nếu cửa sổ đã mở, đưa lên trước
+  if (routerDashboardWindow && !routerDashboardWindow.isDestroyed()) {
+    routerDashboardWindow.show()
+    routerDashboardWindow.focus()
+    return { ok: true }
+  }
+
+  // 3. Mở cửa sổ Electron chuyên biệt cho 9Router
+  routerDashboardWindow = new BrowserWindow({
+    width: 1040,
+    height: 720,
+    minWidth: 800,
+    minHeight: 550,
+    title: '9Router - AI Infrastructure Management',
+    autoHideMenuBar: true,
+    webPreferences: {
+      partition: 'persist:9router',
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  // Các popup OAuth mở bằng trình duyệt hệ thống
+  routerDashboardWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
+  routerDashboardWindow.webContents.on('dom-ready', () => {
+    routerDashboardWindow?.webContents.executeJavaScript(`
+      try {
+        const input = document.querySelector('input[type="password"]');
+        if (input && !input.value) {
+          input.placeholder = '123456 (Mật khẩu mặc định)';
+        }
+      } catch (e) {}
+    `).catch(() => {})
+  })
+
+  routerDashboardWindow.on('closed', () => {
+    routerDashboardWindow = null
+    mainWindow?.webContents.send('9router:updated')
+  })
+
+  await routerDashboardWindow.loadURL('http://localhost:20128/')
+  return { ok: true }
+})
+
+ipcMain.handle('check-9router-status', async () => {
+  const running = await is9RouterRunning(20128)
+  return { running }
+})
+
 app.whenReady().then(() => {
   startProductionBackend()
   createWindow()
+  if (mainWindow) {
+    mainWindow.on('focus', () => {
+      mainWindow?.webContents.send('9router:updated')
+    })
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

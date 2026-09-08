@@ -95,3 +95,23 @@ export type PippitTask = {
   description: string
   failed_reason: string
 }
+
+export type ChatGptState = {
+  endpoint: string
+  api_key_masked: string
+  has_api_key: boolean
+  default_model: string
+  is_connected: boolean
+  last_checked_at?: string | null
+  detected_local_secret?: string | null
+  available_models: string[]
+}
+
+export type ChatGptTestResult = {
+  ok: boolean
+  latency_ms: number
+  reply: string
+  models_count: number
+  available_models: string[]
+  error?: string | null
+}

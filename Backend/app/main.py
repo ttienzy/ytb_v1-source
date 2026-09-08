@@ -30,6 +30,7 @@ from app.watermark.router import router as watermark_router
 from app.publisher_monitor.router import router as monitor_router
 from app.stories.router import router as stories_router
 from app.veo.router import router as veo_router
+from app.ai.chatgpt.router import router as chatgpt_router
 
 
 
@@ -37,6 +38,7 @@ app = FastAPI(title="Google Search Backend", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(health_router)
 app.include_router(gemini_router)
+app.include_router(chatgpt_router)
 app.include_router(voices_router)
 app.include_router(media_router)
 app.include_router(video_router)

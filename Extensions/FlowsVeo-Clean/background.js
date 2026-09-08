@@ -1376,8 +1376,8 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     let endFrameMediaId = null;
     const ingredientMediaIds = [];
 
-    const isFrames = flowRequest?.input_mode === 'frames';
-    const isIngredients = flowRequest?.input_mode === 'ingredients';
+    let isFrames = flowRequest?.input_mode === 'frames';
+    let isIngredients = flowRequest?.input_mode === 'ingredients';
 
     if (isFrames) {
       if (flowRequest.image_base64) {
@@ -1393,6 +1393,11 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
           flowRequest.end_image_mime,
           flowRequest.end_image_name || 'end_frame.png'
         );
+      }
+      if (!startFrameMediaId && !endFrameMediaId) {
+        logActivity('warn', 'Không có khung hình trong request frames, tự động tạo video từ prompt (text_to_video)');
+        isFrames = false;
+        modelId = modelId.replace('_i2v_', '_t2v_').replace('_first_last', '').replace('_first', '');
       }
     } else if (isIngredients) {
       const ingList = Array.isArray(flowRequest?.ingredient_images) ? flowRequest.ingredient_images.slice() : [];
@@ -1417,7 +1422,9 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
         }
       }
       if (ingredientMediaIds.length === 0) {
-        throw new Error('Chế độ Ingredients yêu cầu ít nhất 1 ảnh tham chiếu đã tải lên thành công');
+        logActivity('warn', 'Không có ảnh tham chiếu trong request ingredients, tự động tạo video từ prompt (text_to_video)');
+        isIngredients = false;
+        modelId = modelId.replace('_r2v_', '_t2v_');
       }
     }
 
