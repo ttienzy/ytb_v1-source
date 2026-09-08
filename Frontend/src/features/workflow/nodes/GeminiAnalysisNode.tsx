@@ -10,10 +10,26 @@ interface GeminiAnalysisNodeProps {
 
 export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) {
   const isAnalyzing = data.isAnalyzing ?? false
+  const isStartNode = data.isStartNode ?? false
+  const isOrphan = data.isOrphan ?? false
   const res = data.analysisResult
 
   return (
-    <div className={`wf-node-card ${selected ? 'selected' : ''}`} style={{ width: 350 }}>
+    <div
+      className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
+      style={{ width: 350 }}
+    >
+      {/* Start Node Top Banner */}
+      {isStartNode && (
+        <div className="wf-start-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="wf-start-dot" />
+            <span>⭐ NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
+          </div>
+          <span style={{ fontSize: 9, opacity: 0.9 }}>Root Trigger</span>
+        </div>
+      )}
+
       {/* Top Handle receiving downward wire from ProductAssetsNode */}
       <Handle
         type="target"
@@ -34,7 +50,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
       />
 
       {/* Header */}
-      <div className="wf-node-header" style={{ background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
+      <div className="wf-node-header" style={{ background: isStartNode ? '#ecfdf5' : '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
         <div className="wf-node-title-group">
           <div
             className="wf-node-icon"
@@ -47,7 +63,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
             <Sparkles size={15} />
           </div>
           <div>
-            <div className="wf-node-title" style={{ color: '#064e3b' }}>
+            <div className="wf-node-title" style={{ color: '#064e3b', display: 'flex', alignItems: 'center', gap: 6 }}>
               {data.title || 'Gemini 2.5 • Vision Phân Tích'}
             </div>
             <div style={{ fontSize: 10, color: '#059669', fontWeight: 600 }}>
@@ -56,7 +72,25 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {isOrphan && (
+            <span className="wf-orphan-badge" title="Node này chưa được nối dây với quy trình">
+              Chưa nối
+            </span>
+          )}
+
+          <button
+            type="button"
+            className={`wf-node-star-btn ${isStartNode ? 'is-active' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              data.onSetStartNode?.()
+            }}
+            title={isStartNode ? 'Node chính bắt đầu quy trình' : 'Nhấp để đặt làm Node chính'}
+          >
+            <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
+          </button>
+
           <span
             className="wf-node-badge"
             style={{
@@ -81,6 +115,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
         </div>
       </div>
 
+
       {/* Body */}
       <div className="wf-node-body">
         <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, lineHeight: 1.4 }}>
@@ -95,8 +130,13 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
           disabled={isAnalyzing}
         >
           <Wand2 size={13} className={isAnalyzing ? 'animate-spin' : ''} />
-          {isAnalyzing ? 'Đang soi ảnh & trích xuất USPs...' : 'Phân Tích Với Gemini'}
+          {isAnalyzing
+            ? 'Đang soi ảnh & trích xuất USPs...'
+            : isStartNode
+            ? '⚡ Bắt Đầu Phân Tích (Node Chính)'
+            : 'Phân Tích Với Gemini'}
         </button>
+
 
         {/* Analysis Results Display */}
         {res ? (

@@ -10,6 +10,8 @@ interface GptScriptNodeProps {
 
 export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   const isGenerating = data.isGenerating ?? false
+  const isStartNode = data.isStartNode ?? false
+  const isOrphan = data.isOrphan ?? false
   const scenes = data.scenes || []
 
   const styleChips = [
@@ -24,7 +26,20 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   }
 
   return (
-    <div className={`wf-node-card ${selected ? 'selected' : ''}`} style={{ width: 370 }}>
+    <div
+      className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
+      style={{ width: 370 }}
+    >
+      {isStartNode && (
+        <div className="wf-start-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="wf-start-dot" />
+            <span>⭐ NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
+          </div>
+          <span style={{ fontSize: 9, opacity: 0.9 }}>Root Trigger</span>
+        </div>
+      )}
+
       {/* Top Handle from CharacterSceneNode */}
       <Handle
         type="target"
@@ -68,7 +83,25 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {isOrphan && (
+            <span className="wf-orphan-badge" title="Node này chưa được nối dây với quy trình">
+              Chưa nối
+            </span>
+          )}
+
+          <button
+            type="button"
+            className={`wf-node-star-btn ${isStartNode ? 'is-active' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              data.onSetStartNode?.()
+            }}
+            title={isStartNode ? 'Node chính bắt đầu quy trình' : 'Nhấp để đặt làm Node chính'}
+          >
+            <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
+          </button>
+
           <span
             className="wf-node-badge"
             style={{
@@ -83,6 +116,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             type="button"
             className="wf-node-del-btn"
             onClick={(e) => {
+
               e.stopPropagation()
               data.onDelete?.()
             }}

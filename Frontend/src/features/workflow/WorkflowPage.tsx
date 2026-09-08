@@ -34,8 +34,32 @@ import type { GeneratedSceneItem } from './types'
 function WorkflowCanvas() {
   const [nodes, setNodes] = useState<Node[]>(initialNodes)
   const [edges, setEdges] = useState<Edge[]>(initialEdges)
+  const [startNodeId, setStartNodeId] = useState<string>('node-gemini')
   const [isRunning, setIsRunning] = useState(false)
   const { fitView } = useReactFlow()
+
+  // Track connected nodes to identify loose/orphan nodes
+  const connectedNodeIds = useMemo(() => {
+    const set = new Set<string>()
+    edges.forEach((e) => {
+      set.add(e.source)
+      set.add(e.target)
+    })
+    return set
+  }, [edges])
+
+  const orphanCount = useMemo(() => {
+    return nodes.filter((n) => !connectedNodeIds.has(n.id)).length
+  }, [nodes, connectedNodeIds])
+
+  const handleCleanOrphans = useCallback(() => {
+    setNodes((nds) => nds.filter((n) => connectedNodeIds.has(n.id)))
+  }, [connectedNodeIds])
+
+  const handleSetStartNode = useCallback((nodeId: string) => {
+    setStartNodeId(nodeId)
+  }, [])
+
 
   const nodeTypes = useMemo(
     () => ({
@@ -613,11 +637,16 @@ function WorkflowCanvas() {
     }, 1500)
   }, [isRunning])
 
-  // Attach handlers to nodes (onDelete, onChangeImage, onChange, etc.)
+  // Attach handlers to nodes (onDelete, onChangeImage, onChange, onSetStartNode, etc.)
   const nodesWithHandlers = useMemo(() => {
     return nodes.map((node) => {
+      const isStartNode = node.id === startNodeId
+      const isOrphan = !connectedNodeIds.has(node.id)
       const baseData = {
         ...node.data,
+        isStartNode,
+        isOrphan,
+        onSetStartNode: () => handleSetStartNode(node.id),
         onDelete: () => handleDeleteNode(node.id),
       }
       if (node.type === 'productAssets') {
@@ -678,6 +707,8 @@ function WorkflowCanvas() {
     })
   }, [
     nodes,
+    startNodeId,
+    connectedNodeIds,
     handleProductImageChange,
     handleCharacterSceneChange,
     handleGptPromptChange,
@@ -689,6 +720,7 @@ function WorkflowCanvas() {
     handleRenderFlowScene,
     handleExportFlowVideo,
     handleDeleteNode,
+    handleSetStartNode,
   ])
 
   // Attach onDeleteEdge to edges data
@@ -703,14 +735,21 @@ function WorkflowCanvas() {
     }))
   }, [edges, handleDeleteEdge])
 
+  const startNode = nodes.find((n) => n.id === startNodeId)
+  const startNodeTitle = (startNode?.data?.title as string) || 'Gemini 2.5'
+
   return (
     <div className="workflow-container">
       <WorkflowToolbar
         onAddNode={handleAddNode}
         onResetLayout={handleResetLayout}
         onSimulateRun={handleSimulateRun}
+        onCleanOrphans={handleCleanOrphans}
+        orphanCount={orphanCount}
+        startNodeTitle={startNodeTitle}
         isRunning={isRunning}
       />
+
 
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         <ReactFlow

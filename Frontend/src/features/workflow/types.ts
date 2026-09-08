@@ -20,7 +20,10 @@ export interface ProductAssetsNodeData {
   title?: string
   productName?: string
   images: (string | null)[] // up to 3 images: [main, detail, angle]
+  isStartNode?: boolean
+  isOrphan?: boolean
   onChangeImage?: (index: number, url: string | null) => void
+  onSetStartNode?: () => void
   onDelete?: () => void
 }
 
@@ -28,7 +31,10 @@ export interface CharacterSceneNodeData {
   title?: string
   modelImage?: string | null
   sceneImage?: string | null
+  isStartNode?: boolean
+  isOrphan?: boolean
   onChange?: (key: 'modelImage' | 'sceneImage', value: string | null) => void
+  onSetStartNode?: () => void
   onDelete?: () => void
 }
 
@@ -37,7 +43,10 @@ export interface AssetInputNodeData {
   modelImage?: string | null
   sceneImage?: string | null
   productName?: string
+  isStartNode?: boolean
+  isOrphan?: boolean
   onChange?: (key: 'productImage' | 'modelImage' | 'sceneImage' | 'productName', value: string | null) => void
+  onSetStartNode?: () => void
   onDelete?: () => void
 }
 
@@ -54,10 +63,14 @@ export interface GeminiAnalysisNodeData {
   model: string // e.g. 'gemini-2.5-flash'
   provider: string // 'Google Gemini 2.5'
   isAnalyzing?: boolean
+  isStartNode?: boolean
+  isOrphan?: boolean
   analysisResult?: GeminiAnalysisResult | null
   onAnalyze?: () => void
+  onSetStartNode?: () => void
   onDelete?: () => void
 }
+
 
 export interface GeneratedSceneItem {
   sceneNumber: number
@@ -85,10 +98,13 @@ export interface GptScriptNodeData {
   totalScenes: number
   targetDuration: number // total seconds, e.g. 15
   isGenerating?: boolean
+  isStartNode?: boolean
+  isOrphan?: boolean
   scenes: GeneratedSceneItem[]
   onGenerate?: () => void
   onChangePrompt?: (val: string) => void
   onAddScene?: () => void
+  onSetStartNode?: () => void
   onDelete?: () => void
 }
 
@@ -103,6 +119,8 @@ export interface VeoFlowStudioNodeData {
   renderProgress?: number
   isExporting?: boolean
   exportProgress?: number
+  isStartNode?: boolean
+  isOrphan?: boolean
   finalVideoUrl?: string | null
   refImages?: {
     productUrls?: (string | null)[]
@@ -115,8 +133,10 @@ export interface VeoFlowStudioNodeData {
   onUpdateSceneMotion?: (index: number, motion: string) => void
   onRenderScene?: (index: number) => void
   onExportVideo?: () => void
+  onSetStartNode?: () => void
   onDelete?: () => void
 }
+
 
 export interface SceneVideoNodeData {
   sceneNumber: number
