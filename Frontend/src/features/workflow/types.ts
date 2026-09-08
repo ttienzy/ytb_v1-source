@@ -50,8 +50,17 @@ export interface AssetInputNodeData {
   onDelete?: () => void
 }
 
+export interface GeminiProductClassification {
+  name: string
+  colorVariant?: string
+  mainIngredients?: string
+  coreBenefits?: string
+  experienceScent?: string
+}
+
 export interface GeminiAnalysisResult {
-  productFeatures: string
+  productFeatures: string // Điểm 'ăn tiền' & yếu tố thu hút chung
+  classifications?: GeminiProductClassification[] // Phân loại chi tiết từng sản phẩm
   modelAttributes?: string
   sceneVibe?: string
   keySellingPoints: string[]
@@ -62,14 +71,20 @@ export interface GeminiAnalysisNodeData {
   title: string
   model: string // e.g. 'gemini-2.5-flash'
   provider: string // 'Google Gemini 2.5'
+  prompt?: string
+  connectedImages?: (string | null)[]
+  isConnectedToImages?: boolean
   isAnalyzing?: boolean
   isStartNode?: boolean
   isOrphan?: boolean
   analysisResult?: GeminiAnalysisResult | null
   onAnalyze?: () => void
+  onChangePrompt?: (prompt: string) => void
+  onResetPrompt?: () => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }
+
 
 
 export interface GeneratedSceneItem {
@@ -90,20 +105,37 @@ export interface GeneratedSceneItem {
   }
 }
 
+export interface GptSalesScriptItem {
+  angle: string
+  title?: string
+  content: string
+  hook?: string
+  problem?: string
+  product?: string
+  benefits?: string
+  cta?: string
+  wordCount?: number
+}
+
 export interface GptScriptNodeData {
   title: string
-  prompt: string
-  model: string // e.g. 'cx/gpt-5.5'
-  provider: string // '9Router (Local)'
-  totalScenes: number
-  targetDuration: number // total seconds, e.g. 15
+  prompt?: string
+  model?: string // e.g. 'cx/gpt-5.5'
+  provider?: string // '9Router (Local)'
+  connectedImages?: (string | null)[]
+  isConnectedToImages?: boolean
+  hasProductData?: boolean
+  productDataPreview?: string
   isGenerating?: boolean
   isStartNode?: boolean
   isOrphan?: boolean
-  scenes: GeneratedSceneItem[]
+  salesScripts?: GptSalesScriptItem[]
+  activeScriptIndex?: number
+  scenes?: GeneratedSceneItem[]
   onGenerate?: () => void
   onChangePrompt?: (val: string) => void
-  onAddScene?: () => void
+  onResetPrompt?: () => void
+  onSelectScript?: (index: number) => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }

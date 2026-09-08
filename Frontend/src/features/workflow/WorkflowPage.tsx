@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo, useEffect } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -19,6 +19,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import './workflow.css'
 
+import { API_URL } from '../../shared/constants'
 import { ProductAssetsNode } from './nodes/ProductAssetsNode'
 import { CharacterSceneNode } from './nodes/CharacterSceneNode'
 import { GeminiAnalysisNode } from './nodes/GeminiAnalysisNode'
@@ -206,12 +207,108 @@ function WorkflowCanvas() {
     )
   }, [])
 
-  // Trigger Gemini Analysis directly
-  const handleAnalyzeGemini = useCallback((nodeId: string) => {
+  // Tự động lấy prompt mặc định từ Backend khi mở trang
+  useEffect(() => {
+    fetch(`${API_URL}/api/workflow/prompts/gemini`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.prompt) {
+          setNodes((nds) =>
+            nds.map((n) => {
+              if (n.type === 'geminiAnalysis' && !n.data?.prompt) {
+                return { ...n, data: { ...n.data, prompt: data.prompt } }
+              }
+              return n
+            })
+          )
+        }
+      })
+      .catch((err) => console.warn('Could not load Gemini prompt from Backend:', err))
+
+    fetch(`${API_URL}/api/workflow/prompts/gpt`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.prompt) {
+          setNodes((nds) =>
+            nds.map((n) => {
+              if (n.type === 'gptScript' && !n.data?.prompt) {
+                return { ...n, data: { ...n.data, prompt: data.prompt } }
+              }
+              return n
+            })
+          )
+        }
+      })
+      .catch((err) => console.warn('Could not load GPT prompt from Backend:', err))
+  }, [])
+
+  // Update prompt in Gemini node
+  const handleGeminiPromptChange = useCallback((nodeId: string, prompt: string) => {
     setNodes((nds) =>
-      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: true } } : n))
+      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, prompt } } : n))
     )
-    setTimeout(() => {
+  }, [])
+
+  // Reset prompt to backend default
+  const handleResetGeminiPrompt = useCallback((nodeId: string) => {
+    fetch(`${API_URL}/api/workflow/prompts/gemini`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.prompt) {
+          setNodes((nds) =>
+            nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, prompt: data.prompt } } : n))
+          )
+        }
+      })
+      .catch((err) => console.error(err))
+  }, [])
+
+  // Reset GPT prompt to backend default
+  const handleResetGptPrompt = useCallback((nodeId: string) => {
+    fetch(`${API_URL}/api/workflow/prompts/gpt`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.prompt) {
+          setNodes((nds) =>
+            nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, prompt: data.prompt } } : n))
+          )
+        }
+      })
+      .catch((err) => console.error(err))
+  }, [])
+
+  // Trigger Gemini Analysis directly via Backend API
+  const handleAnalyzeGemini = useCallback(async (nodeId: string) => {
+    let validImages: string[] = []
+    let promptToSend = ''
+
+    setNodes((nds) => {
+      const targetNode = nds.find((n) => n.id === nodeId)
+      promptToSend = (targetNode?.data?.prompt as string) || ''
+      const connectedEdge = edges.find((e) => e.target === nodeId)
+      const sourceNode = connectedEdge ? nds.find((n) => n.id === connectedEdge.source) : null
+      const rawImgs = (sourceNode?.data?.images as (string | null)[]) || []
+      validImages = rawImgs.filter(Boolean) as string[]
+
+      return nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: true } } : n))
+    })
+
+    try {
+      const res = await fetch(`${API_URL}/api/workflow/gemini/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          images: validImages,
+          prompt: promptToSend,
+        }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `Lỗi phân tích Gemini (HTTP ${res.status})`)
+      }
+
+      const data = await res.json()
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
@@ -221,11 +318,11 @@ function WorkflowCanvas() {
                 ...n.data,
                 isAnalyzing: false,
                 analysisResult: {
-                  productFeatures: 'Chất vải dệt cao cấp, thiết kế phom chuẩn tôn dáng, đường may tỉ mỉ.',
-                  modelAttributes: 'Người mẫu trẻ trung, thần thái tự tin, nụ cười rạng rỡ.',
-                  sceneVibe: 'Ánh sáng tự nhiên mềm mại, không gian hiện đại, chiều sâu trường ảnh tốt.',
-                  keySellingPoints: ['Co giãn thoáng mát', 'Chống nhăn cao cấp', 'Phong cách năng động'],
-                  suggestedAngles: ['Macro sợi vải & cúc', 'Toàn cảnh sải bước', 'Cận nụ cười tự tin'],
+                  raw_text: data.raw_text,
+                  productFeatures: data.product_features,
+                  classifications: data.classifications,
+                  keySellingPoints: data.key_selling_points,
+                  suggestedAngles: data.suggested_angles,
                 },
               },
             }
@@ -233,15 +330,65 @@ function WorkflowCanvas() {
           return n
         })
       )
-    }, 1200)
-  }, [])
+    } catch (err: any) {
+      console.error('Gemini Analysis error:', err)
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: false } } : n))
+      )
+      alert(err?.message || 'Có lỗi xảy ra khi phân tích bằng Gemini')
+    }
+  }, [edges])
 
-  // Trigger GPT Script generation directly
-  const handleGenerateGptScript = useCallback((nodeId: string) => {
-    setNodes((nds) =>
-      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: true } } : n))
-    )
-    setTimeout(() => {
+
+  // Trigger GPT Script generation via Backend API
+  const handleGenerateGptScript = useCallback(async (nodeId: string) => {
+    let productDataToSend = ''
+    let validImages: string[] = []
+    let promptToSend = ''
+    let modelToSend = ''
+
+    setNodes((nds) => {
+      const gptNode = nds.find((n) => n.id === nodeId)
+      promptToSend = (gptNode?.data?.prompt as string) || ''
+      modelToSend = (gptNode?.data?.model as string) || 'cx/gpt-5.5'
+
+      // 1. Lấy dữ liệu phân tích từ Gemini (qua edge kết nối hoặc mặc định node-gemini)
+      const geminiEdge = edges.find((e) => e.target === nodeId && (e.source === 'node-gemini' || e.targetHandle === 'from-gemini'))
+      const geminiNode = geminiEdge ? nds.find((n) => n.id === geminiEdge.source) : nds.find((n) => n.id === 'node-gemini')
+      const analysisRes = geminiNode?.data?.analysisResult as any
+      if (analysisRes) {
+        productDataToSend = typeof analysisRes === 'string'
+          ? analysisRes
+          : (analysisRes.raw_text || analysisRes.productFeatures || '')
+      }
+
+      // 2. Lấy ảnh sản phẩm từ Products node (qua edge kết nối hoặc mặc định node-products)
+      const prodEdge = edges.find((e) => e.target === nodeId && (e.source === 'node-products' || e.targetHandle === 'from-products'))
+      const productsNode = prodEdge ? nds.find((n) => n.id === prodEdge.source) : nds.find((n) => n.id === 'node-products')
+      const rawImgs = (productsNode?.data?.images as (string | null)[]) || []
+      validImages = rawImgs.filter(Boolean) as string[]
+
+      return nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: true } } : n))
+    })
+
+    try {
+      const res = await fetch(`${API_URL}/api/workflow/gpt/generate-script`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_data: productDataToSend,
+          images: validImages,
+          prompt_template: promptToSend,
+          model: modelToSend,
+        }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `Lỗi tạo kịch bản GPT (HTTP ${res.status})`)
+      }
+
+      const data = await res.json()
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
@@ -250,40 +397,23 @@ function WorkflowCanvas() {
               data: {
                 ...n.data,
                 isGenerating: false,
-                scenes: [
-                  {
-                    sceneNumber: 1,
-                    title: 'Cận cảnh chất liệu & Logo',
-                    prompt: 'Macro cinematic close up shot of fabric texture and collar stitching, soft natural sunlight, slow tilt up, 4k ultra realistic',
-                    durationSec: 4,
-                    aspectRatio: '9:16',
-                    cameraMotion: 'Slow Tilt Up',
-                  },
-                  {
-                    sceneNumber: 2,
-                    title: 'Người mẫu trải nghiệm sản phẩm',
-                    prompt: 'Full body tracking shot of young handsome model walking gracefully through a bright modern setting, joyful smile, premium look',
-                    durationSec: 8,
-                    aspectRatio: '9:16',
-                    cameraMotion: 'Tracking Shot',
-                  },
-                  {
-                    sceneNumber: 3,
-                    title: 'Tạo dáng chốt & Call To Action',
-                    prompt: 'Medium close-up of model looking directly into camera with confident smile, pointing with finger to click shop now button, cinematic bokeh',
-                    durationSec: 4,
-                    aspectRatio: '9:16',
-                    cameraMotion: 'Slow Push In',
-                  },
-                ],
+                salesScripts: data.scripts || [],
+                rawOutput: data.raw_text,
+                activeScriptIndex: 0,
               },
             }
           }
           return n
         })
       )
-    }, 1200)
-  }, [])
+    } catch (err: any) {
+      console.error('GPT Script generation error:', err)
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false } } : n))
+      )
+      alert(err?.message || 'Có lỗi xảy ra khi tạo kịch bản bằng ChatGPT')
+    }
+  }, [edges])
 
   // Render single scene inside Flow Studio
   const handleRenderFlowScene = useCallback((nodeId: string, sceneIndex: number) => {
@@ -669,20 +799,42 @@ function WorkflowCanvas() {
         }
       }
       if (node.type === 'geminiAnalysis') {
+        const geminiEdge = edges.find((e) => e.target === node.id)
+        const sourceProductNode = geminiEdge ? nodes.find((n) => n.id === geminiEdge.source) : null
+        const connectedProductImages = ((sourceProductNode?.data?.images as (string | null)[]) || [])
+
         return {
           ...node,
           data: {
             ...baseData,
+            isConnectedToImages: !!geminiEdge,
+            connectedImages: connectedProductImages,
+            onChangePrompt: (prompt: string) => handleGeminiPromptChange(node.id, prompt),
+            onResetPrompt: () => handleResetGeminiPrompt(node.id),
             onAnalyze: () => handleAnalyzeGemini(node.id),
           },
         }
       }
       if (node.type === 'gptScript') {
+        const prodEdge = edges.find((e) => e.target === node.id && (e.source === 'node-products' || e.targetHandle === 'from-products'))
+        const sourceProductNode = prodEdge ? nodes.find((n) => n.id === prodEdge.source) : nodes.find((n) => n.id === 'node-products')
+        const connectedProductImages = ((sourceProductNode?.data?.images as (string | null)[]) || [])
+
+        const geminiEdge = edges.find((e) => e.target === node.id && (e.source === 'node-gemini' || e.targetHandle === 'from-gemini'))
+        const sourceGeminiNode = geminiEdge ? nodes.find((n) => n.id === geminiEdge.source) : nodes.find((n) => n.id === 'node-gemini')
+        const hasProductData = !!(sourceGeminiNode?.data?.analysisResult)
+        const geminiRes = sourceGeminiNode?.data?.analysisResult as any
+        const productDataPreview = geminiRes ? (typeof geminiRes === 'string' ? geminiRes : (geminiRes.raw_text || geminiRes.productFeatures || '')) : ''
+
         return {
           ...node,
           data: {
             ...baseData,
+            connectedImages: connectedProductImages,
+            hasProductData,
+            productDataPreview,
             onChangePrompt: (val: string) => handleGptPromptChange(node.id, val),
+            onResetPrompt: () => handleResetGptPrompt(node.id),
             onGenerate: () => handleGenerateGptScript(node.id),
           },
         }
@@ -707,11 +859,15 @@ function WorkflowCanvas() {
     })
   }, [
     nodes,
+    edges,
     startNodeId,
     connectedNodeIds,
     handleProductImageChange,
     handleCharacterSceneChange,
+    handleGeminiPromptChange,
+    handleResetGeminiPrompt,
     handleGptPromptChange,
+    handleResetGptPrompt,
     handleAnalyzeGemini,
     handleGenerateGptScript,
     handleFlowStudioSelectScene,
@@ -722,6 +878,7 @@ function WorkflowCanvas() {
     handleDeleteNode,
     handleSetStartNode,
   ])
+
 
   // Attach onDeleteEdge to edges data
   const edgesWithHandlers = useMemo(() => {

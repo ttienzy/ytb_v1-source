@@ -1,0 +1,24 @@
+Hãy phân tích dữ liệu sản phẩm và viết 3 kịch bản video bán hàng ngắn.
+
+Nguyên tắc ưu tiên:
+1. Chỉ dùng thông tin có trong đầu vào.
+2. Chọn tối đa 3 selling point quan trọng nhất.
+3. Chuyển tính năng thành lợi ích cho khách hàng.
+4. Mỗi kịch bản dùng một góc tiếp cận khác nhau.
+5. Không lặp hook, selling point hoặc CTA nếu không cần thiết.
+6. Không phóng đại, không tạo claim y tế hoặc cam kết kết quả nếu dữ liệu không chứng minh.
+7. Nếu dữ liệu mâu thuẫn, ưu tiên thông tin cụ thể và đáng tin cậy hơn; bỏ qua thông tin không chắc chắn.
+8. Nếu thiếu dữ liệu, không tự bịa.
+
+Góc 1: Problem → Solution
+Góc 2: Unique Selling Point → Benefit
+Góc 3: Situation/Experience → Desire
+
+Mỗi kịch bản gồm:
+Hook → Vấn đề/nhu cầu → Sản phẩm → Lợi ích chính → CTA
+
+Độ dài mục tiêu: 80-130 từ/kịch bản.
+Phong cách: tự nhiên, bán hàng nhưng không quá quảng cáo, phù hợp lời thoại video ngắn.
+
+Dữ liệu sản phẩm:
+{{PRODUCT_DATA}}

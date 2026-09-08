@@ -1,6 +1,20 @@
 import React from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { Sparkles, Eye, Trash2, CheckCircle2, Wand2, Lightbulb, Camera, Tag } from 'lucide-react'
+import {
+  Sparkles,
+  Eye,
+  Trash2,
+  CheckCircle2,
+  Wand2,
+  Lightbulb,
+  Camera,
+  Tag,
+  Link2,
+  Link2Off,
+  Image as ImageIcon,
+  FileText,
+  RotateCcw,
+} from 'lucide-react'
 import type { GeminiAnalysisNodeData } from '../types'
 
 interface GeminiAnalysisNodeProps {
@@ -12,12 +26,21 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
   const isAnalyzing = data.isAnalyzing ?? false
   const isStartNode = data.isStartNode ?? false
   const isOrphan = data.isOrphan ?? false
+  const isConnected = data.isConnectedToImages ?? false
+  const connectedImages = data.connectedImages || []
+  const validImages = connectedImages.filter(Boolean) as string[]
+
+  const promptText = data.prompt ?? ''
   const res = data.analysisResult
+
+  const handleResetPrompt = () => {
+    data.onResetPrompt?.()
+  }
 
   return (
     <div
       className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
-      style={{ width: 350 }}
+      style={{ width: 380 }}
     >
       {/* Start Node Top Banner */}
       {isStartNode && (
@@ -50,7 +73,13 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
       />
 
       {/* Header */}
-      <div className="wf-node-header" style={{ background: isStartNode ? '#ecfdf5' : '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
+      <div
+        className="wf-node-header"
+        style={{
+          background: isStartNode ? '#ecfdf5' : '#f0fdf4',
+          borderBottom: '1px solid #dcfce7',
+        }}
+      >
         <div className="wf-node-title-group">
           <div
             className="wf-node-icon"
@@ -94,12 +123,12 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
           <span
             className="wf-node-badge"
             style={{
-              background: res ? '#ecfdf5' : '#f8fafc',
-              color: res ? '#059669' : '#64748b',
-              border: res ? '1px solid #a7f3d0' : '1px solid #e2e8f0',
+              background: res ? '#ecfdf5' : isConnected ? '#eff6ff' : '#f8fafc',
+              color: res ? '#059669' : isConnected ? '#2563eb' : '#64748b',
+              border: res ? '1px solid #a7f3d0' : isConnected ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
             }}
           >
-            {res ? 'Đã phân tích' : 'Vision AI'}
+            {res ? 'Đã phân tích' : isConnected ? 'Đã nối dây' : 'Vision AI'}
           </span>
           <button
             type="button"
@@ -115,31 +144,229 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
         </div>
       </div>
 
-
       {/* Body */}
-      <div className="wf-node-body">
-        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, lineHeight: 1.4 }}>
-          Tự động trích xuất chất liệu, form dáng, tính năng nổi bật & đề xuất góc quay cho video.
-        </div>
+      <div className="wf-node-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Conditional rendering based on whether wire is connected into Gemini */}
+        {isConnected ? (
+          <>
+            {/* 1. Connected Input Images Strip */}
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '8px 10px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#334155',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                  }}
+                >
+                  <Link2 size={12} color="#2563eb" />
+                  Ảnh nhận từ dây nối ({validImages.length}/3 ảnh):
+                </span>
+                <span
+                  style={{
+                    fontSize: 9,
+                    color: validImages.length > 0 ? '#059669' : '#d97706',
+                    fontWeight: 600,
+                  }}
+                >
+                  {validImages.length > 0 ? '✓ Đã đồng bộ' : 'Chờ nạp ảnh ở khối trên'}
+                </span>
+              </div>
 
-        <button
-          type="button"
-          className="wf-btn wf-btn-primary"
-          style={{ width: '100%', justifyContent: 'center', marginBottom: 10, padding: '7px 12px' }}
-          onClick={() => data.onAnalyze?.()}
-          disabled={isAnalyzing}
-        >
-          <Wand2 size={13} className={isAnalyzing ? 'animate-spin' : ''} />
-          {isAnalyzing
-            ? 'Đang soi ảnh & trích xuất USPs...'
-            : isStartNode
-            ? '⚡ Bắt Đầu Phân Tích (Node Chính)'
-            : 'Phân Tích Với Gemini'}
-        </button>
+              {validImages.length > 0 ? (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {validImages.map((imgUrl, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        position: 'relative',
+                        width: 58,
+                        height: 58,
+                        borderRadius: 6,
+                        overflow: 'hidden',
+                        border: '1px solid #cbd5e1',
+                        background: '#0f172a',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <img
+                        src={imgUrl}
+                        alt={`Ảnh ${idx + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: 2,
+                          left: 2,
+                          background: 'rgba(0,0,0,0.65)',
+                          color: '#fff',
+                          fontSize: 8,
+                          padding: '1px 3px',
+                          borderRadius: 3,
+                          fontWeight: 700,
+                        }}
+                      >
+                        #{idx + 1}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: '#94a3b8',
+                    fontStyle: 'italic',
+                    padding: '4px 0',
+                  }}
+                >
+                  Dây đã nối thành công. Hãy tải ảnh vào khối [Ảnh Sản Phẩm] phía trên để soi ảnh.
+                </div>
+              )}
+            </div>
 
+            {/* 2. Prompt Box on Node Card */}
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 4,
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#334155',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <FileText size={12} color="#10b981" />
+                  Prompt chỉ thị Gemini Vision:
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResetPrompt}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#64748b',
+                    fontSize: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    cursor: 'pointer',
+                  }}
+                  title="Khôi phục prompt mặc định"
+                >
+                  <RotateCcw size={10} /> Mặc định
+                </button>
+              </div>
 
-        {/* Analysis Results Display */}
-        {res ? (
+              <textarea
+                className="wf-input-textarea"
+                rows={4}
+                value={promptText}
+                onChange={(e) => data.onChangePrompt?.(e.target.value)}
+                placeholder="Nhập prompt tra cứu và phân tích sản phẩm..."
+                style={{
+                  fontSize: 11,
+                  lineHeight: 1.45,
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            {/* 3. Analyze Action Button */}
+            <button
+              type="button"
+              className="wf-btn wf-btn-primary"
+              style={{
+                width: '100%',
+                justifyContent: 'center',
+                padding: '7px 12px',
+                background: isStartNode
+                  ? 'linear-gradient(135deg, #059669, #10b981)'
+                  : undefined,
+              }}
+              onClick={() => data.onAnalyze?.()}
+              disabled={isAnalyzing}
+            >
+              <Wand2 size={13} className={isAnalyzing ? 'animate-spin' : ''} />
+              {isAnalyzing
+                ? 'Đang soi ảnh & tra cứu theo prompt...'
+                : isStartNode
+                  ? '⚡ Bắt Đầu Phân Tích (Node Chính)'
+                  : 'Phân Tích Với Gemini'}
+            </button>
+          </>
+        ) : (
+          /* Wire not connected state */
+          <div
+            style={{
+              padding: '14px 12px',
+              background: '#f8fafc',
+              border: '1px dashed #cbd5e1',
+              borderRadius: 8,
+              textAlign: 'center',
+              color: '#64748b',
+              fontSize: 11,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: '#fee2e2',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Link2Off size={16} color="#ef4444" />
+            </div>
+            <div>
+              <strong style={{ color: '#0f172a' }}>Chưa có dây nối nạp ảnh</strong>
+              <div style={{ color: '#64748b', fontSize: 10, marginTop: 2 }}>
+                Hãy kéo dây từ cổng ra của khối <strong>[Ảnh Sản Phẩm]</strong> vào cổng trên của
+                Gemini để nạp ảnh và hiển thị prompt phân tích.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 4. Analysis Results Display */}
+        {res && (
           <div
             style={{
               display: 'flex',
@@ -152,29 +379,65 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
               fontSize: 11,
             }}
           >
+            {/* Điểm 'ăn tiền' và yếu tố thu hút chung */}
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
               <Tag size={13} color="#2563eb" style={{ flexShrink: 0, marginTop: 2 }} />
               <div>
-                <strong style={{ color: '#0f172a' }}>Đặc tính sản phẩm:</strong>
-                <div style={{ color: '#475569', marginTop: 1 }}>{res.productFeatures}</div>
+                <strong style={{ color: '#0f172a' }}>Điểm 'ăn tiền' & Yếu tố thu hút chung:</strong>
+                <div style={{ color: '#475569', marginTop: 1, lineHeight: 1.4 }}>
+                  {res.productFeatures}
+                </div>
               </div>
             </div>
 
-            {res.modelAttributes && (
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                <Eye size={13} color="#7c3aed" style={{ flexShrink: 0, marginTop: 2 }} />
-                <div>
-                  <strong style={{ color: '#0f172a' }}>Người mẫu & Phong thái:</strong>
-                  <div style={{ color: '#475569', marginTop: 1 }}>{res.modelAttributes}</div>
+            {/* Phân loại chi tiết từng sản phẩm */}
+            {res.classifications && res.classifications.length > 0 && (
+              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6 }}>
+                <strong style={{ color: '#0f172a', display: 'block', marginBottom: 4 }}>
+                  Phân loại chi tiết từng sản phẩm:
+                </strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {res.classifications.map((item, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 6,
+                        padding: '6px 8px',
+                        fontSize: 10,
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, color: '#1e3a8a' }}>
+                        • {item.name} {item.colorVariant ? `(${item.colorVariant})` : ''}
+                      </div>
+                      {item.mainIngredients && (
+                        <div style={{ color: '#475569', marginTop: 1 }}>
+                          - Thành phần chính: {item.mainIngredients}
+                        </div>
+                      )}
+                      {item.coreBenefits && (
+                        <div style={{ color: '#475569' }}>
+                          - Công dụng cốt lõi: {item.coreBenefits}
+                        </div>
+                      )}
+                      {item.experienceScent && (
+                        <div style={{ color: '#475569' }}>
+                          - Trải nghiệm/Mùi hương: {item.experienceScent}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
+            {/* USPs / Điểm nhấn kịch bản */}
             {res.keySellingPoints && res.keySellingPoints.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                 <Lightbulb size={13} color="#d97706" style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
-                  <strong style={{ color: '#0f172a' }}>Điểm nhấn bán hàng (USPs):</strong>
+                  <strong style={{ color: '#0f172a' }}>USPs nổi bật:</strong>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
                     {res.keySellingPoints.map((usp, i) => (
                       <span
@@ -218,28 +481,6 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                 <CheckCircle2 size={12} /> Sẵn sàng chuyển giao sang GPT
               </span>
             </div>
-          </div>
-        ) : (
-          <div
-            style={{
-              padding: '16px 12px',
-              textAlign: 'center',
-              background: '#f8fafc',
-              borderRadius: 8,
-              border: '1px dashed #cbd5e1',
-              color: '#94a3b8',
-              fontSize: 11,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <Sparkles size={18} color="#cbd5e1" />
-            <span>Chưa có dữ liệu phân tích.</span>
-            <span style={{ fontSize: 10, color: '#94a3b8' }}>
-              Nạp ảnh sản phẩm và nhấp nút trên để phân tích.
-            </span>
           </div>
         )}
       </div>

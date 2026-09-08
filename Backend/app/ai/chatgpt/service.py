@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import subprocess
 import time
 import webbrowser
@@ -14,9 +15,9 @@ logger = logging.getLogger("ai.chatgpt")
 
 def is_9router_running(port: int = 20128) -> bool:
     try:
-        with httpx.Client(timeout=1.0) as client:
+        with httpx.Client(timeout=1.5, follow_redirects=True) as client:
             r = client.get(f"http://127.0.0.1:{port}")
-            return r.status_code in [200, 404, 401, 302]
+            return r.status_code < 500
     except Exception:
         return False
 
@@ -25,15 +26,16 @@ def ensure_9router_running(port: int = 20128) -> bool:
     if is_9router_running(port):
         return True
     try:
+        bin_path = shutil.which("9router.cmd") or shutil.which("9router") or "9router"
         subprocess.Popen(
-            ["9router", "-p", str(port), "-t", "-n"],
+            f'"{bin_path}" -p {port} -n --skip-update',
             shell=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        for _ in range(15):
-            time.sleep(0.4)
+        for _ in range(25):
+            time.sleep(0.3)
             if is_9router_running(port):
                 return True
     except Exception as e:

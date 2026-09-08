@@ -1,6 +1,18 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { Bot, Sparkles, Wand2, Layers, Trash2, CheckCircle2 } from 'lucide-react'
+import {
+  Bot,
+  Sparkles,
+  Trash2,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  Check,
+  RotateCcw,
+  Camera,
+  FileText,
+  Lightbulb,
+} from 'lucide-react'
 import type { GptScriptNodeData } from '../types'
 
 interface GptScriptNodeProps {
@@ -12,23 +24,25 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   const isGenerating = data.isGenerating ?? false
   const isStartNode = data.isStartNode ?? false
   const isOrphan = data.isOrphan ?? false
-  const scenes = data.scenes || []
+  const connectedImages = data.connectedImages || []
+  const validImages = connectedImages.filter(Boolean) as string[]
+  const hasProductData = data.hasProductData ?? false
+  const salesScripts = data.salesScripts || []
+  const [activeTab, setActiveTab] = useState<number>(0)
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
-  const styleChips = [
-    'TikTok Viral 15s',
-    'Review KOL chân thực',
-    'Điện ảnh Premium',
-    'Flash Sale chốt đơn',
-  ]
-
-  const handleChipClick = (chip: string) => {
-    data.onChangePrompt?.(`Tạo kịch bản video quảng cáo sản phẩm phong cách ${chip}, 3 phân cảnh mượt mà, ánh sáng tự nhiên.`)
+  const handleCopy = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text)
+    setCopiedIndex(idx)
+    setTimeout(() => setCopiedIndex(null), 2000)
   }
+
+  const currentScript = salesScripts[activeTab]
 
   return (
     <div
       className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
-      style={{ width: 370 }}
+      style={{ width: 400 }}
     >
       {isStartNode && (
         <div className="wf-start-banner">
@@ -40,14 +54,24 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
         </div>
       )}
 
-      {/* Top Handle from CharacterSceneNode */}
+      {/* Top Handle from ProductAssetsNode */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="from-products"
+        style={{ left: '30%' }}
+        className="wf-handle wf-handle-target"
+        title="Nhận ảnh sản phẩm từ node Products"
+      />
+
+      {/* Top-Left Handle from CharacterSceneNode */}
       <Handle
         type="target"
         position={Position.Top}
         id="from-charscene"
-        style={{ left: '50%' }}
+        style={{ left: '70%' }}
         className="wf-handle wf-handle-target"
-        title="Nhận ảnh nhân vật từ trên xuống"
+        title="Nhận bối cảnh/nhân vật từ node Character & Scene"
       />
 
       {/* Left Handle from GeminiAnalysisNode */}
@@ -55,9 +79,9 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
         type="target"
         position={Position.Left}
         id="from-gemini"
-        style={{ top: '50%' }}
+        style={{ top: '45%' }}
         className="wf-handle wf-handle-target"
-        title="Nhận phân tích từ Gemini"
+        title="Nhận phân tích USP từ Gemini"
       />
 
       {/* Header */}
@@ -75,7 +99,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </div>
           <div>
             <div className="wf-node-title" style={{ color: '#581c87' }}>
-              {data.title || 'ChatGPT • Kịch Bản Phân Cảnh'}
+              {data.title || 'ChatGPT • Kịch Bản Bán Hàng'}
             </div>
             <div style={{ fontSize: 10, color: '#9333ea', fontWeight: 600 }}>
               {data.model || 'cx/gpt-5.5'} • 9Router Gateway
@@ -105,18 +129,17 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           <span
             className="wf-node-badge"
             style={{
-              background: scenes.length > 0 ? '#f5f3ff' : '#f8fafc',
-              color: scenes.length > 0 ? '#7c3aed' : '#64748b',
-              border: scenes.length > 0 ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+              background: salesScripts.length > 0 ? '#f5f3ff' : '#f8fafc',
+              color: salesScripts.length > 0 ? '#7c3aed' : '#64748b',
+              border: salesScripts.length > 0 ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
             }}
           >
-            {scenes.length} Phân cảnh
+            {salesScripts.length > 0 ? `${salesScripts.length} Kịch bản` : 'Chưa có'}
           </span>
           <button
             type="button"
             className="wf-node-del-btn"
             onClick={(e) => {
-
               e.stopPropagation()
               data.onDelete?.()
             }}
@@ -129,52 +152,106 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
       {/* Body */}
       <div className="wf-node-body">
-        <label style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 4 }}>
-          Yêu cầu & Định hướng kịch bản:
-        </label>
-        <textarea
-          className="wf-input-textarea"
-          rows={3}
-          value={data.prompt}
-          onChange={(e) => data.onChangePrompt?.(e.target.value)}
-          placeholder="Nhập yêu cầu kịch bản (ví dụ: Video 15s cận cảnh sợi dệt vải, người mẫu sải bước tự tin và chốt ưu đãi giảm 30%)..."
-          style={{ minHeight: 60 }}
-        />
+        {/* 1. Connected Product Images Display */}
+        <div style={{ marginBottom: 8, padding: '6px 8px', background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Camera size={12} style={{ color: '#7c3aed' }} />
+              Ảnh sản phẩm nhận từ dây nối ({validImages.length}/3 ảnh):
+            </span>
+            <span style={{ color: validImages.length > 0 ? '#10b981' : '#94a3b8', fontSize: 9 }}>
+              {validImages.length > 0 ? '✓ Đã đồng bộ' : 'Chờ nạp ảnh'}
+            </span>
+          </div>
 
-        {/* Style chips */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '6px 0 10px 0' }}>
-          {styleChips.map((chip) => (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => handleChipClick(chip)}
-              style={{
-                fontSize: 10,
-                padding: '2px 7px',
-                borderRadius: 4,
-                border: '1px solid #e2e8f0',
-                background: '#f8fafc',
-                color: '#475569',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#c084fc'
-                e.currentTarget.style.color = '#7c3aed'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#e2e8f0'
-                e.currentTarget.style.color = '#475569'
-              }}
-            >
-              + {chip}
-            </button>
-          ))}
+          {validImages.length > 0 ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              {validImages.map((imgUrl, i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 5,
+                    overflow: 'hidden',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <img src={imgUrl} alt={`SP ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 10, color: '#94a3b8', fontStyle: 'italic' }}>
+              Dây nối từ khối [Ảnh Sản Phẩm] phía trên để GPT quan sát bao bì thực tế.
+            </div>
+          )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: 11, color: '#64748b' }}>
-            Thời lượng mục tiêu: <strong>{data.targetDuration || 15}s</strong>
+        {/* 2. Connected Gemini Data Status */}
+        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 6, background: hasProductData ? '#ecfdf5' : '#fffbeb', border: hasProductData ? '1px solid #a7f3d0' : '1px solid #fde68a' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+            {hasProductData ? (
+              <>
+                <CheckCircle2 size={13} style={{ color: '#059669' }} />
+                <span style={{ color: '#065f46', fontWeight: 600 }}>Dữ liệu Gemini: Đã nạp USP & Phân loại</span>
+              </>
+            ) : (
+              <>
+                <AlertCircle size={13} style={{ color: '#d97706' }} />
+                <span style={{ color: '#92400e', fontWeight: 500 }}>Chờ Gemini phân tích sản phẩm</span>
+              </>
+            )}
+          </div>
+          <span style={{ fontSize: 9, color: hasProductData ? '#059669' : '#b45309', fontWeight: 600 }}>
+            {hasProductData ? 'Sẵn sàng' : 'Chưa có'}
+          </span>
+        </div>
+
+        {/* 3. Prompt Template input */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <FileText size={12} style={{ color: '#7c3aed' }} />
+            Prompt chỉ thị ChatGPT (3 kịch bản bán hàng):
+          </label>
+          <button
+            type="button"
+            onClick={() => data.onResetPrompt?.()}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#7c3aed',
+              fontSize: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 3,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+            title="Khôi phục prompt kịch bản gốc từ Backend"
+          >
+            <RotateCcw size={10} />
+            Mặc định
+          </button>
+        </div>
+
+        <textarea
+          className="wf-input-textarea"
+          rows={5}
+          value={data.prompt}
+          onChange={(e) => data.onChangePrompt?.(e.target.value)}
+          placeholder="Dán prompt tạo kịch bản tại đây. Sử dụng biến {{PRODUCT_DATA}} để tự động nạp kết quả từ Gemini..."
+          style={{ minHeight: 90, fontSize: 11, fontFamily: 'monospace' }}
+        />
+
+        {/* Action button */}
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: 10, color: '#64748b' }}>
+            Mục tiêu: <strong>3 kịch bản (80-130 từ)</strong>
           </div>
 
           <button
@@ -182,134 +259,160 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             className="wf-btn wf-btn-primary"
             onClick={() => data.onGenerate?.()}
             disabled={isGenerating}
-            style={{ padding: '6px 14px' }}
+            style={{
+              padding: '6px 14px',
+              background: 'linear-gradient(135deg, #9333ea, #7c3aed)',
+              borderColor: '#7c3aed',
+            }}
           >
             <Sparkles size={13} className={isGenerating ? 'animate-spin' : ''} />
-            {isGenerating ? 'Đang soạn kịch bản...' : 'Sinh Kịch Bản Phân Cảnh'}
+            {isGenerating ? 'Đang viết kịch bản...' : 'Sinh 3 Kịch Bản Bán Hàng'}
           </button>
         </div>
 
-        {/* Breakdown Scenes list preview */}
-        {scenes.length > 0 ? (
-          <div style={{ marginTop: 12, borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: '#64748b',
-                marginBottom: 6,
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <span>Phân Cảnh Xuất Ra ({scenes.length}):</span>
-              <span style={{ fontSize: 10, color: '#7c3aed', fontWeight: 600, textTransform: 'none' }}>
-                kịch bản 1, 2, 3 ➔ Flow
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {scenes.map((scene, idx) => (
-                <div
-                  key={scene.sceneNumber || idx}
+        {/* 4. Output Scripts: 3 Tabs / Cards */}
+        {salesScripts.length > 0 ? (
+          <div style={{ marginTop: 12, borderTop: '1px solid #ede9fe', paddingTop: 10 }}>
+            {/* Tabs */}
+            <div style={{ display: 'flex', gap: 4, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
+              {salesScripts.map((s, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setActiveTab(idx)}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 10px',
-                    background: '#f8fafc',
-                    borderRadius: 6,
-                    border: '1px solid #e2e8f0',
-                    fontSize: 11,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '4px 8px',
+                    borderRadius: 5,
+                    border: activeTab === idx ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+                    background: activeTab === idx ? '#f5f3ff' : '#f8fafc',
+                    color: activeTab === idx ? '#7c3aed' : '#64748b',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
-                    <span
-                      style={{
-                        background: '#f5f3ff',
-                        color: '#7c3aed',
-                        fontWeight: 700,
-                        padding: '1px 6px',
-                        borderRadius: 4,
-                        fontSize: 10,
-                        flexShrink: 0,
-                        border: '1px solid #ddd6fe',
-                      }}
-                    >
-                      #{idx + 1}
-                    </span>
-                    <span
-                      style={{
-                        color: '#1e293b',
-                        fontWeight: 500,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {scene.title}
-                    </span>
-                  </div>
-                  <span style={{ color: '#64748b', fontSize: 10, flexShrink: 0 }}>
-                    {scene.durationSec || 4}s • {scene.aspectRatio || '9:16'}
-                  </span>
-                </div>
+                  {s.angle.includes('1') ? '🎬 Góc 1: Vấn đề' : s.angle.includes('2') ? '💎 Góc 2: USP' : '✨ Góc 3: Trải nghiệm'}
+                </button>
               ))}
             </div>
+
+            {/* Active Script Card */}
+            {currentScript && (
+              <div
+                style={{
+                  background: '#faf5ff',
+                  border: '1px solid #e9d5ff',
+                  borderRadius: 6,
+                  padding: '10px',
+                  fontSize: 11,
+                  color: '#334155',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, borderBottom: '1px dashed #d8b4fe', paddingBottom: 4 }}>
+                  <span style={{ fontWeight: 700, color: '#6b21a8' }}>
+                    {currentScript.angle}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 9, background: '#f3e8ff', color: '#7e22ce', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>
+                      ~{currentScript.word_count || currentScript.wordCount || 0} từ
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(currentScript.content, activeTab)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: copiedIndex === activeTab ? '#16a34a' : '#7c3aed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 2,
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}
+                      title="Sao chép kịch bản này"
+                    >
+                      {copiedIndex === activeTab ? <Check size={12} /> : <Copy size={12} />}
+                      {copiedIndex === activeTab ? 'Đã chép' : 'Chép'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Breakdown items if parsed */}
+                {currentScript.hook && (
+                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
+                    <strong style={{ color: '#7e22ce' }}>Hook:</strong> {currentScript.hook}
+                  </div>
+                )}
+                {currentScript.problem && (
+                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
+                    <strong style={{ color: '#7e22ce' }}>Vấn đề:</strong> {currentScript.problem}
+                  </div>
+                )}
+                {currentScript.product && (
+                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
+                    <strong style={{ color: '#7e22ce' }}>Sản phẩm:</strong> {currentScript.product}
+                  </div>
+                )}
+                {currentScript.benefits && (
+                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
+                    <strong style={{ color: '#7e22ce' }}>Lợi ích:</strong> {currentScript.benefits}
+                  </div>
+                )}
+                {currentScript.cta && (
+                  <div style={{ marginBottom: 6, fontSize: 10.5 }}>
+                    <strong style={{ color: '#7e22ce' }}>CTA:</strong> {currentScript.cta}
+                  </div>
+                )}
+
+                {/* Full script text */}
+                <div
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #f3e8ff',
+                    borderRadius: 4,
+                    padding: '8px',
+                    fontSize: 11,
+                    lineHeight: '1.5',
+                    color: '#1e293b',
+                    whiteSpace: 'pre-line',
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {currentScript.content}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div
             style={{
               marginTop: 10,
-              padding: '12px 8px',
+              padding: '10px 8px',
               textAlign: 'center',
               background: '#f8fafc',
               borderRadius: 6,
               border: '1px dashed #cbd5e1',
               color: '#94a3b8',
-              fontSize: 11,
+              fontSize: 10.5,
             }}
           >
-            Chưa tạo phân cảnh. Nhấp 'Sinh Kịch Bản' để tạo 3 cảnh.
+            Chưa có kịch bản. Nhấn <strong>Sinh 3 Kịch Bản Bán Hàng</strong> để tạo.
           </div>
         )}
       </div>
 
-      {/* Output Handles for Scenes branching to Flow */}
+      {/* Output Handle to Veo / Flow Studio */}
       <Handle
         type="source"
         position={Position.Right}
         id="to-flow"
-        style={{ top: '40%' }}
+        style={{ top: '50%' }}
         className="wf-handle wf-handle-source"
-        title="Dòng kịch bản toàn phần sang Flow"
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="scene-1"
-        style={{ top: '65%' }}
-        className="wf-handle wf-handle-source"
-        title="Cảnh #1 sang Flow"
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="scene-2"
-        style={{ top: '75%' }}
-        className="wf-handle wf-handle-source"
-        title="Cảnh #2 sang Flow"
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="scene-3"
-        style={{ top: '85%' }}
-        className="wf-handle wf-handle-source"
-        title="Cảnh #3 sang Flow"
+        title="Dòng kịch bản sang Veo / Flow Studio"
       />
     </div>
   )

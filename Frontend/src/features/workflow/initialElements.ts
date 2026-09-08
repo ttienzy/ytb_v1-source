@@ -22,9 +22,11 @@ export const initialNodes: Node[] = [
       title: 'Gemini 2.5 • Vision Phân Tích',
       model: 'gemini-2.5-flash',
       provider: 'Google Gemini 2.5',
+      prompt: '',
       analysisResult: null,
     },
   },
+
 
   // 3. Character & Scene Node (Top-Center, Model & Background)
   {
@@ -131,6 +133,18 @@ export const initialEdges: Edge[] = [
     type: 'removable',
     animated: true,
     style: { stroke: '#2563eb', strokeWidth: 2.5 },
+  },
+
+  // 1b. Products to ChatGPT Script (Nạp ảnh sản phẩm trực tiếp vào GPT)
+  {
+    id: 'edge-products-gpt',
+    source: 'node-products',
+    sourceHandle: 'to-gpt',
+    target: 'node-gpt',
+    targetHandle: 'from-products',
+    type: 'removable',
+    animated: true,
+    style: { stroke: '#8b5cf6', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
   // 2. Gemini Vision to ChatGPT Script (Horizontal Right)
