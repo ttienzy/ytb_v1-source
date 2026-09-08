@@ -49,10 +49,11 @@ export function StudioPage({
   const [submitting, setSubmitting] = useState(false)
   const [mode, setMode] = useState<'single' | 'batch'>(initialUrls && initialUrls.length > 0 ? 'batch' : 'single')
   const [selectedWorkflow, setSelectedWorkflow] = useState<'youtube' | 'audio'>('youtube')
-  const [audioStories, setAudioStories] = useState<Array<{ story_slug: string; name: string; thumbnail_name?: string | null; chapters: Array<{ chapter_number: number; title: string }> }>>([])
+  const [audioStories, setAudioStories] = useState<Array<{ story_slug: string; name: string; thumbnail_name?: string | null; chapters: Array<{ chapter_number: number; title: string; completed?: boolean; drive_uploaded?: boolean }> }>>([])
   const [audioStory, setAudioStory] = useState('')
   const [audioChapter, setAudioChapter] = useState<number | ''>('')
   const [audioMode, setAudioMode] = useState<'single' | 'batch'>('single')
+  const [audioQueueFilter, setAudioQueueFilter] = useState<'all' | 'completed' | 'pending' | 'active'>('all')
   const [audioBatchQueue, setAudioBatchQueue] = useState<Array<{ story_slug: string; chapter_numbers: number[] }>>([])
   const [audioThumbnailBusy, setAudioThumbnailBusy] = useState(false)
   const [audioVoice, setAudioVoice] = useState('')
@@ -189,6 +190,16 @@ export function StudioPage({
   }, [audioJob?.job_id, audioJob?.status])
 
   const selectedAudioStory = audioStories.find(s => s.story_slug === audioStory)
+  const sortedAudioStories = useMemo(() => [...audioStories].sort((a, b) => {
+    const aDone = a.chapters.length > 0 && a.chapters.every(chapter => chapter.completed)
+    const bDone = b.chapters.length > 0 && b.chapters.every(chapter => chapter.completed)
+    if (aDone !== bDone) return aDone ? 1 : -1
+    return a.name.localeCompare(b.name, 'vi')
+  }), [audioStories])
+  const sortedAudioChapters = useMemo(() => selectedAudioStory ? [...selectedAudioStory.chapters].sort((a, b) => {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1
+    return a.chapter_number - b.chapter_number
+  }) : [], [selectedAudioStory])
   const audioOutputGroups = useMemo(() => {
     const groups = new Map<string, typeof audioOutputs>()
     audioOutputs.forEach(item => {
@@ -240,8 +251,21 @@ export function StudioPage({
       setAudioDriveBusy(false)
     }
   }
-  const completedChaptersForStory = (storyName: string) => new Set(audioOutputs.filter(item => item.story_name === storyName && item.chapter_number).map(item => item.chapter_number as number))
+  const completedChaptersForStory = (storyName: string) => {
+    const story = audioStories.find(item => item.name === storyName)
+    const fromHistory = story?.chapters.filter(chapter => chapter.completed).map(chapter => chapter.chapter_number) || []
+    const fromLocal = audioOutputs.filter(item => item.story_name === storyName && item.chapter_number).map(item => item.chapter_number as number)
+    return new Set([...fromHistory, ...fromLocal])
+  }
   const isStoryCompleted = (story: typeof audioStories[number]) => story.chapters.length > 0 && story.chapters.every(chapter => completedChaptersForStory(story.name).has(chapter.chapter_number))
+  const filteredAudioStories = useMemo(() => sortedAudioStories.filter(story => {
+    const completed = isStoryCompleted(story)
+    const active = audioBatchQueue.some(item => item.story_slug === story.story_slug) || audioJob?.current_story === story.name
+    if (audioQueueFilter === 'completed') return completed
+    if (audioQueueFilter === 'pending') return !completed && !active
+    if (audioQueueFilter === 'active') return active
+    return true
+  }), [sortedAudioStories, audioQueueFilter, audioBatchQueue, audioJob?.current_story, audioOutputs, audioStories])
   const isStoryQueued = (storySlug: string) => audioBatchQueue.some(item => item.story_slug === storySlug)
   const toggleBatchStory = (story: typeof audioStories[number]) => {
     setAudioBatchQueue(current => {
@@ -997,7 +1021,7 @@ export function StudioPage({
           </div>
           <div className="settings-card audio-form-card">
             <div className="audio-form-grid">
-              {audioMode === 'single' ? <><label>Truyện đã crawl<select value={audioStory} onChange={e => { const nextStory = audioStories.find(s => s.story_slug === e.target.value); setAudioStory(e.target.value); setAudioChapter(nextStory?.chapters[0]?.chapter_number ?? '') }}><option value="">-- Chọn truyện --</option>{audioStories.map(s => <option key={s.story_slug} value={s.story_slug}>{s.name} ({s.chapters.length} chương)</option>)}</select></label><label>Chương<select value={audioChapter} onChange={e => setAudioChapter(e.target.value ? Number(e.target.value) : '')}><option value="">-- Chọn chương --</option>{selectedAudioStory?.chapters.map(c => <option key={c.chapter_number} value={c.chapter_number}>Chương {c.chapter_number} · {c.title}</option>)}</select></label></> : <div className="audio-batch-selector"><div className="audio-batch-selector-head"><strong>Queue truyện và chương</strong><small>{audioBatchQueue.length}/10 truyện</small></div><div className="audio-story-queue-list">{audioStories.map(story => { const queued = audioBatchQueue.find(item => item.story_slug === story.story_slug); const completed = completedChaptersForStory(story.name); return <div className={`audio-queue-story ${queued ? 'selected' : ''}`} key={story.story_slug}><div className="audio-queue-story-head"><button type="button" className="audio-queue-story-toggle" onClick={() => toggleBatchStory(story)} disabled={!queued && audioBatchQueue.length >= 10}><input type="checkbox" readOnly checked={Boolean(queued)} /><span>{story.name}</span></button>{isStoryCompleted(story) ? <em className="audio-completed-badge">Đã hoàn thành</em> : <small>{completed.size}/{story.chapters.length} chương đã xong</small>}</div><div className="audio-queue-thumbnail">{story.thumbnail_name ? <img src={`${API_URL}/api/audio/thumbnails/${encodeURIComponent(story.thumbnail_name)}`} alt={`Thumbnail ${story.name}`} /> : <span>Chưa có thumbnail</span>}<label className="secondary-button audio-queue-thumbnail-button">{story.thumbnail_name ? 'Đổi ảnh' : 'Chọn thumbnail'}<input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={audioThumbnailBusy} onChange={e => { const file = e.target.files?.[0]; if (file) uploadAudioThumbnail(story.story_slug, file); e.currentTarget.value = '' }} /></label></div>{queued && <div className="audio-queue-chapters">{story.chapters.map(chapter => <label key={chapter.chapter_number} className={completed.has(chapter.chapter_number) ? 'completed' : ''}><input type="checkbox" checked={queued.chapter_numbers.includes(chapter.chapter_number)} onChange={() => toggleBatchChapter(story.story_slug, chapter.chapter_number)} /><span>Chương {chapter.chapter_number}</span><small>{chapter.title}{completed.has(chapter.chapter_number) ? ' · Đã hoàn thành' : ''}</small></label>)}</div>}</div> })}</div></div>}
+              {audioMode === 'single' ? <><label>Truyện đã crawl<select value={audioStory} onChange={e => { const nextStory = audioStories.find(s => s.story_slug === e.target.value); setAudioStory(e.target.value); setAudioChapter(nextStory?.chapters.find(chapter => !chapter.completed)?.chapter_number ?? nextStory?.chapters[0]?.chapter_number ?? '') }}><option value="">-- Chọn truyện --</option>{sortedAudioStories.map(s => <option key={s.story_slug} value={s.story_slug}>{s.name} ({s.chapters.filter(c => !c.completed).length}/{s.chapters.length} chương chưa làm)</option>)}</select></label><label>Chương<select value={audioChapter} onChange={e => setAudioChapter(e.target.value ? Number(e.target.value) : '')}><option value="">-- Chọn chương --</option>{sortedAudioChapters.map(c => <option key={c.chapter_number} value={c.chapter_number}>Chương {c.chapter_number} · {c.title}{c.completed ? (c.drive_uploaded ? ' · Đã upload Drive' : ' · Đã hoàn thành') : ''}</option>)}</select></label></> : <div className="audio-batch-selector"><div className="audio-batch-selector-head"><strong>Queue truyện và chương</strong><div className="audio-queue-filter"><label htmlFor="audio-status-filter">Trạng thái</label><select id="audio-status-filter" value={audioQueueFilter} onChange={e => setAudioQueueFilter(e.target.value as typeof audioQueueFilter)}><option value="all">Tất cả</option><option value="completed">Đã hoàn thành</option><option value="pending">Chưa hoàn thành</option><option value="active">Đang hoàn thành</option></select><small>{audioBatchQueue.length}/10 truyện</small></div></div><div className="audio-story-queue-list">{filteredAudioStories.map(story => { const queued = audioBatchQueue.find(item => item.story_slug === story.story_slug); const completed = completedChaptersForStory(story.name); return <div className={`audio-queue-story ${queued ? 'selected' : ''}`} key={story.story_slug}><div className="audio-queue-story-head"><button type="button" className="audio-queue-story-toggle" onClick={() => toggleBatchStory(story)} disabled={!queued && audioBatchQueue.length >= 10}><input type="checkbox" readOnly checked={Boolean(queued)} /><span>{story.name}</span></button>{isStoryCompleted(story) ? <em className="audio-completed-badge">Đã hoàn thành</em> : queued ? <em className="audio-active-badge">Đang hoàn thành</em> : <small>{completed.size}/{story.chapters.length} chương đã xong</small>}</div><div className="audio-queue-thumbnail">{story.thumbnail_name ? <img src={`${API_URL}/api/audio/thumbnails/${encodeURIComponent(story.thumbnail_name)}`} alt={`Thumbnail ${story.name}`} /> : <span>Chưa có thumbnail</span>}<label className="secondary-button audio-queue-thumbnail-button">{story.thumbnail_name ? 'Đổi ảnh' : 'Chọn thumbnail'}<input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={audioThumbnailBusy} onChange={e => { const file = e.target.files?.[0]; if (file) uploadAudioThumbnail(story.story_slug, file); e.currentTarget.value = '' }} /></label></div>{queued && <div className="audio-queue-chapters">{[...story.chapters].sort((a, b) => { if (a.completed !== b.completed) return a.completed ? 1 : -1; return a.chapter_number - b.chapter_number }).map(chapter => <label key={chapter.chapter_number} className={completed.has(chapter.chapter_number) ? 'completed' : ''}><input type="checkbox" disabled={completed.has(chapter.chapter_number)} checked={queued.chapter_numbers.includes(chapter.chapter_number)} onChange={() => toggleBatchChapter(story.story_slug, chapter.chapter_number)} /><span>Chương {chapter.chapter_number}</span><small>{chapter.title}{completed.has(chapter.chapter_number) ? (chapter.drive_uploaded ? ' · Đã upload Drive' : ' · Đã hoàn thành') : ''}</small></label>)}</div>}</div> })}</div></div>}
               <label>Giọng đọc<select value={audioVoice} onChange={e => setAudioVoice(e.target.value)}><option value="">-- Chọn giọng --</option>{clonedVoices.length > 0 && <optgroup label="Giọng đã clone">{clonedVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}</optgroup>}{audioPresets.length > 0 && <optgroup label="Preset VieNeu">{audioPresets.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}</optgroup>}</select></label>
               <label>Khổ video<select value={audioAspect} onChange={e => setAudioAspect(e.target.value as '9:16' | '16:9')}><option value="9:16">Dọc 9:16</option><option value="16:9">Ngang 16:9</option></select></label>
             </div>

@@ -89,6 +89,10 @@ def _upload_outputs_worker(job_id: str, body: AudioDriveRequest) -> None:
     for filename, path, meta in _safe_audio_files(body.file_names):
         item = next(entry for entry in job["items"] if entry["file_name"] == filename)
         try:
+            history_item = audio_workflow.find_history_item(meta.get("story_slug"), meta.get("story_name"), meta.get("chapter_number"))
+            if meta.get("drive_uploaded") or (history_item and history_item.get("drive_uploaded")):
+                item.update(status="already_uploaded", percent=100, drive_url=meta.get("drive_url"))
+                continue
             item.update(status="uploading", percent=0)
             def progress(done: int, total: int, current=item) -> None:
                 current["percent"] = min(99, round(done * 100 / total)) if total else 0
@@ -97,6 +101,7 @@ def _upload_outputs_worker(job_id: str, body: AudioDriveRequest) -> None:
             drive_name = _unique_drive_video_name(client, _drive_video_name(meta), story_folder["id"])
             result = client.upload_file_resumable(path, folder_id=story_folder["id"], custom_name=drive_name, progress_callback=progress)
             item.update(status="done", percent=100, drive_url=result.get("web_view_link"))
+            audio_workflow.record_drive_upload(meta, result)
             if body.auto_delete_local:
                 _remove_audio_local(filename, path)
                 item["deleted"] = True
@@ -141,7 +146,10 @@ def delete_audio_outputs_local(body: AudioLocalDeleteRequest):
 
 @router.get("/stories")
 def stories(db: Session = Depends(get_db)):
-    return [{"story_slug": s.story_slug, "name": s.name, "thumbnail_name": audio_workflow.thumbnail_path(s.story_slug).name if audio_workflow.thumbnail_path(s.story_slug) else None, "chapters": [{"chapter_number": c.chapter_number, "title": c.title} for c in db.query(CrawledChapter).filter_by(story_slug=s.story_slug).order_by(CrawledChapter.chapter_number).all()]} for s in db.query(CrawledStory).order_by(CrawledStory.name).all()]
+    history = [item for item in audio_workflow.history() if item.get("status") in {"completed", "uploaded"}]
+    by_key = {(item.get("story_slug"), item.get("chapter_number")): item for item in history}
+    by_name = {(item.get("story_name"), item.get("chapter_number")): item for item in history}
+    return [{"story_slug": s.story_slug, "name": s.name, "thumbnail_name": audio_workflow.thumbnail_path(s.story_slug).name if audio_workflow.thumbnail_path(s.story_slug) else None, "chapters": [{"chapter_number": c.chapter_number, "title": c.title, "completed": bool(by_key.get((s.story_slug, c.chapter_number)) or by_name.get((s.name, c.chapter_number))), "drive_uploaded": bool(((by_key.get((s.story_slug, c.chapter_number)) or by_name.get((s.name, c.chapter_number)) or {}).get("drive_uploaded")))} for c in db.query(CrawledChapter).filter_by(story_slug=s.story_slug).order_by(CrawledChapter.chapter_number).all()]} for s in db.query(CrawledStory).order_by(CrawledStory.name).all()]
 
 @router.post("/stories/{story_slug}/thumbnail")
 async def upload_thumbnail(story_slug: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -200,7 +208,7 @@ async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = De
             if not valid_tracks: raise HTTPException(400, "Bạn đã bật nhạc nền nhưng thư viện nhạc chưa có bài nào hợp lệ.")
             bgm_pool = [Path(t.file_path) for t in valid_tracks]
         job_id = audio_workflow.create("Queue Audio", "Nhiều truyện", total_chapters)
-        queue_data = [(story.name, chapters, audio_workflow.thumbnail_path(story.story_slug)) for story, chapters in queue]
+        queue_data = [(story.story_slug, story.name, chapters, audio_workflow.thumbnail_path(story.story_slug)) for story, chapters in queue]
         background_tasks.add_task(audio_workflow.run_queue, job_id, queue_data, body.voice_id, body.aspect, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload)
         return {"job_id": job_id}
 
@@ -227,9 +235,9 @@ async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = De
         bgm_pool = [Path(t.file_path) for t in valid_tracks]
     job_id = audio_workflow.create(story.name, chapters[0].title, len(chapters))
     if len(chapters) == 1:
-        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload)
+        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload, story.story_slug)
     else:
-        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload)
+        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload, story.story_slug)
     return {"job_id": job_id}
 
 @router.post("/test-run", status_code=202)
