@@ -122,5 +122,6 @@ class GDriveVideoItem(BaseModel):
 class GDriveVideoListResponse(BaseModel):
     folder_id: str
     folder_name: str = ""
+    folders: list[GDriveFolderItem] = []
     videos: list[GDriveVideoItem] = []
     total: int = 0

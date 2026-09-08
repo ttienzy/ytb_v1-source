@@ -57,6 +57,33 @@ const QUICK_HASHTAGS = [
   '#vietnamfood',
 ]
 
+const CAPTION_STATES_KEY = 'pippit_caption_states'
+const CAPTION_TAG_STATES_KEY = 'pippit_caption_tag_states'
+const CAPTION_CUSTOM_TAGS_KEY = 'pippit_caption_custom_tags'
+const CAPTION_HIDDEN_TAGS_KEY = 'pippit_caption_hidden_tags'
+const DEFAULT_CAPTION_STATES: Record<string, string> = {
+  studio: '{filename}\n\n#shorts #reviewamthuc #foodreview #reels',
+  audio: '{filename}\n\n#truyenaudio #truyenhay #kechuyen #shorts',
+}
+const DEFAULT_CAPTION_TAG_STATES: Record<string, string[]> = {
+  studio: ['#shorts', '#reviewamthuc', '#foodreview', '#reels'],
+  audio: ['#truyenaudio', '#truyenhay', '#kechuyen', '#shorts'],
+}
+
+function captionWorkflowLabel(workflow: string): string {
+  const labels: Record<string, string> = { studio: 'Studio', audio: 'Audio' }
+  return labels[workflow] || workflow.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
+}
+
+function resolvePublishedCaption(template: string, filename: string): string {
+  const resolved = template.replace(/{filename}/g, filename)
+  return resolved
+    .split(filename).join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function TikTokIcon({ size = 11 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -173,6 +200,11 @@ export function PublisherPage() {
   const [driveStatus, setDriveStatus] = useState<any>(null)
   const [selectedFolderId, setSelectedFolderId] = useState<string>('')
   const [selectedFolderName, setSelectedFolderName] = useState<string>('')
+  const [activeWorkflow, setActiveWorkflow] = useState('studio')
+  const [childFolders, setChildFolders] = useState<DriveFolder[]>([])
+  const [expandedFolderId, setExpandedFolderId] = useState<string | null>(null)
+  const [expandedFolderVideos, setExpandedFolderVideos] = useState<Record<string, DriveVideo[]>>({})
+  const [isLoadingExpandedFolder, setIsLoadingExpandedFolder] = useState(false)
   const [videos, setVideos] = useState<DriveVideo[]>([])
   const [isLoadingVideos, setIsLoadingVideos] = useState(false)
   const [videoSearch, setVideoSearch] = useState('')
@@ -190,6 +222,12 @@ export function PublisherPage() {
   const [isLoadingModalFolders, setIsLoadingModalFolders] = useState(false)
   const [modalSearch, setModalSearch] = useState('')
   const [customLinkInput, setCustomLinkInput] = useState('')
+  const [showQuickFolderCreate, setShowQuickFolderCreate] = useState(false)
+  const [newQuickWorkflow, setNewQuickWorkflow] = useState('')
+  const [newQuickFolderId, setNewQuickFolderId] = useState('')
+  const [newQuickFolderName, setNewQuickFolderName] = useState('')
+  const [folderPickerWorkflow, setFolderPickerWorkflow] = useState('')
+  const [isCreatingQuickFolder, setIsCreatingQuickFolder] = useState(false)
 
   // Active Facebook Pages state
   const [activePages, setActivePages] = useState<ActiveFacebookPage[]>([])
@@ -276,9 +314,63 @@ export function PublisherPage() {
     } catch {}
   }, [scheduleMode, goldenPreset, goldenSlots, enableRandomJitter])
 
-  const [captionTemplate, setCaptionTemplate] = useState<string>(
-    '{filename}\n\n#shorts #reviewamthuc #foodreview #reels'
-  )
+  const [captionStates, setCaptionStates] = useState<Record<string, string>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CAPTION_STATES_KEY) || '{}')
+      return { ...DEFAULT_CAPTION_STATES, ...(saved && typeof saved === 'object' ? saved : {}) }
+    } catch {
+      return DEFAULT_CAPTION_STATES
+    }
+  })
+  const [captionTagStates, setCaptionTagStates] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CAPTION_TAG_STATES_KEY) || '{}')
+      return { ...DEFAULT_CAPTION_TAG_STATES, ...(saved && typeof saved === 'object' ? saved : {}) }
+    } catch {
+      return DEFAULT_CAPTION_TAG_STATES
+    }
+  })
+  const [customCaptionTags, setCustomCaptionTags] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CAPTION_CUSTOM_TAGS_KEY) || '{}')
+      return saved && typeof saved === 'object' ? saved : {}
+    } catch {
+      return {}
+    }
+  })
+  const [hiddenCaptionTags, setHiddenCaptionTags] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CAPTION_HIDDEN_TAGS_KEY) || '{}')
+      return saved && typeof saved === 'object' ? saved : {}
+    } catch {
+      return {}
+    }
+  })
+  const [selectedCaptionHashtags, setSelectedCaptionHashtags] = useState<string[]>(() => captionTagStates.studio || DEFAULT_CAPTION_TAG_STATES.studio)
+  const [showCaptionStateCreate, setShowCaptionStateCreate] = useState(false)
+  const [newCaptionStateName, setNewCaptionStateName] = useState('')
+  const [newCaptionTag, setNewCaptionTag] = useState('')
+  const [captionTemplate, setCaptionTemplate] = useState<string>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CAPTION_STATES_KEY) || '{}')
+      return saved?.studio || DEFAULT_CAPTION_STATES.studio
+    } catch {
+      return DEFAULT_CAPTION_STATES.studio
+    }
+  })
+
+  useEffect(() => {
+    setCaptionStates(current => {
+      const next = { ...current, [activeWorkflow]: captionTemplate }
+      try { localStorage.setItem(CAPTION_STATES_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    setCaptionTagStates(current => {
+      const next = { ...current, [activeWorkflow]: selectedCaptionHashtags }
+      try { localStorage.setItem(CAPTION_TAG_STATES_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [activeWorkflow, captionTemplate, selectedCaptionHashtags])
 
   // Tasks & Execution state
   const [tasks, setTasks] = useState<PippitScheduleTask[]>([])
@@ -287,6 +379,12 @@ export function PublisherPage() {
   const [submitProgress, setSubmitProgress] = useState<{ current: number; total: number } | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+
+  useEffect(() => {
+    if (!successMessage) return
+    const timer = window.setTimeout(() => setSuccessMessage(''), 4000)
+    return () => window.clearTimeout(timer)
+  }, [successMessage])
 
   // History Filter & Pagination state
   const [historySearch, setHistorySearch] = useState('')
@@ -471,6 +569,8 @@ export function PublisherPage() {
     setErrorMessage('')
     try {
       const res = await api.fetchDriveVideos(folderId, search)
+      setChildFolders(res.folders || [])
+      setExpandedFolderId(null)
       setVideos(res.videos || [])
       if (res.folder_name) {
         setSelectedFolderName(res.folder_name)
@@ -520,7 +620,8 @@ export function PublisherPage() {
     }
   }, [])
 
-  const openFolderPickerModal = () => {
+  const openFolderPickerModal = (workflow = '') => {
+    setFolderPickerWorkflow(workflow)
     setIsFolderModalOpen(true)
     setModalBreadcrumbs([{ id: 'root', name: 'Drive của tôi' }])
     setModalParentId('root')
@@ -547,21 +648,24 @@ export function PublisherPage() {
     loadModalFolders(target.id)
   }
 
-  const handleConfirmSelectModal = () => {
-    if (modalSelectedFolder) {
-      setSelectedFolderId(modalSelectedFolder.id)
-      setSelectedFolderName(modalSelectedFolder.name)
+  const handleConfirmSelectModal = async () => {
+    const selected = modalSelectedFolder || (() => {
+      const current = modalBreadcrumbs[modalBreadcrumbs.length - 1]
+      return current.id !== 'root' ? { id: current.id, name: current.name } : null
+    })()
+    if (selected) {
+      if (folderPickerWorkflow === '__new_workflow__' || folderPickerWorkflow) {
+        setNewQuickFolderId(selected.id)
+        setNewQuickFolderName(selected.name)
+        setFolderPickerWorkflow('')
+        setIsFolderModalOpen(false)
+        return
+      }
+      setSelectedFolderId(selected.id)
+      setSelectedFolderName(selected.name)
       setIsFolderModalOpen(false)
-      loadVideos(modalSelectedFolder.id)
+      loadVideos(selected.id)
       return
-    }
-
-    const currentCrumb = modalBreadcrumbs[modalBreadcrumbs.length - 1]
-    if (currentCrumb.id !== 'root') {
-      setSelectedFolderId(currentCrumb.id)
-      setSelectedFolderName(currentCrumb.name)
-      setIsFolderModalOpen(false)
-      loadVideos(currentCrumb.id)
     }
   }
 
@@ -572,6 +676,85 @@ export function PublisherPage() {
     setIsFolderModalOpen(false)
     loadVideos(customLinkInput.trim())
     setCustomLinkInput('')
+  }
+
+  const selectWorkflowCaptionState = (workflow: string) => {
+    const key = workflow.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_|_$/g, '') || 'studio'
+    setActiveWorkflow(key)
+    setCaptionTemplate(captionStates[key] || DEFAULT_CAPTION_STATES[key] || DEFAULT_CAPTION_STATES.studio)
+    setSelectedCaptionHashtags(captionTagStates[key] || DEFAULT_CAPTION_TAG_STATES[key] || [])
+  }
+
+  const handleQuickWorkflowFolder = (folder: { folder_id?: string; folder_name?: string }, workflow = activeWorkflow) => {
+    if (!folder.folder_id) return
+    selectWorkflowCaptionState(workflow)
+    setSelectedFolderId(folder.folder_id)
+    setSelectedFolderName(folder.folder_name || 'Thư mục workflow')
+    setVideoSearch('')
+    setSelectedVideoIds(new Set())
+    loadVideos(folder.folder_id)
+  }
+
+  const handleOpenChildFolder = async (folder: DriveFolder) => {
+    if (expandedFolderId === folder.id) {
+      setExpandedFolderId(null)
+      return
+    }
+    setExpandedFolderId(folder.id)
+    if (expandedFolderVideos[folder.id]) return
+    setIsLoadingExpandedFolder(true)
+    try {
+      const res = await api.fetchDriveVideos(folder.id)
+      setExpandedFolderVideos(current => ({ ...current, [folder.id]: res.videos || [] }))
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Không thể tải video trong folder con.')
+      setExpandedFolderId(null)
+    } finally {
+      setIsLoadingExpandedFolder(false)
+    }
+  }
+
+  const handleCreateQuickWorkflowFolder = async () => {
+    const workflow = newQuickWorkflow.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_|_$/g, '')
+    if (!workflow || !newQuickFolderId) {
+      setErrorMessage('Vui lòng nhập tên workflow và chọn folder có sẵn trên Google Drive.')
+      return
+    }
+    setIsCreatingQuickFolder(true)
+    setErrorMessage('')
+    try {
+      const response = await fetch(`${API_URL}/api/gdrive/workflow-folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflow, folder_id: newQuickFolderId, folder_name: newQuickFolderName }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || 'Không thể tạo folder workflow.')
+      setDriveStatus(data)
+      const folder = data.workflow_folders?.[workflow]
+      if (folder?.folder_id) handleQuickWorkflowFolder(folder, workflow)
+      setShowQuickFolderCreate(false)
+      setNewQuickWorkflow('')
+      setNewQuickFolderName('')
+      setSuccessMessage(`Đã thêm workflow ${workflow} dùng folder ${folder?.folder_name || newQuickFolderName}.`)
+    } catch (error: any) {
+      setErrorMessage(error.message || 'Không thể tạo folder workflow.')
+    } finally {
+      setIsCreatingQuickFolder(false)
+    }
+  }
+
+  const openWorkflowFolderPicker = () => {
+    openFolderPickerModal('__new_workflow__')
+  }
+
+  const workflowFolderLabel = (workflow: string) => {
+    const labels: Record<string, string> = {
+      audio: 'Audio',
+      studio: 'Studio',
+      watermark: 'Watermark',
+    }
+    return labels[workflow] || workflow.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
   }
 
   // Filtered Drive videos (Search + Published Platform filter)
@@ -734,7 +917,8 @@ export function PublisherPage() {
 
   // Computed timeline schedule slots with individual overrides
   const scheduledSlots = useMemo<ScheduleSlot[]>(() => {
-    const selectedVideosList = videos.filter(v => selectedVideoIds.has(v.id))
+    const loadedVideos = [...videos, ...Object.values(expandedFolderVideos).flat()]
+    const selectedVideosList = loadedVideos.filter(v => selectedVideoIds.has(v.id))
     if (selectedVideosList.length === 0 || activePages.length === 0 || selectedPageIds.size === 0) {
       return []
     }
@@ -765,7 +949,7 @@ export function PublisherPage() {
           pagesList[0]
 
         const cleanTitle = cleanTitleFromName(video.name)
-        const caption = captionTemplate.replace(/{filename}/g, cleanTitle)
+        const caption = resolvePublishedCaption(captionTemplate, cleanTitle)
 
         return {
           file_id: video.id,
@@ -836,7 +1020,7 @@ export function PublisherPage() {
           pagesList[idx % pagesList.length] ||
           pagesList[0]
         const cleanTitle = cleanTitleFromName(video.name)
-        const caption = captionTemplate.replace(/{filename}/g, cleanTitle)
+        const caption = resolvePublishedCaption(captionTemplate, cleanTitle)
 
         return {
           file_id: video.id,
@@ -887,7 +1071,7 @@ export function PublisherPage() {
         pagesList[0]
 
       const cleanTitle = cleanTitleFromName(video.name)
-      const caption = captionTemplate.replace(/{filename}/g, cleanTitle)
+      const caption = resolvePublishedCaption(captionTemplate, cleanTitle)
 
       return {
         file_id: video.id,
@@ -903,6 +1087,7 @@ export function PublisherPage() {
     })
   }, [
     videos,
+    expandedFolderVideos,
     selectedVideoIds,
     activePages,
     selectedPageIds,
@@ -993,10 +1178,81 @@ export function PublisherPage() {
   }
 
   const handleAddHashtag = (tag: string) => {
+    const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const isSelected = selectedCaptionHashtags.includes(tag)
+    const isInCaption = captionTemplate.includes(tag)
+    const shouldRemove = isSelected || isInCaption
+    setSelectedCaptionHashtags(prev => shouldRemove ? prev.filter(item => item !== tag) : [...prev, tag])
     setCaptionTemplate(prev => {
-      if (prev.includes(tag)) return prev
+      if (shouldRemove) {
+        return prev
+          .replace(new RegExp(`\\s*${escaped}(?=\\s|$)`, 'gi'), '')
+          .replace(/[ \t]{2,}/g, ' ')
+          .replace(/[ \t]+\n/g, '\n')
+          .trimEnd()
+      }
       return `${prev.trim()} ${tag}`
     })
+  }
+
+  const removeCustomCaptionTag = (tag: string) => {
+    setHiddenCaptionTags(current => {
+      const next = { ...current, [activeWorkflow]: Array.from(new Set([...(current[activeWorkflow] || []), tag])) }
+      try { localStorage.setItem(CAPTION_HIDDEN_TAGS_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    setCustomCaptionTags(current => {
+      const next = { ...current, [activeWorkflow]: (current[activeWorkflow] || []).filter(item => item !== tag) }
+      try { localStorage.setItem(CAPTION_CUSTOM_TAGS_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    if (selectedCaptionHashtags.includes(tag) || captionTemplate.includes(tag)) handleAddHashtag(tag)
+  }
+
+  const createCaptionTag = () => {
+    const raw = newCaptionTag.trim().replace(/\s+/g, '')
+    if (!raw) return
+    const tag = raw.startsWith('#') ? raw : `#${raw}`
+    setHiddenCaptionTags(current => {
+      const next = { ...current, [activeWorkflow]: (current[activeWorkflow] || []).filter(item => item !== tag) }
+      try { localStorage.setItem(CAPTION_HIDDEN_TAGS_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    setCustomCaptionTags(current => {
+      const next = { ...current, [activeWorkflow]: Array.from(new Set([...(current[activeWorkflow] || []), tag])) }
+      try { localStorage.setItem(CAPTION_CUSTOM_TAGS_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    setNewCaptionTag('')
+  }
+
+  const saveCaptionState = () => {
+    const next = { ...captionStates, [activeWorkflow]: captionTemplate }
+    const nextTags = { ...captionTagStates, [activeWorkflow]: selectedCaptionHashtags }
+    setCaptionStates(next)
+    setCaptionTagStates(nextTags)
+    try { localStorage.setItem(CAPTION_STATES_KEY, JSON.stringify(next)) } catch {}
+    try { localStorage.setItem(CAPTION_TAG_STATES_KEY, JSON.stringify(nextTags)) } catch {}
+    setSuccessMessage(`Đã lưu state Caption cho workflow ${captionWorkflowLabel(activeWorkflow)}.`)
+  }
+
+  const createCaptionState = () => {
+    const key = newCaptionStateName.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_|_$/g, '')
+    if (!key) return
+    const template = captionStates[key] || DEFAULT_CAPTION_STATES[key] || DEFAULT_CAPTION_STATES.studio
+    const tags = captionTagStates[key] || DEFAULT_CAPTION_TAG_STATES[key] || []
+    const next = { ...captionStates, [key]: template }
+    const nextTags = { ...captionTagStates, [key]: tags }
+    setCaptionStates(next)
+    setCaptionTagStates(nextTags)
+    setActiveWorkflow(key)
+    setCaptionTemplate(template)
+    setSelectedCaptionHashtags(tags)
+    try { localStorage.setItem(CAPTION_STATES_KEY, JSON.stringify(next)) } catch {}
+    try { localStorage.setItem(CAPTION_TAG_STATES_KEY, JSON.stringify(nextTags)) } catch {}
+    setNewCaptionStateName('')
+    setShowCaptionStateCreate(false)
+    setSuccessMessage(`Đã tạo state cho workflow ${captionWorkflowLabel(key)}.`)
   }
 
   return (
@@ -1129,6 +1385,66 @@ export function PublisherPage() {
                 <Folder size={13} /> Đổi thư mục
               </button>
             </div>
+
+            {driveStatus?.connected && (
+              <div className="pub-quick-workflow-folders">
+                <span className="pub-quick-workflow-label">Chọn nhanh folder mặc định:</span>
+                {driveStatus?.folder_id && (
+                  <button
+                    type="button"
+                    className={`pub-quick-workflow-btn ${selectedFolderId === driveStatus.folder_id ? 'active' : ''}`}
+                    onClick={() => handleQuickWorkflowFolder({ folder_id: driveStatus.folder_id, folder_name: driveStatus.folder_name || 'Folder mặc định' }, 'studio')}
+                    title="Mở folder mặc định gốc"
+                  >
+                    <Folder size={13} /> Folder mặc định
+                  </button>
+                )}
+                {Object.entries(driveStatus?.workflow_folders || {})
+                  .filter(([, folder]: [string, any]) => folder?.folder_id)
+                  .map(([workflow, folder]) => (
+                    <button
+                      key={workflow}
+                      type="button"
+                      className={`pub-quick-workflow-btn ${selectedFolderId === (folder as any).folder_id ? 'active' : ''}`}
+                      onClick={() => handleQuickWorkflowFolder(folder as any, workflow)}
+                      title={`Mở folder ${workflowFolderLabel(workflow)}`}
+                    >
+                      <Folder size={13} /> Chọn {workflowFolderLabel(workflow)} Folder
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  className="pub-quick-workflow-btn pub-quick-workflow-add"
+                  onClick={() => setShowQuickFolderCreate(value => !value)}
+                >
+                  <Plus size={13} /> Tạo folder workflow
+                </button>
+              </div>
+            )}
+
+            {showQuickFolderCreate && driveStatus?.connected && (
+              <div className="pub-quick-workflow-create">
+                <input
+                  value={newQuickWorkflow}
+                  onChange={e => setNewQuickWorkflow(e.target.value)}
+                  placeholder="Tên workflow (VD: Audio)"
+                  disabled={isCreatingQuickFolder}
+                />
+                <input
+                  value={newQuickFolderName}
+                  readOnly
+                  placeholder="Chưa chọn folder Drive"
+                  disabled={isCreatingQuickFolder}
+                />
+                <button type="button" className="chrome-button" onClick={openWorkflowFolderPicker} disabled={isCreatingQuickFolder}>
+                  <Folder size={13} /> Chọn folder Drive
+                </button>
+                <button type="button" className="primary-button" onClick={handleCreateQuickWorkflowFolder} disabled={isCreatingQuickFolder}>
+                  {isCreatingQuickFolder ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Lưu workflow
+                </button>
+                <button type="button" className="chrome-button" onClick={() => setShowQuickFolderCreate(false)} disabled={isCreatingQuickFolder}>Hủy</button>
+              </div>
+            )}
 
             {/* Video Search Filter Bar */}
             <div className="pub-search-box" style={{ marginTop: 10 }}>
@@ -1292,13 +1608,40 @@ export function PublisherPage() {
                   <Loader2 size={24} className="spin" style={{ color: '#4f46e5' }} />
                   <p style={{ marginTop: 8 }}>Đang tải video từ Google Drive...</p>
                 </div>
-              ) : filteredVideos.length === 0 ? (
+              ) : filteredVideos.length === 0 && childFolders.length === 0 ? (
                 <div className="pub-empty-box">
                   <FileVideo size={28} style={{ color: '#94a3b8' }} />
                   <p style={{ marginTop: 8 }}>Không tìm thấy file video MP4 nào phù hợp với bộ lọc.</p>
                 </div>
               ) : (
-                filteredVideos.map(video => {
+                <>
+                {childFolders.map(folder => {
+                  const isExpanded = expandedFolderId === folder.id
+                  const folderVideos = expandedFolderVideos[folder.id] || []
+                  return <div key={folder.id}>
+                    <div className={`pub-drive-folder-card ${isExpanded ? 'pub-drive-folder-card-expanded' : ''}`} onClick={() => handleOpenChildFolder(folder)}>
+                      <div className="pub-drive-folder-card-icon"><FolderOpen size={22} /></div>
+                      <div className="pub-drive-folder-card-info">
+                        <strong>{folder.name}</strong>
+                        <span>{isExpanded ? `${folderVideos.length} video · Bấm để thu gọn` : 'Folder con · Bấm để xổ video'}</span>
+                      </div>
+                      {isLoadingExpandedFolder && isExpanded ? <Loader2 size={17} className="spin pub-drive-folder-card-arrow" /> : <ChevronRight size={17} className="pub-drive-folder-card-arrow" />}
+                    </div>
+                    {isExpanded && folderVideos.length > 0 && <div className="pub-drive-folder-video-list">
+                      {folderVideos.map(video => {
+                        const isSelected = selectedVideoIds.has(video.id)
+                        return <div key={video.id} className={`pub-drive-child-video ${isSelected ? 'selected' : ''}`} onClick={() => handleToggleVideo(video.id)}>
+                          <input type="checkbox" checked={isSelected} onChange={() => handleToggleVideo(video.id)} onClick={event => event.stopPropagation()} />
+                          <FileVideo size={17} />
+                          <span>{cleanTitleFromName(video.name)}</span>
+                          <small>{formatDuration(video.duration_seconds)} · {fmtBytes(video.size_bytes)}</small>
+                        </div>
+                      })}
+                    </div>}
+                    {isExpanded && !isLoadingExpandedFolder && folderVideos.length === 0 && <div className="pub-drive-folder-empty">Folder này chưa có video MP4 trực tiếp.</div>}
+                  </div>
+                })}
+                {filteredVideos.map(video => {
                   const isSelected = selectedVideoIds.has(video.id)
                   const cleanName = cleanTitleFromName(video.name)
                   const selectedPageList = activePages.filter(p => selectedPageIds.has(p.page_id))
@@ -1472,7 +1815,8 @@ export function PublisherPage() {
                       )}
                     </div>
                   )
-                })
+                })}
+                </>
               )}
             </div>
           </div>
@@ -1761,15 +2105,19 @@ export function PublisherPage() {
                       <label className="pub-label">
                         <Tag size={13} /> Mẫu Caption & Tiêu đề:
                       </label>
-                      <button
-                        type="button"
-                        className="pub-tag-btn"
-                        onClick={() => setCaptionTemplate(prev => `${prev} {filename}`)}
-                        title="Chèn biến tên video tự động"
-                      >
-                        + {'{filename}'}
-                      </button>
+                      <div className="pub-caption-state-actions">
+                        <button type="button" className="pub-tag-btn" onClick={() => setShowCaptionStateCreate(value => !value)}>+ Tạo state</button>
+                        <button type="button" className="pub-tag-btn" onClick={saveCaptionState} title="Lưu mẫu Caption riêng cho workflow này">Lưu state</button>
+                        <button type="button" className="pub-tag-btn" onClick={() => setCaptionTemplate(prev => prev.includes('{filename}') ? prev : `${prev} {filename}`)} title="Chèn biến tên video tự động">+ {'{filename}'}</button>
+                      </div>
+                    <div className="pub-caption-state-switcher" title="Áp dụng state đã lưu">
+                      {Object.keys(captionStates).sort().map(key => <button key={key} type="button" data-workflow={key} className={`pub-caption-state-pill ${activeWorkflow === key ? 'active' : ''}`} onClick={() => selectWorkflowCaptionState(key)}>{captionWorkflowLabel(key)}</button>)}
                     </div>
+                    </div>
+                    {showCaptionStateCreate && <div className="pub-caption-state-create">
+                      <input value={newCaptionStateName} onChange={e => setNewCaptionStateName(e.target.value)} placeholder="Tên workflow/state (VD: Audio)" onKeyDown={e => { if (e.key === 'Enter') createCaptionState() }} />
+                      <button type="button" className="pub-tag-btn" onClick={createCaptionState} disabled={!newCaptionStateName.trim()}>Tạo</button>
+                    </div>}
                     <textarea
                       rows={2}
                       value={captionTemplate}
@@ -1778,16 +2126,21 @@ export function PublisherPage() {
                       placeholder="Nhập nội dung bài viết..."
                     />
                     <div className="pub-hashtag-chips">
-                      {QUICK_HASHTAGS.map(tag => (
+                      {Array.from(new Set([...QUICK_HASHTAGS, ...selectedCaptionHashtags, ...(customCaptionTags[activeWorkflow] || [])])).filter(tag => !(hiddenCaptionTags[activeWorkflow] || []).includes(tag)).map(tag => (
                         <span
                           key={tag}
-                          className="pub-hash-chip"
+                          className={`pub-hash-chip ${selectedCaptionHashtags.includes(tag) && captionTemplate.includes(tag) ? 'pub-hash-chip-active' : ''}`}
                           onClick={() => handleAddHashtag(tag)}
                         >
                           <Hash size={11} />
                           {tag.replace('#', '')}
+                          <button type="button" className="pub-hash-chip-remove" onClick={event => { event.stopPropagation(); removeCustomCaptionTag(tag) }} aria-label={`Xóa ${tag}`}>×</button>
                         </span>
                       ))}
+                      <div className="pub-custom-tag-create">
+                        <input value={newCaptionTag} onChange={e => setNewCaptionTag(e.target.value)} placeholder="#tag_moi" onKeyDown={e => { if (e.key === 'Enter') createCaptionTag() }} />
+                        <button type="button" className="pub-hash-chip pub-custom-tag-button" onClick={createCaptionTag} disabled={!newCaptionTag.trim()}>+ Tạo tag</button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2740,7 +3093,7 @@ export function PublisherPage() {
                 if (!currentSlot) return null
                 const targetPage =
                   activePages.find(p => p.page_id === currentSlot.page_id) || activePages[0]
-                const resolvedCaption = captionTemplate.replace(/{filename}/g, currentSlot.title)
+                const resolvedCaption = resolvePublishedCaption(captionTemplate, currentSlot.title)
                 const scheduleDate = new Date(currentSlot.schedule_time_ms)
                 const formattedDate = scheduleDate.toLocaleString('vi-VN', {
                   weekday: 'long',
@@ -2865,7 +3218,7 @@ export function PublisherPage() {
                   onClick={() => {
                     const cur = scheduledSlots[previewSlotIndex]
                     if (cur) {
-                      const txt = captionTemplate.replace(/{filename}/g, cur.title)
+                      const txt = resolvePublishedCaption(captionTemplate, cur.title)
                       handleCopyPreviewCaption(txt)
                     }
                   }}

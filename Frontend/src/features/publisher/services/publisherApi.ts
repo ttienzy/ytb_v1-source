@@ -2,6 +2,7 @@ import { API_URL } from '../../../shared/constants'
 import type {
   BulkScheduleResponse,
   DriveFolder,
+  DriveVideoList,
   DriveVideo,
   PippitAccount,
   PippitScheduleTask,
@@ -29,7 +30,7 @@ export async function fetchDriveFolders(
 export async function fetchDriveVideos(
   folderId?: string,
   query?: string
-): Promise<{ folder_id: string; folder_name: string; videos: DriveVideo[]; total: number }> {
+): Promise<DriveVideoList> {
   const params = new URLSearchParams()
   if (folderId) params.append('folder_id', folderId)
   if (query) params.append('q', query)
