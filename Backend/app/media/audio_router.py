@@ -22,6 +22,8 @@ class RunBody(BaseModel):
     aspect: str = "9:16"
     bgm_random: bool = True
     bgm_enabled: bool = True
+    auto_upload_drive: bool = False
+    delete_local_after_upload: bool = False
 
 class TestRunBody(BaseModel):
     text: str
@@ -199,7 +201,7 @@ async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = De
             bgm_pool = [Path(t.file_path) for t in valid_tracks]
         job_id = audio_workflow.create("Queue Audio", "Nhiều truyện", total_chapters)
         queue_data = [(story.name, chapters, audio_workflow.thumbnail_path(story.story_slug)) for story, chapters in queue]
-        background_tasks.add_task(audio_workflow.run_queue, job_id, queue_data, body.voice_id, body.aspect, bgm_pool)
+        background_tasks.add_task(audio_workflow.run_queue, job_id, queue_data, body.voice_id, body.aspect, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload)
         return {"job_id": job_id}
 
     story = db.get(CrawledStory, body.story_slug)
@@ -225,9 +227,9 @@ async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = De
         bgm_pool = [Path(t.file_path) for t in valid_tracks]
     job_id = audio_workflow.create(story.name, chapters[0].title, len(chapters))
     if len(chapters) == 1:
-        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool)
+        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload)
     else:
-        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect, thumbnail, bgm_pool)
+        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload)
     return {"job_id": job_id}
 
 @router.post("/test-run", status_code=202)

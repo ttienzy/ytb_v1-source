@@ -86,8 +86,27 @@ def _mux(video: Path, audio: Path, output: Path, bgm: Path | None = None, bgm_vo
     if result.returncode or not output.exists() or not output.stat().st_size:
         raise RuntimeError((result.stderr or "Không thể ghép voice vào video.")[-1200:])
 
+def _upload_audio_output(output: Path, story_name: str, chapter_number: int | None) -> dict:
+    from app.externals.gdrive import service as gdrive_service
+    cfg = gdrive_service.get_gdrive_config()
+    client = gdrive_service.get_client()
+    if not client:
+        raise RuntimeError("Google Drive chưa được kết nối.")
+    root_id = gdrive_service.get_workflow_folder_id("audio") or cfg.get("folder_id")
+    if not root_id:
+        raise RuntimeError("Chưa cấu hình thư mục Google Drive cho Audio.")
+    story_folder = client.get_or_create_child_folder(story_name or "Video Audio khác", root_id)
+    safe_story = _safe_name(story_name or "Video_Audio")
+    drive_name = f"{safe_story}_Phần_{chapter_number or 1}.mp4"
+    stem, suffix = Path(drive_name).stem, Path(drive_name).suffix
+    index = 1
+    while client.find_file_in_folder(drive_name, story_folder["id"]):
+        drive_name = f"{stem} ({index}){suffix}"
+        index += 1
+    return client.upload_file_resumable(output, folder_id=story_folder["id"], custom_name=drive_name)
 
-async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, start: int = 0, end: int = 100) -> str:
+
+async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, start: int = 0, end: int = 100, auto_upload_drive: bool = False, delete_local_after_upload: bool = False) -> str:
     voice_file: Path | None = None
     merged_file: Path | None = None
     try:
@@ -132,22 +151,21 @@ async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: 
             AUDIO_THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
             (AUDIO_THUMBNAIL_DIR / output_thumbnail_name).write_bytes(labeled_thumbnail.read_bytes())
         metadata = {"file_name": output.name, "name": output.name, "story_name": story_name, "chapter_number": chapter_number, "chapter_title": chapter_title, "thumbnail_name": output_thumbnail_name, "duration_sec": ffprobe_duration(output), "created_at": datetime.now().isoformat()}
-        # Sao lưu video Audio vào folder riêng trên Drive nếu đã kết nối và bật tự động upload.
-        try:
-            from app.externals.gdrive import service as gdrive_service
-            cfg = gdrive_service.get_gdrive_config()
-            client = gdrive_service.get_client()
-            if cfg.get("enabled") and cfg.get("auto_upload", True) and client:
-                drive_res = await asyncio.to_thread(
-                    client.upload_file_resumable,
-                    file_path=output,
-                    folder_id=gdrive_service.get_workflow_folder_id("audio") or cfg.get("folder_id"),
-                    custom_name=output.name,
-                )
+        if auto_upload_drive:
+            _set(job_id, step="drive", progress=progress(92), message="Đang upload video lên Google Drive…")
+            try:
+                drive_res = await asyncio.to_thread(_upload_audio_output, output, story_name, chapter_number)
                 metadata["drive_file_id"] = drive_res.get("file_id")
                 metadata["drive_url"] = drive_res.get("web_view_link")
-        except Exception as drive_error:  # Drive lỗi không làm hỏng video local đã tạo.
-            metadata["drive_error"] = str(drive_error)
+                metadata["drive_name"] = drive_res.get("file_name")
+                metadata["drive_uploaded"] = True
+                if delete_local_after_upload:
+                    output.unlink(missing_ok=True)
+                    if output_thumbnail_name:
+                        (AUDIO_THUMBNAIL_DIR / output_thumbnail_name).unlink(missing_ok=True)
+                _set(job_id, progress=progress(97), message="Đã upload Google Drive và dọn file local.")
+            except Exception as drive_error:  # Drive lỗi không làm hỏng video local đã tạo.
+                metadata["drive_error"] = str(drive_error)
         _append_manifest(metadata)
         return output.name
     except Exception as error:  # noqa: BLE001
@@ -157,27 +175,27 @@ async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: 
             voice_file.unlink(missing_ok=True)
 
 
-async def run(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None = None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None) -> None:
+async def run(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None = None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False) -> None:
     try:
-        output_name = await _run_one(job_id, story_name, chapter_title, paragraph, voice_id, aspect, chapter_number, thumbnail, bgm_pool)
+        output_name = await _run_one(job_id, story_name, chapter_title, paragraph, voice_id, aspect, chapter_number, thumbnail, bgm_pool, auto_upload_drive=auto_upload_drive, delete_local_after_upload=delete_local_after_upload)
         _set(job_id, status="completed", step="done", progress=100, message="Hoàn thành video Audio.", output_name=output_name)
     except Exception as error:  # noqa: BLE001
         _set(job_id, status="error", step="error", message=str(error), error=str(error))
 
 
-async def run_batch(job_id: str, story_name: str, chapters: list, voice_id: str, aspect: str, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None) -> None:
+async def run_batch(job_id: str, story_name: str, chapters: list, voice_id: str, aspect: str, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False) -> None:
     total = len(chapters)
     try:
         for index, chapter in enumerate(chapters):
             _set(job_id, current_chapter=chapter.chapter_number, completed_chapters=index, total_chapters=total, message=f"Đang xử lý chương {chapter.chapter_number}/{total}…")
-            output_name = await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(index * 100 / total), round((index + 1) * 100 / total))
+            output_name = await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(index * 100 / total), round((index + 1) * 100 / total), auto_upload_drive, delete_local_after_upload)
             _set(job_id, completed_chapters=index + 1, output_name=output_name)
         _set(job_id, status="completed", step="done", progress=100, message=f"Đã hoàn thành {total} video Audio.")
     except Exception as error:  # noqa: BLE001
         _set(job_id, status="error", step="error", message=str(error), error=str(error))
 
 
-async def run_queue(job_id: str, queue: list[tuple[str, list, Path | None]], voice_id: str, aspect: str, bgm_pool: list[Path] | None = None) -> None:
+async def run_queue(job_id: str, queue: list[tuple[str, list, Path | None]], voice_id: str, aspect: str, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False) -> None:
     """Chạy tuần tự các chương đã chọn từ tối đa 10 truyện."""
     total = sum(len(chapters) for _, chapters, _ in queue)
     completed = 0
@@ -186,7 +204,7 @@ async def run_queue(job_id: str, queue: list[tuple[str, list, Path | None]], voi
             _set(job_id, current_story=story_name, message=f"Đang xử lý truyện {story_name}…")
             for chapter in chapters:
                 _set(job_id, current_chapter=chapter.chapter_number, completed_chapters=completed, total_chapters=total, message=f"Đang xử lý {story_name} · chương {chapter.chapter_number}…")
-                await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(completed * 100 / total), round((completed + 1) * 100 / total))
+                await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(completed * 100 / total), round((completed + 1) * 100 / total), auto_upload_drive, delete_local_after_upload)
                 completed += 1
                 _set(job_id, completed_chapters=completed)
         _set(job_id, status="completed", step="done", progress=100, message=f"Đã hoàn thành {completed} video Audio từ {len(queue)} truyện.")
