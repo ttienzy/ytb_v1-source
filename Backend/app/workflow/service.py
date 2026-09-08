@@ -379,12 +379,26 @@ def parse_gpt_scripts(raw_text: str) -> list[GptScriptItem]:
             end_pos = matches[idx + 1].start() if idx + 1 < len(matches) else len(raw_text)
             chunk = raw_text[start_pos:end_pos].strip()
 
-            # Bóc tách các thành phần Hook, Vấn đề, Sản phẩm, Lợi ích, CTA
-            hook_m = re.search(r"(?:[-*•\d\.\s]*\*{0,2}(?:Hook|Mở đầu)\*{0,2}[:\s\-]+)([^\n]+)", chunk, re.IGNORECASE)
-            problem_m = re.search(r"(?:[-*•\d\.\s]*\*{0,2}(?:Vấn đề(?:\/nhu cầu)?|Nhu cầu)\*{0,2}[:\s\-]+)([^\n]+)", chunk, re.IGNORECASE)
-            prod_m = re.search(r"(?:[-*•\d\.\s]*\*{0,2}(?:Sản phẩm)\*{0,2}[:\s\-]+)([^\n]+)", chunk, re.IGNORECASE)
-            benefit_m = re.search(r"(?:[-*•\d\.\s]*\*{0,2}(?:Lợi ích(?: chính)?)\*{0,2}[:\s\-]+)([^\n]+)", chunk, re.IGNORECASE)
-            cta_m = re.search(r"(?:[-*•\d\.\s]*\*{0,2}(?:CTA|Kêu gọi(?: hành động)?)\*{0,2}[:\s\-]+)([^\n]+)", chunk, re.IGNORECASE)
+            # Bóc tách đầy đủ các thành phần Hook, Vấn đề, Sản phẩm, Lợi ích, CTA (toàn bộ text, không cắt dòng)
+            def extract_section_text(keywords: list[str], text_block: str) -> str | None:
+                kw_pattern = r"(?:^|\n)[-*•\d\.\s]*\*{0,2}(?:" + "|".join(keywords) + r")\*{0,2}[:\s\-]+"
+                match = re.search(kw_pattern, text_block, re.IGNORECASE)
+                if not match:
+                    return None
+                start = match.end()
+                next_kw_pattern = r"(?:^|\n)[-*•\d\.\s]*\*{0,2}(?:Hook|Mở đầu|Vấn đề|Nhu cầu|Sản phẩm|Lợi ích|CTA|Kêu gọi|Góc|Kịch bản)\*{0,2}[:\s\-]+"
+                next_match = re.search(next_kw_pattern, text_block[start:], re.IGNORECASE)
+                if next_match:
+                    val = text_block[start:start + next_match.start()].strip()
+                else:
+                    val = text_block[start:].strip()
+                return val if val else None
+
+            hook_val = extract_section_text([r"Hook", r"Mở đầu"], chunk)
+            problem_val = extract_section_text([r"Vấn đề(?:/nhu cầu)?", r"Vấn đề", r"Nhu cầu"], chunk)
+            prod_val = extract_section_text([r"Sản phẩm"], chunk)
+            benefit_val = extract_section_text([r"Lợi ích(?: chính)?", r"Lợi ích", r"Điểm nổi bật"], chunk)
+            cta_val = extract_section_text([r"CTA", r"Kêu gọi(?: hành động)?", r"Kêu gọi"], chunk)
 
             angle_name = angle_defs[idx]["name"] if idx < len(angle_defs) else f"Kịch bản {idx + 1}"
 
@@ -393,11 +407,11 @@ def parse_gpt_scripts(raw_text: str) -> list[GptScriptItem]:
                     angle=angle_name,
                     title=header,
                     content=chunk,
-                    hook=hook_m.group(1).strip() if hook_m else None,
-                    problem=problem_m.group(1).strip() if problem_m else None,
-                    product=prod_m.group(1).strip() if prod_m else None,
-                    benefits=benefit_m.group(1).strip() if benefit_m else None,
-                    cta=cta_m.group(1).strip() if cta_m else None,
+                    hook=hook_val,
+                    problem=problem_val,
+                    product=prod_val,
+                    benefits=benefit_val,
+                    cta=cta_val,
                     word_count=len(chunk.split()),
                 )
             )

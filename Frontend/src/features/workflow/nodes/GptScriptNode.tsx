@@ -384,6 +384,91 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                 >
                   {currentScript.content}
                 </div>
+
+                {/* Button Đẩy CẢ 3 Kịch Bản sang 3 Cảnh Veo */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (data.onPushAllToVeo) {
+                      data.onPushAllToVeo()
+                    } else {
+                      data.onPushToVeo?.(activeTab)
+                    }
+                  }}
+                  style={{
+                    marginTop: 8,
+                    width: '100%',
+                    padding: '7px 12px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #f43f5e, #e11d48)',
+                    color: '#ffffff',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 6px rgba(244, 63, 94, 0.25)',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Đẩy cả 3 kịch bản đầy đủ vào 3 cảnh của Google Veo Flow Studio: Cảnh 1 = Kịch bản 1, Cảnh 2 = Kịch bản 2, Cảnh 3 = Kịch bản 3 (toàn bộ text, không cắt bớt)"
+                >
+                  <Sparkles size={13} />
+                  🚀 Đẩy 3 Kịch Bản Vào 3 Phân Cảnh (Đầy Đủ Text)
+                </button>
+
+                {/* Secondary quick action buttons */}
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => data.onPushSingleToVeo?.(activeTab)}
+                    style={{
+                      flex: 1,
+                      padding: '5px 8px',
+                      borderRadius: 5,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      whiteSpace: 'nowrap',
+                    }}
+                    title="Đẩy toàn bộ text kịch bản đang chọn vào Cảnh đang mở trong Veo Flow Studio"
+                  >
+                    📌 Nạp riêng vào Cảnh đang mở
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => data.onSplitScriptToVeo?.(activeTab)}
+                    style={{
+                      flex: 1,
+                      padding: '5px 8px',
+                      borderRadius: 5,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      whiteSpace: 'nowrap',
+                    }}
+                    title="Phân rã kịch bản này ra 3 cảnh: Cảnh 1: Hook+Vấn đề, Cảnh 2: Sản phẩm+Lợi ích, Cảnh 3: CTA (đầy đủ text)"
+                  >
+                    ✂️ Phân bổ kịch bản này ra 3 cảnh
+                  </button>
+                </div>
               </div>
             )}
           </div>

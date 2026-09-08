@@ -117,6 +117,15 @@ export interface GptSalesScriptItem {
   wordCount?: number
 }
 
+export interface VeoVideoConfig {
+  model: string
+  aspectRatio: '16:9' | '9:16'
+  duration: number
+  resolution: string
+  variations: number
+  creditCost?: number
+}
+
 export interface GptScriptNodeData {
   title: string
   prompt?: string
@@ -136,6 +145,10 @@ export interface GptScriptNodeData {
   onChangePrompt?: (val: string) => void
   onResetPrompt?: () => void
   onSelectScript?: (index: number) => void
+  onPushToVeo?: (scriptIndex: number) => void
+  onPushAllToVeo?: () => void
+  onPushSingleToVeo?: (scriptIndex: number) => void
+  onSplitScriptToVeo?: (scriptIndex: number) => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }
@@ -154,11 +167,23 @@ export interface VeoFlowStudioNodeData {
   isStartNode?: boolean
   isOrphan?: boolean
   finalVideoUrl?: string | null
+  activeProject?: {
+    id: string
+    name: string
+    flow_project_id?: string
+    clip_count?: number
+  } | null
+  videoConfig?: VeoVideoConfig
+  selectedGptScriptAngle?: string
+  availableGptScripts?: GptSalesScriptItem[]
   refImages?: {
     productUrls?: (string | null)[]
     modelUrl?: string | null
     sceneUrl?: string | null
   }
+  onOpenVeoSetup?: () => void
+  onApplyGptScript?: (scriptIndex: number) => void
+  onApplyAllGptScripts?: () => void
   onSelectScene?: (index: number) => void
   onUpdateScenePrompt?: (index: number, prompt: string) => void
   onUpdateSceneDuration?: (index: number, duration: number) => void

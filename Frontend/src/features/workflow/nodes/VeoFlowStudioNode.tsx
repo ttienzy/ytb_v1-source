@@ -24,8 +24,18 @@ interface VeoFlowStudioNodeProps {
 
 export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
   const scenes = data.scenes || []
-  const activeIndex = Math.min(data.activeSceneIndex ?? 0, Math.max(0, scenes.length - 1))
-  const currentScene = scenes[activeIndex] || {
+  const [activeTab, setActiveTab] = useState<number>(data.activeSceneIndex ?? 0)
+
+  // Sync activeTab when data.activeSceneIndex changes from parent
+  React.useEffect(() => {
+    if (data.activeSceneIndex !== undefined && data.activeSceneIndex >= 0 && data.activeSceneIndex < scenes.length) {
+      setActiveTab(data.activeSceneIndex)
+    }
+  }, [data.activeSceneIndex, scenes.length])
+
+  // Ensure activeTab is within valid bounds
+  const safeTab = Math.min(Math.max(0, activeTab), Math.max(0, scenes.length - 1))
+  const currentScene = scenes[safeTab] || scenes[0] || {
     sceneNumber: 1,
     title: 'Phân cảnh 1',
     prompt: '',
@@ -33,8 +43,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
     aspectRatio: '9:16' as const,
   }
 
-  const [activeTab, setActiveTab] = useState<number>(activeIndex)
-  const isRendering = currentScene.isRendering || (data.isRendering && data.activeSceneIndex === activeTab)
+  const isRendering = currentScene.isRendering || (data.isRendering && data.activeSceneIndex === safeTab)
   const renderProgress = currentScene.renderProgress ?? (data.renderProgress ?? 0)
 
   const isExporting = data.isExporting ?? false
@@ -176,6 +185,128 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
 
       {/* Body */}
       <div className="wf-node-body" style={{ padding: '12px 14px' }}>
+        {/* Veo Project & Config Status Bar */}
+        <div
+          style={{
+            marginBottom: 10,
+            padding: '7px 10px',
+            background: data.activeProject ? '#f0fdf4' : '#fffbeb',
+            border: data.activeProject ? '1px solid #bbf7d0' : '1px solid #fde68a',
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, overflow: 'hidden' }}>
+            <span style={{ fontWeight: 700, color: data.activeProject ? '#166534' : '#b45309', whiteSpace: 'nowrap' }}>
+              {data.activeProject ? `📁 ${data.activeProject.name}` : '⚠️ Chưa chọn Project'}
+            </span>
+            <span style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap' }}>
+              • {data.videoConfig?.model || 'Omni 1.1 Flash'} • {data.videoConfig?.aspectRatio || '9:16'} • {data.videoConfig?.resolution || '720p'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              data.onOpenVeoSetup?.()
+            }}
+            style={{
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
+              borderRadius: 6,
+              padding: '3px 8px',
+              fontSize: 10,
+              fontWeight: 700,
+              color: '#334155',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              cursor: 'pointer',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+              whiteSpace: 'nowrap',
+            }}
+            title="Mở Modal thiết lập Project và thông số video"
+          >
+            <Sliders size={11} style={{ color: '#e11d48' }} />
+            Cấu hình Veo
+          </button>
+        </div>
+
+        {/* GPT Script Sync Status */}
+        {data.availableGptScripts && data.availableGptScripts.length > 0 && (
+          <div
+            style={{
+              marginBottom: 10,
+              padding: '6px 10px',
+              background: '#faf5ff',
+              border: '1px solid #f3e8ff',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: 11,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#6b21a8' }}>
+              <Sparkles size={12} style={{ color: '#9333ea' }} />
+              <span style={{ fontWeight: 600 }}>
+                {data.selectedGptScriptAngle || 'Kịch bản ChatGPT'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button
+                type="button"
+                onClick={() => data.onApplyAllGptScripts?.()}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '2px 7px',
+                  borderRadius: 4,
+                  border: '1px solid #c084fc',
+                  background: '#f3e8ff',
+                  color: '#6b21a8',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Đẩy 3 kịch bản đầy đủ vào 3 cảnh tương ứng (Cảnh 1=Góc 1, Cảnh 2=Góc 2, Cảnh 3=Góc 3)"
+              >
+                ⚡ Đồng bộ 3 Cảnh
+              </button>
+              <select
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 5px',
+                  borderRadius: 4,
+                  border: '1px solid #d8b4fe',
+                  background: '#ffffff',
+                  color: '#7e22ce',
+                  cursor: 'pointer',
+                }}
+                onChange={(e) => {
+                  const val = e.target.value
+                  if (val === 'all') {
+                    data.onApplyAllGptScripts?.()
+                  } else {
+                    data.onApplyGptScript?.(Number(val))
+                  }
+                }}
+                defaultValue=""
+              >
+                <option value="" disabled>Nạp kịch bản vào Cảnh #{safeTab + 1}...</option>
+                {data.availableGptScripts.map((s, i) => (
+                  <option key={i} value={i}>
+                    {s.angle.includes('1') ? 'Góc 1: Vấn đề' : s.angle.includes('2') ? 'Góc 2: USP' : 'Góc 3: Trải nghiệm'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+
         {/* Scene Navigation Tabs */}
         <div
           style={{
@@ -189,7 +320,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           }}
         >
           {scenes.map((scene, idx) => {
-            const isActive = idx === activeTab
+            const isActive = idx === safeTab
             return (
               <button
                 key={scene.sceneNumber || idx}
@@ -300,7 +431,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             >
               <Sparkles size={22} color="#f43f5e" className="animate-spin" />
               <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc' }}>
-                Đang render Veo Cảnh #{activeTab + 1}... {renderProgress}%
+                Đang render Veo Cảnh #{safeTab + 1}... {renderProgress}%
               </div>
               <div
                 style={{
@@ -332,7 +463,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               }}
             >
               <Film size={28} color="#475569" />
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>Chưa xuất clip cho Cảnh #{activeTab + 1}</span>
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>Chưa xuất clip cho Cảnh #{safeTab + 1}</span>
             </div>
           )}
 
@@ -387,7 +518,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             }}
           >
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>
-              Prompt mô tả cảnh #{activeTab + 1}:
+              Prompt mô tả cảnh #{safeTab + 1}:
             </label>
             <span style={{ fontSize: 10, color: '#94a3b8' }}>
               {currentScene.title || 'Mô tả hình ảnh'}
@@ -398,7 +529,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             className="wf-input-textarea"
             rows={2}
             value={currentScene.prompt || ''}
-            onChange={(e) => data.onUpdateScenePrompt?.(activeTab, e.target.value)}
+            onChange={(e) => data.onUpdateScenePrompt?.(safeTab, e.target.value)}
             placeholder="Mô tả chi tiết góc quay điện ảnh, hành động của nhân vật, ánh sáng bối cảnh..."
             style={{ minHeight: 50 }}
           />
@@ -413,51 +544,45 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             marginBottom: 12,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ fontSize: 11, color: '#64748b' }}>Thời lượng:</span>
-            <button
-              type="button"
-              onClick={() => data.onUpdateSceneDuration?.(activeTab, 4)}
-              style={{
-                padding: '3px 8px',
-                borderRadius: 4,
-                fontSize: 10,
-                fontWeight: 700,
-                border: currentScene.durationSec === 4 ? '1px solid #f43f5e' : '1px solid #e2e8f0',
-                background: currentScene.durationSec === 4 ? '#fff1f2' : '#ffffff',
-                color: currentScene.durationSec === 4 ? '#e11d48' : '#64748b',
-                cursor: 'pointer',
-              }}
-            >
-              4s
-            </button>
-            <button
-              type="button"
-              onClick={() => data.onUpdateSceneDuration?.(activeTab, 8)}
-              style={{
-                padding: '3px 8px',
-                borderRadius: 4,
-                fontSize: 10,
-                fontWeight: 700,
-                border: currentScene.durationSec === 8 ? '1px solid #f43f5e' : '1px solid #e2e8f0',
-                background: currentScene.durationSec === 8 ? '#fff1f2' : '#ffffff',
-                color: currentScene.durationSec === 8 ? '#e11d48' : '#64748b',
-                cursor: 'pointer',
-              }}
-            >
-              8s
-            </button>
+            {[4, 6, 8, 10].map((sec) => (
+              <button
+                key={sec}
+                type="button"
+                onClick={() => data.onUpdateSceneDuration?.(safeTab, sec)}
+                style={{
+                  padding: '3px 7px',
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  border: currentScene.durationSec === sec ? '1px solid #f43f5e' : '1px solid #e2e8f0',
+                  background: currentScene.durationSec === sec ? '#fff1f2' : '#ffffff',
+                  color: currentScene.durationSec === sec ? '#e11d48' : '#64748b',
+                  cursor: 'pointer',
+                }}
+              >
+                {sec}s
+              </button>
+            ))}
           </div>
 
           <button
             type="button"
             className="wf-btn wf-btn-accent"
-            onClick={() => data.onRenderScene?.(activeTab)}
+            onClick={() => {
+              if (!data.activeProject) {
+                data.onOpenVeoSetup?.()
+              } else {
+                data.onRenderScene?.(safeTab)
+              }
+            }}
             disabled={isRendering}
             style={{ padding: '5px 12px', fontSize: 11 }}
+            title={!data.activeProject ? 'Bấm để cấu hình và chọn Project trước' : `Tạo clip cảnh #${safeTab + 1}`}
           >
             <Video size={13} />
-            {isRendering ? 'Đang tạo...' : `Tạo Clip Cảnh #${activeTab + 1}`}
+            {isRendering ? 'Đang tạo...' : !data.activeProject ? 'Cấu hình Project' : `Tạo Clip Cảnh #${safeTab + 1}`}
           </button>
         </div>
 
