@@ -1,4 +1,3 @@
-import React from 'react'
 import {
   Sparkles,
   Layers,
@@ -10,10 +9,22 @@ import {
   Play,
   LayoutGrid,
   Zap,
+  ShoppingBag,
+  User,
+  Video,
 } from 'lucide-react'
 
 interface WorkflowToolbarProps {
-  onAddNode: (type: 'assetInput' | 'geminiAnalysis' | 'gptScript' | 'sceneVideo' | 'exportTimeline') => void
+  onAddNode: (
+    type:
+      | 'productAssets'
+      | 'characterScene'
+      | 'geminiAnalysis'
+      | 'gptScript'
+      | 'veoFlowStudio'
+      | 'sceneVideo'
+      | 'exportTimeline'
+  ) => void
   onResetLayout: () => void
   onSimulateRun: () => void
   isRunning?: boolean
@@ -40,11 +51,21 @@ export function WorkflowToolbar({
           <button
             type="button"
             className="wf-btn"
-            onClick={() => onAddNode('assetInput')}
-            title="Thêm khối nguyên liệu ảnh đầu vào"
+            onClick={() => onAddNode('productAssets')}
+            title="Thêm khối ảnh sản phẩm (tối đa 3 ảnh)"
           >
-            <Layers size={13} color="#2563eb" />
-            + Nguyên liệu
+            <ShoppingBag size={13} color="#2563eb" />
+            + Ảnh SP
+          </button>
+
+          <button
+            type="button"
+            className="wf-btn"
+            onClick={() => onAddNode('characterScene')}
+            title="Thêm khối người mẫu & bối cảnh không gian"
+          >
+            <User size={13} color="#7c3aed" />
+            + Mẫu & Bối Cảnh
           </button>
 
           <button
@@ -53,7 +74,7 @@ export function WorkflowToolbar({
             onClick={() => onAddNode('geminiAnalysis')}
             title="Thêm khối Gemini Vision phân tích hình ảnh"
           >
-            <Sparkles size={13} color="#2563eb" />
+            <Sparkles size={13} color="#059669" />
             + Gemini Soi Ảnh
           </button>
 
@@ -63,28 +84,18 @@ export function WorkflowToolbar({
             onClick={() => onAddNode('gptScript')}
             title="Thêm khối kịch bản ChatGPT / 9Router"
           >
-            <Bot size={13} color="#7c3aed" />
-            + Kịch bản GPT
+            <Bot size={13} color="#9333ea" />
+            + Kịch Bản GPT
           </button>
 
           <button
             type="button"
             className="wf-btn"
-            onClick={() => onAddNode('sceneVideo')}
-            title="Thêm phân cảnh Google Veo 3.0"
+            onClick={() => onAddNode('veoFlowStudio')}
+            title="Thêm Google Veo 3.0 Flow Studio"
           >
-            <Film size={13} color="#fb7185" />
-            + Phân cảnh Veo
-          </button>
-
-          <button
-            type="button"
-            className="wf-btn"
-            onClick={() => onAddNode('exportTimeline')}
-            title="Thêm khối xuất video hoàn chỉnh"
-          >
-            <Download size={13} color="#34d399" />
-            + Xuất video
+            <Video size={13} color="#e11d48" />
+            + Flow Studio
           </button>
         </div>
       </div>
@@ -95,17 +106,17 @@ export function WorkflowToolbar({
           type="button"
           className="wf-btn"
           onClick={onResetLayout}
-          title="Khôi phục bố cục chuẩn"
+          title="Khôi phục bố cục chuẩn theo bản phác thảo"
         >
           <RotateCcw size={13} />
-          Mặc định
+          Mặc định (Sketch)
         </button>
 
         <button
           type="button"
           className={`wf-btn ${isRunning ? 'wf-btn-accent' : 'wf-btn-primary'}`}
           onClick={onSimulateRun}
-          title="Chạy mô phỏng toàn bộ luồng tạo video"
+          title="Chạy mô phỏng toàn bộ luồng tạo video từ ảnh đến xuất MP4"
         >
           {isRunning ? (
             <>

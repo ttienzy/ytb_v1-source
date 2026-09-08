@@ -1,7 +1,10 @@
 export type WorkflowNodeType =
+  | 'productAssets'
+  | 'characterScene'
   | 'assetInput'
   | 'geminiAnalysis'
   | 'gptScript'
+  | 'veoFlowStudio'
   | 'sceneVideo'
   | 'exportTimeline'
 
@@ -11,6 +14,22 @@ export interface AssetImageItem {
   label: string
   previewUrl: string | null
   fileName?: string
+}
+
+export interface ProductAssetsNodeData {
+  title?: string
+  productName?: string
+  images: (string | null)[] // up to 3 images: [main, detail, angle]
+  onChangeImage?: (index: number, url: string | null) => void
+  onDelete?: () => void
+}
+
+export interface CharacterSceneNodeData {
+  title?: string
+  modelImage?: string | null
+  sceneImage?: string | null
+  onChange?: (key: 'modelImage' | 'sceneImage', value: string | null) => void
+  onDelete?: () => void
 }
 
 export interface AssetInputNodeData {
@@ -35,7 +54,7 @@ export interface GeminiAnalysisNodeData {
   model: string // e.g. 'gemini-2.5-flash'
   provider: string // 'Google Gemini 2.5'
   isAnalyzing?: boolean
-  analysisResult?: GeminiAnalysisResult
+  analysisResult?: GeminiAnalysisResult | null
   onAnalyze?: () => void
   onDelete?: () => void
 }
@@ -47,10 +66,14 @@ export interface GeneratedSceneItem {
   durationSec: number // 4s, 5s, 8s
   aspectRatio: '9:16' | '16:9' | '1:1'
   cameraMotion?: string
+  isRendering?: boolean
+  renderProgress?: number
+  videoUrl?: string | null
+  thumbnailUrl?: string | null
   refImages?: {
-    product?: boolean
-    model?: boolean
-    scene?: boolean
+    productUrl?: string | null
+    modelUrl?: string | null
+    sceneUrl?: string | null
   }
 }
 
@@ -66,6 +89,32 @@ export interface GptScriptNodeData {
   onGenerate?: () => void
   onChangePrompt?: (val: string) => void
   onAddScene?: () => void
+  onDelete?: () => void
+}
+
+export interface VeoFlowStudioNodeData {
+  title?: string
+  model?: string // 'Google Veo 3.0'
+  scenes: GeneratedSceneItem[]
+  activeSceneIndex: number
+  aspectRatio: '9:16' | '16:9' | '1:1'
+  resolution: '1080p' | '4k' | '720p'
+  isRendering?: boolean
+  renderProgress?: number
+  isExporting?: boolean
+  exportProgress?: number
+  finalVideoUrl?: string | null
+  refImages?: {
+    productUrls?: (string | null)[]
+    modelUrl?: string | null
+    sceneUrl?: string | null
+  }
+  onSelectScene?: (index: number) => void
+  onUpdateScenePrompt?: (index: number, prompt: string) => void
+  onUpdateSceneDuration?: (index: number, duration: number) => void
+  onUpdateSceneMotion?: (index: number, motion: string) => void
+  onRenderScene?: (index: number) => void
+  onExportVideo?: () => void
   onDelete?: () => void
 }
 
@@ -103,3 +152,4 @@ export interface ExportTimelineNodeData {
   onExport?: () => void
   onDelete?: () => void
 }
+

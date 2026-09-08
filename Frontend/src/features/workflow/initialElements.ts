@@ -1,67 +1,76 @@
 import type { Node, Edge } from '@xyflow/react'
 
 export const initialNodes: Node[] = [
+  // 1. Product Images Node (Top-Left, up to 3 photos)
   {
-    id: 'node-assets',
-    type: 'assetInput',
-    position: { x: 30, y: 280 },
+    id: 'node-products',
+    type: 'productAssets',
+    position: { x: 40, y: 50 },
     data: {
-      productName: 'Áo Polo Cao Cấp',
-      productImage: 'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=400&auto=format&fit=crop&q=80',
-      modelImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
-      sceneImage: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400&auto=format&fit=crop&q=80',
+      title: 'Ảnh Sản Phẩm (Products)',
+      productName: '',
+      images: [null, null, null],
     },
   },
+
+  // 2. Gemini Vision Analysis Node (Bottom-Left, directly under Products)
   {
     id: 'node-gemini',
     type: 'geminiAnalysis',
-    position: { x: 420, y: 200 },
+    position: { x: 40, y: 360 },
     data: {
       title: 'Gemini 2.5 • Vision Phân Tích',
       model: 'gemini-2.5-flash',
       provider: 'Google Gemini 2.5',
-      analysisResult: {
-        productFeatures: 'Áo polo dệt kim pique cotton 100%, thoáng khí, cổ bo viền tương phản tinh tế, cúc áo khắc laser.',
-        modelAttributes: 'Nam giới trẻ trung (25-30 tuổi), thân hình cân đối, phong thái lịch lãm, nụ cười tự tin.',
-        sceneVibe: 'Quán cafe tối giản hiện đại tone gỗ sáng, ánh nắng sớm mềm mại, chiều sâu trường ảnh mượt.',
-        keySellingPoints: ['Co giãn 4 chiều', 'Chống nhăn cao cấp', 'Thoáng khí mùa hè', 'Logo thêu tinh tế'],
-        suggestedAngles: ['Macro cổ áo & chất vải', 'Tracking shot sải bước', 'Cận mặt tự tin'],
-      },
+      analysisResult: null,
     },
   },
+
+  // 3. Character & Scene Node (Top-Center, Model & Background)
+  {
+    id: 'node-character-scene',
+    type: 'characterScene',
+    position: { x: 430, y: 50 },
+    data: {
+      title: 'Nhân Vật & Bối Cảnh',
+      modelImage: null,
+      sceneImage: null,
+    },
+  },
+
+  // 4. ChatGPT Script Generation Node (Bottom-Center, under Character & Scene)
   {
     id: 'node-gpt',
     type: 'gptScript',
-    position: { x: 840, y: 140 },
+    position: { x: 430, y: 360 },
     data: {
-      title: 'ChatGPT Kịch Bản Phân Cảnh',
+      title: 'ChatGPT • Kịch Bản Phân Cảnh',
       model: 'cx/gpt-5.5',
       provider: '9Router Gateway',
-      prompt:
-        'Dựa trên phân tích từ Gemini về áo polo pique cotton cao cấp: Tạo kịch bản 3 cảnh TikTok Viral: Cảnh 1 cận cảnh sợi dệt thoáng khí, Cảnh 2 người mẫu mặc sải bước năng động trong quán cafe, Cảnh 3 chốt ưu đãi giảm 30% hôm nay.',
+      prompt: '',
       totalScenes: 3,
       targetDuration: 15,
       scenes: [
         {
           sceneNumber: 1,
-          title: 'Cận cảnh chất liệu & Logo',
-          prompt: 'Macro cinematic close up shot of polo shirt fabric texture and collar stitching, soft natural sunlight, slow tilt up, 4k ultra realistic',
+          title: 'Cận cảnh chất liệu & Chi tiết',
+          prompt: '',
           durationSec: 4,
           aspectRatio: '9:16',
           cameraMotion: 'Slow Tilt Up',
         },
         {
           sceneNumber: 2,
-          title: 'Người mẫu sải bước tự tin',
-          prompt: 'Full body tracking shot of young handsome model wearing polo shirt walking gracefully through a bright minimalist modern coffee shop, joyful smile',
+          title: 'Trải nghiệm thực tế & Góc nhìn',
+          prompt: '',
           durationSec: 8,
           aspectRatio: '9:16',
           cameraMotion: 'Tracking Shot',
         },
         {
           sceneNumber: 3,
-          title: 'Tạo dáng chốt & Call To Action',
-          prompt: 'Medium close-up of model looking directly into camera with confident smile, pointing with finger to click shop now button, cinematic bokeh',
+          title: 'Tạo ấn tượng & Kêu gọi (CTA)',
+          prompt: '',
           durationSec: 4,
           aspectRatio: '9:16',
           cameraMotion: 'Slow Push In',
@@ -69,186 +78,150 @@ export const initialNodes: Node[] = [
       ],
     },
   },
+
+  // 5. Veo Flow Studio Node (Right Column - Unified "Flow" Block)
   {
-    id: 'node-scene-1',
-    type: 'sceneVideo',
-    position: { x: 1280, y: -80 },
+    id: 'node-flow-studio',
+    type: 'veoFlowStudio',
+    position: { x: 840, y: 50 },
     data: {
-      sceneNumber: 1,
-      title: 'Cận cảnh chất liệu & Logo',
-      prompt: 'Macro cinematic close up shot of polo shirt fabric texture and collar stitching, soft natural sunlight, slow tilt up, 4k ultra realistic',
-      durationSec: 4,
+      title: 'Google Veo 3.0 • Flow Studio',
+      model: 'Google Veo 3.0',
+      activeSceneIndex: 0,
       aspectRatio: '9:16',
-      cameraMotion: 'Slow Tilt Up',
-      refImages: {
-        productUrl: 'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=200&auto=format&fit=crop&q=80',
-        modelUrl: null,
-        sceneUrl: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=200&auto=format&fit=crop&q=80',
-      },
-    },
-  },
-  {
-    id: 'node-scene-2',
-    type: 'sceneVideo',
-    position: { x: 1280, y: 350 },
-    data: {
-      sceneNumber: 2,
-      title: 'Người mẫu sải bước tự tin',
-      prompt: 'Full body tracking shot of young handsome model wearing polo shirt walking gracefully through a bright minimalist modern coffee shop, joyful smile',
-      durationSec: 8,
-      aspectRatio: '9:16',
-      cameraMotion: 'Tracking Shot',
-      refImages: {
-        productUrl: 'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=200&auto=format&fit=crop&q=80',
-        modelUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-        sceneUrl: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=200&auto=format&fit=crop&q=80',
-      },
-    },
-  },
-  {
-    id: 'node-scene-3',
-    type: 'sceneVideo',
-    position: { x: 1280, y: 780 },
-    data: {
-      sceneNumber: 3,
-      title: 'Tạo dáng chốt & Call To Action',
-      prompt: 'Medium close-up of model looking directly into camera with confident smile, pointing with finger to click shop now button, cinematic bokeh',
-      durationSec: 4,
-      aspectRatio: '9:16',
-      cameraMotion: 'Slow Push In',
-      refImages: {
-        productUrl: 'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=200&auto=format&fit=crop&q=80',
-        modelUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-        sceneUrl: null,
-      },
-    },
-  },
-  {
-    id: 'node-export',
-    type: 'exportTimeline',
-    position: { x: 1720, y: 330 },
-    data: {
-      title: 'Xuất Video Hoàn Chỉnh',
       resolution: '1080p',
-      format: 'mp4',
+      scenes: [
+        {
+          sceneNumber: 1,
+          title: 'Cận cảnh chất liệu & Chi tiết',
+          prompt: '',
+          durationSec: 4,
+          aspectRatio: '9:16',
+          cameraMotion: 'Slow Tilt Up',
+        },
+        {
+          sceneNumber: 2,
+          title: 'Trải nghiệm thực tế & Góc nhìn',
+          prompt: '',
+          durationSec: 8,
+          aspectRatio: '9:16',
+          cameraMotion: 'Tracking Shot',
+        },
+        {
+          sceneNumber: 3,
+          title: 'Tạo ấn tượng & Kêu gọi (CTA)',
+          prompt: '',
+          durationSec: 4,
+          aspectRatio: '9:16',
+          cameraMotion: 'Slow Push In',
+        },
+      ],
     },
   },
 ]
 
 export const initialEdges: Edge[] = [
-  // 1. Asset to Gemini Vision
+  // 1. Products to Gemini Vision (Straight Down - "Phân tích")
   {
-    id: 'edge-assets-gemini',
-    source: 'node-assets',
-    sourceHandle: 'to-gpt',
+    id: 'edge-products-gemini',
+    source: 'node-products',
+    sourceHandle: 'to-gemini',
     target: 'node-gemini',
-    targetHandle: 'input',
+    targetHandle: 'from-products',
     type: 'removable',
     animated: true,
     style: { stroke: '#2563eb', strokeWidth: 2.5 },
   },
-  // 2. Gemini Vision to ChatGPT Script
+
+  // 2. Gemini Vision to ChatGPT Script (Horizontal Right)
   {
     id: 'edge-gemini-gpt',
     source: 'node-gemini',
     sourceHandle: 'to-gpt',
     target: 'node-gpt',
-    targetHandle: 'input',
+    targetHandle: 'from-gemini',
     type: 'removable',
     animated: true,
-    style: { stroke: '#7c3aed', strokeWidth: 2.5 },
+    style: { stroke: '#10b981', strokeWidth: 2.5 },
   },
-  // 3. Asset directly to Scenes (multi-ref feed)
+
+  // 3. Character & Scene to ChatGPT Script (Straight Down)
   {
-    id: 'edge-assets-scene-1',
-    source: 'node-assets',
-    sourceHandle: 'to-veo',
-    target: 'node-scene-1',
-    targetHandle: 'input',
+    id: 'edge-charscene-gpt',
+    source: 'node-character-scene',
+    sourceHandle: 'to-gpt',
+    target: 'node-gpt',
+    targetHandle: 'from-charscene',
+    type: 'removable',
+    animated: true,
+    style: { stroke: '#8b5cf6', strokeWidth: 2.5 },
+  },
+
+  // 4. Products to Flow Studio (Across Top to Flow)
+  {
+    id: 'edge-products-flow',
+    source: 'node-products',
+    sourceHandle: 'to-flow',
+    target: 'node-flow-studio',
+    targetHandle: 'from-assets',
     type: 'removable',
     animated: false,
-    style: { stroke: '#94a3b8', strokeDasharray: '4 4' },
+    style: { stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '4 4' },
   },
+
+  // 5. Character & Scene to Flow Studio (Across Top to Flow)
   {
-    id: 'edge-assets-scene-2',
-    source: 'node-assets',
-    sourceHandle: 'to-veo',
-    target: 'node-scene-2',
-    targetHandle: 'input',
+    id: 'edge-charscene-flow',
+    source: 'node-character-scene',
+    sourceHandle: 'to-flow',
+    target: 'node-flow-studio',
+    targetHandle: 'from-assets',
     type: 'removable',
     animated: false,
-    style: { stroke: '#94a3b8', strokeDasharray: '4 4' },
+    style: { stroke: '#8b5cf6', strokeWidth: 2, strokeDasharray: '4 4' },
   },
+
+  // 6. ChatGPT Script to Flow Studio (Script Stream)
   {
-    id: 'edge-assets-scene-3',
-    source: 'node-assets',
-    sourceHandle: 'to-veo',
-    target: 'node-scene-3',
-    targetHandle: 'input',
-    type: 'removable',
-    animated: false,
-    style: { stroke: '#94a3b8', strokeDasharray: '4 4' },
-  },
-  // 4. GPT to Scenes
-  {
-    id: 'edge-gpt-scene-1',
+    id: 'edge-gpt-flow',
     source: 'node-gpt',
-    sourceHandle: 'scene-1',
-    target: 'node-scene-1',
-    targetHandle: 'input',
+    sourceHandle: 'to-flow',
+    target: 'node-flow-studio',
+    targetHandle: 'from-gpt',
     type: 'removable',
     animated: true,
     style: { stroke: '#ec4899', strokeWidth: 2.5 },
   },
+
+  // 7. Individual Scene Wires from GPT to Flow (kịch bản 1, 2, 3 -> Flow)
   {
-    id: 'edge-gpt-scene-2',
+    id: 'edge-gpt-scene1-flow',
+    source: 'node-gpt',
+    sourceHandle: 'scene-1',
+    target: 'node-flow-studio',
+    targetHandle: 'scene-1-in',
+    type: 'removable',
+    animated: true,
+    style: { stroke: '#f43f5e', strokeWidth: 2 },
+  },
+  {
+    id: 'edge-gpt-scene2-flow',
     source: 'node-gpt',
     sourceHandle: 'scene-2',
-    target: 'node-scene-2',
-    targetHandle: 'input',
+    target: 'node-flow-studio',
+    targetHandle: 'scene-2-in',
     type: 'removable',
     animated: true,
-    style: { stroke: '#a855f7', strokeWidth: 2.5 },
+    style: { stroke: '#a855f7', strokeWidth: 2 },
   },
   {
-    id: 'edge-gpt-scene-3',
+    id: 'edge-gpt-scene3-flow',
     source: 'node-gpt',
     sourceHandle: 'scene-3',
-    target: 'node-scene-3',
-    targetHandle: 'input',
+    target: 'node-flow-studio',
+    targetHandle: 'scene-3-in',
     type: 'removable',
     animated: true,
-    style: { stroke: '#3b82f6', strokeWidth: 2.5 },
-  },
-  // 5. Scenes to Export
-  {
-    id: 'edge-scene1-export',
-    source: 'node-scene-1',
-    sourceHandle: 'to-export',
-    target: 'node-export',
-    targetHandle: 'input',
-    type: 'removable',
-    animated: true,
-    style: { stroke: '#10b981', strokeWidth: 2.5 },
-  },
-  {
-    id: 'edge-scene2-export',
-    source: 'node-scene-2',
-    sourceHandle: 'to-export',
-    target: 'node-export',
-    targetHandle: 'input',
-    type: 'removable',
-    animated: true,
-    style: { stroke: '#10b981', strokeWidth: 2.5 },
-  },
-  {
-    id: 'edge-scene3-export',
-    source: 'node-scene-3',
-    sourceHandle: 'to-export',
-    target: 'node-export',
-    targetHandle: 'input',
-    type: 'removable',
-    animated: true,
-    style: { stroke: '#10b981', strokeWidth: 2.5 },
+    style: { stroke: '#3b82f6', strokeWidth: 2 },
   },
 ]

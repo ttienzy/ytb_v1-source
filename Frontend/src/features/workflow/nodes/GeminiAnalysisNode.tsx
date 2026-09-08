@@ -13,32 +13,59 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
   const res = data.analysisResult
 
   return (
-    <div className={`wf-node-card ${selected ? 'selected' : ''}`} style={{ width: 360 }}>
-      {/* Target handle receiving from Asset Input Node */}
+    <div className={`wf-node-card ${selected ? 'selected' : ''}`} style={{ width: 350 }}>
+      {/* Top Handle receiving downward wire from ProductAssetsNode */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="from-products"
+        style={{ left: '50%' }}
+        className="wf-handle wf-handle-target"
+        title="Nhận ảnh sản phẩm từ trên xuống"
+      />
+
+      {/* Left Handle fallback */}
       <Handle
         type="target"
         position={Position.Left}
         id="input"
+        style={{ top: '50%' }}
         className="wf-handle wf-handle-target"
       />
 
       {/* Header */}
-      <div className="wf-node-header">
+      <div className="wf-node-header" style={{ background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
         <div className="wf-node-title-group">
-          <div className="wf-node-icon wf-icon-blue" style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>
+          <div
+            className="wf-node-icon"
+            style={{
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              color: '#ffffff',
+              boxShadow: '0 2px 6px rgba(16, 185, 129, 0.3)',
+            }}
+          >
             <Sparkles size={15} />
           </div>
           <div>
-            <div className="wf-node-title">{data.title || 'Gemini 2.5 • Vision Phân Tích'}</div>
-            <div style={{ fontSize: 10, color: '#2563eb', fontWeight: 600 }}>
+            <div className="wf-node-title" style={{ color: '#064e3b' }}>
+              {data.title || 'Gemini 2.5 • Vision Phân Tích'}
+            </div>
+            <div style={{ fontSize: 10, color: '#059669', fontWeight: 600 }}>
               {data.model || 'gemini-2.5-flash'} • Google DeepMind
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="wf-node-badge wf-badge-gpt" style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>
-            Vision AI
+          <span
+            className="wf-node-badge"
+            style={{
+              background: res ? '#ecfdf5' : '#f8fafc',
+              color: res ? '#059669' : '#64748b',
+              border: res ? '1px solid #a7f3d0' : '1px solid #e2e8f0',
+            }}
+          >
+            {res ? 'Đã phân tích' : 'Vision AI'}
           </span>
           <button
             type="button"
@@ -57,18 +84,18 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
       {/* Body */}
       <div className="wf-node-body">
         <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, lineHeight: 1.4 }}>
-          Tự động soi chi tiết chất liệu sản phẩm, dáng người mẫu, không gian bối cảnh & điểm bán hàng độc nhất (USPs).
+          Tự động trích xuất chất liệu, form dáng, tính năng nổi bật & đề xuất góc quay cho video.
         </div>
 
         <button
           type="button"
           className="wf-btn wf-btn-primary"
-          style={{ width: '100%', justifyContent: 'center', marginBottom: 10 }}
+          style={{ width: '100%', justifyContent: 'center', marginBottom: 10, padding: '7px 12px' }}
           onClick={() => data.onAnalyze?.()}
           disabled={isAnalyzing}
         >
-          <Wand2 size={13} />
-          {isAnalyzing ? 'Đang phân tích hình ảnh...' : 'Phân Tích Với Gemini'}
+          <Wand2 size={13} className={isAnalyzing ? 'animate-spin' : ''} />
+          {isAnalyzing ? 'Đang soi ảnh & trích xuất USPs...' : 'Phân Tích Với Gemini'}
         </button>
 
         {/* Analysis Results Display */}
@@ -103,21 +130,11 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
               </div>
             )}
 
-            {res.sceneVibe && (
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                <Camera size={13} color="#e11d48" style={{ flexShrink: 0, marginTop: 2 }} />
-                <div>
-                  <strong style={{ color: '#0f172a' }}>Không gian & Ánh sáng:</strong>
-                  <div style={{ color: '#475569', marginTop: 1 }}>{res.sceneVibe}</div>
-                </div>
-              </div>
-            )}
-
             {res.keySellingPoints && res.keySellingPoints.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                 <Lightbulb size={13} color="#d97706" style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
-                  <strong style={{ color: '#0f172a' }}>Điểm nhấn tạo kịch bản (USPs):</strong>
+                  <strong style={{ color: '#0f172a' }}>Điểm nhấn bán hàng (USPs):</strong>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
                     {res.keySellingPoints.map((usp, i) => (
                       <span
@@ -139,25 +156,50 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
               </div>
             )}
 
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 10, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
-                <CheckCircle2 size={12} /> Sẵn sàng chuyển sang GPT
+            <div
+              style={{
+                borderTop: '1px solid #e2e8f0',
+                paddingTop: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  color: '#059669',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontWeight: 600,
+                }}
+              >
+                <CheckCircle2 size={12} /> Sẵn sàng chuyển giao sang GPT
               </span>
             </div>
           </div>
         ) : (
           <div
             style={{
-              padding: '12px 10px',
+              padding: '16px 12px',
               textAlign: 'center',
               background: '#f8fafc',
               borderRadius: 8,
               border: '1px dashed #cbd5e1',
               color: '#94a3b8',
               fontSize: 11,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 4,
             }}
           >
-            Chưa có dữ liệu phân tích. Bấm nút trên để Gemini soi ảnh.
+            <Sparkles size={18} color="#cbd5e1" />
+            <span>Chưa có dữ liệu phân tích.</span>
+            <span style={{ fontSize: 10, color: '#94a3b8' }}>
+              Nạp ảnh sản phẩm và nhấp nút trên để phân tích.
+            </span>
           </div>
         )}
       </div>
@@ -167,7 +209,9 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
         type="source"
         position={Position.Right}
         id="to-gpt"
+        style={{ top: '50%' }}
         className="wf-handle wf-handle-source"
+        title="Dòng phân tích sang ChatGPT"
       />
     </div>
   )
