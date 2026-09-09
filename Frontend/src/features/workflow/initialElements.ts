@@ -46,38 +46,13 @@ export const initialNodes: Node[] = [
     type: 'gptScript',
     position: { x: 430, y: 360 },
     data: {
-      title: 'ChatGPT • Kịch Bản Phân Cảnh',
+      title: 'ChatGPT • Kịch Bản Video',
       model: 'cx/gpt-5.5',
       provider: '9Router Gateway',
       prompt: '',
-      totalScenes: 3,
-      targetDuration: 15,
-      scenes: [
-        {
-          sceneNumber: 1,
-          title: 'Cận cảnh chất liệu & Chi tiết',
-          prompt: '',
-          durationSec: 4,
-          aspectRatio: '9:16',
-          cameraMotion: 'Slow Tilt Up',
-        },
-        {
-          sceneNumber: 2,
-          title: 'Trải nghiệm thực tế & Góc nhìn',
-          prompt: '',
-          durationSec: 8,
-          aspectRatio: '9:16',
-          cameraMotion: 'Tracking Shot',
-        },
-        {
-          sceneNumber: 3,
-          title: 'Tạo ấn tượng & Kêu gọi (CTA)',
-          prompt: '',
-          durationSec: 4,
-          aspectRatio: '9:16',
-          cameraMotion: 'Slow Push In',
-        },
-      ],
+      requestedCount: 3,
+      contentMode: 'sales',
+      salesScripts: [],
     },
   },
 
@@ -159,17 +134,7 @@ export const initialEdges: Edge[] = [
     style: { stroke: '#10b981', strokeWidth: 2.5 },
   },
 
-  // 3. Character & Scene to ChatGPT Script (Straight Down)
-  {
-    id: 'edge-charscene-gpt',
-    source: 'node-character-scene',
-    sourceHandle: 'to-gpt',
-    target: 'node-gpt',
-    targetHandle: 'from-charscene',
-    type: 'removable',
-    animated: true,
-    style: { stroke: '#8b5cf6', strokeWidth: 2.5 },
-  },
+
 
   // 4. Products to Flow Studio (Across Top to Flow)
   {
@@ -205,37 +170,5 @@ export const initialEdges: Edge[] = [
     type: 'removable',
     animated: true,
     style: { stroke: '#ec4899', strokeWidth: 2.5 },
-  },
-
-  // 7. Individual Scene Wires from GPT to Flow (kịch bản 1, 2, 3 -> Flow)
-  {
-    id: 'edge-gpt-scene1-flow',
-    source: 'node-gpt',
-    sourceHandle: 'scene-1',
-    target: 'node-flow-studio',
-    targetHandle: 'scene-1-in',
-    type: 'removable',
-    animated: true,
-    style: { stroke: '#f43f5e', strokeWidth: 2 },
-  },
-  {
-    id: 'edge-gpt-scene2-flow',
-    source: 'node-gpt',
-    sourceHandle: 'scene-2',
-    target: 'node-flow-studio',
-    targetHandle: 'scene-2-in',
-    type: 'removable',
-    animated: true,
-    style: { stroke: '#a855f7', strokeWidth: 2 },
-  },
-  {
-    id: 'edge-gpt-scene3-flow',
-    source: 'node-gpt',
-    sourceHandle: 'scene-3',
-    target: 'node-flow-studio',
-    targetHandle: 'scene-3-in',
-    type: 'removable',
-    animated: true,
-    style: { stroke: '#3b82f6', strokeWidth: 2 },
   },
 ]

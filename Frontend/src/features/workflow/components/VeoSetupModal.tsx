@@ -42,8 +42,6 @@ export function VeoSetupModal({
   onDeleteProject,
   onSaveConfig,
 }: VeoSetupModalProps) {
-  if (!isOpen) return null
-
   // Local state for video configurations
   const [model, setModel] = useState<string>(currentConfig.model || 'Omni 1.1 Flash')
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>(currentConfig.aspectRatio || '9:16')
@@ -99,6 +97,8 @@ export function VeoSetupModal({
   }
 
   const selectedScript = availableScripts[scriptIndex]
+
+  if (!isOpen) return null
 
   return (
     <div
@@ -229,7 +229,7 @@ export function VeoSetupModal({
                 {projects.length === 0 && <option value="">Chưa có project nào (Vui lòng tạo mới)</option>}
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
-                    📁 {p.name} {p.clip_count != null ? `(${p.clip_count} clips)` : ''}
+                    📁 {p.name} {p.video_count != null ? `(${p.video_count} clips)` : ''}
                   </option>
                 ))}
               </select>
@@ -536,15 +536,15 @@ export function VeoSetupModal({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <label style={{ fontSize: 11, fontWeight: 800, color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Sparkles size={13} style={{ color: '#9333ea' }} />
-                  Đồng bộ kịch bản từ ChatGPT sang 3 cảnh Veo
+                  Đồng bộ kịch bản từ ChatGPT sang Veo
                 </label>
                 <span style={{ fontSize: 10, color: '#9333ea', fontWeight: 600 }}>
-                  3 kịch bản khả dụng
+                  {availableScripts.length} kịch bản khả dụng
                 </span>
               </div>
 
               {/* Angle Tabs */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8, overflowX: 'auto' }}>
                 {availableScripts.map((s, idx) => (
                   <button
                     key={idx}
@@ -561,25 +561,46 @@ export function VeoSetupModal({
                       color: scriptIndex === idx ? '#ffffff' : '#7e22ce',
                       cursor: 'pointer',
                       textAlign: 'center',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    {s.angle.includes('1') ? 'Góc 1: Vấn đề' : s.angle.includes('2') ? 'Góc 2: USP' : 'Góc 3: Trải nghiệm'}
+                    {`#${idx + 1}: ${s.angle || s.title || `Kịch bản ${idx + 1}`}`}
                   </button>
                 ))}
               </div>
 
-              {/* Preview Mapping into 3 Scenes */}
+              {/* Preview Kịch bản được chọn */}
               {selectedScript && (
                 <div style={{ fontSize: 11, color: '#475569', background: '#ffffff', padding: 8, borderRadius: 6, border: '1px solid #f3e8ff' }}>
-                  <div style={{ marginBottom: 4 }}>
-                    <strong style={{ color: '#7e22ce' }}>🎬 Cảnh #1 (Mở đầu):</strong> {selectedScript.hook || selectedScript.problem || 'Cận cảnh vấn đề & thu hút người xem'}
-                  </div>
-                  <div style={{ marginBottom: 4 }}>
-                    <strong style={{ color: '#7e22ce' }}>💎 Cảnh #2 (Sản phẩm & USP):</strong> {selectedScript.product || selectedScript.benefits || 'Trình diễn sản phẩm & tính năng nổi bật'}
-                  </div>
-                  <div>
-                    <strong style={{ color: '#7e22ce' }}>✨ Cảnh #3 (Chốt đơn & CTA):</strong> {selectedScript.cta || 'Kêu gọi hành động & ưu đãi'}
-                  </div>
+                  {selectedScript.hook || selectedScript.problem ? (
+                    <div style={{ marginBottom: 4 }}>
+                      <strong style={{ color: '#7e22ce' }}>🎬 Mở đầu / Hook:</strong> {selectedScript.hook || selectedScript.problem}
+                    </div>
+                  ) : null}
+                  {selectedScript.product || selectedScript.benefits ? (
+                    <div style={{ marginBottom: 4 }}>
+                      <strong style={{ color: '#7e22ce' }}>💎 Sản phẩm & USP:</strong> {selectedScript.product || selectedScript.benefits}
+                    </div>
+                  ) : null}
+                  {selectedScript.cta ? (
+                    <div style={{ marginBottom: 4 }}>
+                      <strong style={{ color: '#7e22ce' }}>✨ Kêu gọi (CTA):</strong> {selectedScript.cta}
+                    </div>
+                  ) : null}
+                  {(selectedScript.visualDirection || (selectedScript as any).visual_direction) ? (
+                    <div style={{ marginBottom: 4 }}>
+                      <strong style={{ color: '#7e22ce' }}>🎥 Visual:</strong> {selectedScript.visualDirection || (selectedScript as any).visual_direction}
+                    </div>
+                  ) : null}
+                  {(selectedScript.voiceover || (selectedScript as any).voice_over) ? (
+                    <div>
+                      <strong style={{ color: '#7e22ce' }}>🎙️ Voiceover:</strong> {selectedScript.voiceover || (selectedScript as any).voice_over}
+                    </div>
+                  ) : selectedScript.content ? (
+                    <div>
+                      <strong style={{ color: '#7e22ce' }}>📝 Nội dung:</strong> {selectedScript.content}
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

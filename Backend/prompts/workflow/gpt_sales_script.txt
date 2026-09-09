@@ -1,24 +1,17 @@
-Hãy phân tích dữ liệu sản phẩm và viết 3 kịch bản video bán hàng ngắn.
+Dựa vào thông tin sản phẩm được cung cấp dưới đây, hãy đóng vai một chuyên gia sáng tạo nội dung (Content Creator) và viết các kịch bản video ngắn (TikTok/Reels/Shorts).
 
-Nguyên tắc ưu tiên:
-1. Chỉ dùng thông tin có trong đầu vào.
-2. Chọn tối đa 3 selling point quan trọng nhất.
-3. Chuyển tính năng thành lợi ích cho khách hàng.
-4. Mỗi kịch bản dùng một góc tiếp cận khác nhau.
-5. Không lặp hook, selling point hoặc CTA nếu không cần thiết.
-6. Không phóng đại, không tạo claim y tế hoặc cam kết kết quả nếu dữ liệu không chứng minh.
-7. Nếu dữ liệu mâu thuẫn, ưu tiên thông tin cụ thể và đáng tin cậy hơn; bỏ qua thông tin không chắc chắn.
-8. Nếu thiếu dữ liệu, không tự bịa.
+Nguyên tắc triển khai:
+1. Linh hoạt góc tiếp cận (Angle): Tự phân tích đặc thù của sản phẩm để đề xuất đúng {{SCRIPT_COUNT}} góc nội dung hiệu quả nhất (Gợi ý: Giải quyết vấn đề, Review chân thực, Trải nghiệm/Thị giác, hoặc Kể chuyện/Lifestyle). Không rập khuôn cấu trúc.
+2. Chuyển hóa giá trị: Tập trung biến "Tính năng" (Features) thành "Lợi ích" (Benefits) thực tế, dễ hiểu.
+3. Tính chân thực: Tuyệt đối bám sát dữ liệu đầu vào. KHÔNG phóng đại, KHÔNG tạo cam kết y tế/lố lăng nếu dữ liệu không chứng minh. Nếu thiếu thông tin, hãy tập trung vào các USP hiện có thay vì tự bịa.
+4. Giọng điệu (Tone & Mood): Tự nhiên, bắt tai, nhịp độ nhanh. Hook phải giữ chân người xem trong 3 giây đầu, CTA mượt mà, không "sặc mùi" quảng cáo ép buộc.
+5. Độ dài lời thoại mục tiêu: 80-130 từ/kịch bản.
 
-Góc 1: Problem → Solution
-Góc 2: Unique Selling Point → Benefit
-Góc 3: Situation/Experience → Desire
-
-Mỗi kịch bản gồm:
-Hook → Vấn đề/nhu cầu → Sản phẩm → Lợi ích chính → CTA
-
-Độ dài mục tiêu: 80-130 từ/kịch bản.
-Phong cách: tự nhiên, bán hàng nhưng không quá quảng cáo, phù hợp lời thoại video ngắn.
+Yêu cầu định dạng xuất ra:
+Tạo đúng {{SCRIPT_COUNT}} kịch bản. Mỗi kịch bản bắt đầu bằng tiêu đề rõ ràng kèm góc tiếp cận (Ví dụ: ### Kịch bản 1: [Tên kịch bản] - Góc: [Tên góc tiếp cận]), kèm theo các phần:
+- Gợi ý hình ảnh (Visual): Chỉ dẫn góc máy, hành động, bối cảnh cho video
+- Lời thoại (Voiceover): Lời đọc/thoại của video
+- CTA: Kêu gọi hành động ngắn gọn
 
 Dữ liệu sản phẩm:
 {{PRODUCT_DATA}}

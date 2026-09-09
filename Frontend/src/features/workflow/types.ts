@@ -1,3 +1,7 @@
+import type { AssetRef, ProductAnalysis, SalesScript, ScenePlan, ScenePlanConfig } from './contracts'
+
+export type { AssetRef, AssetBundle, ProductAnalysis, SalesScript, ScenePlan, ScenePlanConfig } from './contracts'
+
 export type WorkflowNodeType =
   | 'productAssets'
   | 'characterScene'
@@ -20,9 +24,10 @@ export interface ProductAssetsNodeData {
   title?: string
   productName?: string
   images: (string | null)[] // up to 3 images: [main, detail, angle]
+  assets?: (AssetRef | null)[]
   isStartNode?: boolean
   isOrphan?: boolean
-  onChangeImage?: (index: number, url: string | null) => void
+  onChangeImage?: (index: number, url: string | null, asset?: AssetRef | null) => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }
@@ -31,9 +36,11 @@ export interface CharacterSceneNodeData {
   title?: string
   modelImage?: string | null
   sceneImage?: string | null
+  modelAsset?: AssetRef | null
+  sceneAsset?: AssetRef | null
   isStartNode?: boolean
   isOrphan?: boolean
-  onChange?: (key: 'modelImage' | 'sceneImage', value: string | null) => void
+  onChange?: (key: 'modelImage' | 'sceneImage', value: string | null, asset?: AssetRef | null) => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }
@@ -75,6 +82,7 @@ export interface GeminiAnalysisNodeData {
   connectedImages?: (string | null)[]
   isConnectedToImages?: boolean
   isAnalyzing?: boolean
+  analysisError?: string | null
   isStartNode?: boolean
   isOrphan?: boolean
   analysisResult?: GeminiAnalysisResult | null
@@ -97,6 +105,7 @@ export interface GeneratedSceneItem {
   isRendering?: boolean
   renderProgress?: number
   videoUrl?: string | null
+  outputFilePath?: string | null
   thumbnailUrl?: string | null
   refImages?: {
     productUrl?: string | null
@@ -106,15 +115,22 @@ export interface GeneratedSceneItem {
 }
 
 export interface GptSalesScriptItem {
+  id?: string
   angle: string
   title?: string
   content: string
+  voiceover?: string
+  visualDirection?: string
+  visual_direction?: string
+  onScreenText?: string
+  on_screen_text?: string
   hook?: string
   problem?: string
   product?: string
   benefits?: string
   cta?: string
   wordCount?: number
+  word_count?: number
 }
 
 export interface VeoVideoConfig {
@@ -136,15 +152,19 @@ export interface GptScriptNodeData {
   hasProductData?: boolean
   productDataPreview?: string
   isGenerating?: boolean
+  scriptError?: string | null
   isStartNode?: boolean
   isOrphan?: boolean
   salesScripts?: GptSalesScriptItem[]
   activeScriptIndex?: number
+  requestedCount?: number
+  contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
   scenes?: GeneratedSceneItem[]
   onGenerate?: () => void
   onChangePrompt?: (val: string) => void
   onResetPrompt?: () => void
   onSelectScript?: (index: number) => void
+  onChangeScriptConfig?: (cfg: { count?: number; contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing' }) => void
   onPushToVeo?: (scriptIndex: number) => void
   onPushAllToVeo?: () => void
   onPushSingleToVeo?: (scriptIndex: number) => void
@@ -190,6 +210,8 @@ export interface VeoFlowStudioNodeData {
   onUpdateSceneMotion?: (index: number, motion: string) => void
   onRenderScene?: (index: number) => void
   onExportVideo?: () => void
+  onOpenPreviewModal?: (videoUrl: string, title?: string, prompt?: string) => void
+  onOpenLibrary?: () => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }

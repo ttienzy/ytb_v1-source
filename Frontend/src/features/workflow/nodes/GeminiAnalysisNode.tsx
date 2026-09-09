@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   FileText,
   RotateCcw,
+  AlertCircle,
 } from 'lucide-react'
 import type { GeminiAnalysisNodeData } from '../types'
 
@@ -146,6 +147,26 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
 
       {/* Body */}
       <div className="wf-node-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Error Banner */}
+        {data.analysisError && (
+          <div
+            style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: 6,
+              padding: '6px 8px',
+              color: '#b91c1c',
+              fontSize: 10.5,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 6,
+            }}
+          >
+            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1 }}>{data.analysisError}</div>
+          </div>
+        )}
+
         {/* Conditional rendering based on whether wire is connected into Gemini */}
         {isConnected ? (
           <>
@@ -385,7 +406,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
               <div>
                 <strong style={{ color: '#0f172a' }}>Điểm 'ăn tiền' & Yếu tố thu hút chung:</strong>
                 <div style={{ color: '#475569', marginTop: 1, lineHeight: 1.4 }}>
-                  {res.productFeatures}
+                  {res.productFeatures || (res as any).features?.join('; ') || (res as any).rawText}
                 </div>
               </div>
             </div>
@@ -394,7 +415,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
             {res.classifications && res.classifications.length > 0 && (
               <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6 }}>
                 <strong style={{ color: '#0f172a', display: 'block', marginBottom: 4 }}>
-                  Phân loại chi tiết từng sản phẩm:
+                  Phân loại chi tiết từng sản phẩm ({res.classifications.length}):
                 </strong>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {res.classifications.map((item, i) => (
@@ -433,13 +454,13 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
             )}
 
             {/* USPs / Điểm nhấn kịch bản */}
-            {res.keySellingPoints && res.keySellingPoints.length > 0 && (
+            {(((res.keySellingPoints && res.keySellingPoints.length > 0) ? res.keySellingPoints : (res as any).sellingPoints) || []).length > 0 && (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                 <Lightbulb size={13} color="#d97706" style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
                   <strong style={{ color: '#0f172a' }}>USPs nổi bật:</strong>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
-                    {res.keySellingPoints.map((usp, i) => (
+                    {(((res.keySellingPoints && res.keySellingPoints.length > 0) ? res.keySellingPoints : (res as any).sellingPoints) || []).map((usp: string, i: number) => (
                       <span
                         key={i}
                         style={{
@@ -457,6 +478,31 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* Collapsible raw text for transparency */}
+            {(res as any).rawText && (
+              <details style={{ marginTop: 2, fontSize: 10, color: '#64748b' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#2563eb' }}>
+                  📄 Xem toàn bộ phản hồi Gemini (Markdown)
+                </summary>
+                <div
+                  style={{
+                    marginTop: 4,
+                    padding: 6,
+                    background: '#ffffff',
+                    borderRadius: 4,
+                    border: '1px solid #e2e8f0',
+                    whiteSpace: 'pre-wrap',
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                    fontSize: 9.5,
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  {(res as any).rawText}
+                </div>
+              </details>
             )}
 
             <div

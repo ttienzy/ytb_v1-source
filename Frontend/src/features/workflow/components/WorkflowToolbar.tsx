@@ -1,112 +1,71 @@
 import {
   Sparkles,
-  Layers,
-  Bot,
   Film,
-  Download,
-  Plus,
   RotateCcw,
-  Play,
-  LayoutGrid,
   Zap,
-  ShoppingBag,
-  User,
-  Video,
-  Broom,
   Trash2,
-  CheckCircle2,
 } from 'lucide-react'
 
 interface WorkflowToolbarProps {
-  onAddNode: (
-    type:
-      | 'productAssets'
-      | 'characterScene'
-      | 'geminiAnalysis'
-      | 'gptScript'
-      | 'veoFlowStudio'
-      | 'sceneVideo'
-      | 'exportTimeline'
-  ) => void
   onResetLayout: () => void
   onSimulateRun: () => void
   onCleanOrphans: () => void
+  onOpenLibrary?: () => void
+  exportedCount?: number
   orphanCount: number
   startNodeTitle?: string
   isRunning?: boolean
 }
 
 export function WorkflowToolbar({
-  onAddNode,
   onResetLayout,
   onSimulateRun,
   onCleanOrphans,
+  onOpenLibrary,
+  exportedCount = 0,
   orphanCount = 0,
   startNodeTitle = 'Gemini 2.5',
   isRunning = false,
 }: WorkflowToolbarProps) {
   return (
     <header className="workflow-toolbar">
-      {/* Left: Brand Badge & Node addition buttons */}
+      {/* Left: Video Library & Node addition buttons */}
       <div className="workflow-toolbar-left">
-        <div className="workflow-title-badge">
-          <Sparkles size={16} color="#6366f1" />
-          <span>AI Visual Flow Studio</span>
-        </div>
-
-        <div style={{ height: 20, width: 1, background: '#e2e8f0' }} />
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button
-            type="button"
-            className="wf-btn"
-            onClick={() => onAddNode('productAssets')}
-            title="Thêm khối ảnh sản phẩm (tối đa 3 ảnh)"
-          >
-            <ShoppingBag size={13} color="#2563eb" />
-            + Ảnh SP
-          </button>
-
-          <button
-            type="button"
-            className="wf-btn"
-            onClick={() => onAddNode('characterScene')}
-            title="Thêm khối người mẫu & bối cảnh không gian"
-          >
-            <User size={13} color="#7c3aed" />
-            + Mẫu & Bối Cảnh
-          </button>
-
-          <button
-            type="button"
-            className="wf-btn"
-            onClick={() => onAddNode('geminiAnalysis')}
-            title="Thêm khối Gemini Vision phân tích hình ảnh"
-          >
-            <Sparkles size={13} color="#059669" />
-            + Gemini Soi Ảnh
-          </button>
-
-          <button
-            type="button"
-            className="wf-btn"
-            onClick={() => onAddNode('gptScript')}
-            title="Thêm khối kịch bản ChatGPT / 9Router"
-          >
-            <Bot size={13} color="#9333ea" />
-            + Kịch Bản GPT
-          </button>
-
-          <button
-            type="button"
-            className="wf-btn"
-            onClick={() => onAddNode('veoFlowStudio')}
-            title="Thêm Google Veo 3.0 Flow Studio"
-          >
-            <Video size={13} color="#e11d48" />
-            + Flow Studio
-          </button>
-        </div>
+        <button
+          type="button"
+          className="wf-btn"
+          onClick={onOpenLibrary}
+          style={{
+            background: 'linear-gradient(135deg, #eef2ff, #e0e7ff)',
+            borderColor: '#c7d2fe',
+            color: '#4338ca',
+            fontWeight: 700,
+            padding: '5px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            cursor: 'pointer',
+          }}
+          title="Mở Thư Viện quản lý video đã xuất"
+        >
+          <Film size={14} color="#4f46e5" />
+          <span>Thư Viện Video</span>
+          {typeof exportedCount === 'number' && exportedCount > 0 && (
+            <span
+              style={{
+                background: '#4f46e5',
+                color: '#ffffff',
+                fontSize: 10,
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: 10,
+                marginLeft: 2,
+              }}
+            >
+              {exportedCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* Right: Node Chính indicator & Execution Actions */}

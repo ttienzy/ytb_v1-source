@@ -31,9 +31,29 @@ import { RemovableEdge } from './edges/RemovableEdge'
 import { WorkflowToolbar } from './components/WorkflowToolbar'
 import { initialNodes, initialEdges } from './initialElements'
 import { VeoSetupModal } from './components/VeoSetupModal'
+import { VideoLibraryModal } from './components/VideoLibraryModal'
+import { VideoPlayerModal } from './components/VideoPlayerModal'
 import * as veoApi from '../veo-studio/services/veoApi'
 import type { VeoCapabilities, VeoProject } from '../veo-studio/types'
 import type { GeneratedSceneItem, GptSalesScriptItem, VeoVideoConfig } from './types'
+import type { AssetRef, ProductAnalysis, SalesScript } from './contracts'
+import {
+  resolveProductAssetsInput,
+  resolveCharacterSceneInput,
+  resolveGeminiAnalysisInput,
+  resolveGptScriptsInput,
+} from './services/graphResolver'
+import {
+  callGeminiAnalysis,
+  callGptScriptGeneration,
+  callWorkflowVideoExport,
+  fetchGeminiDefaultPrompt,
+  fetchGptDefaultPrompt,
+  fetchExportedVideos,
+} from './services/workflowApi'
+import { buildScenePlan, splitScriptToScenes } from './services/buildScenePlan'
+import { RenderJobController } from './services/renderJobService'
+import { runRealWorkflow } from './services/workflowRunner'
 
 function WorkflowCanvas() {
   const [nodes, setNodes] = useState<Node[]>(initialNodes)
@@ -55,6 +75,31 @@ function WorkflowCanvas() {
     variations: 1,
     creditCost: 7,
   })
+
+  // Exported video library and player modal states
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false)
+  const [exportedCount, setExportedCount] = useState<number>(0)
+  const [previewModalData, setPreviewModalData] = useState<{
+    isOpen: boolean
+    videoUrl: string
+    title?: string
+    prompt?: string
+  } | null>(null)
+
+  // Load exported video count on mount
+  useEffect(() => {
+    fetchExportedVideos().then((items) => {
+      setExportedCount(items.length)
+    })
+  }, [])
+
+  const handleOpenPreviewModal = useCallback((videoUrl: string, title?: string, prompt?: string) => {
+    setPreviewModalData({ isOpen: true, videoUrl, title, prompt })
+  }, [])
+
+  const handleClosePreviewModal = useCallback(() => {
+    setPreviewModalData(null)
+  }, [])
 
   // Track connected nodes to identify loose/orphan nodes
   const connectedNodeIds = useMemo(() => {
@@ -138,17 +183,24 @@ function WorkflowCanvas() {
   )
 
   // Update product image slot inside productAssets node
-  const handleProductImageChange = useCallback((nodeId: string, index: number, value: string | null) => {
+  const handleProductImageChange = useCallback((nodeId: string, index: number, value: string | null, asset?: AssetRef | null) => {
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === nodeId) {
           const prevImages = ((node.data?.images as (string | null)[]) || [null, null, null]).slice()
           prevImages[index] = value
+          const prevAssets = ((node.data?.assets as (AssetRef | null)[]) || [null, null, null]).slice()
+          if (asset !== undefined) {
+            prevAssets[index] = asset
+          } else if (value === null) {
+            prevAssets[index] = null
+          }
           return {
             ...node,
             data: {
               ...node.data,
               images: prevImages,
+              assets: prevAssets,
             },
           }
         }
@@ -159,15 +211,17 @@ function WorkflowCanvas() {
 
   // Update character & scene images
   const handleCharacterSceneChange = useCallback(
-    (nodeId: string, key: 'modelImage' | 'sceneImage', value: string | null) => {
+    (nodeId: string, key: 'modelImage' | 'sceneImage', value: string | null, asset?: AssetRef | null) => {
       setNodes((nds) =>
         nds.map((node) => {
           if (node.id === nodeId) {
+            const assetKey = key === 'modelImage' ? 'modelAsset' : 'sceneAsset'
             return {
               ...node,
               data: {
                 ...node.data,
                 [key]: value,
+                [assetKey]: asset !== undefined ? asset : value === null ? null : (node.data as any)?.[assetKey],
               },
             }
           }
@@ -311,86 +365,84 @@ function WorkflowCanvas() {
       s.product ? `Sản phẩm: ${s.product}` : '',
       s.benefits ? `Lợi ích: ${s.benefits}` : '',
       s.cta ? `CTA: ${s.cta}` : '',
+      (s.visualDirection || s.visual_direction) ? `Visual: ${s.visualDirection || s.visual_direction}` : '',
+      (s.voiceover || s.voice_over) ? `Voiceover: ${s.voiceover || s.voice_over}` : '',
     ].filter(Boolean)
     return parts.join('\n\n')
   }, [])
 
-  // 1. Đẩy CẢ 3 kịch bản vào 3 cảnh của Veo Flow Studio:
-  // Cảnh 1 = Toàn bộ Kịch bản 1 (Góc 1: Problem → Solution) - ĐẦY ĐỦ TEXT KHÔNG CẮT BỚT!
-  // Cảnh 2 = Toàn bộ Kịch bản 2 (Góc 2: USP → Benefit) - ĐẦY ĐỦ TEXT KHÔNG CẮT BỚT!
-  // Cảnh 3 = Toàn bộ Kịch bản 3 (Góc 3: Situation/Experience → Desire) - ĐẦY ĐỦ TEXT KHÔNG CẮT BỚT!
-  const handleApplyAllGptScriptsToVeo = useCallback(() => {
+  // 1. Đẩy toàn bộ kịch bản vào các cảnh của Veo Flow Studio
+  const handleApplyAllGptScriptsToVeo = useCallback((sourceGptNodeId?: string) => {
     setNodes((nds) => {
-      const gptNode = nds.find((n) => n.id === 'node-gpt')
+      const gptNode = sourceGptNodeId ? nds.find((n) => n.id === sourceGptNodeId) : nds.find((n) => n.type === 'gptScript')
       const scripts = (gptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
       if (scripts.length === 0) {
-        alert('⚠️ Chưa có kịch bản nào từ ChatGPT! Vui lòng nhấn "Sinh 3 Kịch Bản Bán Hàng" trước.')
+        alert('⚠️ Chưa có kịch bản nào từ ChatGPT! Vui lòng nhấn "Sinh Kịch Bản" trước.')
         return nds
       }
 
-      const currentFlow = nds.find((n) => n.id === 'node-flow-studio')
-      const flowConfig = (currentFlow?.data?.videoConfig as VeoVideoConfig) || veoVideoConfig
+      // Tìm node flow studio đích: ưu tiên qua edge nối từ gptNode
+      const outgoingEdges = gptNode ? edges.filter((e) => e.source === gptNode.id) : []
+      const targetFlow = nds.find((n) => outgoingEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio')) || nds.find((n) => n.type === 'veoFlowStudio')
+      const targetFlowId = targetFlow?.id
 
-      const script1 = scripts[0]
-      const script2 = scripts[1] || scripts[0]
-      const script3 = scripts[2] || scripts[1] || scripts[0]
+      const flowConfig = (targetFlow?.data?.videoConfig as VeoVideoConfig) || veoVideoConfig
+      const baseDuration = Math.min(10, Math.max(1, flowConfig.duration || 4))
 
-      const newScenes: GeneratedSceneItem[] = [
-        {
-          sceneNumber: 1,
-          title: script1.title ? `Cảnh 1: ${script1.title}` : (script1.angle || 'Cảnh 1: Góc 1 (Problem → Solution)'),
-          prompt: getFullScriptContent(script1),
-          durationSec: flowConfig.duration || 6,
-          aspectRatio: flowConfig.aspectRatio || '9:16',
-          cameraMotion: 'Cận cảnh chi tiết',
-        },
-        {
-          sceneNumber: 2,
-          title: script2.title ? `Cảnh 2: ${script2.title}` : (script2.angle || 'Cảnh 2: Góc 2 (USP → Benefit)'),
-          prompt: getFullScriptContent(script2),
-          durationSec: flowConfig.duration ? Math.min(10, Math.max(6, flowConfig.duration * 2)) : 8,
-          aspectRatio: flowConfig.aspectRatio || '9:16',
-          cameraMotion: 'Tracking Shot',
-        },
-        {
-          sceneNumber: 3,
-          title: script3.title ? `Cảnh 3: ${script3.title}` : (script3.angle || 'Cảnh 3: Góc 3 (Experience → Desire)'),
-          prompt: getFullScriptContent(script3),
-          durationSec: flowConfig.duration || 6,
-          aspectRatio: flowConfig.aspectRatio || '9:16',
-          cameraMotion: 'Slow Push In',
-        },
+      const prodInput = resolveProductAssetsInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
+      const charInput = resolveCharacterSceneInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
+
+      const refAssets: AssetRef[] = [
+        ...(prodInput.ok && prodInput.data ? prodInput.data.assets : []),
+        ...(charInput.ok && charInput.data?.model ? [charInput.data.model] : []),
+        ...(charInput.ok && charInput.data?.scene ? [charInput.data.scene] : []),
       ]
 
+      const targetCount = scripts.length
+      const defaultDurations = Array.from({ length: targetCount }, (_, i) => (i === 1 ? Math.min(10, Math.round(baseDuration * 1.5)) : baseDuration))
+
+      const newScenes = buildScenePlan({
+        scripts: scripts as any,
+        sceneConfig: {
+          count: targetCount,
+          durations: defaultDurations,
+          aspectRatio: (flowConfig.aspectRatio || '9:16') as any,
+        },
+        assets: refAssets,
+      })
+
       return nds.map((n) => {
-        if (n.id === 'node-flow-studio') {
+        if (targetFlowId && n.id === targetFlowId) {
           return {
             ...n,
             data: {
               ...n.data,
               scenes: newScenes,
               activeSceneIndex: 0,
-              selectedGptScriptAngle: 'Đồng bộ cả 3 Kịch bản đầy đủ (3 Cảnh)',
+              selectedGptScriptAngle: `Đồng bộ cả ${targetCount} Kịch bản đầy đủ (${targetCount} Cảnh)`,
             },
           }
         }
         return n
       })
     })
-  }, [veoVideoConfig, getFullScriptContent])
+  }, [edges, veoVideoConfig])
 
   // 2. Đẩy riêng kịch bản thứ scriptIdx vào cảnh hiện tại của Flow Studio (toàn bộ text, không cắt bớt)
-  const handleApplySingleScriptToCurrentScene = useCallback((scriptIdx: number) => {
+  const handleApplySingleScriptToCurrentScene = useCallback((scriptIdx: number, sourceGptNodeId?: string) => {
     setNodes((nds) => {
-      const gptNode = nds.find((n) => n.id === 'node-gpt')
+      const gptNode = sourceGptNodeId ? nds.find((n) => n.id === sourceGptNodeId) : nds.find((n) => n.type === 'gptScript')
       const scripts = (gptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
       const targetScript = scripts[scriptIdx]
       if (!targetScript) return nds
 
       const fullPrompt = getFullScriptContent(targetScript)
+      const outgoingEdges = gptNode ? edges.filter((e) => e.source === gptNode.id) : []
+      const targetFlow = nds.find((n) => outgoingEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio')) || nds.find((n) => n.type === 'veoFlowStudio')
+      const targetFlowId = targetFlow?.id
 
       return nds.map((n) => {
-        if (n.id === 'node-gpt') {
+        if (gptNode && n.id === gptNode.id) {
           return {
             ...n,
             data: {
@@ -399,14 +451,22 @@ function WorkflowCanvas() {
             },
           }
         }
-        if (n.id === 'node-flow-studio') {
-          const currentActive = n.data?.activeSceneIndex ?? 0
+        if (targetFlowId && n.id === targetFlowId) {
+          const currentActive = typeof n.data?.activeSceneIndex === 'number' ? n.data.activeSceneIndex : 0
           const prevScenes = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
           if (prevScenes[currentActive]) {
             prevScenes[currentActive] = {
               ...prevScenes[currentActive],
               title: `${targetScript.title || targetScript.angle}`,
               prompt: fullPrompt,
+              videoUrl: null,
+              outputFilePath: null,
+              thumbnailUrl: null,
+              renderStatus: 'idle',
+              renderProgress: 0,
+              jobId: null,
+              errorMessage: null,
+              isRendering: false,
             }
           }
           return {
@@ -421,62 +481,43 @@ function WorkflowCanvas() {
         return n
       })
     })
-  }, [getFullScriptContent])
+  }, [edges, getFullScriptContent])
 
   // 3. Phân rã 1 kịch bản thành 3 cảnh (Hook+Vấn đề, Sản phẩm+Lợi ích, CTA) nhưng ĐẦY ĐỦ TEXT, KHÔNG CẮT BỚT
-  const handleSplitSingleScriptToThreeScenes = useCallback((scriptIdx: number) => {
+  const handleSplitSingleScriptToThreeScenes = useCallback((scriptIdx: number, sourceGptNodeId?: string) => {
     setNodes((nds) => {
-      const gptNode = nds.find((n) => n.id === 'node-gpt')
+      const gptNode = sourceGptNodeId ? nds.find((n) => n.id === sourceGptNodeId) : nds.find((n) => n.type === 'gptScript')
       const scripts = (gptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
       const targetScript = scripts[scriptIdx]
       if (!targetScript) return nds
 
-      const scene1Prompt = [
-        targetScript.hook ? `Hook: ${targetScript.hook}` : '',
-        targetScript.problem ? `Vấn đề: ${targetScript.problem}` : '',
-      ].filter(Boolean).join('\n\n') || targetScript.content
+      const outgoingEdges = gptNode ? edges.filter((e) => e.source === gptNode.id) : []
+      const targetFlow = nds.find((n) => outgoingEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio')) || nds.find((n) => n.type === 'veoFlowStudio')
+      const targetFlowId = targetFlow?.id
 
-      const scene2Prompt = [
-        targetScript.product ? `Sản phẩm: ${targetScript.product}` : '',
-        targetScript.benefits ? `Lợi ích: ${targetScript.benefits}` : '',
-      ].filter(Boolean).join('\n\n') || targetScript.content
+      const flowConfig = (targetFlow?.data?.videoConfig as VeoVideoConfig) || veoVideoConfig
+      const baseDuration = Math.min(10, Math.max(1, flowConfig.duration || 4))
 
-      const scene3Prompt = targetScript.cta
-        ? `Kêu gọi hành động (CTA): ${targetScript.cta}`
-        : targetScript.content
+      const prodInput = resolveProductAssetsInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
+      const charInput = resolveCharacterSceneInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
 
-      const currentFlow = nds.find((n) => n.id === 'node-flow-studio')
-      const flowConfig = (currentFlow?.data?.videoConfig as VeoVideoConfig) || veoVideoConfig
-
-      const newScenes: GeneratedSceneItem[] = [
-        {
-          sceneNumber: 1,
-          title: 'Cảnh 1: Mở đầu & Vấn đề',
-          prompt: scene1Prompt,
-          durationSec: flowConfig.duration || 4,
-          aspectRatio: flowConfig.aspectRatio || '9:16',
-          cameraMotion: 'Cận cảnh chi tiết',
-        },
-        {
-          sceneNumber: 2,
-          title: 'Cảnh 2: Sản phẩm & Lợi ích',
-          prompt: scene2Prompt,
-          durationSec: flowConfig.duration ? Math.min(10, Math.max(6, flowConfig.duration * 2)) : 8,
-          aspectRatio: flowConfig.aspectRatio || '9:16',
-          cameraMotion: 'Tracking Shot',
-        },
-        {
-          sceneNumber: 3,
-          title: 'Cảnh 3: Chốt đơn & Kêu gọi (CTA)',
-          prompt: scene3Prompt,
-          durationSec: flowConfig.duration || 4,
-          aspectRatio: flowConfig.aspectRatio || '9:16',
-          cameraMotion: 'Slow Push In',
-        },
+      const refAssets: AssetRef[] = [
+        ...(prodInput.ok && prodInput.data ? prodInput.data.assets : []),
+        ...(charInput.ok && charInput.data?.model ? [charInput.data.model] : []),
+        ...(charInput.ok && charInput.data?.scene ? [charInput.data.scene] : []),
       ]
 
+      const newScenes = splitScriptToScenes({
+        script: targetScript as any,
+        sceneConfig: {
+          durations: [baseDuration, Math.min(10, baseDuration * 2), baseDuration],
+          aspectRatio: (flowConfig.aspectRatio || '9:16') as any,
+        },
+        assets: refAssets,
+      })
+
       return nds.map((n) => {
-        if (n.id === 'node-gpt') {
+        if (gptNode && n.id === gptNode.id) {
           return {
             ...n,
             data: {
@@ -485,7 +526,7 @@ function WorkflowCanvas() {
             },
           }
         }
-        if (n.id === 'node-flow-studio') {
+        if (targetFlowId && n.id === targetFlowId) {
           return {
             ...n,
             data: {
@@ -499,7 +540,7 @@ function WorkflowCanvas() {
         return n
       })
     })
-  }, [veoVideoConfig])
+  }, [edges, veoVideoConfig])
 
   // handleApplyGptScriptToVeo: mặc định đẩy cả 3 kịch bản đầy đủ text
   const handleApplyGptScriptToVeo = useCallback((scriptIdx?: number) => {
@@ -510,7 +551,7 @@ function WorkflowCanvas() {
     setVeoVideoConfig(config)
     setNodes((nds) =>
       nds.map((n) => {
-        if (n.id === 'node-flow-studio') {
+        if (n.type === 'veoFlowStudio') {
           const currentScenes = ((n.data?.scenes as GeneratedSceneItem[]) || []).map((sc) => ({
             ...sc,
             aspectRatio: config.aspectRatio || sc.aspectRatio,
@@ -570,38 +611,31 @@ function WorkflowCanvas() {
       .catch((err) => console.error(err))
   }, [])
 
-  // Trigger Gemini Analysis directly via Backend API
+  // Trigger Gemini Analysis directly via Backend API (Sử dụng graphResolver & workflowApi)
   const handleAnalyzeGemini = useCallback(async (nodeId: string) => {
-    let validImages: string[] = []
-    let promptToSend = ''
+    const targetNode = nodes.find((n) => n.id === nodeId)
+    const promptToSend = (targetNode?.data?.prompt as string) || ''
 
-    setNodes((nds) => {
-      const targetNode = nds.find((n) => n.id === nodeId)
-      promptToSend = (targetNode?.data?.prompt as string) || ''
-      const connectedEdge = edges.find((e) => e.target === nodeId)
-      const sourceNode = connectedEdge ? nds.find((n) => n.id === connectedEdge.source) : null
-      const rawImgs = (sourceNode?.data?.images as (string | null)[]) || []
-      validImages = rawImgs.filter(Boolean) as string[]
-
-      return nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: true } } : n))
+    const productRes = resolveProductAssetsInput({
+      nodes,
+      edges,
+      targetNodeId: nodeId,
     })
 
+    if (!productRes.ok || !productRes.data || productRes.data.rawImages.length === 0) {
+      const errMsg = productRes.error || 'Vui lòng nạp ít nhất 1 ảnh sản phẩm để Gemini phân tích.'
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: false, analysisError: errMsg } } : n))
+      )
+      return
+    }
+
+    setNodes((nds) =>
+      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: true, analysisError: null } } : n))
+    )
+
     try {
-      const res = await fetch(`${API_URL}/api/workflow/gemini/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          images: validImages,
-          prompt: promptToSend,
-        }),
-      })
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || `Lỗi phân tích Gemini (HTTP ${res.status})`)
-      }
-
-      const data = await res.json()
+      const data = await callGeminiAnalysis(productRes.data.rawImages, promptToSend)
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
@@ -610,13 +644,8 @@ function WorkflowCanvas() {
               data: {
                 ...n.data,
                 isAnalyzing: false,
-                analysisResult: {
-                  raw_text: data.raw_text,
-                  productFeatures: data.product_features,
-                  classifications: data.classifications,
-                  keySellingPoints: data.key_selling_points,
-                  suggestedAngles: data.suggested_angles,
-                },
+                analysisResult: data,
+                analysisError: null,
               },
             }
           }
@@ -625,63 +654,70 @@ function WorkflowCanvas() {
       )
     } catch (err: any) {
       console.error('Gemini Analysis error:', err)
+      const errMsg = err?.message || 'Có lỗi xảy ra khi phân tích bằng Gemini'
       setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: false } } : n))
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: false, analysisError: errMsg } } : n))
       )
-      alert(err?.message || 'Có lỗi xảy ra khi phân tích bằng Gemini')
     }
-  }, [edges])
+  }, [nodes, edges])
 
 
-  // Trigger GPT Script generation via Backend API
+  // Trigger GPT Script generation via Backend API (Sử dụng graphResolver & Object payload)
   const handleGenerateGptScript = useCallback(async (nodeId: string) => {
-    let productDataToSend = ''
-    let validImages: string[] = []
-    let promptToSend = ''
-    let modelToSend = ''
+    const gptNode = nodes.find((n) => n.id === nodeId)
+    const promptToSend = (gptNode?.data?.prompt as string) || ''
+    const modelToSend = (gptNode?.data?.model as string) || 'cx/gpt-5.5'
 
-    setNodes((nds) => {
-      const gptNode = nds.find((n) => n.id === nodeId)
-      promptToSend = (gptNode?.data?.prompt as string) || ''
-      modelToSend = (gptNode?.data?.model as string) || 'cx/gpt-5.5'
-
-      // 1. Lấy dữ liệu phân tích từ Gemini (qua edge kết nối hoặc mặc định node-gemini)
-      const geminiEdge = edges.find((e) => e.target === nodeId && (e.source === 'node-gemini' || e.targetHandle === 'from-gemini'))
-      const geminiNode = geminiEdge ? nds.find((n) => n.id === geminiEdge.source) : nds.find((n) => n.id === 'node-gemini')
-      const analysisRes = geminiNode?.data?.analysisResult as any
-      if (analysisRes) {
-        productDataToSend = typeof analysisRes === 'string'
-          ? analysisRes
-          : (analysisRes.raw_text || analysisRes.productFeatures || '')
-      }
-
-      // 2. Lấy ảnh sản phẩm từ Products node (qua edge kết nối hoặc mặc định node-products)
-      const prodEdge = edges.find((e) => e.target === nodeId && (e.source === 'node-products' || e.targetHandle === 'from-products'))
-      const productsNode = prodEdge ? nds.find((n) => n.id === prodEdge.source) : nds.find((n) => n.id === 'node-products')
-      const rawImgs = (productsNode?.data?.images as (string | null)[]) || []
-      validImages = rawImgs.filter(Boolean) as string[]
-
-      return nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: true } } : n))
+    // 1. Lấy kết quả Gemini phân tích qua graphResolver (KHÔNG hardcode node ID)
+    const geminiRes = resolveGeminiAnalysisInput({
+      nodes,
+      edges,
+      targetNodeId: nodeId,
     })
 
+    // 2. Lấy ảnh sản phẩm từ node Products qua graphResolver
+    const prodRes = resolveProductAssetsInput({
+      nodes,
+      edges,
+      targetNodeId: nodeId,
+    })
+
+    // 3. Lấy bối cảnh & nhân vật (nếu có)
+    const charSceneRes = resolveCharacterSceneInput({
+      nodes,
+      edges,
+      targetNodeId: nodeId,
+    })
+
+    if (!geminiRes.ok && (!prodRes.ok || !prodRes.data || prodRes.data.rawImages.length === 0)) {
+      const errMsg = 'Khối ChatGPT cần kết nối với khối Gemini Vision đã phân tích hoặc khối Ảnh Sản Phẩm.'
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false, scriptError: errMsg } } : n))
+      )
+      return
+    }
+
+    setNodes((nds) =>
+      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: true, scriptError: null } } : n))
+    )
+
+    const gptData = (gptNode?.data || {}) as Record<string, any>
+    const requestedCount = typeof gptData.requestedCount === 'number' ? gptData.requestedCount : 3
+    const contentMode = gptData.contentMode || 'sales'
+
     try {
-      const res = await fetch(`${API_URL}/api/workflow/gpt/generate-script`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          product_data: productDataToSend,
-          images: validImages,
-          prompt_template: promptToSend,
-          model: modelToSend,
-        }),
+      const gptRes = await callGptScriptGeneration({
+        images: prodRes.ok && prodRes.data ? prodRes.data.rawImages : [],
+        productAnalysis: geminiRes.ok ? geminiRes.data : undefined,
+        assets: charSceneRes.data,
+        scriptConfig: {
+          count: requestedCount,
+          contentMode: contentMode,
+        },
+        promptTemplate: promptToSend,
+        model: modelToSend,
       })
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || `Lỗi tạo kịch bản GPT (HTTP ${res.status})`)
-      }
-
-      const data = await res.json()
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
@@ -690,9 +726,10 @@ function WorkflowCanvas() {
               data: {
                 ...n.data,
                 isGenerating: false,
-                salesScripts: data.scripts || [],
-                rawOutput: data.raw_text,
+                salesScripts: gptRes.scripts,
+                rawOutput: gptRes.rawText,
                 activeScriptIndex: 0,
+                scriptError: null,
               },
             }
           }
@@ -701,53 +738,39 @@ function WorkflowCanvas() {
       )
     } catch (err: any) {
       console.error('GPT Script generation error:', err)
+      const errMsg = err?.message || 'Có lỗi xảy ra khi tạo kịch bản bằng ChatGPT'
       setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false } } : n))
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false, scriptError: errMsg } } : n))
       )
-      alert(err?.message || 'Có lỗi xảy ra khi tạo kịch bản bằng ChatGPT')
     }
-  }, [edges])
+  }, [nodes, edges])
 
-  const fallbackRender = useCallback((nodeId: string, sceneIndex: number) => {
-    setTimeout(() => {
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id === nodeId) {
-            const scenes = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-            if (scenes[sceneIndex]) {
-              scenes[sceneIndex] = {
-                ...scenes[sceneIndex],
-                isRendering: false,
-                renderProgress: 100,
-                thumbnailUrl:
-                  sceneIndex === 0
-                    ? 'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=400&auto=format&fit=crop&q=80'
-                    : sceneIndex === 1
-                    ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80'
-                    : 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400&auto=format&fit=crop&q=80',
-              }
-            }
-            return { ...n, data: { ...n.data, scenes } }
-          }
-          return n
-        })
-      )
-    }, 1500)
-  }, [])
-
-  // Render single scene inside Flow Studio
+  // Render single scene inside Flow Studio (Sử dụng RenderJobController & ảnh thật, bỏ fallback giả lập)
   const handleRenderFlowScene = useCallback(async (nodeId: string, sceneIndex: number) => {
-    let targetPrompt = ''
-    let targetDuration = 4
+    const targetNode = nodes.find((n) => n.id === nodeId)
+    const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
+    const sc = scenes[sceneIndex]
 
-    setNodes((nds) => {
-      const targetNode = nds.find((n) => n.id === nodeId)
-      const scenes = ((targetNode?.data?.scenes as GeneratedSceneItem[]) || [])
-      const sc = scenes[sceneIndex]
-      targetPrompt = sc?.prompt?.trim() || ''
-      targetDuration = sc?.durationSec || 4
+    if (!sc?.prompt?.trim()) {
+      alert(`⚠️ Cảnh #${sceneIndex + 1} chưa có nội dung prompt! Vui lòng nhập prompt hoặc bấm "Đẩy Kịch Bản Này Sang Veo Flow Studio" trước.`)
+      return
+    }
 
-      return nds.map((n) => {
+    if (!activeVeoProject) {
+      alert('⚠️ Chưa có Dự án Veo được kích hoạt! Vui lòng chọn hoặc tạo dự án trong "Cấu hình Veo".')
+      return
+    }
+
+    const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: nodeId })
+    const charSceneRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: nodeId })
+    const refAssets: AssetRef[] = [
+      ...(prodRes.ok && prodRes.data ? prodRes.data.assets : []),
+      ...(charSceneRes.data?.model ? [charSceneRes.data.model] : []),
+      ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
+    ]
+
+    setNodes((nds) =>
+      nds.map((n) => {
         if (n.id === nodeId) {
           const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
           if (scs[sceneIndex]) {
@@ -757,103 +780,85 @@ function WorkflowCanvas() {
         }
         return n
       })
+    )
+
+    const jobController = new RenderJobController()
+    const result = await jobController.renderScene({
+      scene: {
+        sceneNumber: sc.sceneNumber,
+        title: sc.title,
+        prompt: sc.prompt,
+        durationSec: sc.durationSec,
+        aspectRatio: sc.aspectRatio,
+        cameraMotion: sc.cameraMotion,
+        referenceAssets: refAssets,
+      },
+      project: activeVeoProject,
+      videoConfig: veoVideoConfig,
+      referenceAssets: refAssets,
+      onProgress: (prog) => {
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id === nodeId) {
+              const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+              if (scs[sceneIndex]) {
+                scs[sceneIndex] = { ...scs[sceneIndex], renderProgress: prog }
+              }
+              return { ...n, data: { ...n.data, scenes: scs } }
+            }
+            return n
+          })
+        )
+      },
     })
 
-    if (!targetPrompt) {
-      alert(`⚠️ Cảnh #${sceneIndex + 1} chưa có nội dung prompt! Vui lòng nhập prompt hoặc bấm "Đẩy Kịch Bản Này Sang Veo Flow Studio" trước.`)
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id === nodeId) {
-            const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-            if (scs[sceneIndex]) {
-              scs[sceneIndex] = { ...scs[sceneIndex], isRendering: false, renderProgress: 0 }
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.id === nodeId) {
+          const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+          if (scs[sceneIndex]) {
+            scs[sceneIndex] = {
+              ...scs[sceneIndex],
+              isRendering: false,
+              renderProgress: result.ok ? 100 : 0,
+              videoUrl: result.videoUrl || null,
+              outputFilePath: result.outputFilePath || null,
             }
-            return { ...n, data: { ...n.data, scenes: scs } }
           }
-          return n
-        })
-      )
+          return { ...n, data: { ...n.data, scenes: scs } }
+        }
+        return n
+      })
+    )
+
+    if (result.ok) {
+      setExportedCount((prev) => prev + 1)
+    } else {
+      alert(`Lỗi render Cảnh #${sceneIndex + 1}: ${result.error}`)
+    }
+  }, [nodes, edges, activeVeoProject, veoVideoConfig])
+
+  // Export complete stitched video in Flow Studio (Sử dụng backend FFmpeg concat)
+  const handleExportFlowVideo = useCallback(async (nodeId: string) => {
+    const targetNode = nodes.find((n) => n.id === nodeId)
+    const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
+
+    const validVideoPaths = scenes
+      .map((s) => s.outputFilePath || s.videoUrl)
+      .filter((p): p is string => Boolean(p && p.trim()))
+
+    if (validVideoPaths.length < scenes.length || scenes.length === 0) {
+      alert('⚠️ Chưa thể xuất video hoàn chỉnh! Tất cả các phân cảnh cần render video thành công trước khi xuất.')
       return
     }
 
-    if (activeVeoProject) {
-      try {
-        const job = await veoApi.submitJob({
-          project_id: activeVeoProject.id,
-          prompt: targetPrompt,
-          model_display_name: veoVideoConfig.model || 'Omni 1.1 Flash',
-          input_mode: 'text_to_video',
-          aspect_ratio: (veoVideoConfig.aspectRatio || '9:16') as any,
-          duration_seconds: targetDuration,
-          resolution: veoVideoConfig.resolution || '720p',
-          num_outputs: veoVideoConfig.variations || 1,
-        })
-
-        let attempts = 0
-        const interval = setInterval(async () => {
-          attempts++
-          try {
-            const status = await veoApi.getJobStatus(job.job_id)
-            if (!status) return
-
-            if (status.status === 'done') {
-              clearInterval(interval)
-              const videoUrl = status.output_files?.[0] ? veoApi.getVideoStreamUrl(status.output_files[0]) : ''
-              setNodes((nds) =>
-                nds.map((n) => {
-                  if (n.id === nodeId) {
-                    const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                    if (scs[sceneIndex]) {
-                      scs[sceneIndex] = {
-                        ...scs[sceneIndex],
-                        isRendering: false,
-                        renderProgress: 100,
-                        videoUrl: videoUrl,
-                      }
-                    }
-                    return { ...n, data: { ...n.data, scenes: scs } }
-                  }
-                  return n
-                })
-              )
-            } else if (status.status === 'error' || attempts > 20) {
-              clearInterval(interval)
-              fallbackRender(nodeId, sceneIndex)
-            } else {
-              setNodes((nds) =>
-                nds.map((n) => {
-                  if (n.id === nodeId) {
-                    const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                    if (scs[sceneIndex]) {
-                      const prog = Math.min(90, (scs[sceneIndex].renderProgress || 20) + 12)
-                      scs[sceneIndex] = { ...scs[sceneIndex], renderProgress: prog }
-                    }
-                    return { ...n, data: { ...n.data, scenes: scs } }
-                  }
-                  return n
-                })
-              )
-            }
-          } catch {
-            clearInterval(interval)
-            fallbackRender(nodeId, sceneIndex)
-          }
-        }, 2500)
-      } catch (err) {
-        console.warn('Veo API error, using simulation fallback:', err)
-        fallbackRender(nodeId, sceneIndex)
-      }
-    } else {
-      fallbackRender(nodeId, sceneIndex)
-    }
-  }, [activeVeoProject, veoVideoConfig, fallbackRender])
-
-  // Export complete stitched video in Flow Studio
-  const handleExportFlowVideo = useCallback((nodeId: string) => {
     setNodes((nds) =>
-      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isExporting: true, exportProgress: 40 } } : n))
+      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isExporting: true, exportProgress: 30 } } : n))
     )
-    setTimeout(() => {
+
+    try {
+      const res = await callWorkflowVideoExport(validVideoPaths)
+      setExportedCount((prev) => prev + 1)
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
@@ -863,15 +868,21 @@ function WorkflowCanvas() {
                 ...n.data,
                 isExporting: false,
                 exportProgress: 100,
-                finalVideoUrl: 'completed_video.mp4',
+                finalVideoUrl: res.finalVideoUrl,
               },
             }
           }
           return n
         })
       )
-    }, 1800)
-  }, [])
+    } catch (err: any) {
+      console.error('Export video error:', err)
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isExporting: false, exportProgress: 0 } } : n))
+      )
+      alert(err?.message || 'Có lỗi xảy ra khi xuất video hoàn chỉnh bằng FFmpeg.')
+    }
+  }, [nodes])
 
   // Add a new node dynamically
   const handleAddNode = useCallback(
@@ -920,13 +931,13 @@ function WorkflowCanvas() {
           type,
           position: { x, y },
           data: {
-            title: 'ChatGPT • Kịch Bản Phân Cảnh',
+            title: 'ChatGPT • Kịch Bản Video',
             model: 'cx/gpt-5.5',
             provider: '9Router Gateway',
             prompt: '',
-            totalScenes: 3,
-            targetDuration: 15,
-            scenes: [],
+            requestedCount: 3,
+            contentMode: 'sales',
+            salesScripts: [],
           },
         }
       } else {
@@ -974,190 +985,39 @@ function WorkflowCanvas() {
     }, 50)
   }, [fitView])
 
-  // Interactive Simulation of full pipeline execution
-  const handleSimulateRun = useCallback(() => {
+  // Real Workflow Execution using DAG traversal & Data Contracts
+  const handleExecuteWorkflow = useCallback(async () => {
     if (isRunning) return
     setIsRunning(true)
-
-    // Step 1: Ensure Product and Character have test images loaded if empty
-    setNodes((nds) =>
-      nds.map((n) => {
-        if (n.id === 'node-products') {
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              images: [
-                'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=400&auto=format&fit=crop&q=80',
-                'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?w=400&auto=format&fit=crop&q=80',
-                'https://images.unsplash.com/photo-1576566588028-4147f3842f27?w=400&auto=format&fit=crop&q=80',
-              ],
-            },
-          }
-        }
-        if (n.id === 'node-character-scene') {
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              modelImage:
-                'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
-              sceneImage:
-                'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400&auto=format&fit=crop&q=80',
-            },
-          }
-        }
-        if (n.id === 'node-gemini') {
-          return { ...n, data: { ...n.data, isAnalyzing: true } }
-        }
-        return n
-      })
-    )
-
-    // Step 2: Gemini completes analysis, GPT starts generating script
-    setTimeout(() => {
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id === 'node-gemini') {
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                isAnalyzing: false,
-                analysisResult: {
-                  productFeatures: 'Áo polo dệt kim pique cotton 100%, thoáng khí, cúc áo khắc laser.',
-                  modelAttributes: 'Nam giới 25-30 tuổi, phong thái lịch lãm, nụ cười tự tin.',
-                  sceneVibe: 'Quán cafe hiện đại tone gỗ sáng, ánh nắng sớm mềm mại.',
-                  keySellingPoints: ['Co giãn 4 chiều', 'Chống nhăn cao cấp', 'Thoáng khí mùa hè'],
-                  suggestedAngles: ['Macro cổ áo & chất vải', 'Tracking shot sải bước', 'Cận mặt tự tin'],
-                },
-              },
-            }
-          }
-          if (n.id === 'node-gpt') {
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                isGenerating: true,
-                prompt: 'Tạo kịch bản video TikTok 15s tôn lên chất vải thoáng mát và phom dáng lịch lãm...',
-              },
-            }
-          }
-          return n
-        })
-      )
-
-      // Step 3: GPT finishes script, populates 3 scenes into Flow Studio
-      setTimeout(() => {
-        const generatedScenes: GeneratedSceneItem[] = [
-          {
-            sceneNumber: 1,
-            title: 'Cận cảnh chất liệu & Logo',
-            prompt: 'Macro cinematic close up shot of polo shirt fabric texture, soft natural sunlight, slow tilt up',
-            durationSec: 4,
-            aspectRatio: '9:16',
-            cameraMotion: 'Slow Tilt Up',
-          },
-          {
-            sceneNumber: 2,
-            title: 'Người mẫu sải bước tự tin',
-            prompt: 'Full body tracking shot of model wearing polo walking gracefully in modern coffee shop',
-            durationSec: 8,
-            aspectRatio: '9:16',
-            cameraMotion: 'Tracking Shot',
-          },
-          {
-            sceneNumber: 3,
-            title: 'Tạo dáng chốt & Kêu gọi (CTA)',
-            prompt: 'Medium close-up of model looking directly into camera with confident smile, pointing to shop now',
-            durationSec: 4,
-            aspectRatio: '9:16',
-            cameraMotion: 'Slow Push In',
-          },
-        ]
-
-        setNodes((nds) =>
-          nds.map((n) => {
-            if (n.id === 'node-gpt') {
-              return { ...n, data: { ...n.data, isGenerating: false, scenes: generatedScenes } }
-            }
-            if (n.id === 'node-flow-studio') {
-              return {
-                ...n,
-                data: {
-                  ...n.data,
-                  scenes: generatedScenes,
-                  activeSceneIndex: 0,
-                  isRendering: true,
-                  renderProgress: 45,
-                },
-              }
-            }
-            return n
-          })
-        )
-
-        // Step 4: Flow Studio renders Scene 1, then Scene 2, then Scene 3
-        setTimeout(() => {
-          setNodes((nds) =>
-            nds.map((n) => {
-              if (n.id === 'node-flow-studio') {
-                const updated = generatedScenes.slice()
-                updated[0] = {
-                  ...updated[0],
-                  thumbnailUrl:
-                    'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=400&auto=format&fit=crop&q=80',
-                }
-                updated[1] = {
-                  ...updated[1],
-                  thumbnailUrl:
-                    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
-                }
-                updated[2] = {
-                  ...updated[2],
-                  thumbnailUrl:
-                    'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400&auto=format&fit=crop&q=80',
-                }
-                return {
-                  ...n,
-                  data: {
-                    ...n.data,
-                    scenes: updated,
-                    isRendering: false,
-                    isExporting: true,
-                    exportProgress: 65,
-                  },
-                }
-              }
-              return n
-            })
-          )
-
-          // Step 5: Complete stitched export
-          setTimeout(() => {
-            setNodes((nds) =>
-              nds.map((n) => {
-                if (n.id === 'node-flow-studio') {
-                  return {
-                    ...n,
-                    data: {
-                      ...n.data,
-                      isExporting: false,
-                      exportProgress: 100,
-                      finalVideoUrl: 'completed_tiktok_polo.mp4',
-                    },
-                  }
-                }
-                return n
-              })
+    try {
+      await runRealWorkflow({
+        startNodeId,
+        nodes,
+        edges,
+        callbacks: {
+          onNodeStateChange: (nodeId, patch) => {
+            setNodes((prevNodes) =>
+              prevNodes.map((n) =>
+                n.id === nodeId
+                  ? { ...n, data: { ...n.data, ...patch } }
+                  : n
+              )
             )
-            setIsRunning(false)
-          }, 1500)
-        }, 1500)
-      }, 1500)
-    }, 1500)
-  }, [isRunning])
+          },
+          onError: (nodeId, errMsg) => {
+            alert(`Lỗi tại node [${nodeId}]: ${errMsg}`)
+          },
+          onSuccess: () => {
+            console.log('Workflow execution completed successfully.')
+          },
+        },
+      })
+    } catch (err: any) {
+      alert(err?.message || 'Có lỗi xảy ra khi chạy workflow.')
+    } finally {
+      setIsRunning(false)
+    }
+  }, [isRunning, startNodeId, nodes, edges])
 
   // Attach handlers to nodes (onDelete, onChangeImage, onChange, onSetStartNode, etc.)
   const nodesWithHandlers = useMemo(() => {
@@ -1176,7 +1036,8 @@ function WorkflowCanvas() {
           ...node,
           data: {
             ...baseData,
-            onChangeImage: (idx: number, url: string | null) => handleProductImageChange(node.id, idx, url),
+            onChangeImage: (idx: number, url: string | null, asset?: AssetRef) =>
+              handleProductImageChange(node.id, idx, url, asset),
           },
         }
       }
@@ -1185,21 +1046,21 @@ function WorkflowCanvas() {
           ...node,
           data: {
             ...baseData,
-            onChange: (key: 'modelImage' | 'sceneImage', val: string | null) =>
-              handleCharacterSceneChange(node.id, key, val),
+            onChange: (key: 'modelImage' | 'sceneImage', val: string | null, asset?: AssetRef) =>
+              handleCharacterSceneChange(node.id, key, val, asset),
           },
         }
       }
       if (node.type === 'geminiAnalysis') {
-        const geminiEdge = edges.find((e) => e.target === node.id)
-        const sourceProductNode = geminiEdge ? nodes.find((n) => n.id === geminiEdge.source) : null
-        const connectedProductImages = ((sourceProductNode?.data?.images as (string | null)[]) || [])
+        const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: node.id })
+        const isConnectedToImages = prodRes.ok
+        const connectedProductImages = prodRes.ok && prodRes.data ? prodRes.data.rawImages : []
 
         return {
           ...node,
           data: {
             ...baseData,
-            isConnectedToImages: !!geminiEdge,
+            isConnectedToImages,
             connectedImages: connectedProductImages,
             onChangePrompt: (prompt: string) => handleGeminiPromptChange(node.id, prompt),
             onResetPrompt: () => handleResetGeminiPrompt(node.id),
@@ -1208,15 +1069,15 @@ function WorkflowCanvas() {
         }
       }
       if (node.type === 'gptScript') {
-        const prodEdge = edges.find((e) => e.target === node.id && (e.source === 'node-products' || e.targetHandle === 'from-products'))
-        const sourceProductNode = prodEdge ? nodes.find((n) => n.id === prodEdge.source) : nodes.find((n) => n.id === 'node-products')
-        const connectedProductImages = ((sourceProductNode?.data?.images as (string | null)[]) || [])
+        const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: node.id })
+        const connectedProductImages = prodRes.ok && prodRes.data ? prodRes.data.rawImages : []
 
-        const geminiEdge = edges.find((e) => e.target === node.id && (e.source === 'node-gemini' || e.targetHandle === 'from-gemini'))
-        const sourceGeminiNode = geminiEdge ? nodes.find((n) => n.id === geminiEdge.source) : nodes.find((n) => n.id === 'node-gemini')
-        const hasProductData = !!(sourceGeminiNode?.data?.analysisResult)
-        const geminiRes = sourceGeminiNode?.data?.analysisResult as any
-        const productDataPreview = geminiRes ? (typeof geminiRes === 'string' ? geminiRes : (geminiRes.raw_text || geminiRes.productFeatures || '')) : ''
+        const geminiRes = resolveGeminiAnalysisInput({ nodes, edges, targetNodeId: node.id })
+        const hasProductData = geminiRes.ok && !!geminiRes.data
+        const productDataPreview =
+          geminiRes.ok && geminiRes.data
+            ? geminiRes.data.rawText || (geminiRes.data.features || []).join(', ') || ''
+            : ''
 
         return {
           ...node,
@@ -1228,16 +1089,32 @@ function WorkflowCanvas() {
             onChangePrompt: (val: string) => handleGptPromptChange(node.id, val),
             onResetPrompt: () => handleResetGptPrompt(node.id),
             onGenerate: () => handleGenerateGptScript(node.id),
-            onPushToVeo: () => handleApplyAllGptScriptsToVeo(),
-            onPushAllToVeo: () => handleApplyAllGptScriptsToVeo(),
-            onPushSingleToVeo: (idx: number) => handleApplySingleScriptToCurrentScene(idx),
-            onSplitScriptToVeo: (idx: number) => handleSplitSingleScriptToThreeScenes(idx),
+            onChangeScriptConfig: (cfg: { count?: number; contentMode?: any }) => {
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === node.id
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          requestedCount: cfg.count ?? n.data?.requestedCount,
+                          contentMode: cfg.contentMode ?? n.data?.contentMode,
+                        },
+                      }
+                    : n
+                )
+              )
+            },
+            onPushToVeo: () => handleApplyAllGptScriptsToVeo(node.id),
+            onPushAllToVeo: () => handleApplyAllGptScriptsToVeo(node.id),
+            onPushSingleToVeo: (idx: number) => handleApplySingleScriptToCurrentScene(idx, node.id),
+            onSplitScriptToVeo: (idx: number) => handleSplitSingleScriptToThreeScenes(idx, node.id),
           },
         }
       }
       if (node.type === 'veoFlowStudio') {
-        const gptNode = nodes.find((n) => n.id === 'node-gpt')
-        const availableGptScripts = (gptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
+        const gptRes = resolveGptScriptsInput({ nodes, edges, targetNodeId: node.id })
+        const availableGptScripts = gptRes.ok && gptRes.data ? (gptRes.data as GptSalesScriptItem[]) : []
 
         return {
           ...node,
@@ -1247,6 +1124,8 @@ function WorkflowCanvas() {
             videoConfig: veoVideoConfig,
             availableGptScripts,
             onOpenVeoSetup: () => setIsVeoModalOpen(true),
+            onOpenLibrary: () => setIsLibraryOpen(true),
+            onOpenPreviewModal: handleOpenPreviewModal,
             onApplyGptScript: (idx: number) => handleApplySingleScriptToCurrentScene(idx),
             onApplyAllGptScripts: () => handleApplyAllGptScriptsToVeo(),
             onSelectScene: (idx: number) => handleFlowStudioSelectScene(node.id, idx),
@@ -1277,7 +1156,6 @@ function WorkflowCanvas() {
     handleResetGptPrompt,
     handleAnalyzeGemini,
     handleGenerateGptScript,
-    handleApplyGptScriptToVeo,
     handleApplyAllGptScriptsToVeo,
     handleApplySingleScriptToCurrentScene,
     handleSplitSingleScriptToThreeScenes,
@@ -1287,8 +1165,9 @@ function WorkflowCanvas() {
     handleRenderFlowScene,
     handleExportFlowVideo,
     handleDeleteNode,
+    handleSetStartNode,
+    handleOpenPreviewModal,
   ])
-
 
   // Attach onDeleteEdge to edges data
   const edgesWithHandlers = useMemo(() => {
@@ -1305,19 +1184,20 @@ function WorkflowCanvas() {
   const startNode = nodes.find((n) => n.id === startNodeId)
   const startNodeTitle = (startNode?.data?.title as string) || 'Gemini 2.5'
 
-  const gptNode = nodes.find((n) => n.id === 'node-gpt')
+  const gptNode = nodes.find((n) => n.type === 'gptScript')
   const availableGptScripts = (gptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
 
   return (
     <div className="workflow-container">
       <WorkflowToolbar
-        onAddNode={handleAddNode}
         onResetLayout={handleResetLayout}
-        onSimulateRun={handleSimulateRun}
+        onSimulateRun={handleExecuteWorkflow}
         onCleanOrphans={handleCleanOrphans}
         orphanCount={orphanCount}
         startNodeTitle={startNodeTitle}
         isRunning={isRunning}
+        onOpenLibrary={() => setIsLibraryOpen(true)}
+        exportedCount={exportedCount}
       />
 
 
@@ -1350,19 +1230,41 @@ function WorkflowCanvas() {
       </div>
 
       {/* Modal Cấu Hình Google Veo & Flow Project */}
-      <VeoSetupModal
-        isOpen={isVeoModalOpen}
-        onClose={() => setIsVeoModalOpen(false)}
-        projects={veoProjects}
-        activeProject={activeVeoProject}
-        capabilities={veoCapabilities}
-        currentConfig={veoVideoConfig}
-        availableScripts={availableGptScripts}
-        onSelectProject={handleSelectVeoProject}
-        onCreateProject={handleCreateVeoProject}
-        onDeleteProject={handleDeleteVeoProject}
-        onSaveConfig={handleSaveVeoConfig}
-      />
+      {isVeoModalOpen && (
+        <VeoSetupModal
+          isOpen={isVeoModalOpen}
+          onClose={() => setIsVeoModalOpen(false)}
+          projects={veoProjects}
+          activeProject={activeVeoProject}
+          capabilities={veoCapabilities}
+          currentConfig={veoVideoConfig}
+          availableScripts={availableGptScripts}
+          onSelectProject={handleSelectVeoProject}
+          onCreateProject={handleCreateVeoProject}
+          onDeleteProject={handleDeleteVeoProject}
+          onSaveConfig={handleSaveVeoConfig}
+        />
+      )}
+
+      {/* Modal Thư Viện Video Đã Xuất */}
+      {isLibraryOpen && (
+        <VideoLibraryModal
+          isOpen={isLibraryOpen}
+          onClose={() => setIsLibraryOpen(false)}
+          onVideoCountChange={(count) => setExportedCount(count)}
+        />
+      )}
+
+      {/* Modal Toàn Cảnh Xem Video (Không bị cắt/crop) */}
+      {Boolean(previewModalData?.isOpen) && (
+        <VideoPlayerModal
+          isOpen={Boolean(previewModalData?.isOpen)}
+          onClose={handleClosePreviewModal}
+          videoUrl={previewModalData?.videoUrl || ''}
+          title={previewModalData?.title}
+          prompt={previewModalData?.prompt}
+        />
+      )}
     </div>
   )
 }

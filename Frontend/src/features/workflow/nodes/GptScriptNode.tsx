@@ -31,18 +31,25 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   const [activeTab, setActiveTab] = useState<number>(0)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
+  const requestedCount = data.requestedCount ?? 3
+
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text)
     setCopiedIndex(idx)
     setTimeout(() => setCopiedIndex(null), 2000)
   }
 
-  const currentScript = salesScripts[activeTab]
+  const handleCountChange = (count: number) => {
+    data.onChangeScriptConfig?.({ count })
+  }
+
+  const safeTab = Math.min(Math.max(0, activeTab), Math.max(0, salesScripts.length - 1))
+  const currentScript = salesScripts[safeTab]
 
   return (
     <div
       className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
-      style={{ width: 400 }}
+      style={{ width: 420 }}
     >
       {isStartNode && (
         <div className="wf-start-banner">
@@ -99,7 +106,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </div>
           <div>
             <div className="wf-node-title" style={{ color: '#581c87' }}>
-              {data.title || 'ChatGPT • Kịch Bản Bán Hàng'}
+              {data.title || 'ChatGPT • Kịch Bản Video'}
             </div>
             <div style={{ fontSize: 10, color: '#9333ea', fontWeight: 600 }}>
               {data.model || 'cx/gpt-5.5'} • 9Router Gateway
@@ -152,6 +159,27 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
       {/* Body */}
       <div className="wf-node-body">
+        {/* Error Banner */}
+        {data.scriptError && (
+          <div
+            style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: 6,
+              padding: '6px 8px',
+              color: '#b91c1c',
+              fontSize: 10.5,
+              marginBottom: 8,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 6,
+            }}
+          >
+            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1 }}>{data.scriptError}</div>
+          </div>
+        )}
+
         {/* 1. Connected Product Images Display */}
         <div style={{ marginBottom: 8, padding: '6px 8px', background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
@@ -193,7 +221,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
         </div>
 
         {/* 2. Connected Gemini Data Status */}
-        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 6, background: hasProductData ? '#ecfdf5' : '#fffbeb', border: hasProductData ? '1px solid #a7f3d0' : '1px solid #fde68a' }}>
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 6, background: hasProductData ? '#ecfdf5' : '#fffbeb', border: hasProductData ? '1px solid #a7f3d0' : '1px solid #fde68a' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
             {hasProductData ? (
               <>
@@ -212,11 +240,42 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </span>
         </div>
 
-        {/* 3. Prompt Template input */}
+        {/* 3. Configuration Bar: Script Count */}
+        <div style={{ marginBottom: 8, padding: '7px 8px', background: '#faf5ff', borderRadius: 6, border: '1px solid #f3e8ff' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
+              Số lượng kịch bản:
+            </span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[1, 2, 3, 4, 5].map((cnt) => (
+                <button
+                  key={cnt}
+                  type="button"
+                  onClick={() => handleCountChange(cnt)}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    border: requestedCount === cnt ? '1px solid #7c3aed' : '1px solid #cbd5e1',
+                    background: requestedCount === cnt ? '#7c3aed' : '#ffffff',
+                    color: requestedCount === cnt ? '#ffffff' : '#475569',
+                    cursor: 'pointer',
+                    transition: 'all 0.1s ease',
+                  }}
+                >
+                  {cnt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 4. Prompt Template input */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <label style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
             <FileText size={12} style={{ color: '#7c3aed' }} />
-            Prompt chỉ thị ChatGPT (3 kịch bản bán hàng):
+            Prompt chỉ thị ChatGPT (Tự do tùy biến):
           </label>
           <button
             type="button"
@@ -244,14 +303,14 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           rows={5}
           value={data.prompt}
           onChange={(e) => data.onChangePrompt?.(e.target.value)}
-          placeholder="Dán prompt tạo kịch bản tại đây. Sử dụng biến {{PRODUCT_DATA}} để tự động nạp kết quả từ Gemini..."
-          style={{ minHeight: 90, fontSize: 11, fontFamily: 'monospace' }}
+          placeholder="Dán prompt tạo kịch bản tại đây. Sử dụng biến {{SCRIPT_COUNT}} và {{PRODUCT_DATA}} để tự động nạp dữ liệu..."
+          style={{ minHeight: 85, fontSize: 10.5, fontFamily: 'monospace' }}
         />
 
         {/* Action button */}
-        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 10, color: '#64748b' }}>
-            Mục tiêu: <strong>3 kịch bản (80-130 từ)</strong>
+            Mục tiêu: <strong>{requestedCount} kịch bản (80-130 từ)</strong>
           </div>
 
           <button
@@ -266,14 +325,20 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             }}
           >
             <Sparkles size={13} className={isGenerating ? 'animate-spin' : ''} />
-            {isGenerating ? 'Đang viết kịch bản...' : 'Sinh 3 Kịch Bản Bán Hàng'}
+            {isGenerating ? 'Đang viết kịch bản...' : `Sinh ${requestedCount} Kịch Bản`}
           </button>
         </div>
 
-        {/* 4. Output Scripts: 3 Tabs / Cards */}
+        {/* 5. Output Scripts: Dynamic Tabs & Cards */}
         {salesScripts.length > 0 ? (
-          <div style={{ marginTop: 12, borderTop: '1px solid #ede9fe', paddingTop: 10 }}>
-            {/* Tabs */}
+          <div style={{ marginTop: 10, borderTop: '1px solid #ede9fe', paddingTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#475569' }}>
+                Đã tạo ({salesScripts.length}/{requestedCount} kịch bản):
+              </span>
+            </div>
+
+            {/* Dynamic Tabs */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
               {salesScripts.map((s, idx) => (
                 <button
@@ -285,15 +350,15 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                     fontWeight: 700,
                     padding: '4px 8px',
                     borderRadius: 5,
-                    border: activeTab === idx ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-                    background: activeTab === idx ? '#f5f3ff' : '#f8fafc',
-                    color: activeTab === idx ? '#7c3aed' : '#64748b',
+                    border: safeTab === idx ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+                    background: safeTab === idx ? '#f5f3ff' : '#f8fafc',
+                    color: safeTab === idx ? '#7c3aed' : '#64748b',
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  {s.angle.includes('1') ? '🎬 Góc 1: Vấn đề' : s.angle.includes('2') ? '💎 Góc 2: USP' : '✨ Góc 3: Trải nghiệm'}
+                  #{idx + 1} — {s.angle || s.title || `Kịch bản ${idx + 1}`}
                 </button>
               ))}
             </div>
@@ -305,27 +370,27 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                   background: '#faf5ff',
                   border: '1px solid #e9d5ff',
                   borderRadius: 6,
-                  padding: '10px',
+                  padding: '9px',
                   fontSize: 11,
                   color: '#334155',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, borderBottom: '1px dashed #d8b4fe', paddingBottom: 4 }}>
                   <span style={{ fontWeight: 700, color: '#6b21a8' }}>
-                    {currentScript.angle}
+                    {currentScript.angle || `Kịch bản #${safeTab + 1}`}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ fontSize: 9, background: '#f3e8ff', color: '#7e22ce', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>
-                      ~{currentScript.word_count || currentScript.wordCount || 0} từ
+                      ~{currentScript.wordCount || currentScript.word_count || 0} từ
                     </span>
                     <button
                       type="button"
-                      onClick={() => handleCopy(currentScript.content, activeTab)}
+                      onClick={() => handleCopy(currentScript.content, safeTab)}
                       style={{
                         background: 'transparent',
                         border: 'none',
                         cursor: 'pointer',
-                        color: copiedIndex === activeTab ? '#16a34a' : '#7c3aed',
+                        color: copiedIndex === safeTab ? '#16a34a' : '#7c3aed',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 2,
@@ -334,69 +399,73 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                       }}
                       title="Sao chép kịch bản này"
                     >
-                      {copiedIndex === activeTab ? <Check size={12} /> : <Copy size={12} />}
-                      {copiedIndex === activeTab ? 'Đã chép' : 'Chép'}
+                      {copiedIndex === safeTab ? <Check size={12} /> : <Copy size={12} />}
+                      {copiedIndex === safeTab ? 'Đã chép' : 'Chép'}
                     </button>
                   </div>
                 </div>
 
-                {/* Breakdown items if parsed */}
-                {currentScript.hook && (
-                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
-                    <strong style={{ color: '#7e22ce' }}>Hook:</strong> {currentScript.hook}
+                {/* Visual Direction for Veo */}
+                {(currentScript.visualDirection || currentScript.visual_direction) && (
+                  <div style={{ marginBottom: 6, padding: '5px 7px', background: '#eff6ff', borderRadius: 5, border: '1px solid #bfdbfe' }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                      <Camera size={11} />
+                      Gợi ý hình ảnh (Visual Direction cho Veo):
+                    </div>
+                    <div style={{ fontSize: 10.5, color: '#1e3a8a', lineHeight: 1.4 }}>
+                      {currentScript.visualDirection || currentScript.visual_direction}
+                    </div>
                   </div>
                 )}
-                {currentScript.problem && (
-                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
-                    <strong style={{ color: '#7e22ce' }}>Vấn đề:</strong> {currentScript.problem}
+
+                {/* Voiceover / Script Content */}
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: '#6b21a8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                    <FileText size={11} />
+                    Lời thoại (Voiceover):
                   </div>
-                )}
-                {currentScript.product && (
-                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
-                    <strong style={{ color: '#7e22ce' }}>Sản phẩm:</strong> {currentScript.product}
+                  <div
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid #f3e8ff',
+                      borderRadius: 4,
+                      padding: '7px 8px',
+                      fontSize: 11,
+                      lineHeight: '1.5',
+                      color: '#1e293b',
+                      whiteSpace: 'pre-line',
+                      maxHeight: 140,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {currentScript.voiceover || currentScript.content}
                   </div>
-                )}
-                {currentScript.benefits && (
-                  <div style={{ marginBottom: 3, fontSize: 10.5 }}>
-                    <strong style={{ color: '#7e22ce' }}>Lợi ích:</strong> {currentScript.benefits}
+                </div>
+
+                {/* On-screen text & CTA if parsed */}
+                {(currentScript.onScreenText || currentScript.on_screen_text) && (
+                  <div style={{ marginBottom: 3, fontSize: 10, color: '#475569' }}>
+                    <strong style={{ color: '#7e22ce' }}>Chữ màn hình:</strong> {currentScript.onScreenText || currentScript.on_screen_text}
                   </div>
                 )}
                 {currentScript.cta && (
-                  <div style={{ marginBottom: 6, fontSize: 10.5 }}>
+                  <div style={{ marginBottom: 6, fontSize: 10, color: '#475569' }}>
                     <strong style={{ color: '#7e22ce' }}>CTA:</strong> {currentScript.cta}
                   </div>
                 )}
 
-                {/* Full script text */}
-                <div
-                  style={{
-                    background: '#ffffff',
-                    border: '1px solid #f3e8ff',
-                    borderRadius: 4,
-                    padding: '8px',
-                    fontSize: 11,
-                    lineHeight: '1.5',
-                    color: '#1e293b',
-                    whiteSpace: 'pre-line',
-                    maxHeight: 180,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {currentScript.content}
-                </div>
-
-                {/* Button Đẩy CẢ 3 Kịch Bản sang 3 Cảnh Veo */}
+                {/* Action 1: Đẩy tất cả kịch bản vào các Cảnh Veo tương ứng */}
                 <button
                   type="button"
                   onClick={() => {
                     if (data.onPushAllToVeo) {
                       data.onPushAllToVeo()
                     } else {
-                      data.onPushToVeo?.(activeTab)
+                      data.onPushToVeo?.(safeTab)
                     }
                   }}
                   style={{
-                    marginTop: 8,
+                    marginTop: 6,
                     width: '100%',
                     padding: '7px 12px',
                     borderRadius: 6,
@@ -413,17 +482,17 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                     boxShadow: '0 2px 6px rgba(244, 63, 94, 0.25)',
                     transition: 'all 0.15s ease',
                   }}
-                  title="Đẩy cả 3 kịch bản đầy đủ vào 3 cảnh của Google Veo Flow Studio: Cảnh 1 = Kịch bản 1, Cảnh 2 = Kịch bản 2, Cảnh 3 = Kịch bản 3 (toàn bộ text, không cắt bớt)"
+                  title={`Đẩy tất cả ${salesScripts.length} kịch bản vào ${salesScripts.length} phân cảnh của Veo Flow Studio`}
                 >
                   <Sparkles size={13} />
-                  🚀 Đẩy 3 Kịch Bản Vào 3 Phân Cảnh (Đầy Đủ Text)
+                  🚀 Đẩy cả {salesScripts.length} Kịch Bản vào {salesScripts.length} Cảnh Veo
                 </button>
 
                 {/* Secondary quick action buttons */}
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button
                     type="button"
-                    onClick={() => data.onPushSingleToVeo?.(activeTab)}
+                    onClick={() => data.onPushSingleToVeo?.(safeTab)}
                     style={{
                       flex: 1,
                       padding: '5px 8px',
@@ -447,7 +516,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
                   <button
                     type="button"
-                    onClick={() => data.onSplitScriptToVeo?.(activeTab)}
+                    onClick={() => data.onSplitScriptToVeo?.(safeTab)}
                     style={{
                       flex: 1,
                       padding: '5px 8px',
@@ -464,7 +533,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                       gap: 4,
                       whiteSpace: 'nowrap',
                     }}
-                    title="Phân rã kịch bản này ra 3 cảnh: Cảnh 1: Hook+Vấn đề, Cảnh 2: Sản phẩm+Lợi ích, Cảnh 3: CTA (đầy đủ text)"
+                    title="Phân rã kịch bản này ra 3 cảnh: Cảnh 1: Mở đầu, Cảnh 2: Điểm nổi bật & Trải nghiệm, Cảnh 3: Chốt CTA"
                   >
                     ✂️ Phân bổ kịch bản này ra 3 cảnh
                   </button>
@@ -485,7 +554,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
               fontSize: 10.5,
             }}
           >
-            Chưa có kịch bản. Nhấn <strong>Sinh 3 Kịch Bản Bán Hàng</strong> để tạo.
+            Chưa có kịch bản. Nhấn <strong>Sinh {requestedCount} Kịch Bản</strong> để tạo.
           </div>
         )}
       </div>

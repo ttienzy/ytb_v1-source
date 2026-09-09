@@ -2,6 +2,7 @@ import React, { useRef } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { ShoppingBag, Upload, X, CheckCircle2, Trash2, Plus, Sparkles } from 'lucide-react'
 import type { ProductAssetsNodeData } from '../types'
+import { uploadWorkflowAsset } from '../services/workflowApi'
 
 interface ProductAssetsNodeProps {
   data: ProductAssetsNodeData
@@ -24,10 +25,20 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
     const file = e.target.files?.[0]
     if (!file) return
 
+    const slotIndex = activeSlotIndexRef.current
     const reader = new FileReader()
     reader.onload = (event) => {
       const url = event.target?.result as string
-      data.onChangeImage?.(activeSlotIndexRef.current, url)
+      data.onChangeImage?.(slotIndex, url)
+
+      // Upload lên Backend trong nền để nhận assetId và backendPath
+      uploadWorkflowAsset(file, 'product')
+        .then((assetRef) => {
+          data.onChangeImage?.(slotIndex, url, assetRef)
+        })
+        .catch((err) => {
+          console.warn('Lỗi khi upload asset lên backend:', err)
+        })
     }
     reader.readAsDataURL(file)
     e.target.value = ''
@@ -43,6 +54,15 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
     reader.onload = (event) => {
       const url = event.target?.result as string
       data.onChangeImage?.(index, url)
+
+      // Upload lên Backend trong nền
+      uploadWorkflowAsset(file, 'product')
+        .then((assetRef) => {
+          data.onChangeImage?.(index, url, assetRef)
+        })
+        .catch((err) => {
+          console.warn('Lỗi khi upload asset lên backend:', err)
+        })
     }
     reader.readAsDataURL(file)
   }

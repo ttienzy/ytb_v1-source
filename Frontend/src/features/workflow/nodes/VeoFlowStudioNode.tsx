@@ -14,6 +14,7 @@ import {
   Sliders,
   ChevronRight,
   ExternalLink,
+  Maximize2,
 } from 'lucide-react'
 import type { VeoFlowStudioNodeData } from '../types'
 
@@ -93,27 +94,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
         className="wf-handle wf-handle-target"
         title="Nhận kịch bản từ ChatGPT"
       />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="scene-1-in"
-        style={{ top: '55%' }}
-        className="wf-handle wf-handle-target"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="scene-2-in"
-        style={{ top: '65%' }}
-        className="wf-handle wf-handle-target"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="scene-3-in"
-        style={{ top: '75%' }}
-        className="wf-handle wf-handle-target"
-      />
+
 
       {/* Header */}
       <div className="wf-node-header" style={{ background: '#fdf2f8', borderBottom: '1px solid #fce7f3' }}>
@@ -271,9 +252,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
-                title="Đẩy 3 kịch bản đầy đủ vào 3 cảnh tương ứng (Cảnh 1=Góc 1, Cảnh 2=Góc 2, Cảnh 3=Góc 3)"
+                title={`Đẩy ${data.availableGptScripts.length} kịch bản đầy đủ vào ${data.availableGptScripts.length} cảnh tương ứng`}
               >
-                ⚡ Đồng bộ 3 Cảnh
+                ⚡ Đồng bộ {data.availableGptScripts.length} Cảnh
               </button>
               <select
                 style={{
@@ -299,7 +280,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 <option value="" disabled>Nạp kịch bản vào Cảnh #{safeTab + 1}...</option>
                 {data.availableGptScripts.map((s, i) => (
                   <option key={i} value={i}>
-                    {s.angle.includes('1') ? 'Góc 1: Vấn đề' : s.angle.includes('2') ? 'Góc 2: USP' : 'Góc 3: Trải nghiệm'}
+                    {`#${i + 1} — ${s.angle || s.title || `Kịch bản ${i + 1}`}`}
                   </option>
                 ))}
               </select>
@@ -362,8 +343,8 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
         <div
           style={{
             width: '100%',
-            height: 140,
-            background: '#090d16',
+            height: 170,
+            background: '#050811',
             borderRadius: 8,
             overflow: 'hidden',
             position: 'relative',
@@ -375,18 +356,53 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           }}
         >
           {currentScene.videoUrl ? (
-            <video
-              src={currentScene.videoUrl}
-              controls
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              poster={currentScene.thumbnailUrl || undefined}
-            />
+            <>
+              <video
+                src={currentScene.videoUrl}
+                controls
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                poster={currentScene.thumbnailUrl || undefined}
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  data.onOpenPreviewModal?.(
+                    currentScene.videoUrl!,
+                    `Cảnh #${safeTab + 1}: ${currentScene.title || 'Phân cảnh'}`,
+                    currentScene.prompt
+                  )
+                }
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  zIndex: 5,
+                  padding: '3px 7px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'rgba(15, 23, 42, 0.75)',
+                  backdropFilter: 'blur(4px)',
+                  color: '#f8fafc',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                }}
+                title="Mở xem video toàn cảnh chất lượng cao"
+              >
+                <Maximize2 size={11} />
+                Toàn cảnh
+              </button>
+            </>
           ) : currentScene.thumbnailUrl ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
               <img
                 src={currentScene.thumbnailUrl}
                 alt="Scene frame"
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
               <div
                 style={{
@@ -693,32 +709,87 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 background: '#ecfdf5',
                 border: '1px solid #a7f3d0',
                 borderRadius: 8,
-                padding: '8px 12px',
+                padding: '10px 12px',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
+                flexDirection: 'column',
+                gap: 8,
               }}
             >
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#065f46',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                }}
-              >
-                <CheckCircle2 size={14} color="#059669" /> Video hoàn chỉnh đã sẵn sàng!
-              </span>
-              <button
-                type="button"
-                className="wf-btn wf-btn-primary"
-                style={{ padding: '4px 10px', fontSize: 11 }}
-                onClick={() => alert('Đang chuẩn bị tải xuống video MP4!')}
-              >
-                <Download size={12} /> Tải MP4
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#065f46',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                  }}
+                >
+                  <CheckCircle2 size={14} color="#059669" /> Video hoàn chỉnh đã sẵn sàng!
+                </span>
+                <span style={{ fontSize: 10, color: '#047857', fontWeight: 600 }}>MP4 • 1080p</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  className="wf-btn"
+                  style={{
+                    flex: 1,
+                    justifyContent: 'center',
+                    padding: '5px 8px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: '#ffffff',
+                    color: '#065f46',
+                    border: '1px solid #a7f3d0',
+                  }}
+                  onClick={() =>
+                    data.onOpenPreviewModal?.(
+                      data.finalVideoUrl!,
+                      'Video hoàn chỉnh (Ghép nối timeline)',
+                      undefined
+                    )
+                  }
+                >
+                  <Play size={12} fill="#065f46" /> Phát Video
+                </button>
+
+                <button
+                  type="button"
+                  className="wf-btn"
+                  style={{
+                    flex: 1,
+                    justifyContent: 'center',
+                    padding: '5px 8px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: '#ffffff',
+                    color: '#4338ca',
+                    border: '1px solid #c7d2fe',
+                  }}
+                  onClick={() => data.onOpenLibrary?.()}
+                >
+                  <Film size={12} color="#6366f1" /> Thư viện
+                </button>
+
+                <a
+                  href={data.finalVideoUrl}
+                  download="workflow_final_video.mp4"
+                  className="wf-btn wf-btn-primary"
+                  style={{
+                    padding: '5px 10px',
+                    fontSize: 11,
+                    textDecoration: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <Download size={12} /> Tải MP4
+                </a>
+              </div>
             </div>
           ) : (
             <button

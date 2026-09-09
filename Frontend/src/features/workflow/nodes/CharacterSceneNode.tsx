@@ -2,6 +2,7 @@ import React, { useRef } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2 } from 'lucide-react'
 import type { CharacterSceneNodeData } from '../types'
+import { uploadWorkflowAsset } from '../services/workflowApi'
 
 interface CharacterSceneNodeProps {
   data: CharacterSceneNodeData
@@ -21,10 +22,21 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
     const file = e.target.files?.[0]
     if (!file) return
 
+    const slot = currentSlotRef.current
+    const kind = slot === 'modelImage' ? 'model' : 'scene'
     const reader = new FileReader()
     reader.onload = (event) => {
       const url = event.target?.result as string
-      data.onChange?.(currentSlotRef.current, url)
+      data.onChange?.(slot, url)
+
+      // Upload lên Backend trong nền
+      uploadWorkflowAsset(file, kind)
+        .then((assetRef) => {
+          data.onChange?.(slot, url, assetRef)
+        })
+        .catch((err) => {
+          console.warn('Lỗi khi upload asset lên backend:', err)
+        })
     }
     reader.readAsDataURL(file)
     e.target.value = ''
@@ -36,10 +48,20 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
     const file = e.dataTransfer.files?.[0]
     if (!file || !file.type.startsWith('image/')) return
 
+    const kind = slot === 'modelImage' ? 'model' : 'scene'
     const reader = new FileReader()
     reader.onload = (event) => {
       const url = event.target?.result as string
       data.onChange?.(slot, url)
+
+      // Upload lên Backend trong nền
+      uploadWorkflowAsset(file, kind)
+        .then((assetRef) => {
+          data.onChange?.(slot, url, assetRef)
+        })
+        .catch((err) => {
+          console.warn('Lỗi khi upload asset lên backend:', err)
+        })
     }
     reader.readAsDataURL(file)
   }
