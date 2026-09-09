@@ -1112,6 +1112,119 @@ def delete_video(video_id: str) -> bool:
     return False
 
 
+def extract_last_frame(video_id: str) -> dict:
+    """Trích xuất frame cuối của video Veo để làm frame đầu cho phân cảnh tiếp theo."""
+    path = get_video_path(video_id)
+    if not path or not path.exists():
+        raise FileNotFoundError(f"Không tìm thấy file video với ID '{video_id}'")
+
+    clean_id = Path(video_id).stem
+    _VEO_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    img_id = f"frame_{clean_id}"
+    out_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
+
+    # Đọc metadata sidecar nếu có
+    meta_path = path.with_suffix(".json")
+    meta: dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # Nếu file ảnh chưa có hoặc rỗng thì chạy FFmpeg để cắt
+    if not (out_file.exists() and out_file.stat().st_size > 0):
+        # 1. Thử seek từ cuối video bằng -sseof -0.08
+        cmd = [
+            "ffmpeg", "-y",
+            "-sseof", "-0.08",
+            "-i", str(path),
+            "-frames:v", "1",
+            "-q:v", "2",
+            str(out_file),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+
+        # 2. Nếu -sseof không thành công, thử fallback bằng timestamp duration
+        if not (out_file.exists() and out_file.stat().st_size > 0):
+            dur = float(meta.get("duration_seconds") or 0.0)
+            if dur <= 0:
+                try:
+                    from app.recap.ffmpeg import ffprobe_duration
+                    dur = ffprobe_duration(path)
+                except Exception:
+                    dur = 0.0
+            seek_time = max(0.0, dur - 0.08)
+            fallback_cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(seek_time),
+                "-i", str(path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(out_file),
+            ]
+            proc = subprocess.run(fallback_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+
+        if not (out_file.exists() and out_file.stat().st_size > 0):
+            err_msg = (proc.stderr or "")[-300:]
+            raise RuntimeError(f"FFmpeg không thể trích xuất frame cuối từ video '{video_id}': {err_msg}")
+
+    prompt = meta.get("prompt") or ""
+    aspect_ratio = meta.get("aspect_ratio") or "9:16"
+    model_display_name = meta.get("model_display_name") or "Google Veo"
+    local_rel_path = str(out_file.relative_to(_BASE_DIR)).replace("\\", "/")
+
+    target_project_id = meta.get("project_id") or ""
+    if not target_project_id:
+        job = _jobs.get(clean_id) or _jobs.get(video_id)
+        if job and job.get("project_id"):
+            target_project_id = job.get("project_id")
+    if not target_project_id:
+        try:
+            with SessionLocal() as db:
+                active_p = db.query(VeoProject).filter(VeoProject.is_active == True).first()
+                if active_p:
+                    target_project_id = active_p.id
+        except Exception:
+            pass
+
+    # Lưu vào database VeoImage để hiển thị trong Thư viện ảnh Veo Studio
+    try:
+        with SessionLocal() as db:
+            existing = db.query(VeoImage).filter(VeoImage.id == img_id).first()
+            if existing:
+                if target_project_id and existing.project_id != target_project_id:
+                    existing.project_id = target_project_id
+                    db.commit()
+            else:
+                new_img = VeoImage(
+                    id=img_id,
+                    prompt=f"[Frame cuối] {prompt}" if prompt else "Frame cuối phân cảnh",
+                    model_display_name=model_display_name,
+                    model_key="veo_last_frame",
+                    aspect_ratio=aspect_ratio,
+                    seed=None,
+                    media_id=img_id,
+                    image_url=f"/api/veo/images/{img_id}/file",
+                    local_path=local_rel_path,
+                    project_id=target_project_id,
+                )
+                db.add(new_img)
+                db.commit()
+    except Exception as e:
+        logger.warning("Không thể lưu VeoImage vào database: %s", e)
+
+    return {
+        "ok": True,
+        "image_id": img_id,
+        "file_path": str(out_file.resolve()),
+        "preview_url": f"/api/veo/images/{img_id}/file",
+        "prompt": prompt,
+        "aspect_ratio": aspect_ratio,
+        "model_display_name": model_display_name,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Image Generation (Nano Banana - Pinhole)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1275,7 +1388,11 @@ def list_images(project_id: str | None = None) -> list[VeoImageItem]:
             if p:
                 if p.id: match_ids.add(p.id)
                 if p.flow_project_id: match_ids.add(p.flow_project_id)
-            q = q.filter(VeoImage.project_id.in_(list(match_ids)))
+            q = q.filter(
+                (VeoImage.project_id.in_(list(match_ids)))
+                | (VeoImage.project_id == "")
+                | (VeoImage.project_id.is_(None))
+            )
         images = q.order_by(VeoImage.created_at.desc()).limit(100).all()
         return [_model_to_image_item(img) for img in images]
 

@@ -1,8 +1,10 @@
-import React, { useRef } from 'react'
+import React, { useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2 } from 'lucide-react'
+import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2, ImageDown } from 'lucide-react'
 import type { CharacterSceneNodeData } from '../types'
+import type { AssetRef } from '../contracts'
 import { uploadWorkflowAsset } from '../services/workflowApi'
+import { VeoImagePickerModal } from '../components/VeoImagePickerModal'
 
 interface CharacterSceneNodeProps {
   data: CharacterSceneNodeData
@@ -12,11 +14,23 @@ interface CharacterSceneNodeProps {
 export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentSlotRef = useRef<'modelImage' | 'sceneImage'>('modelImage')
+  const [veoPickerOpen, setVeoPickerOpen] = useState(false)
+  const [activeSlot, setActiveSlot] = useState<'modelImage' | 'sceneImage'>('modelImage')
 
   const handleSlotClick = (slot: 'modelImage' | 'sceneImage') => {
     currentSlotRef.current = slot
     fileInputRef.current?.click()
   }
+
+  const handleOpenVeoModal = (slot: 'modelImage' | 'sceneImage') => {
+    setActiveSlot(slot)
+    setVeoPickerOpen(true)
+  }
+
+  const handleSelectVeoImage = (dataUrl: string, assetRef: AssetRef) => {
+    data.onChange?.(activeSlot, dataUrl, assetRef)
+  }
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -191,6 +205,17 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                 <img src={data.modelImage} alt="Model" className="wf-asset-preview-img" />
                 <button
                   type="button"
+                  className="wf-btn-veo-replace"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleOpenVeoModal('modelImage')
+                  }}
+                  title="Đổi ảnh từ Thư viện Veo"
+                >
+                  <ImageDown size={10} />
+                </button>
+                <button
+                  type="button"
                   onClick={(e) => handleRemove(e, 'modelImage')}
                   style={{
                     position: 'absolute',
@@ -246,6 +271,18 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                 </div>
                 <div className="wf-asset-slot-label">Người mẫu / KOL</div>
                 <div className="wf-asset-slot-sub">Kéo thả / Chọn</div>
+                <button
+                  type="button"
+                  className="wf-btn-veo-library"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleOpenVeoModal('modelImage')
+                  }}
+                  title="Chọn ảnh từ Thư viện Veo Studio"
+                >
+                  <ImageDown size={11} />
+                  <span>Thư viện Veo</span>
+                </button>
               </>
             )}
           </div>
@@ -265,6 +302,17 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
             {data.sceneImage ? (
               <>
                 <img src={data.sceneImage} alt="Scene" className="wf-asset-preview-img" />
+                <button
+                  type="button"
+                  className="wf-btn-veo-replace"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleOpenVeoModal('sceneImage')
+                  }}
+                  title="Đổi ảnh từ Thư viện Veo"
+                >
+                  <ImageDown size={10} />
+                </button>
                 <button
                   type="button"
                   onClick={(e) => handleRemove(e, 'sceneImage')}
@@ -322,6 +370,18 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                 </div>
                 <div className="wf-asset-slot-label">Bối cảnh / Nền</div>
                 <div className="wf-asset-slot-sub">Kéo thả / Chọn</div>
+                <button
+                  type="button"
+                  className="wf-btn-veo-library"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleOpenVeoModal('sceneImage')
+                  }}
+                  title="Chọn ảnh từ Thư viện Veo Studio"
+                >
+                  <ImageDown size={11} />
+                  <span>Thư viện Veo</span>
+                </button>
               </>
             )}
           </div>
@@ -364,6 +424,14 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
         style={{ top: '50%' }}
         className="wf-handle wf-handle-source"
         title="Dòng tham chiếu nhân vật sang Flow Studio"
+      />
+
+      <VeoImagePickerModal
+        isOpen={veoPickerOpen}
+        onClose={() => setVeoPickerOpen(false)}
+        onSelect={handleSelectVeoImage}
+        targetLabel={activeSlot === 'modelImage' ? 'Nhân vật: Người mẫu / KOL' : 'Nhân vật: Bối cảnh / Nền'}
+        kind={activeSlot === 'modelImage' ? 'model' : 'scene'}
       />
     </div>
   )

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, Video, Sparkles, Film, Activity, Download, X, Send } from 'lucide-react'
+import { Clapperboard, Video, Sparkles, Film, Activity, Download, X, Send, ImageDown } from 'lucide-react'
 import type {
   StudioTask,
   VeoBridgeStatus,
@@ -242,6 +242,36 @@ export function VeoStudioPage({ setActivePage }: Props) {
     loadProjects()
   }
 
+  const [extractingVideoId, setExtractingVideoId] = useState<string | null>(null)
+  const [imageRefreshTrigger, setImageRefreshTrigger] = useState(0)
+
+  const handleSaveLastFrameToLibrary = async (video: {
+    job_id?: string
+    video_id?: string
+    prompt?: string
+    aspect_ratio?: string
+  }) => {
+    const vidId = video.video_id || video.job_id
+    if (!vidId) return
+
+    setExtractingVideoId(vidId)
+    setMessage('Đang trích xuất frame cuối vào Thư viện...')
+    try {
+      const result = await api.extractLastFrame(vidId)
+      if (result.ok) {
+        setImageRefreshTrigger((v) => v + 1)
+        setMessage('✅ Đã trích xuất và lưu frame cuối vào Thư viện Ảnh Veo!')
+      } else {
+        setMessage('Không thể trích xuất frame cuối từ video')
+      }
+    } catch (err: any) {
+      setMessage(err.message || 'Lỗi trích xuất frame cuối')
+    } finally {
+      setExtractingVideoId(null)
+    }
+  }
+
+
   const handleSelectHistory = (item: VeoHistoryItem) => {
     // Create a synthetic "done" job for preview
     const job: VeoJobOut = {
@@ -262,6 +292,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
     }
     handlePreviewJob(job)
   }
+
 
   return (
     <div className="veo-studio">
@@ -355,6 +386,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
                     onRegisterTask={addStudioTask}
                     onUpdateTask={updateStudioTask}
                     onRemoveTask={removeStudioTask}
+                    imageRefreshTrigger={imageRefreshTrigger}
                   />
                 )}
                 {activeTab === 'image' && (
@@ -395,6 +427,12 @@ export function VeoStudioPage({ setActivePage }: Props) {
           <VideoPlayer
             activeJob={activeJob}
             onClose={() => setActiveJob(null)}
+            onSaveLastFrameToLibrary={handleSaveLastFrameToLibrary}
+            isExtractingFrame={Boolean(
+              activeJob &&
+                (extractingVideoId === activeJob.job_id ||
+                  (activeJob.output_files && activeJob.output_files.includes(extractingVideoId!))),
+            )}
           />
 
           {/* Message */}
@@ -407,7 +445,10 @@ export function VeoStudioPage({ setActivePage }: Props) {
             onDelete={handleDeleteVideo}
             onSendToEditor={() => setActivePage('Video')}
             onSendToSchedule={() => setActivePage('Lên lịch Youtube')}
+            onSaveLastFrameToLibrary={handleSaveLastFrameToLibrary}
+            extractingVideoId={extractingVideoId}
           />
+
         </aside>
       </div>
 
@@ -506,6 +547,19 @@ export function VeoStudioPage({ setActivePage }: Props) {
                   <Download size={14} />
                   <span>Tải video MP4</span>
                 </a>
+                <button
+                  type="button"
+                  className="veo-btn-modal-secondary"
+                  disabled={extractingVideoId === (previewVideo.job_id || previewVideo.output_files?.[0])}
+                  onClick={() => {
+                    handleSaveLastFrameToLibrary(previewVideo)
+                    setPreviewVideo(null)
+                  }}
+                  title="Lưu frame cuối vào Thư viện Ảnh Veo"
+                >
+                  <ImageDown size={14} />
+                  <span>Lưu frame cuối vào Thư viện</span>
+                </button>
                 <button
                   type="button"
                   className="veo-btn-modal-primary"

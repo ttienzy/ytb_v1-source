@@ -1,8 +1,10 @@
-import React, { useRef } from 'react'
+import React, { useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { ShoppingBag, Upload, X, CheckCircle2, Trash2, Plus, Sparkles } from 'lucide-react'
+import { ShoppingBag, Upload, X, CheckCircle2, Trash2, Plus, Sparkles, ImageDown } from 'lucide-react'
 import type { ProductAssetsNodeData } from '../types'
+import type { AssetRef } from '../contracts'
 import { uploadWorkflowAsset } from '../services/workflowApi'
+import { VeoImagePickerModal } from '../components/VeoImagePickerModal'
 
 interface ProductAssetsNodeProps {
   data: ProductAssetsNodeData
@@ -12,6 +14,8 @@ interface ProductAssetsNodeProps {
 export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeSlotIndexRef = useRef<number>(0)
+  const [veoPickerOpen, setVeoPickerOpen] = useState(false)
+  const [activePickerSlot, setActivePickerSlot] = useState<number>(0)
 
   const images = data.images || [null, null, null]
   const imageCount = images.filter(Boolean).length
@@ -20,6 +24,16 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
     activeSlotIndexRef.current = index
     fileInputRef.current?.click()
   }
+
+  const handleOpenVeoModal = (index: number) => {
+    setActivePickerSlot(index)
+    setVeoPickerOpen(true)
+  }
+
+  const handleSelectVeoImage = (dataUrl: string, assetRef: AssetRef) => {
+    data.onChangeImage?.(activePickerSlot, dataUrl, assetRef)
+  }
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -198,6 +212,17 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
                     <img src={imgUrl} alt={`Product ${idx + 1}`} className="wf-asset-preview-img" />
                     <button
                       type="button"
+                      className="wf-btn-veo-replace"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleOpenVeoModal(idx)
+                      }}
+                      title="Đổi ảnh từ Thư viện Veo"
+                    >
+                      <ImageDown size={10} />
+                    </button>
+                    <button
+                      type="button"
                       onClick={(e) => handleRemove(e, idx)}
                       style={{
                         position: 'absolute',
@@ -253,6 +278,18 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
                     </div>
                     <div className="wf-asset-slot-label">{slotLabels[idx]}</div>
                     <div className="wf-asset-slot-sub">Kéo thả / Chọn</div>
+                    <button
+                      type="button"
+                      className="wf-btn-veo-library"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleOpenVeoModal(idx)
+                      }}
+                      title="Chọn ảnh từ Thư viện Veo Studio"
+                    >
+                      <ImageDown size={11} />
+                      <span>Thư viện Veo</span>
+                    </button>
                   </>
                 )}
               </div>
@@ -307,6 +344,14 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
         style={{ top: '75%' }}
         className="wf-handle wf-handle-source"
         title="Dòng thông tin sản phẩm sang ChatGPT"
+      />
+
+      <VeoImagePickerModal
+        isOpen={veoPickerOpen}
+        onClose={() => setVeoPickerOpen(false)}
+        onSelect={handleSelectVeoImage}
+        targetLabel={`Sản phẩm: ${slotLabels[activePickerSlot]}`}
+        kind="product"
       />
     </div>
   )

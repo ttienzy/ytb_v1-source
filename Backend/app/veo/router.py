@@ -215,6 +215,17 @@ def delete_video(video_id: str):
     return {"ok": True}
 
 
+@router.post("/history/{video_id}/extract-last-frame")
+def extract_last_frame(video_id: str):
+    """Trích xuất frame cuối của video Veo để làm frame đầu cho phân cảnh tiếp theo."""
+    try:
+        return service.extract_last_frame(video_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi trích xuất frame cuối: {exc}") from exc
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Upload (cho mode frames/ingredients)
 # ─────────────────────────────────────────────────────────────────────────────

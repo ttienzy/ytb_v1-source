@@ -38,6 +38,7 @@ interface Props {
   onRegisterTask?: (task: StudioTask) => void
   onUpdateTask?: (id: string, patch: Partial<StudioTask>) => void
   onRemoveTask?: (id: string) => void
+  imageRefreshTrigger?: number
 }
 
 interface ModelOption {
@@ -106,6 +107,7 @@ export function TextToImageTab({
   onRegisterTask,
   onUpdateTask,
   onRemoveTask,
+  imageRefreshTrigger,
 }: Props) {
   // Config state
   const [selectedModelKey, setSelectedModelKey] = useState<ImageModelKey>('GEM_PIX_2')
@@ -174,7 +176,7 @@ export function TextToImageTab({
 
   useEffect(() => {
     loadImages()
-  }, [activeProject?.id])
+  }, [activeProject?.id, imageRefreshTrigger])
 
   // Handle single generation (Non-blocking async task)
   const handleGenerateSingle = () => {

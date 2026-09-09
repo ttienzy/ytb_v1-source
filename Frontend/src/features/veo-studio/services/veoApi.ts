@@ -125,6 +125,28 @@ export function getVideoStreamUrl(videoIdOrPath: string): string {
   return `${BASE}/history/${encodeURIComponent(cleanId)}/file`
 }
 
+export async function extractLastFrame(
+  videoId: string,
+): Promise<{
+  ok: boolean
+  image_id: string
+  file_path: string
+  preview_url: string
+  prompt?: string
+  aspect_ratio?: string
+}> {
+  const cleanId = videoId.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || videoId
+  const resp = await fetch(`${BASE}/history/${encodeURIComponent(cleanId)}/extract-last-frame`, {
+    method: 'POST',
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+    throw new Error(err.detail || 'Trích xuất frame cuối thất bại')
+  }
+  return resp.json()
+}
+
+
 // ─── Upload ─────────────────────────────────────────────────────────────────
 
 export async function uploadImage(

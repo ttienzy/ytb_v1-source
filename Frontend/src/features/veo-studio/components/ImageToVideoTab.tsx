@@ -98,20 +98,15 @@ export function ImageToVideoTab({
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Đồng bộ khi nhận props forwarded từ tab Tạo Ảnh
+  // Đồng bộ khi nhận props forwarded từ tab Tạo Ảnh hoặc Nối cảnh tiếp theo
   useEffect(() => {
     if (initialImagePath && initialImagePreview) {
-      if (inputMode === 'frames') {
-        setFirstFrame({ path: initialImagePath, preview: initialImagePreview, name: 'Ảnh đã chọn' })
-      } else {
-        setIngredientSlots((prev) => ({
-          ...prev,
-          subject: { path: initialImagePath, preview: initialImagePreview, name: 'Chủ thể' },
-        }))
-      }
+      setInputMode('frames')
+      setFirstFrame({ path: initialImagePath, preview: initialImagePreview, name: 'Frame đầu' })
     }
     if (initialPrompt) setPrompt(initialPrompt)
   }, [initialImagePath, initialImagePreview, initialPrompt])
+
 
   // Lọc profiles theo chế độ đầu vào hiện tại
   const profiles = (capabilities?.profiles || []).filter((p) => p.input_mode === inputMode)

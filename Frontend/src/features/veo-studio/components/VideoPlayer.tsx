@@ -1,10 +1,12 @@
-import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
+import { CheckCircle2, Circle, ImageDown, Loader2, XCircle } from 'lucide-react'
 import type { VeoJobOut } from '../types'
 import { getVideoStreamUrl } from '../services/veoApi'
 
 interface Props {
   activeJob: VeoJobOut | null
   onClose: () => void
+  onSaveLastFrameToLibrary?: (job: VeoJobOut) => void
+  isExtractingFrame?: boolean
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -19,7 +21,7 @@ const STEP_LABELS: Record<string, string> = {
 
 const STEP_ORDER = ['pending', 'captcha', 'submitting', 'generating', 'downloading', 'done']
 
-export function VideoPlayer({ activeJob, onClose }: Props) {
+export function VideoPlayer({ activeJob, onClose, onSaveLastFrameToLibrary, isExtractingFrame }: Props) {
   if (!activeJob) {
     return (
       <div className="veo-player-empty">
@@ -55,6 +57,26 @@ export function VideoPlayer({ activeJob, onClose }: Props) {
           </div>
         )}
       </div>
+
+      {/* Action Toolbar for Completed Video */}
+      {isDone && onSaveLastFrameToLibrary && (
+        <div className="veo-player-actions">
+          <button
+            type="button"
+            className="veo-btn-continue-frame"
+            onClick={() => onSaveLastFrameToLibrary(activeJob)}
+            disabled={isExtractingFrame}
+            title="Trích xuất và lưu frame cuối video này vào Thư viện Ảnh Veo"
+          >
+            {isExtractingFrame ? (
+              <Loader2 size={14} className="spinning" />
+            ) : (
+              <ImageDown size={14} />
+            )}
+            <span>Lưu frame cuối vào Thư viện</span>
+          </button>
+        </div>
+      )}
 
       {/* Step tracker */}
       <div className="veo-step-tracker">
@@ -97,3 +119,4 @@ export function VideoPlayer({ activeJob, onClose }: Props) {
     </div>
   )
 }
+

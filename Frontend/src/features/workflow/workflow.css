@@ -444,6 +444,53 @@
   color: #94a3b8;
 }
 
+.wf-btn-veo-library {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 5px;
+  padding: 3px 6px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all .15s ease-in-out;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  z-index: 1;
+}
+
+.wf-btn-veo-library:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.wf-btn-veo-replace {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #ffffff;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.15s;
+}
+
+.wf-btn-veo-replace:hover {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+
 /* Scene Video Node Specifics */
 .wf-scene-preview-container {
   width: 100%;
@@ -610,3 +657,345 @@
   color: #b91c1c;
   transform: scale(1.2);
 }
+
+/* ==========================================================================
+   Veo Image Picker Modal for AI Workflow (Professional Landscape)
+   ========================================================================== */
+
+.wf-veo-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: wfFadeIn 0.18s ease-out;
+}
+
+@keyframes wfFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.wf-veo-picker-modal {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  width: 860px;
+  max-width: 94vw;
+  height: 540px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px -12px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  animation: wfScaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes wfScaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.wf-veo-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.wf-veo-picker-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wf-veo-picker-icon-badge {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #334155;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.wf-veo-picker-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wf-veo-picker-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-veo-picker-target-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.wf-veo-picker-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.wf-veo-picker-close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wf-veo-picker-close-btn:hover {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+/* Toolbar: Search + Quick filters */
+.wf-veo-picker-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+  flex-shrink: 0;
+}
+
+.wf-veo-picker-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  flex: 1;
+  max-width: 320px;
+  transition: border-color 0.15s;
+}
+
+.wf-veo-picker-search-box:focus-within {
+  border-color: #475569;
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(71, 85, 105, 0.1);
+}
+
+.wf-veo-picker-search-input {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: #1e293b;
+  width: 100%;
+  outline: none;
+}
+
+.wf-veo-picker-filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wf-veo-picker-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.wf-veo-picker-filter-btn:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.wf-veo-picker-filter-btn.active {
+  background: #334155;
+  border-color: #334155;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* Body & Grid */
+.wf-veo-picker-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px;
+  background: #f8fafc;
+}
+
+.wf-veo-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.wf-veo-picker-card {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  position: relative;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.wf-veo-picker-card:hover {
+  border-color: #475569;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
+  transform: translateY(-2px);
+}
+
+.wf-veo-picker-thumb {
+  position: relative;
+  width: 100%;
+  height: 84px;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.wf-veo-picker-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.2s ease;
+}
+
+.wf-veo-picker-card:hover .wf-veo-picker-thumb img {
+  transform: scale(1.05);
+}
+
+.wf-veo-picker-badge-ratio {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #ffffff;
+  font-size: 8.5px;
+  font-weight: 700;
+  backdrop-filter: blur(2px);
+}
+
+.wf-veo-picker-badge-type {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #38bdf8;
+  font-size: 8px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  backdrop-filter: blur(2px);
+}
+
+.wf-veo-picker-card-info {
+  padding: 6px 8px;
+  background: #ffffff;
+}
+
+.wf-veo-picker-card-prompt {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-height: 27px;
+}
+
+/* Footer */
+.wf-veo-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 18px;
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.wf-veo-picker-hint {
+  font-size: 11px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wf-veo-picker-cancel-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.wf-veo-picker-cancel-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+

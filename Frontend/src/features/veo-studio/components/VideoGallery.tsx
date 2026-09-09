@@ -1,4 +1,4 @@
-import { Download, Edit3, Send, Trash2 } from 'lucide-react'
+import { Download, Edit3, ImageDown, Loader2, Send, Trash2 } from 'lucide-react'
 import type { VeoHistoryItem } from '../types'
 import { getVideoStreamUrl } from '../services/veoApi'
 
@@ -8,9 +8,19 @@ interface Props {
   onDelete: (videoId: string) => void
   onSendToEditor?: (item: VeoHistoryItem) => void
   onSendToSchedule?: (item: VeoHistoryItem) => void
+  onSaveLastFrameToLibrary?: (item: VeoHistoryItem) => void
+  extractingVideoId?: string | null
 }
 
-export function VideoGallery({ items, onSelect, onDelete, onSendToEditor, onSendToSchedule }: Props) {
+export function VideoGallery({
+  items,
+  onSelect,
+  onDelete,
+  onSendToEditor,
+  onSendToSchedule,
+  onSaveLastFrameToLibrary,
+  extractingVideoId,
+}: Props) {
   if (items.length === 0) {
     return (
       <div className="veo-gallery-empty">
@@ -57,6 +67,24 @@ export function VideoGallery({ items, onSelect, onDelete, onSendToEditor, onSend
               >
                 <Download size={14} />
               </a>
+              {onSaveLastFrameToLibrary && (
+                <button
+                  type="button"
+                  className="veo-icon-btn continue-frame"
+                  title="Lưu frame cuối vào Thư viện Ảnh Veo"
+                  disabled={extractingVideoId === item.video_id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onSaveLastFrameToLibrary(item)
+                  }}
+                >
+                  {extractingVideoId === item.video_id ? (
+                    <Loader2 size={14} className="spinning" />
+                  ) : (
+                    <ImageDown size={14} />
+                  )}
+                </button>
+              )}
               {onSendToEditor && (
                 <button
                   className="veo-icon-btn"
