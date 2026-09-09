@@ -20,14 +20,13 @@ export const initialNodes: Node[] = [
     type: 'geminiAnalysis',
     position: { x: 40, y: 360 },
     data: {
-      title: 'Gemini 2.5 • Vision Phân Tích',
+      title: 'Gemini • Phân Tích',
       model: 'gemini-2.5-flash',
-      provider: 'Google Gemini 2.5',
+      provider: 'Trích xuất chi tiết & bao bì',
       prompt: '',
       analysisResult: null,
     },
   },
-
 
   // 3. Character & Scene Node (Top-Center, Model & Background)
   {
@@ -47,9 +46,9 @@ export const initialNodes: Node[] = [
     type: 'gptScript',
     position: { x: 430, y: 360 },
     data: {
-      title: 'ChatGPT • Kịch Bản Video',
+      title: 'ChatGPT • Kịch Bản',
       model: 'cx/gpt-5.5',
-      provider: '9Router Gateway',
+      provider: 'Viết phân cảnh & lời thoại',
       prompt: '',
       requestedCount: 3,
       contentMode: 'sales',
@@ -64,7 +63,7 @@ export const initialNodes: Node[] = [
     type: 'veoFlowStudio',
     position: { x: 840, y: 50 },
     data: {
-      title: 'Google Flow • Video Clips',
+      title: 'Veo AI • Tạo Video',
       model: 'Omni 1.1 Flash',
       activeSceneIndex: 0,
       aspectRatio: '9:16',

@@ -94,10 +94,10 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
           </div>
           <div>
             <div className="wf-node-title" style={{ color: '#064e3b', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {data.title || 'Gemini 2.5 • Vision Phân Tích'}
+              {data.title || 'Gemini • Phân Tích'}
             </div>
             <div style={{ fontSize: 10, color: '#059669', fontWeight: 600 }}>
-              {data.model || 'gemini-2.5-flash'} • Google DeepMind
+              {data.provider || 'Trích xuất chi tiết & bao bì'}
             </div>
           </div>
         </div>
@@ -379,8 +379,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
             <div>
               <strong style={{ color: '#0f172a' }}>Chưa có dây nối nạp ảnh</strong>
               <div style={{ color: '#64748b', fontSize: 10, marginTop: 2 }}>
-                Hãy kéo dây từ cổng ra của khối <strong>[Ảnh Sản Phẩm]</strong> vào cổng trên của
-                Gemini để nạp ảnh và hiển thị prompt phân tích.
+                Nối dây từ khối <strong>[Ảnh Sản Phẩm]</strong> để bắt đầu phân tích.
               </div>
             </div>
           </div>

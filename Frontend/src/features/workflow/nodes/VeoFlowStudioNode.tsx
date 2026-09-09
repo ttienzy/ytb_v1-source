@@ -114,10 +114,10 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           </div>
           <div>
             <div className="wf-node-title" style={{ color: '#881337' }}>
-              {data.title || 'Google Flow • Video Clips'}
+              {data.title || 'Veo AI • Tạo Video'}
             </div>
             <div style={{ fontSize: 10, color: '#e11d48', fontWeight: 600 }}>
-              Mỗi kịch bản tạo một clip độc lập
+              Render phân cảnh kịch bản
             </div>
           </div>
         </div>
@@ -633,7 +633,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           >
             <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 5 }}>
               <Layers size={13} color="#6366f1" />
-              Tuỳ chọn: Ghép {scenes.length} clip ({totalDuration}s)
+              Ghép {scenes.length} clip ({totalDuration}s)
             </div>
             <span style={{ fontSize: 10, color: '#64748b' }}>Định dạng: MP4 1080p</span>
           </div>
@@ -808,7 +808,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               onClick={() => data.onExportVideo?.()}
             >
               <Download size={14} />
-              Ghép Các Clip (Tuỳ chọn • MP4)
+              Ghép Clip Hoàn Chỉnh (MP4)
             </button>
           )}
         </div>

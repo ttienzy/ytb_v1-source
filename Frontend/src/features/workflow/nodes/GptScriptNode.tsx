@@ -129,10 +129,10 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </div>
           <div>
             <div className="wf-node-title" style={{ color: '#581c87' }}>
-              {data.title || 'ChatGPT • Kịch Bản Video'}
+              {data.title || 'ChatGPT • Kịch Bản'}
             </div>
             <div style={{ fontSize: 10, color: '#9333ea', fontWeight: 600 }}>
-              {data.model || 'cx/gpt-5.5'} • 9Router Gateway
+              {data.provider || 'Viết phân cảnh & lời thoại'}
             </div>
           </div>
         </div>
@@ -215,7 +215,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <Camera size={12} style={{ color: '#7c3aed' }} />
-              Ảnh sản phẩm nhận từ dây nối ({validImages.length}/3 ảnh):
+              Ảnh tham chiếu ({validImages.length}/3 ảnh):
             </span>
             <span style={{ color: validImages.length > 0 ? '#10b981' : '#94a3b8', fontSize: 9 }}>
               {validImages.length > 0 ? '✓ Đã đồng bộ' : 'Chờ nạp ảnh'}
@@ -245,7 +245,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             </div>
           ) : (
             <div style={{ fontSize: 10, color: '#94a3b8', fontStyle: 'italic' }}>
-              Dây nối từ khối [Ảnh Sản Phẩm] phía trên để GPT quan sát bao bì thực tế.
+              Dây nối từ khối [Ảnh Sản Phẩm] để GPT quan sát bao bì thực tế.
             </div>
           )}
         </div>
@@ -318,7 +318,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <label style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
             <FileText size={12} style={{ color: '#7c3aed' }} />
-            Prompt chỉ thị ChatGPT (Tự do tùy biến):
+            Chỉ thị kịch bản (Prompt System):
           </label>
           <button
             type="button"

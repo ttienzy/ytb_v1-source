@@ -808,7 +808,7 @@ function WorkflowCanvas() {
     }
   }, [nodes, edges, activeVeoProject, veoVideoConfig])
 
-  // Export complete stitched video in Flow Studio (Sử dụng backend FFmpeg concat)
+// Export complete stitched video in Flow Studio (Sử dụng backend FFmpeg concat)
   const handleExportFlowVideo = useCallback(async (nodeId: string) => {
     const targetNode = nodes.find((n) => n.id === nodeId)
     const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
@@ -868,7 +868,7 @@ function WorkflowCanvas() {
           type,
           position: { x, y },
           data: {
-            title: 'Ảnh Sản Phẩm (Products)',
+            title: 'Sản Phẩm',
             images: [null, null, null],
           },
         }
@@ -889,9 +889,9 @@ function WorkflowCanvas() {
           type,
           position: { x, y },
           data: {
-            title: 'Gemini 2.5 • Vision Phân Tích',
+            title: 'Gemini • Phân Tích',
             model: 'gemini-2.5-flash',
-            provider: 'Google Gemini 2.5',
+            provider: 'Trích xuất chi tiết & bao bì',
             analysisResult: null,
           },
         }
@@ -901,9 +901,9 @@ function WorkflowCanvas() {
           type,
           position: { x, y },
           data: {
-            title: 'ChatGPT • Kịch Bản Video',
+            title: 'ChatGPT • Kịch Bản',
             model: 'cx/gpt-5.5',
-            provider: '9Router Gateway',
+            provider: 'Viết phân cảnh & lời thoại',
             prompt: '',
             requestedCount: 3,
             contentMode: 'sales',
@@ -917,7 +917,7 @@ function WorkflowCanvas() {
           type: 'veoFlowStudio',
           position: { x, y },
           data: {
-            title: 'Google Flow • Video Clips',
+            title: 'Veo AI • Tạo Video',
             model: 'Omni 1.1 Flash',
             activeSceneIndex: 0,
             aspectRatio: '9:16',
