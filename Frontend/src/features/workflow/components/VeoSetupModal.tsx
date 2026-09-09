@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import type { GptSalesScriptItem, VeoVideoConfig } from '../types'
 import type { VeoCapabilities, VeoProject } from '../../veo-studio/types'
+import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
 
 interface VeoSetupModalProps {
   isOpen: boolean
@@ -21,7 +22,6 @@ interface VeoSetupModalProps {
   capabilities: VeoCapabilities | null
   currentConfig: VeoVideoConfig
   availableScripts?: GptSalesScriptItem[]
-  selectedScriptIndex?: number
   onSelectProject: (projectId: string) => Promise<void> | void
   onCreateProject: (name: string) => Promise<void> | void
   onDeleteProject: (projectId: string) => Promise<void> | void
@@ -36,7 +36,6 @@ export function VeoSetupModal({
   capabilities,
   currentConfig,
   availableScripts = [],
-  selectedScriptIndex = 0,
   onSelectProject,
   onCreateProject,
   onDeleteProject,
@@ -45,10 +44,9 @@ export function VeoSetupModal({
   // Local state for video configurations
   const [model, setModel] = useState<string>(currentConfig.model || 'Omni 1.1 Flash')
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>(currentConfig.aspectRatio || '9:16')
-  const [duration, setDuration] = useState<number>(currentConfig.duration || 4)
+  const [duration, setDuration] = useState<number>(currentConfig.duration || DEFAULT_CLIP_DURATION_SECONDS)
   const [resolution, setResolution] = useState<string>(currentConfig.resolution || '720p')
   const [variations, setVariations] = useState<number>(currentConfig.variations || 1)
-  const [scriptIndex, setScriptIndex] = useState<number>(selectedScriptIndex)
 
   // Project creation state
   const [isCreatingProject, setIsCreatingProject] = useState(false)
@@ -59,11 +57,39 @@ export function VeoSetupModal({
   // Profiles from capabilities
   const profiles = (capabilities?.profiles || []).filter((p) => p.input_mode === 'text_to_video')
   const modelNames = [...new Set(profiles.map((p) => p.model_display_name))]
-  const fallbackModels = modelNames.length > 0 ? modelNames : ['Omni 1.1 Flash', 'Veo 3.0 Fast', 'Veo 3.0 Quality']
+  const availableModels = modelNames.length > 0 ? modelNames : [model]
+  const modelProfiles = profiles.filter((profile) => profile.model_display_name === model)
+  const aspectRatioOptions = [...new Set(modelProfiles.map((profile) => profile.aspect_ratio))]
+  const resolutionOptions = [...new Set(
+    modelProfiles
+      .filter((profile) => profile.aspect_ratio === aspectRatio)
+      .map((profile) => profile.resolution)
+  )]
 
   // Credit cost calculation
-  const selectedProfile = profiles.find((p) => p.model_display_name === model)
+  const matchingProfiles = profiles.filter((profile) =>
+    profile.model_display_name === model &&
+    profile.aspect_ratio === aspectRatio &&
+    profile.resolution === resolution
+  )
+  const durationOptions = [...new Set(matchingProfiles.map((profile) => profile.duration_seconds))].sort((a, b) => a - b)
+  const variationOptions = Array.from(
+    { length: Math.max(1, capabilities?.max_outputs || 1) },
+    (_, index) => index + 1,
+  )
+  const selectedProfile = matchingProfiles.find((profile) => profile.duration_seconds === duration)
+    || profiles.find((profile) => profile.model_display_name === model)
   const creditCost = selectedProfile?.credit_cost ?? 7
+
+  const handleModelChange = (nextModel: string) => {
+    setModel(nextModel)
+    const candidates = profiles.filter((profile) => profile.model_display_name === nextModel)
+    if (candidates.length === 0) return
+    const preferred = [...candidates].sort((a, b) => b.duration_seconds - a.duration_seconds)[0]
+    setAspectRatio(preferred.aspect_ratio)
+    setResolution(preferred.resolution)
+    setDuration(preferred.duration_seconds)
+  }
 
   const handleCreateNewProject = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -91,12 +117,9 @@ export function VeoSetupModal({
         variations,
         creditCost,
       },
-      availableScripts.length > 0 ? scriptIndex : undefined,
     )
     onClose()
   }
-
-  const selectedScript = availableScripts[scriptIndex]
 
   if (!isOpen) return null
 
@@ -353,7 +376,7 @@ export function VeoSetupModal({
               </div>
               <select
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => handleModelChange(e.target.value)}
                 style={{
                   width: '100%',
                   padding: '9px 12px',
@@ -366,7 +389,7 @@ export function VeoSetupModal({
                   cursor: 'pointer',
                 }}
               >
-                {fallbackModels.map((m) => (
+                {availableModels.map((m) => (
                   <option key={m} value={m}>
                     {m} ({creditCost} credits)
                   </option>
@@ -380,9 +403,11 @@ export function VeoSetupModal({
                 Tỉ lệ khung hình
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {(aspectRatioOptions.length > 0 ? aspectRatioOptions : [aspectRatio]).map((ratio) => (
                 <button
+                  key={ratio}
                   type="button"
-                  onClick={() => setAspectRatio('16:9')}
+                  onClick={() => setAspectRatio(ratio)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -390,9 +415,9 @@ export function VeoSetupModal({
                     gap: 8,
                     padding: '9px 14px',
                     borderRadius: 8,
-                    border: aspectRatio === '16:9' ? '2px solid #4f46e5' : '1px solid #e2e8f0',
-                    background: aspectRatio === '16:9' ? '#eef2ff' : '#ffffff',
-                    color: aspectRatio === '16:9' ? '#4338ca' : '#475569',
+                    border: aspectRatio === ratio ? '2px solid #4f46e5' : '1px solid #e2e8f0',
+                    background: aspectRatio === ratio ? '#eef2ff' : '#ffffff',
+                    color: aspectRatio === ratio ? '#4338ca' : '#475569',
                     fontSize: 12,
                     fontWeight: 700,
                     cursor: 'pointer',
@@ -401,54 +426,25 @@ export function VeoSetupModal({
                 >
                   <span
                     style={{
-                      width: 16,
-                      height: 10,
-                      border: `1.5px solid ${aspectRatio === '16:9' ? '#4338ca' : '#64748b'}`,
+                      width: ratio === '9:16' ? 10 : 16,
+                      height: ratio === '9:16' ? 16 : 10,
+                      border: `1.5px solid ${aspectRatio === ratio ? '#4338ca' : '#64748b'}`,
                       borderRadius: 2,
                     }}
                   />
-                  16:9
+                  {ratio}{ratio === '9:16' ? ' (TikTok / Reels)' : ''}
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => setAspectRatio('9:16')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    padding: '9px 14px',
-                    borderRadius: 8,
-                    border: aspectRatio === '9:16' ? '2px solid #4f46e5' : '1px solid #e2e8f0',
-                    background: aspectRatio === '9:16' ? '#eef2ff' : '#ffffff',
-                    color: aspectRatio === '9:16' ? '#4338ca' : '#475569',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 10,
-                      height: 16,
-                      border: `1.5px solid ${aspectRatio === '9:16' ? '#4338ca' : '#64748b'}`,
-                      borderRadius: 2,
-                    }}
-                  />
-                  9:16 (TikTok / Reels)
-                </button>
+                ))}
               </div>
             </div>
 
             {/* THỜI LƯỢNG */}
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-                Thời lượng mỗi cảnh
+                Thời lượng mỗi clip
               </label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {[4, 6, 8, 10].map((d) => (
+                {(durationOptions.length > 0 ? durationOptions : [duration]).map((d) => (
                   <button
                     key={d}
                     type="button"
@@ -477,7 +473,7 @@ export function VeoSetupModal({
                 Độ phân giải
               </label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {['720p', '360p Draft', '1080p'].map((res) => (
+                {(resolutionOptions.length > 0 ? resolutionOptions : [resolution]).map((res) => (
                   <button
                     key={res}
                     type="button"
@@ -507,7 +503,7 @@ export function VeoSetupModal({
                 Biến thể:
               </span>
               <div style={{ display: 'flex', gap: 6 }}>
-                {[1, 2, 3, 4].map((v) => (
+                {variationOptions.map((v) => (
                   <button
                     key={v}
                     type="button"
@@ -530,79 +526,43 @@ export function VeoSetupModal({
             </div>
           </div>
 
-          {/* 3. GPT Script Mapping Section */}
+          {/* 3. GPT Script to Clip Mapping */}
           {availableScripts.length > 0 && (
             <div style={{ padding: 14, background: '#faf5ff', borderRadius: 10, border: '1px solid #e9d5ff' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <label style={{ fontSize: 11, fontWeight: 800, color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Sparkles size={13} style={{ color: '#9333ea' }} />
-                  Đồng bộ kịch bản từ ChatGPT sang Veo
+                  Ánh xạ kịch bản sang Google Flow
                 </label>
                 <span style={{ fontSize: 10, color: '#9333ea', fontWeight: 600 }}>
-                  {availableScripts.length} kịch bản khả dụng
+                  {availableScripts.length} kịch bản → {availableScripts.length} clip
                 </span>
               </div>
 
-              {/* Angle Tabs */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8, overflowX: 'auto' }}>
+              <div style={{ fontSize: 10.5, color: '#6b21a8', marginBottom: 8 }}>
+                Mỗi kịch bản được giữ nguyên như một phương án video độc lập; hệ thống không tự chia thành nhiều cảnh.
+              </div>
+              <div style={{ display: 'flex', gap: 4, overflowX: 'auto' }}>
                 {availableScripts.map((s, idx) => (
-                  <button
+                  <span
                     key={idx}
-                    type="button"
-                    onClick={() => setScriptIndex(idx)}
                     style={{
-                      flex: 1,
                       padding: '6px 4px',
                       borderRadius: 6,
                       fontSize: 10.5,
                       fontWeight: 700,
-                      border: scriptIndex === idx ? '1.5px solid #9333ea' : '1px solid #e9d5ff',
-                      background: scriptIndex === idx ? '#9333ea' : '#ffffff',
-                      color: scriptIndex === idx ? '#ffffff' : '#7e22ce',
-                      cursor: 'pointer',
+                      border: '1px solid #e9d5ff',
+                      background: '#ffffff',
+                      color: '#7e22ce',
                       textAlign: 'center',
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {`#${idx + 1}: ${s.angle || s.title || `Kịch bản ${idx + 1}`}`}
-                  </button>
+                    {`Clip #${idx + 1}: ${s.angle || s.title || `Kịch bản ${idx + 1}`}`}
+                  </span>
                 ))}
               </div>
 
-              {/* Preview Kịch bản được chọn */}
-              {selectedScript && (
-                <div style={{ fontSize: 11, color: '#475569', background: '#ffffff', padding: 8, borderRadius: 6, border: '1px solid #f3e8ff' }}>
-                  {selectedScript.hook || selectedScript.problem ? (
-                    <div style={{ marginBottom: 4 }}>
-                      <strong style={{ color: '#7e22ce' }}>🎬 Mở đầu / Hook:</strong> {selectedScript.hook || selectedScript.problem}
-                    </div>
-                  ) : null}
-                  {selectedScript.product || selectedScript.benefits ? (
-                    <div style={{ marginBottom: 4 }}>
-                      <strong style={{ color: '#7e22ce' }}>💎 Sản phẩm & USP:</strong> {selectedScript.product || selectedScript.benefits}
-                    </div>
-                  ) : null}
-                  {selectedScript.cta ? (
-                    <div style={{ marginBottom: 4 }}>
-                      <strong style={{ color: '#7e22ce' }}>✨ Kêu gọi (CTA):</strong> {selectedScript.cta}
-                    </div>
-                  ) : null}
-                  {(selectedScript.visualDirection || (selectedScript as any).visual_direction) ? (
-                    <div style={{ marginBottom: 4 }}>
-                      <strong style={{ color: '#7e22ce' }}>🎥 Visual:</strong> {selectedScript.visualDirection || (selectedScript as any).visual_direction}
-                    </div>
-                  ) : null}
-                  {(selectedScript.voiceover || (selectedScript as any).voice_over) ? (
-                    <div>
-                      <strong style={{ color: '#7e22ce' }}>🎙️ Voiceover:</strong> {selectedScript.voiceover || (selectedScript as any).voice_over}
-                    </div>
-                  ) : selectedScript.content ? (
-                    <div>
-                      <strong style={{ color: '#7e22ce' }}>📝 Nội dung:</strong> {selectedScript.content}
-                    </div>
-                  ) : null}
-                </div>
-              )}
             </div>
           )}
         </div>

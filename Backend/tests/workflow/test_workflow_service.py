@@ -1,13 +1,146 @@
+import json
+
 import pytest
 from pathlib import Path
 from app.workflow.service import (
+    calculate_voiceover_word_range,
+    execute_gpt_script_generation,
+    generate_validated_gpt_scripts,
     parse_gpt_scripts,
+    validate_gpt_scripts,
     concat_workflow_scenes,
     parse_analysis_to_structured,
     list_exported_videos,
     delete_exported_video,
     WORKFLOW_EXPORTS_DIR,
 )
+
+
+def test_voiceover_word_range_follows_clip_duration():
+    assert calculate_voiceover_word_range(10) == (20, 30)
+    assert calculate_voiceover_word_range(6) == (12, 18)
+    assert calculate_voiceover_word_range(10, min_words=16, max_words=24) == (16, 24)
+
+    with pytest.raises(ValueError, match="min_words"):
+        calculate_voiceover_word_range(10, min_words=31, max_words=20)
+
+
+def test_gpt_prompt_uses_dynamic_clip_contract(monkeypatch):
+    from app.workflow import service as workflow_service
+
+    captured = {}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "read_config",
+        lambda: {"chatgpt_9router": {"endpoint": "http://router.test/v1", "api_key": "test-key"}},
+    )
+
+    def fake_chat_completion(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True, "content": "mock response"}
+
+    monkeypatch.setattr(workflow_service, "chat_completion", fake_chat_completion)
+
+    raw_text, _ = execute_gpt_script_generation(
+        product_data="Sản phẩm thử nghiệm",
+        script_config={
+            "count": 5,
+            "content_mode": "ugc",
+            "platform": "reels",
+            "clip_duration_seconds": 10,
+        },
+        prompt_template=(
+            "Tạo {{SCRIPT_COUNT}} kịch bản {{CONTENT_MODE}} cho {{PLATFORM}}, "
+            "clip {{CLIP_DURATION}}s, {{MIN_WORDS}}-{{MAX_WORDS}} từ. {{PRODUCT_DATA}}"
+        ),
+    )
+
+    assert raw_text == "mock response"
+    assert "Tạo 5 kịch bản ugc cho reels, clip 10s, 20-30 từ" in captured["prompt"]
+    assert "Sản phẩm thử nghiệm" in captured["prompt"]
+    assert "đúng một clip Google Flow dài 10 giây" in captured["system_prompt"]
+
+
+def test_validate_gpt_scripts_rejects_invalid_flow_contract():
+    scripts = parse_gpt_scripts(
+        json.dumps({
+            "scripts": [{
+                "angle": "Review",
+                "title": "Một tiêu đề",
+                "hook": "Hook",
+                "visual_direction": "Một cú máy liền mạch",
+                "voiceover": "quá ngắn",
+                "on_screen_text": "Text",
+                "cta": "Xem thêm",
+            }]
+        }, ensure_ascii=False),
+        expected_count=1,
+    )
+    with pytest.raises(ValueError, match="từ lời thoại"):
+        validate_gpt_scripts(scripts, expected_count=1, min_words=20, max_words=30)
+
+
+def test_validate_gpt_scripts_does_not_silently_truncate_json_output():
+    voiceover = " ".join(f"từ{i}" for i in range(20))
+    raw_items = [
+        {
+            "angle": f"Góc {index}",
+            "title": f"Kịch bản {index}",
+            "hook": "Hook rõ ràng",
+            "visual_direction": "Một cú máy liền mạch tập trung vào sản phẩm",
+            "voiceover": voiceover,
+            "on_screen_text": "Thông điệp ngắn",
+            "cta": "Xem thêm khi bạn cần",
+        }
+        for index in (1, 2)
+    ]
+    scripts = parse_gpt_scripts(
+        json.dumps({"scripts": raw_items}, ensure_ascii=False),
+        expected_count=1,
+    )
+
+    assert len(scripts) == 2
+    with pytest.raises(ValueError, match="Cần đúng 1 kịch bản"):
+        validate_gpt_scripts(scripts, expected_count=1, min_words=20, max_words=30)
+
+
+def test_generate_validated_scripts_repairs_once(monkeypatch):
+    from app.workflow import service as workflow_service
+
+    valid_voiceover = " ".join(f"từ{i}" for i in range(20))
+    responses = [
+        json.dumps({"scripts": [{"angle": "Thiếu trường"}]}, ensure_ascii=False),
+        json.dumps({
+            "scripts": [
+                {
+                    "angle": "Review thực tế",
+                    "title": "Trải nghiệm nhanh",
+                    "hook": "Bạn cần một lựa chọn gọn nhẹ?",
+                    "visual_direction": "Một cú máy liền mạch cận sản phẩm bên cửa sổ",
+                    "voiceover": valid_voiceover,
+                    "on_screen_text": "Gọn nhẹ mỗi ngày",
+                    "cta": "Xem chi tiết khi bạn cần",
+                }
+            ]
+        }, ensure_ascii=False),
+    ]
+
+    def fake_execute(**_kwargs):
+        return responses.pop(0), "mock-model"
+
+    monkeypatch.setattr(workflow_service, "execute_gpt_script_generation", fake_execute)
+    raw_text, model, scripts, repaired, duration, min_words, max_words = generate_validated_gpt_scripts(
+        product_data="Sản phẩm test",
+        script_config={"count": 1, "clip_duration_seconds": 10},
+    )
+
+    assert raw_text
+    assert model == "mock-model"
+    assert len(scripts) == 1
+    assert repaired is True
+    assert (duration, min_words, max_words) == (10, 20, 30)
+    assert responses == []
 
 
 def test_parse_gpt_scripts_dynamic_count():
@@ -66,6 +199,21 @@ def test_parse_gpt_scripts_json_format():
     assert "chất vải cotton" in scripts[0].visual_direction
     assert "nắng hè" in scripts[0].voiceover
     assert scripts[1].angle == "Kể chuyện Lifestyle"
+
+
+def test_parse_gpt_scripts_reads_dynamic_angle_section():
+    sample_markdown = """
+### Kịch bản 1: Buổi sáng gọn nhẹ
+- Góc tiếp cận: Lifestyle tối giản
+- Hook: Một bước nhỏ cho buổi sáng nhẹ nhàng hơn.
+- Gợi ý hình ảnh: Một cú máy liền mạch, cận sản phẩm trên bàn cạnh cửa sổ.
+- Lời thoại: Bắt đầu ngày mới gọn gàng với đúng điều bạn cần.
+- Chữ trên màn hình: Chỉ một bước
+- CTA: Xem chi tiết khi bạn sẵn sàng.
+"""
+    scripts = parse_gpt_scripts(sample_markdown, expected_count=1)
+    assert scripts[0].angle == "Lifestyle tối giản"
+    assert "cú máy liền mạch" in (scripts[0].visual_direction or "")
 
 
 def test_parse_gpt_scripts_5_items_markdown():
@@ -207,5 +355,3 @@ def test_exported_videos_library(tmp_path):
     finally:
         if dummy_file.exists():
             dummy_file.unlink()
-
-

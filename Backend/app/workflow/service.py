@@ -32,6 +32,7 @@ from app.ai.chatgpt.service import (
 )
 from app.recap.ffmpeg import concat_segments, ffprobe_duration
 from app.workflow.schemas import (
+    DEFAULT_CLIP_DURATION_SECONDS,
     GeminiAnalysisResponse,
     GeminiProductClassification,
     GptScriptItem,
@@ -324,26 +325,31 @@ def get_default_gpt_prompt() -> str:
         except Exception as e:
             logger.error(f"Không thể đọc file prompt {GPT_PROMPT_FILE}: {e}")
     return (
-        "Hãy phân tích dữ liệu sản phẩm và viết 3 kịch bản video bán hàng ngắn.\n\n"
-        "Nguyên tắc ưu tiên:\n"
-        "1. Chỉ dùng thông tin có trong đầu vào.\n"
-        "2. Chọn tối đa 3 selling point quan trọng nhất.\n"
-        "3. Chuyển tính năng thành lợi ích cho khách hàng.\n"
-        "4. Mỗi kịch bản dùng một góc tiếp cận khác nhau.\n"
-        "5. Không lặp hook, selling point hoặc CTA nếu không cần thiết.\n"
-        "6. Không phóng đại, không tạo claim y tế hoặc cam kết kết quả nếu dữ liệu không chứng minh.\n"
-        "7. Nếu dữ liệu mâu thuẫn, ưu tiên thông tin cụ thể và đáng tin cậy hơn; bỏ qua thông tin không chắc chắn.\n"
-        "8. Nếu thiếu dữ liệu, không tự bịa.\n\n"
-        "Góc 1: Problem → Solution\n"
-        "Góc 2: Unique Selling Point → Benefit\n"
-        "Góc 3: Situation/Experience → Desire\n\n"
-        "Mỗi kịch bản gồm:\n"
-        "Hook → Vấn đề/nhu cầu → Sản phẩm → Lợi ích chính → CTA\n\n"
-        "Độ dài mục tiêu: 80-130 từ/kịch bản.\n"
-        "Phong cách: tự nhiên, bán hàng nhưng không quá quảng cáo, phù hợp lời thoại video ngắn.\n\n"
+        "Hãy phân tích dữ liệu sản phẩm và tạo đúng {{SCRIPT_COUNT}} kịch bản video độc lập.\n"
+        "Mỗi kịch bản tương ứng với một clip Google Flow dài {{CLIP_DURATION}} giây, "
+        "có {{MIN_WORDS}}-{{MAX_WORDS}} từ lời thoại và không bị chia thành nhiều cảnh.\n"
+        "Tự chọn góc tiếp cận phù hợp với sản phẩm và chế độ {{CONTENT_MODE}}; "
+        "chỉ dùng dữ liệu đầu vào, không phóng đại hoặc tự bịa.\n"
+        "Chỉ trả về JSON object có key scripts. Mỗi phần tử phải có angle, title, hook, "
+        "visual_direction, voiceover, on_screen_text và cta. Voiceover là toàn bộ lời đọc "
+        "hoàn chỉnh từ hook đến CTA.\n\n"
         "Dữ liệu sản phẩm:\n"
         "{{PRODUCT_DATA}}"
     )
+
+
+def calculate_voiceover_word_range(
+    clip_duration_seconds: int | float,
+    min_words: int | None = None,
+    max_words: int | None = None,
+) -> tuple[int, int]:
+    """Tính ngân sách lời thoại theo nhịp nhanh 2-3 từ/giây, cho phép cấu hình ghi đè."""
+    duration = max(1, round(float(clip_duration_seconds)))
+    resolved_min = int(min_words) if min_words is not None else max(1, round(duration * 2))
+    resolved_max = int(max_words) if max_words is not None else max(1, round(duration * 3))
+    if resolved_min > resolved_max:
+        raise ValueError("min_words không được lớn hơn max_words")
+    return resolved_min, resolved_max
 
 
 def format_product_data_from_structured(
@@ -398,6 +404,13 @@ def format_product_data_from_structured(
     if target_count:
         parts.append(f"Yêu cầu kịch bản: Tạo đúng {target_count} kịch bản độc lập.")
 
+    if script_config:
+        clip_duration = script_config.get("clip_duration_seconds")
+        if clip_duration:
+            parts.append(
+                f"Đầu ra Google Flow: Mỗi kịch bản tạo một clip độc lập dài {clip_duration} giây."
+            )
+
     return "\n\n".join(parts) if parts else "Chưa có văn bản mô tả, hãy quan sát kỹ ảnh sản phẩm đính kèm để trích xuất USP."
 
 
@@ -432,6 +445,20 @@ def execute_gpt_script_generation(
     if script_config and script_config.get("content_mode"):
         content_mode = str(script_config["content_mode"])
 
+    platform = "auto"
+    if script_config and script_config.get("platform"):
+        platform = str(script_config["platform"])
+
+    clip_duration_seconds = DEFAULT_CLIP_DURATION_SECONDS
+    if script_config and script_config.get("clip_duration_seconds"):
+        clip_duration_seconds = int(script_config["clip_duration_seconds"])
+
+    min_words, max_words = calculate_voiceover_word_range(
+        clip_duration_seconds,
+        script_config.get("min_words") if script_config else None,
+        script_config.get("max_words") if script_config else None,
+    )
+
     template = (prompt_template or "").strip() or get_default_gpt_prompt()
     data_str = format_product_data_from_structured(
         product_data,
@@ -441,21 +468,29 @@ def execute_gpt_script_generation(
         script_config,
     )
 
-    # Thay thế các biến {{PRODUCT_DATA}}, {{SCRIPT_COUNT}}, {{CONTENT_MODE}}
+    # Thay thế các biến runtime; prompt tùy chỉnh có thể dùng toàn bộ hoặc một phần.
     filled_prompt = re.sub(r"\{\{\s*PRODUCT_DATA\s*\}\}", data_str, template, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*SCRIPT_COUNT\s*\}\}", str(target_count), filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*CONTENT_MODE\s*\}\}", content_mode, filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*PLATFORM\s*\}\}", platform, filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*CLIP_DURATION\s*\}\}", str(clip_duration_seconds), filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*MIN_WORDS\s*\}\}", str(min_words), filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*MAX_WORDS\s*\}\}", str(max_words), filled_prompt, flags=re.IGNORECASE)
 
-    if filled_prompt == template and "{{PRODUCT_DATA}}" not in template:
-        filled_prompt = f"{template}\n\n[Dữ liệu sản phẩm]:\n{data_str}"
+    if not re.search(r"\{\{\s*PRODUCT_DATA\s*\}\}", template, flags=re.IGNORECASE):
+        filled_prompt = f"{filled_prompt}\n\n[Dữ liệu sản phẩm]:\n{data_str}"
 
-    # Luôn gắn thêm chỉ thị hệ thống ràng buộc chính xác số lượng kịch bản mong muốn
+    # Các bất biến của pipeline nằm ở system prompt để prompt người dùng vẫn tùy biến được.
     system_instruction = (
-        f"\n\n[YÊU CẦU HỆ THỐNG BẮT BUỘC]:\n"
-        f"- Bắt buộc phải tạo chính xác đúng {target_count} kịch bản độc lập (nếu văn bản prompt phía trên có ghi số lượng khác, hãy ưu tiên tuân thủ đúng {target_count} kịch bản theo yêu cầu hệ thống này).\n"
-        f"- Mỗi kịch bản phải có Tiêu đề & Góc tiếp cận (Angle) riêng biệt, Gợi ý hình ảnh (Visual Direction cho video), Lời thoại (Voiceover), và CTA."
+        f"Tạo chính xác {target_count} kịch bản độc lập. "
+        f"Mỗi kịch bản tương ứng với đúng một clip Google Flow dài {clip_duration_seconds} giây, "
+        f"không tự chia thành nhiều cảnh. Lời thoại mỗi kịch bản từ {min_words} đến {max_words} từ. "
+        "Mỗi mục phải có tiêu đề, góc tiếp cận, hook, gợi ý hình ảnh cho một clip liền mạch, "
+        "lời thoại, chữ trên màn hình và CTA. Voiceover là toàn bộ lời đọc theo đúng thứ tự, "
+        "từ hook đến CTA; hook và CTA chỉ là metadata tách lại từ voiceover. "
+        "Chỉ sử dụng dữ liệu đầu vào; không tự tạo claim. "
+        "Chỉ trả về JSON object hợp lệ theo dạng {\"scripts\": [...]}, không dùng Markdown."
     )
-    filled_prompt = f"{filled_prompt}{system_instruction}"
 
     # Lọc ảnh hợp lệ
     valid_images = [img for img in (images or []) if img and img.strip()]
@@ -466,6 +501,7 @@ def execute_gpt_script_generation(
         api_key=api_key,
         model=target_model,
         prompt=filled_prompt,
+        system_prompt=system_instruction,
         images=valid_images if valid_images else None,
         timeout=120.0,
     )
@@ -481,6 +517,7 @@ def execute_gpt_script_generation(
                     api_key=api_key,
                     model=fb,
                     prompt=filled_prompt,
+                    system_prompt=system_instruction,
                     images=valid_images if valid_images else None,
                     timeout=120.0,
                 )
@@ -499,8 +536,13 @@ def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptI
     scripts: list[GptScriptItem] = []
 
     # 1. Thử phân giải JSON (nếu model trả về dạng JSON block)
-    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
+    json_match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw_text, re.DOTALL | re.IGNORECASE)
     candidate_json = json_match.group(1).strip() if json_match else raw_text.strip()
+    if not (candidate_json.startswith("{") and candidate_json.endswith("}")):
+        object_start = candidate_json.find("{")
+        object_end = candidate_json.rfind("}")
+        if object_start >= 0 and object_end > object_start:
+            candidate_json = candidate_json[object_start:object_end + 1]
 
     if candidate_json.startswith("{") and candidate_json.endswith("}"):
         try:
@@ -510,8 +552,8 @@ def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptI
                 for idx, item in enumerate(raw_items):
                     if not isinstance(item, dict):
                         continue
-                    angle = item.get("angle") or f"Góc {idx + 1}"
-                    title = item.get("title") or f"Kịch bản {idx + 1}"
+                    angle = item.get("angle") or ""
+                    title = item.get("title") or ""
                     voiceover = item.get("voiceover") or item.get("voice_over")
                     visual = item.get("visual_direction") or item.get("visualDirection") or item.get("visual")
                     on_screen = item.get("on_screen_text") or item.get("onScreenText")
@@ -538,8 +580,10 @@ def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptI
                             word_count=len(content.split()),
                         )
                     )
-                if len(scripts) >= expected_count:
-                    return scripts[:expected_count]
+                # Không cắt bớt output JSON ở tầng parser. Tầng validation cần
+                # nhìn thấy số lượng thực để phát hiện model trả thừa/thiếu và
+                # kích hoạt đúng một lượt repair.
+                return scripts
         except Exception:
             pass  # Nếu JSON parse lỗi, tiếp tục fallback sang Markdown bên dưới
 
@@ -584,24 +628,26 @@ def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptI
             visual_val = extract_section_text([r"Visual(?: direction)?", r"Gợi ý hình ảnh", r"Hình ảnh", r"Góc quay"], chunk)
             voice_val = extract_section_text([r"Voiceover", r"Lời thoại", r"Thoại", r"Kịch bản đọc"], chunk)
             on_screen_val = extract_section_text([r"Text trên màn hình", r"Chữ trên màn hình", r"On-screen text", r"Text"], chunk)
+            angle_val = extract_section_text([r"Góc tiếp cận", r"Angle"], chunk)
 
-            # Tách angle thông minh từ header (e.g. "Kịch bản 1: Tiêu đề - Góc: Review chân thực")
-            angle_name = f"Kịch bản {idx + 1}"
-            if "Góc" in header or "Angle" in header:
+            # Ưu tiên angle do model tự đề xuất, không gán ba angle cố định theo vị trí.
+            angle_name = angle_val or ""
+            if not angle_name and ("Góc" in header or "Angle" in header):
                 angle_match = re.search(r"(?:Góc|Angle)\s*[:\-]?\s*([^\-\n]+)", header, re.IGNORECASE)
                 if angle_match:
                     angle_name = angle_match.group(1).strip()
                 else:
                     angle_name = header
-            elif " - " in header:
+            elif not angle_name and " - " in header:
                 parts = header.split(" - ")
                 angle_name = parts[-1].strip()
-            elif idx == 0:
-                angle_name = "Problem → Solution"
-            elif idx == 1:
-                angle_name = "USP → Benefit"
-            elif idx == 2:
-                angle_name = "Experience → Desire"
+            elif not angle_name:
+                angle_name = re.sub(
+                    r"^(?:Kịch\s*bản|Script|Option|Góc)\s*\d+\s*[:\-]?\s*",
+                    "",
+                    header,
+                    flags=re.IGNORECASE,
+                ).strip() or f"Kịch bản {idx + 1}"
 
             main_content = voice_val if voice_val else chunk
 
@@ -629,6 +675,112 @@ def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptI
         )
 
     return scripts[:expected_count]
+
+
+def validate_gpt_scripts(
+    scripts: list[GptScriptItem],
+    expected_count: int,
+    min_words: int,
+    max_words: int,
+) -> None:
+    """Kiểm tra contract trước khi dữ liệu được phép đi tiếp sang Google Flow."""
+    errors: list[str] = []
+    if len(scripts) != expected_count:
+        errors.append(f"Cần đúng {expected_count} kịch bản, nhận được {len(scripts)}")
+
+    seen_angles: set[str] = set()
+    required_fields = (
+        ("angle", "góc tiếp cận"),
+        ("title", "tiêu đề"),
+        ("hook", "hook"),
+        ("visual_direction", "gợi ý hình ảnh"),
+        ("voiceover", "lời thoại"),
+        ("on_screen_text", "chữ trên màn hình"),
+        ("cta", "CTA"),
+    )
+
+    for index, script in enumerate(scripts, start=1):
+        for field_name, label in required_fields:
+            value = getattr(script, field_name, None)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"Kịch bản {index} thiếu {label}")
+
+        voiceover = (script.voiceover or script.content or "").strip()
+        word_count = len(voiceover.split())
+        script.word_count = word_count
+        if word_count < min_words or word_count > max_words:
+            errors.append(
+                f"Kịch bản {index} có {word_count} từ lời thoại; yêu cầu {min_words}-{max_words} từ"
+            )
+
+        normalized_angle = re.sub(r"\s+", " ", (script.angle or "").strip().casefold())
+        if normalized_angle:
+            if normalized_angle in seen_angles:
+                errors.append(f"Kịch bản {index} trùng góc tiếp cận với kịch bản trước")
+            seen_angles.add(normalized_angle)
+
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
+def generate_validated_gpt_scripts(
+    product_data: str,
+    images: list[str] | None = None,
+    product_analysis: dict[str, Any] | None = None,
+    assets: dict[str, Any] | None = None,
+    scene_config: dict[str, Any] | None = None,
+    script_config: dict[str, Any] | None = None,
+    prompt_template: str | None = None,
+    model: str | None = None,
+) -> tuple[str, str, list[GptScriptItem], bool, int, int, int]:
+    """Sinh, parse và validate; nếu sai contract thì yêu cầu model tự sửa đúng một lần."""
+    config = script_config or {}
+    expected_count = int(config.get("count") or (scene_config or {}).get("count") or 3)
+    clip_duration = int(config.get("clip_duration_seconds") or DEFAULT_CLIP_DURATION_SECONDS)
+    min_words, max_words = calculate_voiceover_word_range(
+        clip_duration,
+        config.get("min_words"),
+        config.get("max_words"),
+    )
+
+    raw_text, used_model = execute_gpt_script_generation(
+        product_data=product_data,
+        images=images,
+        product_analysis=product_analysis,
+        assets=assets,
+        scene_config=scene_config,
+        script_config=script_config,
+        prompt_template=prompt_template,
+        model=model,
+    )
+
+    try:
+        scripts = parse_gpt_scripts(raw_text, expected_count=expected_count)
+        validate_gpt_scripts(scripts, expected_count, min_words, max_words)
+        return raw_text, used_model, scripts, False, clip_duration, min_words, max_words
+    except ValueError as first_error:
+        repair_prompt = (
+            "Hãy sửa kết quả không hợp lệ bên dưới. Chỉ trả về một JSON object hợp lệ có key "
+            f"\"scripts\" chứa đúng {expected_count} phần tử. Mỗi phần tử bắt buộc có angle, title, "
+            "hook, visual_direction, voiceover, on_screen_text và cta. "
+            f"Voiceover phải là toàn bộ lời đọc từ hook đến CTA và có {min_words}-{max_words} từ. "
+            "Các angle phải khác nhau.\n\n"
+            f"Lỗi cần sửa:\n{first_error}\n\n"
+            f"Kết quả cũ:\n{raw_text[:12000]}"
+        )
+        repaired_raw, repaired_model = execute_gpt_script_generation(
+            product_data=product_data,
+            images=images,
+            product_analysis=product_analysis,
+            assets=assets,
+            scene_config=scene_config,
+            script_config=script_config,
+            prompt_template=repair_prompt,
+            model=used_model,
+        )
+        scripts = parse_gpt_scripts(repaired_raw, expected_count=expected_count)
+        validate_gpt_scripts(scripts, expected_count, min_words, max_words)
+        return repaired_raw, repaired_model, scripts, True, clip_duration, min_words, max_words
 
 
 # ─────────────────────────────────────────────────────────────────────────────

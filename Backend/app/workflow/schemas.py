@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 
+DEFAULT_CLIP_DURATION_SECONDS = 10
+
 
 class GeminiPromptResponse(BaseModel):
     prompt: str = Field(description="Nội dung prompt phân tích sản phẩm mặc định")
@@ -52,9 +54,10 @@ class GptScriptItem(BaseModel):
 class ScriptGenerationConfig(BaseModel):
     count: int = Field(default=3, ge=1, le=10, description="Số lượng kịch bản mong muốn")
     content_mode: str = Field(default="sales", description="Loại nội dung: sales, review, ugc, lifestyle, tutorial, unboxing")
-    min_words: Optional[int] = Field(default=80, description="Số từ tối thiểu")
-    max_words: Optional[int] = Field(default=130, description="Số từ tối đa")
-    platform: Optional[str] = Field(default="tiktok", description="Nền tảng mục tiêu: tiktok, reels, shorts")
+    clip_duration_seconds: int = Field(default=DEFAULT_CLIP_DURATION_SECONDS, ge=1, le=60, description="Thời lượng một clip Google Flow")
+    min_words: Optional[int] = Field(default=None, ge=1, description="Số từ tối thiểu; để trống để tính theo thời lượng clip")
+    max_words: Optional[int] = Field(default=None, ge=1, description="Số từ tối đa; để trống để tính theo thời lượng clip")
+    platform: Optional[str] = Field(default="auto", description="Nền tảng mục tiêu: auto, tiktok, reels, shorts")
 
 
 class GptScriptRequest(BaseModel):
@@ -72,6 +75,12 @@ class GptScriptResponse(BaseModel):
     raw_text: str = Field(default="", description="Nội dung kịch bản thô từ GPT")
     scripts: list[GptScriptItem] = Field(default_factory=list, description="Danh sách kịch bản đã bóc tách")
     model: str = Field(default="", description="Model đã tạo kịch bản")
+    requested_count: int = Field(default=0, description="Số kịch bản được yêu cầu")
+    actual_count: int = Field(default=0, description="Số kịch bản hợp lệ trả về")
+    clip_duration_seconds: int = Field(default=DEFAULT_CLIP_DURATION_SECONDS, description="Thời lượng mục tiêu của mỗi clip")
+    min_words: int = Field(default=0, description="Số từ lời thoại tối thiểu")
+    max_words: int = Field(default=0, description="Số từ lời thoại tối đa")
+    repaired: bool = Field(default=False, description="Kết quả đã qua một lượt tự sửa hay chưa")
 
 
 class WorkflowAssetUploadResponse(BaseModel):

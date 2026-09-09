@@ -22,14 +22,13 @@ from app.workflow.service import (
     concat_workflow_scenes,
     delete_exported_video,
     execute_gemini_analysis,
-    execute_gpt_script_generation,
+    generate_validated_gpt_scripts,
     get_default_gemini_prompt,
     get_default_gpt_prompt,
     get_workflow_asset_path,
     list_exported_videos,
     open_export_folder_in_explorer,
     parse_analysis_to_structured,
-    parse_gpt_scripts,
     save_workflow_asset,
     WORKFLOW_EXPORTS_DIR,
     VEO_DATA_DIR,
@@ -146,36 +145,38 @@ async def analyze_product(req: GeminiAnalysisRequest) -> GeminiAnalysisResponse:
 
 @router.get("/prompts/gpt", response_model=GptPromptResponse)
 def get_gpt_prompt() -> GptPromptResponse:
-    """Lấy nội dung prompt mẫu viết 3 kịch bản bán hàng từ file Backend."""
+    """Lấy prompt mẫu sinh số lượng kịch bản động từ file Backend."""
     prompt = get_default_gpt_prompt()
     return GptPromptResponse(prompt=prompt)
 
 
 @router.post("/gpt/generate-script", response_model=GptScriptResponse)
 async def generate_sales_script(req: GptScriptRequest) -> GptScriptResponse:
-    """Gọi ChatGPT để tạo 3 kịch bản video bán hàng từ dữ liệu sản phẩm và ảnh."""
+    """Sinh và validate các kịch bản độc lập trước khi trả về frontend."""
     try:
-        raw_text, used_model = await run_in_threadpool(
-            execute_gpt_script_generation,
+        script_config = req.script_config.model_dump() if req.script_config else None
+        raw_text, used_model, scripts, repaired, clip_duration, min_words, max_words = await run_in_threadpool(
+            generate_validated_gpt_scripts,
             product_data=req.product_data,
             images=req.images,
             product_analysis=req.product_analysis,
             assets=req.assets,
             scene_config=req.scene_config,
-            script_config=req.script_config.model_dump() if req.script_config else None,
+            script_config=script_config,
             prompt_template=req.prompt_template,
             model=req.model,
         )
-        expected_count = 3
-        if req.script_config and req.script_config.count:
-            expected_count = req.script_config.count
-        elif req.scene_config and isinstance(req.scene_config, dict):
-            expected_count = req.scene_config.get("count", 3)
-        scripts = parse_gpt_scripts(raw_text, expected_count=expected_count)
+        requested_count = req.script_config.count if req.script_config else int((req.scene_config or {}).get("count", 3))
         return GptScriptResponse(
             raw_text=raw_text,
             scripts=scripts,
             model=used_model,
+            requested_count=requested_count,
+            actual_count=len(scripts),
+            clip_duration_seconds=clip_duration,
+            min_words=min_words,
+            max_words=max_words,
+            repaired=repaired,
         )
     except Exception as exc:
         raise HTTPException(

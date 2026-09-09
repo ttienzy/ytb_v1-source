@@ -12,7 +12,7 @@ import {
   findConnectedSourceNodes,
 } from './graphResolver'
 import { callGeminiAnalysis, callGptScriptGeneration } from './workflowApi'
-import { buildScenePlan } from './buildScenePlan'
+import { buildClipPlans, normalizeClipDuration } from './buildScenePlan'
 import type { AssetRef, ProductAnalysis, SalesScript } from '../contracts'
 
 export interface WorkflowRunCallbacks {
@@ -173,6 +173,13 @@ async function executeGptAndDownstream(params: {
   const gptData = (gptNode.data || {}) as Record<string, any>
   const scriptCount = typeof gptData.requestedCount === 'number' ? gptData.requestedCount : 3
   const scriptMode = gptData.contentMode || 'sales'
+  const platform = gptData.platform || 'auto'
+  const flowEdges = edges.filter((e) => e.source === gptNode.id)
+  const flowStudioNode = nodes.find((n) => flowEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio'))
+  const flowData = (flowStudioNode?.data || {}) as Record<string, any>
+  const clipDurationSeconds = normalizeClipDuration(
+    flowData.videoConfig?.duration ?? flowData.scenes?.[0]?.durationSec,
+  )
   let salesScripts: SalesScript[] = []
 
   try {
@@ -183,6 +190,8 @@ async function executeGptAndDownstream(params: {
       scriptConfig: {
         count: scriptCount,
         contentMode: scriptMode,
+        platform,
+        clipDurationSeconds,
       },
       promptTemplate: gptPromptTemplate,
       model: gptModel,
@@ -192,6 +201,7 @@ async function executeGptAndDownstream(params: {
     callbacks.onNodeStateChange(gptNode.id, {
       isGenerating: false,
       salesScripts,
+      scriptCollection: gptRes.collection,
       scriptError: null,
     })
   } catch (err: any) {
@@ -204,9 +214,6 @@ async function executeGptAndDownstream(params: {
   // ──────────────────────────────────────────────────────────────────────────
   // BƯỚC 3: Duyệt theo cạnh nối từ GPT sang Veo Flow Studio (DAG traversal)
   // ──────────────────────────────────────────────────────────────────────────
-  const flowEdges = edges.filter((e) => e.source === gptNode.id)
-  const flowStudioNode = nodes.find((n) => flowEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio'))
-
   if (flowStudioNode && salesScripts.length > 0) {
     const allAssets: AssetRef[] = [
       ...productAssets,
@@ -214,31 +221,25 @@ async function executeGptAndDownstream(params: {
       ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
     ]
 
-    const flowData = (flowStudioNode.data || {}) as Record<string, any>
-    const flowScenes = (flowData.scenes || []) as any[]
-    const existingDurations = flowScenes
-      .map((s: any) => s.durationSec)
-      .filter((d: any) => typeof d === 'number' && d > 0)
-
     try {
       const targetCount = salesScripts.length
-      const defaultDurations = Array.from({ length: targetCount }, (_, i) => (i === 1 ? 6 : 4))
-      const newScenes = buildScenePlan({
+      const clipDurations = Array.from({ length: targetCount }, () => clipDurationSeconds)
+      const newClips = buildClipPlans({
         scripts: salesScripts,
         sceneConfig: {
           count: targetCount,
-          durations: existingDurations.length >= targetCount ? existingDurations : defaultDurations,
+          durations: clipDurations,
           aspectRatio: flowData.aspectRatio || '9:16',
         },
         assets: allAssets,
       })
 
       callbacks.onNodeStateChange(flowStudioNode.id, {
-        scenes: newScenes,
+        scenes: newClips,
         activeSceneIndex: 0,
       })
     } catch (err: any) {
-      callbacks.onError(flowStudioNode.id, err?.message || 'Lỗi phân phối phân cảnh sang Veo Flow Studio.')
+      callbacks.onError(flowStudioNode.id, err?.message || 'Lỗi phân phối clip sang Google Flow.')
       return
     }
   }

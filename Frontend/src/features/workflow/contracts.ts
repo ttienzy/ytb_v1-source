@@ -42,6 +42,8 @@ export interface ProductAnalysis {
 export interface ScriptGenerationConfig {
   count: number
   contentMode: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
+  /** Thời lượng của một clip Google Flow mà mỗi kịch bản sẽ tạo ra. */
+  clipDurationSeconds?: number
   minWords?: number
   maxWords?: number
   platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
@@ -69,6 +71,13 @@ export interface ScriptCollection {
   actualCount: number
   items: SalesScript[]
   contentMode: string
+  platform: string
+  clipDurationSeconds: number
+  minWords: number
+  maxWords: number
+  repaired: boolean
+  promptTemplate: string
+  requestedModel: string
   generationModel?: string
 }
 
@@ -127,4 +136,3 @@ export interface ExportedVideoItem {
   prompt?: string
   modelDisplayName?: string
 }
-

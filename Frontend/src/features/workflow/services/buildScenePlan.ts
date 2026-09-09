@@ -1,19 +1,66 @@
 /**
- * Pure Mapper: Chuyển đổi SalesScript từ ChatGPT sang ScenePlan cho Veo Flow Studio.
+ * Pure Mapper: Chuyển đổi SalesScript từ ChatGPT sang các clip Google Flow.
  * 
  * NGUYÊN TẮC:
  * - Hàm thuần (Pure function), không side effect.
- * - Dynamic config: Số lượng scene và durations lấy từ sceneConfig, không hardcode.
+ * - Bất biến nghiệp vụ: 1 kịch bản = 1 clip độc lập.
+ * - Số lượng clip lấy từ số kịch bản; thời lượng lấy từ cấu hình Flow.
  * - Giữ trọn vẹn nội dung text prompt không cắt bớt.
+ *
+ * `ScenePlan` và các field `scene*` được giữ lại để tương thích dữ liệu/API cũ.
  */
 
-import type { AssetRef, SalesScript, ScenePlan, ScenePlanConfig } from '../contracts'
+import type {
+  AssetRef,
+  SalesScript,
+  ScenePlan,
+  ScenePlanConfig,
+  ScriptCollection,
+  ScriptGenerationConfig,
+} from '../contracts'
+
+export const DEFAULT_CLIP_DURATION_SECONDS = 10
 
 export const DEFAULT_SCENE_CONFIG: ScenePlanConfig = {
   count: 3,
-  durations: [4, 8, 4],
+  durations: [DEFAULT_CLIP_DURATION_SECONDS],
   aspectRatio: '9:16',
-  cameraStyles: ['Cận cảnh chất liệu & Chi tiết', 'Tracking Shot chuyển động', 'Slow Push In chốt CTA'],
+  cameraStyles: [],
+}
+
+export function normalizeClipDuration(
+  value?: number,
+  fallback = DEFAULT_CLIP_DURATION_SECONDS,
+): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : fallback
+}
+
+/** Khoảng lời thoại gợi ý theo nhịp nói nhanh 2-3 từ/giây. */
+export function estimateVoiceoverWordRange(durationSeconds?: number): { min: number; max: number } {
+  const duration = normalizeClipDuration(durationSeconds)
+  return {
+    min: Math.max(1, Math.round(duration * 2)),
+    max: Math.max(1, Math.round(duration * 3)),
+  }
+}
+
+export function isScriptCollectionStale(
+  collection: ScriptCollection | undefined,
+  current: ScriptGenerationConfig & { promptTemplate?: string; model?: string },
+): boolean {
+  if (!collection) return false
+  return (
+    collection.requestedCount !== current.count ||
+    collection.actualCount !== collection.requestedCount ||
+    collection.actualCount !== collection.items.length ||
+    collection.contentMode !== current.contentMode ||
+    collection.platform !== (current.platform || 'auto') ||
+    collection.clipDurationSeconds !== normalizeClipDuration(current.clipDurationSeconds) ||
+    collection.promptTemplate !== (current.promptTemplate || '') ||
+    collection.requestedModel !== (current.model || 'cx/gpt-5.5')
+  )
 }
 
 /**
@@ -54,19 +101,19 @@ export function getFullScriptContent(s?: SalesScript): string {
 }
 
 /**
- * Map danh sách kịch bản (mỗi kịch bản tương ứng 1 phân cảnh)
+ * Map danh sách kịch bản thành danh sách clip theo quan hệ 1:1.
  */
-export function buildScenePlan(params: {
+export function buildClipPlans(params: {
   scripts: SalesScript[]
   sceneConfig?: Partial<ScenePlanConfig>
   assets?: AssetRef[]
 }): ScenePlan[] {
   const { scripts, sceneConfig, assets = [] } = params
-  const count = sceneConfig?.count ?? (scripts.length > 0 ? scripts.length : DEFAULT_SCENE_CONFIG.count)
+  const count = scripts.length
 
-  if (scripts.length < count) {
+  if (sceneConfig?.count !== undefined && sceneConfig.count !== count) {
     throw new Error(
-      `Không đủ số lượng kịch bản để tạo ${count} phân cảnh (nhận được ${scripts.length}/${count} kịch bản). Vui lòng tạo lại kịch bản.`
+      `Số clip phải bằng số kịch bản theo quy tắc 1:1 (nhận ${scripts.length} kịch bản nhưng cấu hình yêu cầu ${sceneConfig.count} clip).`
     )
   }
 
@@ -74,23 +121,23 @@ export function buildScenePlan(params: {
   const aspectRatio = sceneConfig?.aspectRatio ?? DEFAULT_SCENE_CONFIG.aspectRatio
   const cameraStyles = sceneConfig?.cameraStyles ?? DEFAULT_SCENE_CONFIG.cameraStyles ?? []
 
-  const scenes: ScenePlan[] = []
+  const clips: ScenePlan[] = []
 
   for (let i = 0; i < count; i++) {
     const script = scripts[i]
-    const rawDuration = durations[i] !== undefined ? durations[i] : (durations[0] || 4)
-    const durationSec = Math.min(10, Math.max(1, rawDuration))
-    const cameraMotion = cameraStyles[i] || 'Cận cảnh chi tiết'
+    const rawDuration = durations[i] !== undefined ? durations[i] : durations[0]
+    const durationSec = normalizeClipDuration(rawDuration)
+    const cameraMotion = cameraStyles[i] || cameraStyles[0]
 
     const title = script?.title
-      ? `Cảnh ${i + 1}: ${script.title}`
+      ? `Clip ${i + 1}: ${script.title}`
       : script?.angle
-      ? `Cảnh ${i + 1}: ${script.angle}`
-      : `Phân cảnh #${i + 1}`
+      ? `Clip ${i + 1}: ${script.angle}`
+      : `Clip #${i + 1}`
 
     const prompt = getFullScriptContent(script)
 
-    scenes.push({
+    clips.push({
       sceneNumber: i + 1,
       title,
       prompt,
@@ -105,11 +152,14 @@ export function buildScenePlan(params: {
     })
   }
 
-  return scenes
+  return clips
 }
 
+/** @deprecated Dùng buildClipPlans. Giữ alias để đọc project/workflow cũ. */
+export const buildScenePlan = buildClipPlans
+
 /**
- * Phân rã 1 kịch bản duy nhất thành 3 phân cảnh (Mở đầu -> Điểm nổi bật -> CTA)
+ * Tiện ích legacy cho Scene Builder. Không dùng trong luồng GPT -> Flow chính.
  */
 export function splitScriptToScenes(params: {
   script: SalesScript

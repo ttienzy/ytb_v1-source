@@ -11,9 +11,26 @@ import {
   RotateCcw,
   Camera,
   FileText,
-  Lightbulb,
 } from 'lucide-react'
 import type { GptScriptNodeData } from '../types'
+import { estimateVoiceoverWordRange, normalizeClipDuration } from '../services/buildScenePlan'
+
+const CONTENT_MODE_OPTIONS = [
+  { value: 'sales', label: 'Bán hàng' },
+  { value: 'review', label: 'Review' },
+  { value: 'ugc', label: 'UGC' },
+  { value: 'lifestyle', label: 'Lifestyle' },
+  { value: 'tutorial', label: 'Hướng dẫn' },
+  { value: 'comparison', label: 'So sánh' },
+  { value: 'unboxing', label: 'Unboxing' },
+] as const
+
+const PLATFORM_OPTIONS = [
+  { value: 'auto', label: 'Tự động' },
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'reels', label: 'Reels' },
+  { value: 'shorts', label: 'Shorts' },
+] as const
 
 interface GptScriptNodeProps {
   data: GptScriptNodeData
@@ -28,10 +45,16 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   const validImages = connectedImages.filter(Boolean) as string[]
   const hasProductData = data.hasProductData ?? false
   const salesScripts = data.salesScripts || []
+  const scriptCollection = data.scriptCollection
+  const isScriptOutputStale = data.isScriptOutputStale ?? false
   const [activeTab, setActiveTab] = useState<number>(0)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
   const requestedCount = data.requestedCount ?? 3
+  const contentMode = data.contentMode ?? 'sales'
+  const platform = data.platform ?? 'auto'
+  const clipDurationSeconds = normalizeClipDuration(data.clipDurationSeconds)
+  const voiceoverWords = estimateVoiceoverWordRange(clipDurationSeconds)
 
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text)
@@ -40,7 +63,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   }
 
   const handleCountChange = (count: number) => {
-    data.onChangeScriptConfig?.({ count })
+    data.onChangeScriptConfig?.({ count: Math.min(10, Math.max(1, Math.round(count))) })
   }
 
   const safeTab = Math.min(Math.max(0, activeTab), Math.max(0, salesScripts.length - 1))
@@ -180,6 +203,13 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </div>
         )}
 
+        {isScriptOutputStale && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 8px', color: '#92400e', fontSize: 10.5, marginBottom: 8, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>Kết quả hiện tại được sinh bằng cấu hình cũ. Hãy sinh lại trước khi đồng bộ sang Flow.</div>
+          </div>
+        )}
+
         {/* 1. Connected Product Images Display */}
         <div style={{ marginBottom: 8, padding: '6px 8px', background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
@@ -240,34 +270,47 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </span>
         </div>
 
-        {/* 3. Configuration Bar: Script Count */}
+        {/* 3. Configuration Bar */}
         <div style={{ marginBottom: 8, padding: '7px 8px', background: '#faf5ff', borderRadius: 6, border: '1px solid #f3e8ff' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
-              Số lượng kịch bản:
-            </span>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {[1, 2, 3, 4, 5].map((cnt) => (
-                <button
-                  key={cnt}
-                  type="button"
-                  onClick={() => handleCountChange(cnt)}
-                  style={{
-                    padding: '2px 7px',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    borderRadius: 4,
-                    border: requestedCount === cnt ? '1px solid #7c3aed' : '1px solid #cbd5e1',
-                    background: requestedCount === cnt ? '#7c3aed' : '#ffffff',
-                    color: requestedCount === cnt ? '#ffffff' : '#475569',
-                    cursor: 'pointer',
-                    transition: 'all 0.1s ease',
-                  }}
-                >
-                  {cnt}
-                </button>
-              ))}
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.2fr 1fr', gap: 8 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
+              Số kịch bản / clip
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={requestedCount}
+                onChange={(event) => handleCountChange(Number(event.target.value) || 1)}
+                style={{ padding: '4px 7px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
+              Thể loại nội dung
+              <select
+                value={contentMode}
+                onChange={(event) => data.onChangeScriptConfig?.({ contentMode: event.target.value as typeof contentMode })}
+                style={{ padding: '4px 7px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569' }}
+              >
+                {CONTENT_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
+              Nền tảng
+              <select
+                value={platform}
+                onChange={(event) => data.onChangeScriptConfig?.({ platform: event.target.value as typeof platform })}
+                style={{ padding: '4px 7px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569' }}
+              >
+                {PLATFORM_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div style={{ marginTop: 5, fontSize: 9.5, color: '#7e22ce' }}>
+            1 kịch bản = 1 clip Flow {clipDurationSeconds}s
           </div>
         </div>
 
@@ -303,14 +346,14 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           rows={5}
           value={data.prompt}
           onChange={(e) => data.onChangePrompt?.(e.target.value)}
-          placeholder="Dán prompt tạo kịch bản tại đây. Sử dụng biến {{SCRIPT_COUNT}} và {{PRODUCT_DATA}} để tự động nạp dữ liệu..."
+          placeholder="Có thể dùng {{SCRIPT_COUNT}}, {{CLIP_DURATION}}, {{MIN_WORDS}}, {{MAX_WORDS}}, {{CONTENT_MODE}}, {{PLATFORM}} và {{PRODUCT_DATA}}..."
           style={{ minHeight: 85, fontSize: 10.5, fontFamily: 'monospace' }}
         />
 
         {/* Action button */}
         <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 10, color: '#64748b' }}>
-            Mục tiêu: <strong>{requestedCount} kịch bản (80-130 từ)</strong>
+            Mục tiêu: <strong>{requestedCount} clip × {clipDurationSeconds}s</strong> · lời thoại khoảng {voiceoverWords.min}–{voiceoverWords.max} từ/clip
           </div>
 
           <button
@@ -336,6 +379,11 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
               <span style={{ fontSize: 10, fontWeight: 700, color: '#475569' }}>
                 Đã tạo ({salesScripts.length}/{requestedCount} kịch bản):
               </span>
+              {scriptCollection?.repaired && (
+                <span style={{ fontSize: 9, color: '#0369a1', background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: 4, padding: '1px 5px' }}>
+                  Đã tự sửa định dạng
+                </span>
+              )}
             </div>
 
             {/* Dynamic Tabs */}
@@ -454,7 +502,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                   </div>
                 )}
 
-                {/* Action 1: Đẩy tất cả kịch bản vào các Cảnh Veo tương ứng */}
+                {/* Đồng bộ tất cả kịch bản vào các clip Flow tương ứng */}
                 <button
                   type="button"
                   onClick={() => {
@@ -464,6 +512,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                       data.onPushToVeo?.(safeTab)
                     }
                   }}
+                  disabled={isScriptOutputStale}
                   style={{
                     marginTop: 6,
                     width: '100%',
@@ -478,21 +527,23 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 6,
-                    cursor: 'pointer',
+                    cursor: isScriptOutputStale ? 'not-allowed' : 'pointer',
+                    opacity: isScriptOutputStale ? 0.55 : 1,
                     boxShadow: '0 2px 6px rgba(244, 63, 94, 0.25)',
                     transition: 'all 0.15s ease',
                   }}
-                  title={`Đẩy tất cả ${salesScripts.length} kịch bản vào ${salesScripts.length} phân cảnh của Veo Flow Studio`}
+                  title={`Đẩy ${salesScripts.length} kịch bản vào ${salesScripts.length} clip Google Flow độc lập`}
                 >
                   <Sparkles size={13} />
-                  🚀 Đẩy cả {salesScripts.length} Kịch Bản vào {salesScripts.length} Cảnh Veo
+                  🚀 Đồng bộ {salesScripts.length} Kịch Bản → {salesScripts.length} Clip Flow
                 </button>
 
-                {/* Secondary quick action buttons */}
+                {/* Nạp thủ công kịch bản đang chọn vào clip đang mở */}
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button
                     type="button"
                     onClick={() => data.onPushSingleToVeo?.(safeTab)}
+                    disabled={isScriptOutputStale}
                     style={{
                       flex: 1,
                       padding: '5px 8px',
@@ -502,40 +553,17 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                       color: '#475569',
                       fontSize: 10,
                       fontWeight: 600,
-                      cursor: 'pointer',
+                      cursor: isScriptOutputStale ? 'not-allowed' : 'pointer',
+                      opacity: isScriptOutputStale ? 0.55 : 1,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 4,
                       whiteSpace: 'nowrap',
                     }}
-                    title="Đẩy toàn bộ text kịch bản đang chọn vào Cảnh đang mở trong Veo Flow Studio"
+                    title="Đẩy toàn bộ kịch bản đang chọn vào clip đang mở trong Google Flow"
                   >
-                    📌 Nạp riêng vào Cảnh đang mở
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => data.onSplitScriptToVeo?.(safeTab)}
-                    style={{
-                      flex: 1,
-                      padding: '5px 8px',
-                      borderRadius: 5,
-                      border: '1px solid #cbd5e1',
-                      background: '#ffffff',
-                      color: '#475569',
-                      fontSize: 10,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 4,
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Phân rã kịch bản này ra 3 cảnh: Cảnh 1: Mở đầu, Cảnh 2: Điểm nổi bật & Trải nghiệm, Cảnh 3: Chốt CTA"
-                  >
-                    ✂️ Phân bổ kịch bản này ra 3 cảnh
+                    📌 Nạp riêng vào Clip đang mở
                   </button>
                 </div>
               </div>

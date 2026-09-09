@@ -1,4 +1,5 @@
 import type { Node, Edge } from '@xyflow/react'
+import { DEFAULT_CLIP_DURATION_SECONDS } from './services/buildScenePlan'
 
 export const initialNodes: Node[] = [
   // 1. Product Images Node (Top-Left, up to 3 photos)
@@ -52,6 +53,7 @@ export const initialNodes: Node[] = [
       prompt: '',
       requestedCount: 3,
       contentMode: 'sales',
+      platform: 'auto',
       salesScripts: [],
     },
   },
@@ -62,35 +64,32 @@ export const initialNodes: Node[] = [
     type: 'veoFlowStudio',
     position: { x: 840, y: 50 },
     data: {
-      title: 'Google Veo 3.0 • Flow Studio',
-      model: 'Google Veo 3.0',
+      title: 'Google Flow • Video Clips',
+      model: 'Omni 1.1 Flash',
       activeSceneIndex: 0,
       aspectRatio: '9:16',
       resolution: '1080p',
       scenes: [
         {
           sceneNumber: 1,
-          title: 'Cận cảnh chất liệu & Chi tiết',
+          title: 'Clip #1',
           prompt: '',
-          durationSec: 4,
+          durationSec: DEFAULT_CLIP_DURATION_SECONDS,
           aspectRatio: '9:16',
-          cameraMotion: 'Slow Tilt Up',
         },
         {
           sceneNumber: 2,
-          title: 'Trải nghiệm thực tế & Góc nhìn',
+          title: 'Clip #2',
           prompt: '',
-          durationSec: 8,
+          durationSec: DEFAULT_CLIP_DURATION_SECONDS,
           aspectRatio: '9:16',
-          cameraMotion: 'Tracking Shot',
         },
         {
           sceneNumber: 3,
-          title: 'Tạo ấn tượng & Kêu gọi (CTA)',
+          title: 'Clip #3',
           prompt: '',
-          durationSec: 4,
+          durationSec: DEFAULT_CLIP_DURATION_SECONDS,
           aspectRatio: '9:16',
-          cameraMotion: 'Slow Push In',
         },
       ],
     },

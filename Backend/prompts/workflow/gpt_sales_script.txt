@@ -1,17 +1,37 @@
-Dựa vào thông tin sản phẩm được cung cấp dưới đây, hãy đóng vai một chuyên gia sáng tạo nội dung (Content Creator) và viết các kịch bản video ngắn (TikTok/Reels/Shorts).
+Dựa vào dữ liệu sản phẩm bên dưới, hãy đóng vai chuyên gia sáng tạo nội dung và viết kịch bản video ngắn cho TikTok, Reels hoặc Shorts.
+
+Mục tiêu đầu ra:
+- Tạo chính xác {{SCRIPT_COUNT}} kịch bản độc lập.
+- Mỗi kịch bản tương ứng với đúng 1 clip Google Flow dài {{CLIP_DURATION}} giây; không chia một kịch bản thành nhiều cảnh và không tạo timeline nhiều clip.
+- Thể loại nội dung: {{CONTENT_MODE}}. Nền tảng ưu tiên: {{PLATFORM}}.
+- Lời thoại mục tiêu: {{MIN_WORDS}}-{{MAX_WORDS}} từ/kịch bản, đủ tự nhiên để đọc trong {{CLIP_DURATION}} giây.
 
 Nguyên tắc triển khai:
-1. Linh hoạt góc tiếp cận (Angle): Tự phân tích đặc thù của sản phẩm để đề xuất đúng {{SCRIPT_COUNT}} góc nội dung hiệu quả nhất (Gợi ý: Giải quyết vấn đề, Review chân thực, Trải nghiệm/Thị giác, hoặc Kể chuyện/Lifestyle). Không rập khuôn cấu trúc.
-2. Chuyển hóa giá trị: Tập trung biến "Tính năng" (Features) thành "Lợi ích" (Benefits) thực tế, dễ hiểu.
-3. Tính chân thực: Tuyệt đối bám sát dữ liệu đầu vào. KHÔNG phóng đại, KHÔNG tạo cam kết y tế/lố lăng nếu dữ liệu không chứng minh. Nếu thiếu thông tin, hãy tập trung vào các USP hiện có thay vì tự bịa.
-4. Giọng điệu (Tone & Mood): Tự nhiên, bắt tai, nhịp độ nhanh. Hook phải giữ chân người xem trong 3 giây đầu, CTA mượt mà, không "sặc mùi" quảng cáo ép buộc.
-5. Độ dài lời thoại mục tiêu: 80-130 từ/kịch bản.
+1. Tự phân tích đặc thù sản phẩm để chọn {{SCRIPT_COUNT}} góc tiếp cận phù hợp nhất. Có thể tham khảo giải quyết vấn đề, review chân thực, trải nghiệm thị giác, UGC, hướng dẫn hoặc lifestyle nhưng không rập khuôn.
+2. Chuyển tính năng thành lợi ích thực tế, dễ hiểu. Mỗi kịch bản nên có góc tiếp cận khác nhau và chỉ tập trung vào những ý đủ sức thể hiện trong một clip ngắn.
+3. Tuyệt đối bám sát dữ liệu đầu vào. Không tự bịa, không phóng đại, không tạo cam kết y tế hoặc cam kết kết quả khi dữ liệu không chứng minh.
+4. Hook cần rõ ngay từ đầu; giọng điệu tự nhiên, bắt tai, nhịp nhanh; CTA ngắn và không ép buộc.
+5. Chỉ dẫn hình ảnh phải mô tả một clip liền mạch: chủ thể/sản phẩm, hành động chính, bố cục hoặc chuyển động máy, bối cảnh, ánh sáng và mood. Tránh nhồi nhiều hành động hoặc nhiều bối cảnh không thể hiện được trong {{CLIP_DURATION}} giây.
+6. Chữ trên màn hình phải ngắn, dễ đọc trên điện thoại và không lặp nguyên toàn bộ lời thoại.
+7. "voiceover" là toàn bộ lời đọc hoàn chỉnh của clip theo đúng thứ tự phát ngôn, bắt đầu bằng hook và kết thúc bằng CTA tự nhiên. "hook" và "cta" là metadata được tách lại từ chính lời đọc đó, không phải hai đoạn thoại bổ sung.
 
-Yêu cầu định dạng xuất ra:
-Tạo đúng {{SCRIPT_COUNT}} kịch bản. Mỗi kịch bản bắt đầu bằng tiêu đề rõ ràng kèm góc tiếp cận (Ví dụ: ### Kịch bản 1: [Tên kịch bản] - Góc: [Tên góc tiếp cận]), kèm theo các phần:
-- Gợi ý hình ảnh (Visual): Chỉ dẫn góc máy, hành động, bối cảnh cho video
-- Lời thoại (Voiceover): Lời đọc/thoại của video
-- CTA: Kêu gọi hành động ngắn gọn
+Định dạng đầu ra bắt buộc:
+- Chỉ trả về một JSON object hợp lệ, không dùng Markdown và không viết giải thích ngoài JSON.
+- Mảng "scripts" phải có đúng {{SCRIPT_COUNT}} phần tử.
+- Tuân theo schema:
+{
+  "scripts": [
+    {
+      "angle": "Tên góc tiếp cận",
+      "title": "Tên kịch bản ngắn",
+      "hook": "Hook ngắn",
+      "visual_direction": "Visual direction cho một clip liền mạch",
+      "voiceover": "Toàn bộ lời đọc từ hook đến CTA, dài {{MIN_WORDS}}-{{MAX_WORDS}} từ",
+      "on_screen_text": "Một câu ngắn",
+      "cta": "Kêu gọi hành động tự nhiên"
+    }
+  ]
+}
 
 Dữ liệu sản phẩm:
 {{PRODUCT_DATA}}

@@ -5,8 +5,8 @@ import {
   resolveCharacterSceneInput,
   resolveGeminiAnalysisInput,
 } from '../services/graphResolver.ts'
-import { buildScenePlan, splitScriptToScenes } from '../services/buildScenePlan.ts'
-import type { AssetRef, SalesScript } from '../contracts.ts'
+import { buildClipPlans, isScriptCollectionStale, splitScriptToScenes } from '../services/buildScenePlan.ts'
+import type { AssetRef, SalesScript, ScriptCollection } from '../contracts.ts'
 
 console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
 
@@ -115,38 +115,37 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
   console.log('✅ TEST 2 PASSED: resolveCharacterSceneInput bảo toàn backendPath thành công')
 }
 
-// ─── TEST 3: buildScenePlan validate số kịch bản & clamp thời lượng ───────
+// ─── TEST 3: buildClipPlans giữ bất biến 1 kịch bản = 1 clip ─────────────
 {
   const mockScripts: SalesScript[] = [
     { angle: 'Góc 1', title: 'Tiêu đề 1', content: 'Nội dung 1' },
     { angle: 'Góc 2', title: 'Tiêu đề 2', content: 'Nội dung 2' },
   ]
 
-  // Test 3.1: Nếu yêu cầu 3 cảnh mà chỉ có 2 script -> Phải ném lỗi rõ ràng, không lặp
+  // Nếu cấu hình yêu cầu 3 clip nhưng chỉ có 2 script thì không được tự lặp nội dung.
   assert.throws(
     () => {
-      buildScenePlan({
+      buildClipPlans({
         scripts: mockScripts,
         sceneConfig: { count: 3 },
       })
     },
-    /Không đủ số lượng kịch bản/,
-    'Phải ném lỗi khi scripts.length < count'
+    /Số clip phải bằng số kịch bản/,
+    'Phải ném lỗi khi số clip khác số kịch bản'
   )
 
-  // Test 3.2: Khi có đủ 2 script cho 2 cảnh và thời lượng > 10s -> Phải clamp về tối đa 10s
-  const scenes = buildScenePlan({
+  const clips = buildClipPlans({
     scripts: mockScripts,
     sceneConfig: {
       count: 2,
-      durations: [12, 16], // Vượt quá giới hạn Veo 10s
+      durations: [10, 10],
     },
   })
 
-  assert.equal(scenes.length, 2)
-  assert.equal(scenes[0].durationSec, 10, 'Thời lượng cảnh 1 phải được clamp về 10s')
-  assert.equal(scenes[1].durationSec, 10, 'Thời lượng cảnh 2 phải được clamp về 10s')
-  console.log('✅ TEST 3 PASSED: buildScenePlan validate script count và clamp duration thành công')
+  assert.equal(clips.length, 2)
+  assert.equal(clips[0].durationSec, 10)
+  assert.equal(clips[1].durationSec, 10)
+  console.log('✅ TEST 3 PASSED: buildClipPlans giữ ánh xạ 1:1 thành công')
 }
 
 // ─── TEST 4: splitScriptToScenes clamp thời lượng ─────────────────────────
@@ -176,7 +175,7 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
   console.log('✅ TEST 4 PASSED: splitScriptToScenes clamp duration thành công')
 }
 
-// ─── TEST 5: buildScenePlan hỗ trợ 5 kịch bản & ưu tiên visualDirection ───
+// ─── TEST 5: buildClipPlans hỗ trợ 5 kịch bản & ưu tiên visualDirection ──
 {
   const mock5Scripts: SalesScript[] = [
     { angle: 'Review chân thực', title: 'Áo polo test', content: 'Thoại 1', visualDirection: 'Cận cảnh bàn tay sờ vải' },
@@ -186,19 +185,19 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
     { angle: 'Social Proof', title: 'Feedback', content: 'Thoại 5' },
   ]
 
-  const scenes = buildScenePlan({
+  const scenes = buildClipPlans({
     scripts: mock5Scripts,
     sceneConfig: { count: 5 },
   })
 
-  assert.equal(scenes.length, 5, 'Phải tạo đúng 5 scenes')
-  assert.equal(scenes[0].title, 'Cảnh 1: Áo polo test')
-  assert.ok(scenes[0].prompt.includes('Hình ảnh: Cận cảnh bàn tay sờ vải'), 'Prompt cảnh 1 phải có visualDirection')
-  assert.equal(scenes[4].title, 'Cảnh 5: Feedback')
-  console.log('✅ TEST 5 PASSED: buildScenePlan 5 scripts & visualDirection thành công')
+  assert.equal(scenes.length, 5, 'Phải tạo đúng 5 clip')
+  assert.equal(scenes[0].title, 'Clip 1: Áo polo test')
+  assert.ok(scenes[0].prompt.includes('Hình ảnh: Cận cảnh bàn tay sờ vải'), 'Prompt clip 1 phải có visualDirection')
+  assert.equal(scenes[4].title, 'Clip 5: Feedback')
+  console.log('✅ TEST 5 PASSED: buildClipPlans 5 scripts & visualDirection thành công')
 }
 
-// ─── TEST 6: buildScenePlan hỗ trợ fallback snake_case (visual_direction) ───
+// ─── TEST 6: buildClipPlans hỗ trợ fallback snake_case ───────────────────
 {
   const mockSnakeCaseScripts: any[] = [
     {
@@ -211,7 +210,7 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
     },
   ]
 
-  const scenes = buildScenePlan({
+  const scenes = buildClipPlans({
     scripts: mockSnakeCaseScripts as any,
     sceneConfig: { count: 1 },
   })
@@ -221,7 +220,70 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
     scenes[0].prompt.includes('Hình ảnh: Cận cảnh sản phẩm xoay 360 độ ánh sáng mềm'),
     'Prompt phải đọc được visual_direction khi trường camelCase visualDirection vắng mặt'
   )
-  console.log('✅ TEST 6 PASSED: buildScenePlan đọc trơn tru cả visual_direction (snake_case)')
+  console.log('✅ TEST 6 PASSED: buildClipPlans đọc trơn tru visual_direction (snake_case)')
+}
+
+// ─── TEST 7: phát hiện output cũ khi cấu hình GPT/Flow thay đổi ──────────
+{
+  const collection: ScriptCollection = {
+    requestedCount: 3,
+    actualCount: 3,
+    items: [
+      { angle: 'A', title: 'A', content: 'A' },
+      { angle: 'B', title: 'B', content: 'B' },
+      { angle: 'C', title: 'C', content: 'C' },
+    ],
+    contentMode: 'sales',
+    platform: 'auto',
+    clipDurationSeconds: 10,
+    minWords: 20,
+    maxWords: 30,
+    repaired: false,
+    promptTemplate: 'prompt-v1',
+    requestedModel: 'cx/gpt-5.5',
+  }
+
+  assert.equal(isScriptCollectionStale(collection, {
+    count: 3,
+    contentMode: 'sales',
+    platform: 'auto',
+    clipDurationSeconds: 10,
+    promptTemplate: 'prompt-v1',
+    model: 'cx/gpt-5.5',
+  }), false)
+  assert.equal(isScriptCollectionStale(collection, {
+    count: 5,
+    contentMode: 'sales',
+    platform: 'auto',
+    clipDurationSeconds: 10,
+    promptTemplate: 'prompt-v1',
+    model: 'cx/gpt-5.5',
+  }), true)
+  assert.equal(isScriptCollectionStale(collection, {
+    count: 3,
+    contentMode: 'ugc',
+    platform: 'auto',
+    clipDurationSeconds: 6,
+    promptTemplate: 'prompt-v1',
+    model: 'cx/gpt-5.5',
+  }), true)
+  assert.equal(isScriptCollectionStale(collection, {
+    count: 3,
+    contentMode: 'sales',
+    platform: 'auto',
+    clipDurationSeconds: 10,
+    promptTemplate: 'prompt-v2',
+    model: 'cx/gpt-5.5',
+  }), true)
+  assert.equal(isScriptCollectionStale({ ...collection, actualCount: 2, items: collection.items.slice(0, 2) }, {
+    count: 3,
+    contentMode: 'sales',
+    platform: 'auto',
+    clipDurationSeconds: 10,
+    promptTemplate: 'prompt-v1',
+    model: 'cx/gpt-5.5',
+  }), true)
+  console.log('✅ TEST 7 PASSED: phát hiện output stale thành công')
 }
 
 console.log('🎉 TOÀN BỘ WORKFLOW FRONTEND UNIT TESTS ĐÃ HOÀN TẤT VÀ VƯỢT QUA!')

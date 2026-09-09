@@ -1,6 +1,6 @@
-import type { AssetRef, ProductAnalysis, SalesScript, ScenePlan, ScenePlanConfig } from './contracts'
+import type { AssetRef, ProductAnalysis, SalesScript, ScenePlan, ScenePlanConfig, ScriptCollection } from './contracts'
 
-export type { AssetRef, AssetBundle, ProductAnalysis, SalesScript, ScenePlan, ScenePlanConfig } from './contracts'
+export type { AssetRef, AssetBundle, ProductAnalysis, SalesScript, ScenePlan, ScenePlanConfig, ScriptCollection } from './contracts'
 
 export type WorkflowNodeType =
   | 'productAssets'
@@ -99,7 +99,7 @@ export interface GeneratedSceneItem {
   sceneNumber: number
   title: string
   prompt: string
-  durationSec: number // 4s, 5s, 8s
+  durationSec: number // Tên field legacy; đại diện thời lượng của một clip Flow.
   aspectRatio: '9:16' | '16:9' | '1:1'
   cameraMotion?: string
   isRendering?: boolean
@@ -156,19 +156,26 @@ export interface GptScriptNodeData {
   isStartNode?: boolean
   isOrphan?: boolean
   salesScripts?: GptSalesScriptItem[]
+  scriptCollection?: ScriptCollection
+  isScriptOutputStale?: boolean
   activeScriptIndex?: number
   requestedCount?: number
   contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
+  platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
+  clipDurationSeconds?: number
   scenes?: GeneratedSceneItem[]
   onGenerate?: () => void
   onChangePrompt?: (val: string) => void
   onResetPrompt?: () => void
   onSelectScript?: (index: number) => void
-  onChangeScriptConfig?: (cfg: { count?: number; contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing' }) => void
+  onChangeScriptConfig?: (cfg: {
+    count?: number
+    contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
+    platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
+  }) => void
   onPushToVeo?: (scriptIndex: number) => void
   onPushAllToVeo?: () => void
   onPushSingleToVeo?: (scriptIndex: number) => void
-  onSplitScriptToVeo?: (scriptIndex: number) => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }
@@ -194,6 +201,8 @@ export interface VeoFlowStudioNodeData {
     clip_count?: number
   } | null
   videoConfig?: VeoVideoConfig
+  durationOptions?: number[]
+  isSourceScriptStale?: boolean
   selectedGptScriptAngle?: string
   availableGptScripts?: GptSalesScriptItem[]
   refImages?: {

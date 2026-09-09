@@ -17,6 +17,7 @@ import {
   Maximize2,
 } from 'lucide-react'
 import type { VeoFlowStudioNodeData } from '../types'
+import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
 
 interface VeoFlowStudioNodeProps {
   data: VeoFlowStudioNodeData
@@ -38,9 +39,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
   const safeTab = Math.min(Math.max(0, activeTab), Math.max(0, scenes.length - 1))
   const currentScene = scenes[safeTab] || scenes[0] || {
     sceneNumber: 1,
-    title: 'Phân cảnh 1',
+    title: 'Clip 1',
     prompt: '',
-    durationSec: 4,
+    durationSec: data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS,
     aspectRatio: '9:16' as const,
   }
 
@@ -55,7 +56,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
     data.onSelectScene?.(idx)
   }
 
-  const totalDuration = scenes.reduce((sum, s) => sum + (s.durationSec || 4), 0)
+  const totalDuration = scenes.reduce((sum, s) => sum + (s.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS), 0)
+  const clipDurations = [...new Set(scenes.map((scene) => scene.durationSec).filter(Boolean))]
+  const durationLabel = clipDurations.length === 1 ? `${clipDurations[0]}s/clip` : 'thời lượng linh hoạt'
   const isStartNode = data.isStartNode ?? false
   const isOrphan = data.isOrphan ?? false
 
@@ -111,10 +114,10 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           </div>
           <div>
             <div className="wf-node-title" style={{ color: '#881337' }}>
-              {data.title || 'Google Veo 3.0 • Flow Studio'}
+              {data.title || 'Google Flow • Video Clips'}
             </div>
             <div style={{ fontSize: 10, color: '#e11d48', fontWeight: 600 }}>
-              Sinh Clip Tự Động & Ghép Nối Timeline
+              Mỗi kịch bản tạo một clip độc lập
             </div>
           </div>
         </div>
@@ -147,7 +150,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
             }}
           >
-            {scenes.length} Cảnh • {totalDuration}s
+            {scenes.length} Clip • {durationLabel}
           </span>
           <button
             type="button"
@@ -234,13 +237,16 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#6b21a8' }}>
               <Sparkles size={12} style={{ color: '#9333ea' }} />
               <span style={{ fontWeight: 600 }}>
-                {data.selectedGptScriptAngle || 'Kịch bản ChatGPT'}
+                {data.isSourceScriptStale
+                  ? 'Kịch bản đã cũ — cần sinh lại'
+                  : data.selectedGptScriptAngle || 'Kịch bản ChatGPT'}
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <button
                 type="button"
                 onClick={() => data.onApplyAllGptScripts?.()}
+                disabled={data.isSourceScriptStale}
                 style={{
                   fontSize: 10,
                   fontWeight: 700,
@@ -249,14 +255,16 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   border: '1px solid #c084fc',
                   background: '#f3e8ff',
                   color: '#6b21a8',
-                  cursor: 'pointer',
+                  cursor: data.isSourceScriptStale ? 'not-allowed' : 'pointer',
+                  opacity: data.isSourceScriptStale ? 0.55 : 1,
                   whiteSpace: 'nowrap',
                 }}
-                title={`Đẩy ${data.availableGptScripts.length} kịch bản đầy đủ vào ${data.availableGptScripts.length} cảnh tương ứng`}
+                title={`Đẩy ${data.availableGptScripts.length} kịch bản vào ${data.availableGptScripts.length} clip độc lập`}
               >
-                ⚡ Đồng bộ {data.availableGptScripts.length} Cảnh
+                ⚡ Đồng bộ {data.availableGptScripts.length} Clip
               </button>
               <select
+                disabled={data.isSourceScriptStale}
                 style={{
                   fontSize: 10,
                   fontWeight: 600,
@@ -265,7 +273,8 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   border: '1px solid #d8b4fe',
                   background: '#ffffff',
                   color: '#7e22ce',
-                  cursor: 'pointer',
+                  cursor: data.isSourceScriptStale ? 'not-allowed' : 'pointer',
+                  opacity: data.isSourceScriptStale ? 0.55 : 1,
                 }}
                 onChange={(e) => {
                   const val = e.target.value
@@ -277,7 +286,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 }}
                 defaultValue=""
               >
-                <option value="" disabled>Nạp kịch bản vào Cảnh #{safeTab + 1}...</option>
+                <option value="" disabled>Nạp kịch bản vào Clip #{safeTab + 1}...</option>
                 {data.availableGptScripts.map((s, i) => (
                   <option key={i} value={i}>
                     {`#${i + 1} — ${s.angle || s.title || `Kịch bản ${i + 1}`}`}
@@ -288,7 +297,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           </div>
         )}
 
-        {/* Scene Navigation Tabs */}
+        {/* Clip Navigation Tabs */}
         <div
           style={{
             display: 'flex',
@@ -333,7 +342,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                     background: scene.thumbnailUrl ? '#10b981' : isActive ? '#6366f1' : '#cbd5e1',
                   }}
                 />
-                Cảnh #{idx + 1}
+                Clip #{idx + 1}
               </button>
             )
           })}
@@ -368,7 +377,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 onClick={() =>
                   data.onOpenPreviewModal?.(
                     currentScene.videoUrl!,
-                    `Cảnh #${safeTab + 1}: ${currentScene.title || 'Phân cảnh'}`,
+                    `Clip #${safeTab + 1}: ${currentScene.title || 'Video'}`,
                     currentScene.prompt
                   )
                 }
@@ -447,7 +456,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             >
               <Sparkles size={22} color="#f43f5e" className="animate-spin" />
               <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc' }}>
-                Đang render Veo Cảnh #{safeTab + 1}... {renderProgress}%
+                Đang tạo Clip #{safeTab + 1}... {renderProgress}%
               </div>
               <div
                 style={{
@@ -479,7 +488,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               }}
             >
               <Film size={28} color="#475569" />
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>Chưa xuất clip cho Cảnh #{safeTab + 1}</span>
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>Chưa tạo Clip #{safeTab + 1}</span>
             </div>
           )}
 
@@ -523,7 +532,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           </div>
         </div>
 
-        {/* Scene Prompt & Parameters */}
+        {/* Clip Prompt & Parameters */}
         <div style={{ marginBottom: 10 }}>
           <div
             style={{
@@ -534,7 +543,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             }}
           >
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>
-              Prompt mô tả cảnh #{safeTab + 1}:
+              Prompt cho Clip #{safeTab + 1}:
             </label>
             <span style={{ fontSize: 10, color: '#94a3b8' }}>
               {currentScene.title || 'Mô tả hình ảnh'}
@@ -551,7 +560,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           />
         </div>
 
-        {/* Quick Scene Controls: Duration & Render Button */}
+        {/* Quick Clip Controls: Duration & Render Button */}
         <div
           style={{
             display: 'flex',
@@ -561,8 +570,8 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 11, color: '#64748b' }}>Thời lượng:</span>
-            {[4, 6, 8, 10].map((sec) => (
+            <span style={{ fontSize: 11, color: '#64748b' }}>Thời lượng chung:</span>
+            {(data.durationOptions?.length ? data.durationOptions : [currentScene.durationSec]).map((sec) => (
               <button
                 key={sec}
                 type="button"
@@ -595,14 +604,14 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             }}
             disabled={isRendering}
             style={{ padding: '5px 12px', fontSize: 11 }}
-            title={!data.activeProject ? 'Bấm để cấu hình và chọn Project trước' : `Tạo clip cảnh #${safeTab + 1}`}
+            title={!data.activeProject ? 'Bấm để cấu hình và chọn Project trước' : `Tạo clip #${safeTab + 1}`}
           >
             <Video size={13} />
-            {isRendering ? 'Đang tạo...' : !data.activeProject ? 'Cấu hình Project' : `Tạo Clip Cảnh #${safeTab + 1}`}
+            {isRendering ? 'Đang tạo...' : !data.activeProject ? 'Cấu hình Project' : `Tạo Clip #${safeTab + 1}`}
           </button>
         </div>
 
-        {/* Timeline Stitching & Export Section */}
+        {/* Optional clip stitching & export */}
         <div
           style={{
             borderTop: '1px solid #f1f5f9',
@@ -624,7 +633,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           >
             <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 5 }}>
               <Layers size={13} color="#6366f1" />
-              Timeline Ghép Nối ({scenes.length} cảnh • {totalDuration}s):
+              Tuỳ chọn: Ghép {scenes.length} clip ({totalDuration}s)
             </div>
             <span style={{ fontSize: 10, color: '#64748b' }}>Định dạng: MP4 1080p</span>
           </div>
@@ -642,7 +651,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               <React.Fragment key={i}>
                 <div
                   style={{
-                    flex: sc.durationSec || 4,
+                    flex: sc.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS,
                     height: 28,
                     borderRadius: 6,
                     background: sc.thumbnailUrl ? '#ecfdf5' : '#ffffff',
@@ -659,7 +668,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                     padding: '0 4px',
                   }}
                 >
-                  #{i + 1} ({sc.durationSec || 4}s)
+                  #{i + 1} ({sc.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS}s)
                 </div>
                 {i < scenes.length - 1 && (
                   <ChevronRight size={12} color="#cbd5e1" style={{ flexShrink: 0 }} />
@@ -689,7 +698,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   color: '#3730a3',
                 }}
               >
-                <span>Đang kết xuất và ghép nối video...</span>
+                <span>Đang ghép các clip đã chọn...</span>
                 <span>{exportProgress}%</span>
               </div>
               <div style={{ height: 4, background: '#c7d2fe', borderRadius: 2, overflow: 'hidden' }}>
@@ -726,7 +735,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                     gap: 5,
                   }}
                 >
-                  <CheckCircle2 size={14} color="#059669" /> Video hoàn chỉnh đã sẵn sàng!
+                  <CheckCircle2 size={14} color="#059669" /> Bản ghép tuỳ chọn đã sẵn sàng!
                 </span>
                 <span style={{ fontSize: 10, color: '#047857', fontWeight: 600 }}>MP4 • 1080p</span>
               </div>
@@ -748,7 +757,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   onClick={() =>
                     data.onOpenPreviewModal?.(
                       data.finalVideoUrl!,
-                      'Video hoàn chỉnh (Ghép nối timeline)',
+                      'Video ghép từ các clip',
                       undefined
                     )
                   }
@@ -799,7 +808,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               onClick={() => data.onExportVideo?.()}
             >
               <Download size={14} />
-              Xuất Video Hoàn Chỉnh (MP4 • 1080p)
+              Ghép Các Clip (Tuỳ chọn • MP4)
             </button>
           )}
         </div>

@@ -36,7 +36,7 @@ import { VideoPlayerModal } from './components/VideoPlayerModal'
 import * as veoApi from '../veo-studio/services/veoApi'
 import type { VeoCapabilities, VeoProject } from '../veo-studio/types'
 import type { GeneratedSceneItem, GptSalesScriptItem, VeoVideoConfig } from './types'
-import type { AssetRef, ProductAnalysis, SalesScript } from './contracts'
+import type { AssetRef, ProductAnalysis, SalesScript, ScriptCollection } from './contracts'
 import {
   resolveProductAssetsInput,
   resolveCharacterSceneInput,
@@ -51,7 +51,13 @@ import {
   fetchGptDefaultPrompt,
   fetchExportedVideos,
 } from './services/workflowApi'
-import { buildScenePlan, splitScriptToScenes } from './services/buildScenePlan'
+import {
+  buildClipPlans,
+  DEFAULT_CLIP_DURATION_SECONDS,
+  getFullScriptContent,
+  isScriptCollectionStale,
+  normalizeClipDuration,
+} from './services/buildScenePlan'
 import { RenderJobController } from './services/renderJobService'
 import { runRealWorkflow } from './services/workflowRunner'
 
@@ -70,7 +76,7 @@ function WorkflowCanvas() {
   const [veoVideoConfig, setVeoVideoConfig] = useState<VeoVideoConfig>({
     model: 'Omni 1.1 Flash',
     aspectRatio: '9:16',
-    duration: 4,
+    duration: DEFAULT_CLIP_DURATION_SECONDS,
     resolution: '720p',
     variations: 1,
     creditCost: 7,
@@ -262,16 +268,24 @@ function WorkflowCanvas() {
     )
   }, [])
 
-  // Update Flow Studio scene duration
-  const handleFlowStudioUpdateDuration = useCallback((nodeId: string, index: number, durationSec: number) => {
+  // Thời lượng là cấu hình chung để prompt GPT và toàn bộ clip luôn nhất quán.
+  const handleFlowStudioUpdateDuration = useCallback((nodeId: string, _index: number, durationSec: number) => {
+    setVeoVideoConfig((current) => ({ ...current, duration: durationSec }))
     setNodes((nds) =>
       nds.map((n) => {
         if (n.id === nodeId) {
-          const prevScenes = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-          if (prevScenes[index]) {
-            prevScenes[index] = { ...prevScenes[index], durationSec }
+          const clips = ((n.data?.scenes as GeneratedSceneItem[]) || []).map((clip) => ({
+            ...clip,
+            durationSec,
+          }))
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              videoConfig: { ...(n.data?.videoConfig as VeoVideoConfig | undefined), duration: durationSec },
+              scenes: clips,
+            },
           }
-          return { ...n, data: { ...n.data, scenes: prevScenes } }
         }
         return n
       })
@@ -354,24 +368,7 @@ function WorkflowCanvas() {
     }
   }, [activeVeoProject])
 
-  // Map kịch bản GPT trực tiếp vào 3 cảnh của Veo Flow Studio
-  // Helper lấy toàn bộ nội dung text không cắt bớt của 1 kịch bản
-  const getFullScriptContent = useCallback((s?: GptSalesScriptItem): string => {
-    if (!s) return ''
-    if (s.content && s.content.trim()) return s.content.trim()
-    const parts = [
-      s.hook ? `Hook: ${s.hook}` : '',
-      s.problem ? `Vấn đề: ${s.problem}` : '',
-      s.product ? `Sản phẩm: ${s.product}` : '',
-      s.benefits ? `Lợi ích: ${s.benefits}` : '',
-      s.cta ? `CTA: ${s.cta}` : '',
-      (s.visualDirection || s.visual_direction) ? `Visual: ${s.visualDirection || s.visual_direction}` : '',
-      (s.voiceover || s.voice_over) ? `Voiceover: ${s.voiceover || s.voice_over}` : '',
-    ].filter(Boolean)
-    return parts.join('\n\n')
-  }, [])
-
-  // 1. Đẩy toàn bộ kịch bản vào các cảnh của Veo Flow Studio
+  // Đẩy toàn bộ kịch bản vào các clip Flow theo ánh xạ 1:1.
   const handleApplyAllGptScriptsToVeo = useCallback((sourceGptNodeId?: string) => {
     setNodes((nds) => {
       const gptNode = sourceGptNodeId ? nds.find((n) => n.id === sourceGptNodeId) : nds.find((n) => n.type === 'gptScript')
@@ -387,7 +384,20 @@ function WorkflowCanvas() {
       const targetFlowId = targetFlow?.id
 
       const flowConfig = (targetFlow?.data?.videoConfig as VeoVideoConfig) || veoVideoConfig
-      const baseDuration = Math.min(10, Math.max(1, flowConfig.duration || 4))
+      const clipDuration = normalizeClipDuration(flowConfig.duration)
+      const collection = gptNode?.data?.scriptCollection as ScriptCollection | undefined
+      const outputIsStale = isScriptCollectionStale(collection, {
+        count: Number(gptNode?.data?.requestedCount || scripts.length),
+        contentMode: (gptNode?.data?.contentMode || 'sales') as any,
+        platform: (gptNode?.data?.platform || 'auto') as any,
+        clipDurationSeconds: clipDuration,
+        promptTemplate: (gptNode?.data?.prompt as string) || '',
+        model: (gptNode?.data?.model as string) || 'cx/gpt-5.5',
+      })
+      if (outputIsStale) {
+        alert('⚠️ Cấu hình đã thay đổi sau lần sinh kịch bản. Vui lòng sinh lại kịch bản trước khi đồng bộ sang Google Flow.')
+        return nds
+      }
 
       const prodInput = resolveProductAssetsInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
       const charInput = resolveCharacterSceneInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
@@ -399,13 +409,13 @@ function WorkflowCanvas() {
       ]
 
       const targetCount = scripts.length
-      const defaultDurations = Array.from({ length: targetCount }, (_, i) => (i === 1 ? Math.min(10, Math.round(baseDuration * 1.5)) : baseDuration))
+      const clipDurations = Array.from({ length: targetCount }, () => clipDuration)
 
-      const newScenes = buildScenePlan({
+      const newClips = buildClipPlans({
         scripts: scripts as any,
         sceneConfig: {
           count: targetCount,
-          durations: defaultDurations,
+          durations: clipDurations,
           aspectRatio: (flowConfig.aspectRatio || '9:16') as any,
         },
         assets: refAssets,
@@ -417,9 +427,9 @@ function WorkflowCanvas() {
             ...n,
             data: {
               ...n.data,
-              scenes: newScenes,
+              scenes: newClips,
               activeSceneIndex: 0,
-              selectedGptScriptAngle: `Đồng bộ cả ${targetCount} Kịch bản đầy đủ (${targetCount} Cảnh)`,
+              selectedGptScriptAngle: `${targetCount} kịch bản → ${targetCount} clip độc lập`,
             },
           }
         }
@@ -428,7 +438,7 @@ function WorkflowCanvas() {
     })
   }, [edges, veoVideoConfig])
 
-  // 2. Đẩy riêng kịch bản thứ scriptIdx vào cảnh hiện tại của Flow Studio (toàn bộ text, không cắt bớt)
+  // Nạp riêng một kịch bản vào clip đang mở.
   const handleApplySingleScriptToCurrentScene = useCallback((scriptIdx: number, sourceGptNodeId?: string) => {
     setNodes((nds) => {
       const gptNode = sourceGptNodeId ? nds.find((n) => n.id === sourceGptNodeId) : nds.find((n) => n.type === 'gptScript')
@@ -436,10 +446,25 @@ function WorkflowCanvas() {
       const targetScript = scripts[scriptIdx]
       if (!targetScript) return nds
 
-      const fullPrompt = getFullScriptContent(targetScript)
+      const fullPrompt = getFullScriptContent(targetScript as SalesScript)
       const outgoingEdges = gptNode ? edges.filter((e) => e.source === gptNode.id) : []
       const targetFlow = nds.find((n) => outgoingEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio')) || nds.find((n) => n.type === 'veoFlowStudio')
       const targetFlowId = targetFlow?.id
+      const targetDuration = normalizeClipDuration(
+        (targetFlow?.data?.videoConfig as VeoVideoConfig | undefined)?.duration ?? veoVideoConfig.duration,
+      )
+      const collection = gptNode?.data?.scriptCollection as ScriptCollection | undefined
+      if (isScriptCollectionStale(collection, {
+        count: Number(gptNode?.data?.requestedCount || scripts.length),
+        contentMode: (gptNode?.data?.contentMode || 'sales') as any,
+        platform: (gptNode?.data?.platform || 'auto') as any,
+        clipDurationSeconds: targetDuration,
+        promptTemplate: (gptNode?.data?.prompt as string) || '',
+        model: (gptNode?.data?.model as string) || 'cx/gpt-5.5',
+      })) {
+        alert('⚠️ Cấu hình đã thay đổi sau lần sinh kịch bản. Vui lòng sinh lại trước khi nạp clip.')
+        return nds
+      }
 
       return nds.map((n) => {
         if (gptNode && n.id === gptNode.id) {
@@ -481,73 +506,9 @@ function WorkflowCanvas() {
         return n
       })
     })
-  }, [edges, getFullScriptContent])
+  }, [edges, veoVideoConfig.duration])
 
-  // 3. Phân rã 1 kịch bản thành 3 cảnh (Hook+Vấn đề, Sản phẩm+Lợi ích, CTA) nhưng ĐẦY ĐỦ TEXT, KHÔNG CẮT BỚT
-  const handleSplitSingleScriptToThreeScenes = useCallback((scriptIdx: number, sourceGptNodeId?: string) => {
-    setNodes((nds) => {
-      const gptNode = sourceGptNodeId ? nds.find((n) => n.id === sourceGptNodeId) : nds.find((n) => n.type === 'gptScript')
-      const scripts = (gptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
-      const targetScript = scripts[scriptIdx]
-      if (!targetScript) return nds
-
-      const outgoingEdges = gptNode ? edges.filter((e) => e.source === gptNode.id) : []
-      const targetFlow = nds.find((n) => outgoingEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio')) || nds.find((n) => n.type === 'veoFlowStudio')
-      const targetFlowId = targetFlow?.id
-
-      const flowConfig = (targetFlow?.data?.videoConfig as VeoVideoConfig) || veoVideoConfig
-      const baseDuration = Math.min(10, Math.max(1, flowConfig.duration || 4))
-
-      const prodInput = resolveProductAssetsInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
-      const charInput = resolveCharacterSceneInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
-
-      const refAssets: AssetRef[] = [
-        ...(prodInput.ok && prodInput.data ? prodInput.data.assets : []),
-        ...(charInput.ok && charInput.data?.model ? [charInput.data.model] : []),
-        ...(charInput.ok && charInput.data?.scene ? [charInput.data.scene] : []),
-      ]
-
-      const newScenes = splitScriptToScenes({
-        script: targetScript as any,
-        sceneConfig: {
-          durations: [baseDuration, Math.min(10, baseDuration * 2), baseDuration],
-          aspectRatio: (flowConfig.aspectRatio || '9:16') as any,
-        },
-        assets: refAssets,
-      })
-
-      return nds.map((n) => {
-        if (gptNode && n.id === gptNode.id) {
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              activeScriptIndex: scriptIdx,
-            },
-          }
-        }
-        if (targetFlowId && n.id === targetFlowId) {
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              scenes: newScenes,
-              activeSceneIndex: 0,
-              selectedGptScriptAngle: `${targetScript.angle} (Chia 3 phân đoạn)`,
-            },
-          }
-        }
-        return n
-      })
-    })
-  }, [edges, veoVideoConfig])
-
-  // handleApplyGptScriptToVeo: mặc định đẩy cả 3 kịch bản đầy đủ text
-  const handleApplyGptScriptToVeo = useCallback((scriptIdx?: number) => {
-    handleApplyAllGptScriptsToVeo()
-  }, [handleApplyAllGptScriptsToVeo])
-
-  const handleSaveVeoConfig = useCallback((config: VeoVideoConfig, scriptIdx?: number) => {
+  const handleSaveVeoConfig = useCallback((config: VeoVideoConfig) => {
     setVeoVideoConfig(config)
     setNodes((nds) =>
       nds.map((n) => {
@@ -571,10 +532,7 @@ function WorkflowCanvas() {
         return n
       })
     )
-    if (scriptIdx !== undefined) {
-      handleApplyAllGptScriptsToVeo()
-    }
-  }, [handleApplyAllGptScriptsToVeo])
+  }, [])
 
   // Update prompt in Gemini node
   const handleGeminiPromptChange = useCallback((nodeId: string, prompt: string) => {
@@ -704,6 +662,15 @@ function WorkflowCanvas() {
     const gptData = (gptNode?.data || {}) as Record<string, any>
     const requestedCount = typeof gptData.requestedCount === 'number' ? gptData.requestedCount : 3
     const contentMode = gptData.contentMode || 'sales'
+    const platform = gptData.platform || 'auto'
+    const outgoingFlowEdges = edges.filter((edge) => edge.source === nodeId)
+    const targetFlowNode = nodes.find((node) =>
+      outgoingFlowEdges.some((edge) => edge.target === node.id && node.type === 'veoFlowStudio')
+    )
+    const targetFlowConfig = targetFlowNode?.data?.videoConfig as VeoVideoConfig | undefined
+    const clipDurationSeconds = normalizeClipDuration(
+      targetFlowConfig?.duration ?? veoVideoConfig.duration,
+    )
 
     try {
       const gptRes = await callGptScriptGeneration({
@@ -713,6 +680,8 @@ function WorkflowCanvas() {
         scriptConfig: {
           count: requestedCount,
           contentMode: contentMode,
+          platform,
+          clipDurationSeconds,
         },
         promptTemplate: promptToSend,
         model: modelToSend,
@@ -727,6 +696,7 @@ function WorkflowCanvas() {
                 ...n.data,
                 isGenerating: false,
                 salesScripts: gptRes.scripts,
+                scriptCollection: gptRes.collection,
                 rawOutput: gptRes.rawText,
                 activeScriptIndex: 0,
                 scriptError: null,
@@ -743,7 +713,7 @@ function WorkflowCanvas() {
         nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false, scriptError: errMsg } } : n))
       )
     }
-  }, [nodes, edges])
+  }, [nodes, edges, veoVideoConfig.duration])
 
   // Render single scene inside Flow Studio (Sử dụng RenderJobController & ảnh thật, bỏ fallback giả lập)
   const handleRenderFlowScene = useCallback(async (nodeId: string, sceneIndex: number) => {
@@ -752,7 +722,7 @@ function WorkflowCanvas() {
     const sc = scenes[sceneIndex]
 
     if (!sc?.prompt?.trim()) {
-      alert(`⚠️ Cảnh #${sceneIndex + 1} chưa có nội dung prompt! Vui lòng nhập prompt hoặc bấm "Đẩy Kịch Bản Này Sang Veo Flow Studio" trước.`)
+      alert(`⚠️ Clip #${sceneIndex + 1} chưa có nội dung prompt! Vui lòng nhập prompt hoặc đồng bộ kịch bản sang Google Flow trước.`)
       return
     }
 
@@ -834,7 +804,7 @@ function WorkflowCanvas() {
     if (result.ok) {
       setExportedCount((prev) => prev + 1)
     } else {
-      alert(`Lỗi render Cảnh #${sceneIndex + 1}: ${result.error}`)
+      alert(`Lỗi tạo Clip #${sceneIndex + 1}: ${result.error}`)
     }
   }, [nodes, edges, activeVeoProject, veoVideoConfig])
 
@@ -848,7 +818,7 @@ function WorkflowCanvas() {
       .filter((p): p is string => Boolean(p && p.trim()))
 
     if (validVideoPaths.length < scenes.length || scenes.length === 0) {
-      alert('⚠️ Chưa thể xuất video hoàn chỉnh! Tất cả các phân cảnh cần render video thành công trước khi xuất.')
+      alert('⚠️ Chưa thể ghép video! Tất cả clip cần được tạo thành công trước khi ghép.')
       return
     }
 
@@ -937,6 +907,7 @@ function WorkflowCanvas() {
             prompt: '',
             requestedCount: 3,
             contentMode: 'sales',
+            platform: 'auto',
             salesScripts: [],
           },
         }
@@ -946,24 +917,17 @@ function WorkflowCanvas() {
           type: 'veoFlowStudio',
           position: { x, y },
           data: {
-            title: 'Google Veo 3.0 • Flow Studio',
-            model: 'Google Veo 3.0',
+            title: 'Google Flow • Video Clips',
+            model: 'Omni 1.1 Flash',
             activeSceneIndex: 0,
             aspectRatio: '9:16',
             resolution: '1080p',
             scenes: [
               {
                 sceneNumber: 1,
-                title: 'Cận cảnh sản phẩm',
+                title: 'Clip #1',
                 prompt: '',
-                durationSec: 4,
-                aspectRatio: '9:16',
-              },
-              {
-                sceneNumber: 2,
-                title: 'Người mẫu & Bối cảnh',
-                prompt: '',
-                durationSec: 8,
+                durationSec: DEFAULT_CLIP_DURATION_SECONDS,
                 aspectRatio: '9:16',
               },
             ],
@@ -1071,6 +1035,23 @@ function WorkflowCanvas() {
       if (node.type === 'gptScript') {
         const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: node.id })
         const connectedProductImages = prodRes.ok && prodRes.data ? prodRes.data.rawImages : []
+        const outgoingFlowEdges = edges.filter((edge) => edge.source === node.id)
+        const targetFlowNode = nodes.find((candidate) =>
+          outgoingFlowEdges.some((edge) => edge.target === candidate.id && candidate.type === 'veoFlowStudio')
+        )
+        const targetFlowConfig = targetFlowNode?.data?.videoConfig as VeoVideoConfig | undefined
+        const clipDurationSeconds = normalizeClipDuration(
+          targetFlowConfig?.duration ?? veoVideoConfig.duration,
+        )
+        const scriptCollection = node.data?.scriptCollection as ScriptCollection | undefined
+        const isScriptOutputStale = isScriptCollectionStale(scriptCollection, {
+          count: Number(node.data?.requestedCount || 3),
+          contentMode: (node.data?.contentMode || 'sales') as any,
+          platform: (node.data?.platform || 'auto') as any,
+          clipDurationSeconds,
+          promptTemplate: (node.data?.prompt as string) || '',
+          model: (node.data?.model as string) || 'cx/gpt-5.5',
+        })
 
         const geminiRes = resolveGeminiAnalysisInput({ nodes, edges, targetNodeId: node.id })
         const hasProductData = geminiRes.ok && !!geminiRes.data
@@ -1086,10 +1067,12 @@ function WorkflowCanvas() {
             connectedImages: connectedProductImages,
             hasProductData,
             productDataPreview,
+            clipDurationSeconds,
+            isScriptOutputStale,
             onChangePrompt: (val: string) => handleGptPromptChange(node.id, val),
             onResetPrompt: () => handleResetGptPrompt(node.id),
             onGenerate: () => handleGenerateGptScript(node.id),
-            onChangeScriptConfig: (cfg: { count?: number; contentMode?: any }) => {
+            onChangeScriptConfig: (cfg: { count?: number; contentMode?: any; platform?: any }) => {
               setNodes((nds) =>
                 nds.map((n) =>
                   n.id === node.id
@@ -1099,6 +1082,7 @@ function WorkflowCanvas() {
                           ...n.data,
                           requestedCount: cfg.count ?? n.data?.requestedCount,
                           contentMode: cfg.contentMode ?? n.data?.contentMode,
+                          platform: cfg.platform ?? n.data?.platform,
                         },
                       }
                     : n
@@ -1108,13 +1092,37 @@ function WorkflowCanvas() {
             onPushToVeo: () => handleApplyAllGptScriptsToVeo(node.id),
             onPushAllToVeo: () => handleApplyAllGptScriptsToVeo(node.id),
             onPushSingleToVeo: (idx: number) => handleApplySingleScriptToCurrentScene(idx, node.id),
-            onSplitScriptToVeo: (idx: number) => handleSplitSingleScriptToThreeScenes(idx, node.id),
           },
         }
       }
       if (node.type === 'veoFlowStudio') {
         const gptRes = resolveGptScriptsInput({ nodes, edges, targetNodeId: node.id })
         const availableGptScripts = gptRes.ok && gptRes.data ? (gptRes.data as GptSalesScriptItem[]) : []
+        const sourceGptNode = nodes.find((candidate) =>
+          candidate.type === 'gptScript' &&
+          edges.some((edge) => edge.target === node.id && edge.source === candidate.id)
+        )
+        const sourceCollection = sourceGptNode?.data?.scriptCollection as ScriptCollection | undefined
+        const isSourceScriptStale = sourceGptNode
+          ? isScriptCollectionStale(sourceCollection, {
+              count: Number(sourceGptNode.data?.requestedCount || availableGptScripts.length),
+              contentMode: (sourceGptNode.data?.contentMode || 'sales') as any,
+              platform: (sourceGptNode.data?.platform || 'auto') as any,
+              clipDurationSeconds: veoVideoConfig.duration,
+              promptTemplate: (sourceGptNode.data?.prompt as string) || '',
+              model: (sourceGptNode.data?.model as string) || 'cx/gpt-5.5',
+            })
+          : false
+        const durationOptions = [...new Set(
+          (veoCapabilities?.profiles || [])
+            .filter((profile) =>
+              profile.input_mode === 'text_to_video' &&
+              profile.model_display_name === veoVideoConfig.model &&
+              profile.aspect_ratio === veoVideoConfig.aspectRatio &&
+              profile.resolution === veoVideoConfig.resolution
+            )
+            .map((profile) => profile.duration_seconds)
+        )].sort((a, b) => a - b)
 
         return {
           ...node,
@@ -1122,6 +1130,8 @@ function WorkflowCanvas() {
             ...baseData,
             activeProject: activeVeoProject,
             videoConfig: veoVideoConfig,
+            durationOptions: durationOptions.length > 0 ? durationOptions : [veoVideoConfig.duration],
+            isSourceScriptStale,
             availableGptScripts,
             onOpenVeoSetup: () => setIsVeoModalOpen(true),
             onOpenLibrary: () => setIsLibraryOpen(true),
@@ -1148,6 +1158,7 @@ function WorkflowCanvas() {
     connectedNodeIds,
     activeVeoProject,
     veoVideoConfig,
+    veoCapabilities,
     handleProductImageChange,
     handleCharacterSceneChange,
     handleGeminiPromptChange,
@@ -1158,7 +1169,6 @@ function WorkflowCanvas() {
     handleGenerateGptScript,
     handleApplyAllGptScriptsToVeo,
     handleApplySingleScriptToCurrentScene,
-    handleSplitSingleScriptToThreeScenes,
     handleFlowStudioSelectScene,
     handleFlowStudioUpdatePrompt,
     handleFlowStudioUpdateDuration,

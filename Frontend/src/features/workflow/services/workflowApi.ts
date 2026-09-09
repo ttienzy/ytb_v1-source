@@ -11,9 +11,11 @@ import type {
   SalesScript,
   ScenePlanConfig,
   ScriptGenerationConfig,
+  ScriptCollection,
   WorkflowExportResponse,
   ExportedVideoItem,
 } from '../contracts'
+import { DEFAULT_CLIP_DURATION_SECONDS } from './buildScenePlan'
 
 /**
  * Upload file ảnh (Sản phẩm / Mẫu / Bối cảnh) lên backend để lưu file thật
@@ -115,7 +117,8 @@ export async function callGeminiAnalysis(
 }
 
 /**
- * Gọi ChatGPT sinh 3 kịch bản bán hàng từ payload có cấu trúc
+ * Gọi ChatGPT sinh số lượng kịch bản động từ payload có cấu trúc.
+ * Mỗi kịch bản tương ứng với một clip Google Flow độc lập.
  */
 export async function callGptScriptGeneration(params: {
   productData?: string
@@ -126,7 +129,7 @@ export async function callGptScriptGeneration(params: {
   scriptConfig?: ScriptGenerationConfig
   promptTemplate?: string
   model?: string
-}): Promise<{ scripts: SalesScript[]; rawText: string; model: string }> {
+}): Promise<{ scripts: SalesScript[]; rawText: string; model: string; collection: ScriptCollection }> {
   const res = await fetch(`${API_URL}/api/workflow/gpt/generate-script`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -140,6 +143,7 @@ export async function callGptScriptGeneration(params: {
         ? {
             count: params.scriptConfig.count,
             content_mode: params.scriptConfig.contentMode,
+            clip_duration_seconds: params.scriptConfig.clipDurationSeconds,
             min_words: params.scriptConfig.minWords,
             max_words: params.scriptConfig.maxWords,
             platform: params.scriptConfig.platform,
@@ -178,6 +182,20 @@ export async function callGptScriptGeneration(params: {
     scripts: normalizedScripts,
     rawText: data.raw_text || '',
     model: data.model || '',
+    collection: {
+      requestedCount: data.requested_count ?? params.scriptConfig?.count ?? normalizedScripts.length,
+      actualCount: data.actual_count ?? normalizedScripts.length,
+      items: normalizedScripts,
+      contentMode: params.scriptConfig?.contentMode || 'sales',
+      platform: params.scriptConfig?.platform || 'auto',
+      clipDurationSeconds: data.clip_duration_seconds ?? params.scriptConfig?.clipDurationSeconds ?? DEFAULT_CLIP_DURATION_SECONDS,
+      minWords: data.min_words ?? params.scriptConfig?.minWords ?? 0,
+      maxWords: data.max_words ?? params.scriptConfig?.maxWords ?? 0,
+      repaired: Boolean(data.repaired),
+      promptTemplate: params.promptTemplate || '',
+      requestedModel: params.model || 'cx/gpt-5.5',
+      generationModel: data.model || '',
+    },
   }
 }
 
@@ -273,4 +291,3 @@ export async function openExportFolder(filename: string): Promise<boolean> {
     return false
   }
 }
-
