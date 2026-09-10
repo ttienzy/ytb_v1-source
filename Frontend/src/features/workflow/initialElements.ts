@@ -82,6 +82,7 @@ export const initialNodes: Node[] = [
           prompt: '',
           durationSec: DEFAULT_CLIP_DURATION_SECONDS,
           aspectRatio: '9:16',
+          chainFromPrevious: true,
         },
         {
           sceneNumber: 3,
@@ -89,6 +90,7 @@ export const initialNodes: Node[] = [
           prompt: '',
           durationSec: DEFAULT_CLIP_DURATION_SECONDS,
           aspectRatio: '9:16',
+          chainFromPrevious: true,
         },
       ],
     },

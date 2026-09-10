@@ -107,6 +107,10 @@ export interface GeneratedSceneItem {
   videoUrl?: string | null
   outputFilePath?: string | null
   thumbnailUrl?: string | null
+  startFramePath?: string | null
+  startFramePreviewUrl?: string | null
+  chainFromPrevious?: boolean
+  isExtractingFrame?: boolean
   refImages?: {
     productUrl?: string | null
     modelUrl?: string | null
@@ -218,6 +222,9 @@ export interface VeoFlowStudioNodeData {
   onUpdateSceneDuration?: (index: number, duration: number) => void
   onUpdateSceneMotion?: (index: number, motion: string) => void
   onRenderScene?: (index: number) => void
+  onRenderAllScenes?: () => void
+  onExtractLastFrame?: (sourceSceneIndex: number) => void
+  onToggleChainFrames?: (sceneIndex: number, enabled: boolean) => void
   onExportVideo?: () => void
   onOpenPreviewModal?: (videoUrl: string, title?: string, prompt?: string) => void
   onOpenLibrary?: () => void

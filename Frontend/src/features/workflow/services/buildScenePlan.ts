@@ -149,6 +149,9 @@ export function buildClipPlans(params: {
       renderProgress: 0,
       videoUrl: null,
       outputFilePath: null,
+      chainFromPrevious: i > 0,
+      startFramePath: null,
+      startFramePreviewUrl: null,
     })
   }
 

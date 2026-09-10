@@ -687,6 +687,28 @@ function WorkflowCanvas() {
         model: modelToSend,
       })
 
+      let newClips: GeneratedSceneItem[] | null = null
+      if (targetFlowNode && gptRes.scripts?.length > 0) {
+        const prodInput = resolveProductAssetsInput({ nodes, edges, targetNodeId: targetFlowNode.id })
+        const charInput = resolveCharacterSceneInput({ nodes, edges, targetNodeId: targetFlowNode.id })
+        const refAssets: AssetRef[] = [
+          ...(prodInput.ok && prodInput.data ? prodInput.data.assets : []),
+          ...(charInput.ok && charInput.data?.model ? [charInput.data.model] : []),
+          ...(charInput.ok && charInput.data?.scene ? [charInput.data.scene] : []),
+        ]
+        const targetCount = gptRes.scripts.length
+        const clipDurations = Array.from({ length: targetCount }, () => clipDurationSeconds)
+        newClips = buildClipPlans({
+          scripts: gptRes.scripts,
+          sceneConfig: {
+            count: targetCount,
+            durations: clipDurations,
+            aspectRatio: (targetFlowConfig?.aspectRatio || '9:16') as any,
+          },
+          assets: refAssets,
+        })
+      }
+
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
@@ -703,6 +725,17 @@ function WorkflowCanvas() {
               },
             }
           }
+          if (targetFlowNode && n.id === targetFlowNode.id && newClips) {
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                scenes: newClips,
+                activeSceneIndex: 0,
+                selectedGptScriptAngle: `${gptRes.scripts.length} kịch bản → ${gptRes.scripts.length} clip độc lập`,
+              },
+            }
+          }
           return n
         })
       )
@@ -715,73 +748,8 @@ function WorkflowCanvas() {
     }
   }, [nodes, edges, veoVideoConfig.duration])
 
-  // Render single scene inside Flow Studio (Sử dụng RenderJobController & ảnh thật, bỏ fallback giả lập)
-  const handleRenderFlowScene = useCallback(async (nodeId: string, sceneIndex: number) => {
-    const targetNode = nodes.find((n) => n.id === nodeId)
-    const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
-    const sc = scenes[sceneIndex]
-
-    if (!sc?.prompt?.trim()) {
-      alert(`⚠️ Clip #${sceneIndex + 1} chưa có nội dung prompt! Vui lòng nhập prompt hoặc đồng bộ kịch bản sang Google Flow trước.`)
-      return
-    }
-
-    if (!activeVeoProject) {
-      alert('⚠️ Chưa có Dự án Veo được kích hoạt! Vui lòng chọn hoặc tạo dự án trong "Cấu hình Veo".')
-      return
-    }
-
-    const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: nodeId })
-    const charSceneRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: nodeId })
-    const refAssets: AssetRef[] = [
-      ...(prodRes.ok && prodRes.data ? prodRes.data.assets : []),
-      ...(charSceneRes.data?.model ? [charSceneRes.data.model] : []),
-      ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
-    ]
-
-    setNodes((nds) =>
-      nds.map((n) => {
-        if (n.id === nodeId) {
-          const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-          if (scs[sceneIndex]) {
-            scs[sceneIndex] = { ...scs[sceneIndex], isRendering: true, renderProgress: 20 }
-          }
-          return { ...n, data: { ...n.data, scenes: scs } }
-        }
-        return n
-      })
-    )
-
-    const jobController = new RenderJobController()
-    const result = await jobController.renderScene({
-      scene: {
-        sceneNumber: sc.sceneNumber,
-        title: sc.title,
-        prompt: sc.prompt,
-        durationSec: sc.durationSec,
-        aspectRatio: sc.aspectRatio,
-        cameraMotion: sc.cameraMotion,
-        referenceAssets: refAssets,
-      },
-      project: activeVeoProject,
-      videoConfig: veoVideoConfig,
-      referenceAssets: refAssets,
-      onProgress: (prog) => {
-        setNodes((nds) =>
-          nds.map((n) => {
-            if (n.id === nodeId) {
-              const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-              if (scs[sceneIndex]) {
-                scs[sceneIndex] = { ...scs[sceneIndex], renderProgress: prog }
-              }
-              return { ...n, data: { ...n.data, scenes: scs } }
-            }
-            return n
-          })
-        )
-      },
-    })
-
+  // Toggle Frame Continuity (🔗 Nối tiếp từ End Frame Clip trước)
+  const handleToggleChainFrames = useCallback((nodeId: string, sceneIndex: number, enabled: boolean) => {
     setNodes((nds) =>
       nds.map((n) => {
         if (n.id === nodeId) {
@@ -789,10 +757,7 @@ function WorkflowCanvas() {
           if (scs[sceneIndex]) {
             scs[sceneIndex] = {
               ...scs[sceneIndex],
-              isRendering: false,
-              renderProgress: result.ok ? 100 : 0,
-              videoUrl: result.videoUrl || null,
-              outputFilePath: result.outputFilePath || null,
+              chainFromPrevious: enabled,
             }
           }
           return { ...n, data: { ...n.data, scenes: scs } }
@@ -800,15 +765,405 @@ function WorkflowCanvas() {
         return n
       })
     )
+  }, [])
 
-    if (result.ok) {
-      setExportedCount((prev) => prev + 1)
-    } else {
-      alert(`Lỗi tạo Clip #${sceneIndex + 1}: ${result.error}`)
-    }
-  }, [nodes, edges, activeVeoProject, veoVideoConfig])
+  // Manual extract last frame (✂️ Cắt lại End Frame của Clip trước)
+  const handleExtractSceneLastFrame = useCallback(
+    async (nodeId: string, sourceSceneIndex: number) => {
+      const targetSceneIndex = sourceSceneIndex + 1
+      const targetNode = nodes.find((n) => n.id === nodeId)
+      const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
+      const prevScene = scenes[sourceSceneIndex]
+      const targetScene = scenes[targetSceneIndex]
 
-// Export complete stitched video in Flow Studio (Sử dụng backend FFmpeg concat)
+      if (!prevScene) return
+      const videoIdOrPath = prevScene.outputFilePath || prevScene.videoUrl
+      if (!videoIdOrPath) {
+        alert(`⚠️ Clip #${sourceSceneIndex + 1} chưa được tạo video! Vui lòng render Clip #${sourceSceneIndex + 1} trước.`)
+        return
+      }
+
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+            if (scs[targetSceneIndex]) {
+              scs[targetSceneIndex] = { ...scs[targetSceneIndex], isExtractingFrame: true }
+            }
+            return { ...n, data: { ...n.data, scenes: scs } }
+          }
+          return n
+        })
+      )
+
+      try {
+        const frameRes = await veoApi.extractLastFrame(videoIdOrPath)
+        if (frameRes.ok) {
+          const previewUrl = veoApi.getImageFileUrl(frameRes.image_id)
+          setNodes((nds) =>
+            nds.map((n) => {
+              if (n.id === nodeId) {
+                const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+                if (scs[targetSceneIndex]) {
+                  scs[targetSceneIndex] = {
+                    ...scs[targetSceneIndex],
+                    startFramePath: frameRes.file_path,
+                    startFramePreviewUrl: previewUrl,
+                    chainFromPrevious: true,
+                    isExtractingFrame: false,
+                  }
+                }
+                return { ...n, data: { ...n.data, scenes: scs } }
+              }
+              return n
+            })
+          )
+          return { ok: true, filePath: frameRes.file_path, previewUrl }
+        } else {
+          throw new Error('Không trích xuất được frame cuối từ video')
+        }
+      } catch (err: any) {
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id === nodeId) {
+              const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+              if (scs[targetSceneIndex]) {
+                scs[targetSceneIndex] = { ...scs[targetSceneIndex], isExtractingFrame: false }
+              }
+              return { ...n, data: { ...n.data, scenes: scs } }
+            }
+            return n
+          })
+        )
+        alert(`Lỗi trích xuất frame cuối của Clip #${sourceSceneIndex + 1}: ${err?.message || err}`)
+        return { ok: false, error: err?.message }
+      }
+    },
+    [nodes]
+  )
+
+  // Render single scene inside Flow Studio (Hỗ trợ Start Frame chaining nối tiếp giữa các clip)
+  const handleRenderFlowScene = useCallback(
+    async (nodeId: string, sceneIndex: number) => {
+      const targetNode = nodes.find((n) => n.id === nodeId)
+      const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
+      const sc = scenes[sceneIndex]
+
+      if (!sc?.prompt?.trim()) {
+        alert(`⚠️ Clip #${sceneIndex + 1} chưa có nội dung prompt! Vui lòng nhập prompt hoặc đồng bộ kịch bản sang Google Flow trước.`)
+        return
+      }
+
+      if (!activeVeoProject) {
+        alert('⚠️ Chưa có Dự án Veo được kích hoạt! Vui lòng chọn hoặc tạo dự án trong "Cấu hình Veo".')
+        return
+      }
+
+      let activeStartFramePath = sc.startFramePath || null
+
+      // Tự động kiểm tra và cắt start frame nếu là Clip #2+ và tùy chọn nối tiếp đang bật
+      if (sceneIndex > 0 && sc.chainFromPrevious !== false) {
+        if (!activeStartFramePath) {
+          const prevScene = scenes[sceneIndex - 1]
+          const prevVideoId = prevScene?.outputFilePath || prevScene?.videoUrl
+          if (!prevVideoId) {
+            alert(
+              `⚠️ Clip #${sceneIndex} chưa được tạo video! Hãy tạo Clip #${sceneIndex} trước để lấy Start Frame nối tiếp, hoặc tắt tùy chọn "Nối tiếp từ End Frame Clip #${sceneIndex}".`
+            )
+            return
+          }
+
+          // Cắt frame từ clip trước
+          try {
+            const frameRes = await veoApi.extractLastFrame(prevVideoId)
+            if (frameRes.ok) {
+              activeStartFramePath = frameRes.file_path
+              const previewUrl = veoApi.getImageFileUrl(frameRes.image_id)
+              setNodes((nds) =>
+                nds.map((n) => {
+                  if (n.id === nodeId) {
+                    const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+                    if (scs[sceneIndex]) {
+                      scs[sceneIndex] = {
+                        ...scs[sceneIndex],
+                        startFramePath: frameRes.file_path,
+                        startFramePreviewUrl: previewUrl,
+                      }
+                    }
+                    return { ...n, data: { ...n.data, scenes: scs } }
+                  }
+                  return n
+                })
+              )
+            }
+          } catch (err: any) {
+            console.error('Lỗi tự động cắt start frame:', err)
+          }
+        }
+      }
+
+      const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: nodeId })
+      const charSceneRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: nodeId })
+      const refAssets: AssetRef[] = [
+        ...(prodRes.ok && prodRes.data ? prodRes.data.assets : []),
+        ...(charSceneRes.data?.model ? [charSceneRes.data.model] : []),
+        ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
+      ]
+
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+            if (scs[sceneIndex]) {
+              scs[sceneIndex] = { ...scs[sceneIndex], isRendering: true, renderProgress: 20 }
+            }
+            return { ...n, data: { ...n.data, scenes: scs } }
+          }
+          return n
+        })
+      )
+
+      const jobController = new RenderJobController()
+      const result = await jobController.renderScene({
+        scene: {
+          sceneNumber: sc.sceneNumber,
+          title: sc.title,
+          prompt: sc.prompt,
+          durationSec: sc.durationSec,
+          aspectRatio: sc.aspectRatio,
+          cameraMotion: sc.cameraMotion,
+          referenceAssets: refAssets,
+          startFramePath: activeStartFramePath || undefined,
+          startFramePreviewUrl: sc.startFramePreviewUrl || undefined,
+        },
+        project: activeVeoProject,
+        videoConfig: veoVideoConfig,
+        referenceAssets: refAssets,
+        onProgress: (prog) => {
+          setNodes((nds) =>
+            nds.map((n) => {
+              if (n.id === nodeId) {
+                const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+                if (scs[sceneIndex]) {
+                  scs[sceneIndex] = { ...scs[sceneIndex], renderProgress: prog }
+                }
+                return { ...n, data: { ...n.data, scenes: scs } }
+              }
+              return n
+            })
+          )
+        },
+      })
+
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+            if (scs[sceneIndex]) {
+              scs[sceneIndex] = {
+                ...scs[sceneIndex],
+                isRendering: false,
+                renderProgress: result.ok ? 100 : 0,
+                videoUrl: result.videoUrl || null,
+                outputFilePath: result.outputFilePath || null,
+              }
+            }
+            return { ...n, data: { ...n.data, scenes: scs } }
+          }
+          return n
+        })
+      )
+
+      if (result.ok) {
+        setExportedCount((prev) => prev + 1)
+
+        // Tự động cắt frame cuối cho clip kế tiếp nếu có và đang bật nối tiếp
+        const nextSceneIndex = sceneIndex + 1
+        const completedVideoId = result.outputFilePath || result.videoUrl
+        if (completedVideoId && nextSceneIndex < scenes.length) {
+          const nextScene = scenes[nextSceneIndex]
+          if (nextScene && nextScene.chainFromPrevious !== false) {
+            try {
+              const autoFrameRes = await veoApi.extractLastFrame(completedVideoId)
+              if (autoFrameRes.ok) {
+                const nextPreviewUrl = veoApi.getImageFileUrl(autoFrameRes.image_id)
+                setNodes((nds) =>
+                  nds.map((n) => {
+                    if (n.id === nodeId) {
+                      const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+                      if (scs[nextSceneIndex]) {
+                        scs[nextSceneIndex] = {
+                          ...scs[nextSceneIndex],
+                          startFramePath: autoFrameRes.file_path,
+                          startFramePreviewUrl: nextPreviewUrl,
+                        }
+                      }
+                      return { ...n, data: { ...n.data, scenes: scs } }
+                    }
+                    return n
+                  })
+                )
+              }
+            } catch (frameErr) {
+              console.warn('Tự động trích xuất frame cho clip kế tiếp thất bại:', frameErr)
+            }
+          }
+        }
+      } else {
+        alert(`Lỗi tạo Clip #${sceneIndex + 1}: ${result.error}`)
+      }
+    },
+    [nodes, edges, activeVeoProject, veoVideoConfig]
+  )
+
+  // Render toàn bộ các clip tuần tự theo chuỗi liên hoàn (Sequential Chain Runner)
+  const handleRenderAllFlowScenes = useCallback(
+    async (nodeId: string) => {
+      const targetNode = nodes.find((n) => n.id === nodeId)
+      const initialScenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
+
+      if (initialScenes.length === 0) {
+        alert('⚠️ Không có clip nào để render.')
+        return
+      }
+
+      if (!activeVeoProject) {
+        alert('⚠️ Chưa có Dự án Veo được kích hoạt! Vui lòng chọn hoặc tạo dự án trong "Cấu hình Veo".')
+        return
+      }
+
+      const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: nodeId })
+      const charSceneRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: nodeId })
+      const refAssets: AssetRef[] = [
+        ...(prodRes.ok && prodRes.data ? prodRes.data.assets : []),
+        ...(charSceneRes.data?.model ? [charSceneRes.data.model] : []),
+        ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
+      ]
+
+      let previousVideoOutputFile: string | null = null
+
+      for (let idx = 0; idx < initialScenes.length; idx++) {
+        handleFlowStudioSelectScene(nodeId, idx)
+        const currentSc = initialScenes[idx]
+
+        if (!currentSc?.prompt?.trim()) {
+          alert(`⚠️ Clip #${idx + 1} chưa có nội dung prompt! Tiến trình liên hoàn dừng lại.`)
+          break
+        }
+
+        let activeStartFramePath = currentSc.startFramePath || null
+        let activePreviewUrl = currentSc.startFramePreviewUrl || null
+
+        // Nếu là clip #2+ và tùy chọn nối tiếp bật, tự động lấy start frame từ video của clip trước
+        if (idx > 0 && currentSc.chainFromPrevious !== false) {
+          if (!activeStartFramePath && previousVideoOutputFile) {
+            try {
+              const frameRes = await veoApi.extractLastFrame(previousVideoOutputFile)
+              if (frameRes.ok) {
+                activeStartFramePath = frameRes.file_path
+                activePreviewUrl = veoApi.getImageFileUrl(frameRes.image_id)
+                setNodes((nds) =>
+                  nds.map((n) => {
+                    if (n.id === nodeId) {
+                      const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+                      if (scs[idx]) {
+                        scs[idx] = {
+                          ...scs[idx],
+                          startFramePath: frameRes.file_path,
+                          startFramePreviewUrl: activePreviewUrl,
+                          chainFromPrevious: true,
+                        }
+                      }
+                      return { ...n, data: { ...n.data, scenes: scs } }
+                    }
+                    return n
+                  })
+                )
+              }
+            } catch (extractErr) {
+              console.error(`Trích xuất frame cho Clip #${idx + 1} thất bại:`, extractErr)
+            }
+          }
+        }
+
+        // Đánh dấu clip đang render
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id === nodeId) {
+              const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+              if (scs[idx]) {
+                scs[idx] = { ...scs[idx], isRendering: true, renderProgress: 20 }
+              }
+              return { ...n, data: { ...n.data, scenes: scs } }
+            }
+            return n
+          })
+        )
+
+        const jobController = new RenderJobController()
+        const result = await jobController.renderScene({
+          scene: {
+            sceneNumber: currentSc.sceneNumber,
+            title: currentSc.title,
+            prompt: currentSc.prompt,
+            durationSec: currentSc.durationSec,
+            aspectRatio: currentSc.aspectRatio,
+            cameraMotion: currentSc.cameraMotion,
+            referenceAssets: refAssets,
+            startFramePath: activeStartFramePath || undefined,
+            startFramePreviewUrl: activePreviewUrl || undefined,
+          },
+          project: activeVeoProject,
+          videoConfig: veoVideoConfig,
+          referenceAssets: refAssets,
+          onProgress: (prog) => {
+            setNodes((nds) =>
+              nds.map((n) => {
+                if (n.id === nodeId) {
+                  const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+                  if (scs[idx]) {
+                    scs[idx] = { ...scs[idx], renderProgress: prog }
+                  }
+                  return { ...n, data: { ...n.data, scenes: scs } }
+                }
+                return n
+              })
+            )
+          },
+        })
+
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id === nodeId) {
+              const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
+              if (scs[idx]) {
+                scs[idx] = {
+                  ...scs[idx],
+                  isRendering: false,
+                  renderProgress: result.ok ? 100 : 0,
+                  videoUrl: result.videoUrl || null,
+                  outputFilePath: result.outputFilePath || null,
+                }
+              }
+              return { ...n, data: { ...n.data, scenes: scs } }
+            }
+            return n
+          })
+        )
+
+        if (!result.ok) {
+          alert(`⚠️ Lỗi khi render Clip #${idx + 1}: ${result.error}. Tiến trình liên hoàn tạm dừng.`)
+          break
+        }
+
+        setExportedCount((prev) => prev + 1)
+        previousVideoOutputFile = result.outputFilePath || result.videoUrl || null
+      }
+    },
+    [nodes, edges, activeVeoProject, veoVideoConfig, handleFlowStudioSelectScene]
+  )
+
+  // Export complete stitched video in Flow Studio (Sử dụng backend FFmpeg concat)
   const handleExportFlowVideo = useCallback(async (nodeId: string) => {
     const targetNode = nodes.find((n) => n.id === nodeId)
     const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
@@ -1142,6 +1497,9 @@ function WorkflowCanvas() {
             onUpdateScenePrompt: (idx: number, p: string) => handleFlowStudioUpdatePrompt(node.id, idx, p),
             onUpdateSceneDuration: (idx: number, d: number) => handleFlowStudioUpdateDuration(node.id, idx, d),
             onRenderScene: (idx: number) => handleRenderFlowScene(node.id, idx),
+            onRenderAllScenes: () => handleRenderAllFlowScenes(node.id),
+            onExtractLastFrame: (idx: number) => handleExtractSceneLastFrame(node.id, idx),
+            onToggleChainFrames: (idx: number, enabled: boolean) => handleToggleChainFrames(node.id, idx, enabled),
             onExportVideo: () => handleExportFlowVideo(node.id),
           },
         }
@@ -1173,6 +1531,9 @@ function WorkflowCanvas() {
     handleFlowStudioUpdatePrompt,
     handleFlowStudioUpdateDuration,
     handleRenderFlowScene,
+    handleRenderAllFlowScenes,
+    handleExtractSceneLastFrame,
+    handleToggleChainFrames,
     handleExportFlowVideo,
     handleDeleteNode,
     handleSetStartNode,

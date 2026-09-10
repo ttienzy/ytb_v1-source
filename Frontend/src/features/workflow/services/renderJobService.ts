@@ -47,23 +47,34 @@ export class RenderJobController {
       }
     }
 
-    // Lọc danh sách file path thật từ referenceAssets để gửi ingredients
+    // Xác định input mode: ưu tiên frames (Start Frame từ clip trước) -> ingredients -> text_to_video
     const ingredientPaths = referenceAssets
       .map((a) => a.backendPath)
       .filter((p): p is string => Boolean(p && p.trim()))
       .slice(0, 3)
 
-    const inputMode = ingredientPaths.length > 0 ? ('ingredients' as const) : ('text_to_video' as const)
+    let inputMode: 'text_to_video' | 'frames' | 'ingredients' = 'text_to_video'
+    let imagePath: string | null = null
+    let ingredientImagePaths: string[] = []
+
+    if (scene.startFramePath) {
+      inputMode = 'frames'
+      imagePath = scene.startFramePath
+    } else if (ingredientPaths.length > 0) {
+      inputMode = 'ingredients'
+      ingredientImagePaths = ingredientPaths
+    }
 
     try {
-      onProgress?.(15, 'Đang gửi yêu cầu render tới Veo Studio...')
+      onProgress?.(15, `Đang gửi yêu cầu render (${inputMode === 'frames' ? 'Khung hình nối tiếp' : inputMode === 'ingredients' ? 'Ảnh tham chiếu' : 'Prompt'})...`)
 
       const job = await veoApi.submitJob({
         project_id: project.id,
         prompt: scene.prompt.trim(),
         model_display_name: videoConfig.model || 'Omni 1.1 Flash',
         input_mode: inputMode,
-        ingredient_image_paths: ingredientPaths,
+        image_path: imagePath,
+        ingredient_image_paths: ingredientImagePaths,
         aspect_ratio: (videoConfig.aspectRatio || '9:16') as any,
         duration_seconds: scene.durationSec || 4,
         resolution: videoConfig.resolution || '720p',

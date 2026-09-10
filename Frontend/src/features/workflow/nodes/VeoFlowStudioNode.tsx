@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ExternalLink,
   Maximize2,
+  Scissors,
 } from 'lucide-react'
 import type { VeoFlowStudioNodeData } from '../types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
@@ -44,6 +45,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
     durationSec: data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS,
     aspectRatio: '9:16' as const,
   }
+  const prevScene = safeTab > 0 ? scenes[safeTab - 1] : null
 
   const isRendering = currentScene.isRendering || (data.isRendering && data.activeSceneIndex === safeTab)
   const renderProgress = currentScene.renderProgress ?? (data.renderProgress ?? 0)
@@ -532,6 +534,125 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           </div>
         </div>
 
+        {/* Frame Continuity Strip (Clip #2+) hoặc Root Indicator (Clip #1) */}
+        {safeTab === 0 ? (
+          <div
+            style={{
+              marginBottom: 10,
+              padding: '6px 10px',
+              background: '#ecfdf5',
+              border: '1px solid #a7f3d0',
+              borderRadius: 8,
+              fontSize: 10.5,
+              fontWeight: 600,
+              color: '#065f46',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 13 }}>🟢</span>
+            <span>Clip Khởi Đầu: Render từ Prompt & Ảnh tham chiếu (Frame cuối sẽ truyền sang Clip #2)</span>
+          </div>
+        ) : (
+          <div
+            style={{
+              marginBottom: 10,
+              padding: '8px 10px',
+              background: currentScene.chainFromPrevious !== false ? '#f5f3ff' : '#f8fafc',
+              border: currentScene.chainFromPrevious !== false ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+              borderRadius: 8,
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: currentScene.chainFromPrevious !== false ? '#6b21a8' : '#64748b', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={currentScene.chainFromPrevious !== false}
+                  onChange={(e) => data.onToggleChainFrames?.(safeTab, e.target.checked)}
+                  style={{ width: 14, height: 14, accentColor: '#7c3aed', cursor: 'pointer' }}
+                />
+                <span>🔗 Nối tiếp từ End Frame Clip #{safeTab}</span>
+              </label>
+
+              {currentScene.chainFromPrevious !== false && prevScene?.videoUrl && (
+                <button
+                  type="button"
+                  onClick={() => data.onExtractLastFrame?.(safeTab - 1)}
+                  disabled={currentScene.isExtractingFrame}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #c084fc',
+                    borderRadius: 5,
+                    padding: '2px 7px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#7e22ce',
+                    cursor: currentScene.isExtractingFrame ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                  title={`Cắt lại frame cuối cùng của Clip #${safeTab}`}
+                >
+                  <Scissors size={11} />
+                  {currentScene.isExtractingFrame ? 'Đang cắt...' : 'Cắt lại Frame'}
+                </button>
+              )}
+            </div>
+
+            {currentScene.chainFromPrevious !== false ? (
+              currentScene.startFramePreviewUrl ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ffffff', padding: 6, borderRadius: 6, border: '1px solid #ede9fe' }}>
+                  <img
+                    src={currentScene.startFramePreviewUrl}
+                    alt={`End frame clip ${safeTab}`}
+                    style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 4, border: '1px solid #cbd5e1' }}
+                  />
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#059669', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <CheckCircle2 size={12} color="#10b981" /> Start Frame đã sẵn sàng
+                    </div>
+                    <div style={{ fontSize: 9.5, color: '#64748b', marginTop: 2 }}>
+                      Trích xuất từ cuối Clip #{safeTab} • Chế độ Frames (Start Frame)
+                    </div>
+                  </div>
+                </div>
+              ) : prevScene?.videoUrl ? (
+                <div style={{ fontSize: 10, color: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ffffff', padding: '5px 8px', borderRadius: 6, border: '1px dashed #d8b4fe' }}>
+                  <span>Clip #{safeTab} đã tạo xong. Sẵn sàng cắt frame cuối!</span>
+                  <button
+                    type="button"
+                    onClick={() => data.onExtractLastFrame?.(safeTab - 1)}
+                    disabled={currentScene.isExtractingFrame}
+                    style={{
+                      background: '#7c3aed',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 4,
+                      padding: '3px 8px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {currentScene.isExtractingFrame ? 'Đang cắt...' : '✂️ Cắt Frame Ngay'}
+                  </button>
+                </div>
+              ) : (
+                <div style={{ fontSize: 10, color: '#92400e', background: '#fffbeb', padding: '5px 8px', borderRadius: 5, border: '1px solid #fde68a' }}>
+                  ⏳ Chờ Clip #{safeTab} tạo xong để tự động bắt End Frame nối sang Clip này.
+                </div>
+              )
+            ) : (
+              <div style={{ fontSize: 9.5, color: '#94a3b8', fontStyle: 'italic' }}>
+                Đã tắt nối tiếp — Clip #{safeTab + 1} sẽ tạo độc lập từ Prompt hoặc ảnh tham chiếu chung.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Clip Prompt & Parameters */}
         <div style={{ marginBottom: 10 }}>
           <div
@@ -592,23 +713,81 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             ))}
           </div>
 
-          <button
-            type="button"
-            className="wf-btn wf-btn-accent"
-            onClick={() => {
-              if (!data.activeProject) {
-                data.onOpenVeoSetup?.()
-              } else {
-                data.onRenderScene?.(safeTab)
-              }
-            }}
-            disabled={isRendering}
-            style={{ padding: '5px 12px', fontSize: 11 }}
-            title={!data.activeProject ? 'Bấm để cấu hình và chọn Project trước' : `Tạo clip #${safeTab + 1}`}
-          >
-            <Video size={13} />
-            {isRendering ? 'Đang tạo...' : !data.activeProject ? 'Cấu hình Project' : `Tạo Clip #${safeTab + 1}`}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {scenes.length > 1 && data.onRenderAllScenes && (
+              <button
+                type="button"
+                className="wf-btn"
+                onClick={() => {
+                  if (!data.activeProject) {
+                    data.onOpenVeoSetup?.()
+                  } else {
+                    data.onRenderAllScenes?.()
+                  }
+                }}
+                disabled={isRendering}
+                style={{
+                  padding: '5px 9px',
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  background: '#fdf2f8',
+                  border: '1px solid #fbcfe8',
+                  color: '#db2777',
+                  cursor: isRendering ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  whiteSpace: 'nowrap',
+                }}
+                title="Tự động render Clip #1 -> cắt End Frame -> render Clip #2 nối tiếp -> tiếp tục đến hết"
+              >
+                <Sparkles size={11} color="#db2777" />
+                Render Liên Hoàn ({scenes.length})
+              </button>
+            )}
+
+            {(() => {
+              const isChained = safeTab > 0 && currentScene.chainFromPrevious !== false
+            const prevNotReady = isChained && !prevScene?.videoUrl
+            return (
+              <button
+                type="button"
+                className="wf-btn wf-btn-accent"
+                onClick={() => {
+                  if (!data.activeProject) {
+                    data.onOpenVeoSetup?.()
+                  } else {
+                    data.onRenderScene?.(safeTab)
+                  }
+                }}
+                disabled={isRendering || prevNotReady}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 11,
+                  opacity: prevNotReady ? 0.6 : 1,
+                  cursor: prevNotReady ? 'not-allowed' : 'pointer',
+                }}
+                title={
+                  !data.activeProject
+                    ? 'Bấm để cấu hình và chọn Project trước'
+                    : prevNotReady
+                    ? `Cần tạo Clip #${safeTab} trước để có End Frame nối tiếp`
+                    : `Tạo clip #${safeTab + 1}`
+                }
+              >
+                <Video size={13} />
+                {isRendering
+                  ? 'Đang tạo...'
+                  : !data.activeProject
+                  ? 'Cấu hình Project'
+                  : prevNotReady
+                  ? `Chờ Clip #${safeTab}`
+                  : isChained
+                  ? `Tạo Clip #${safeTab + 1} (Nối tiếp)`
+                  : `Tạo Clip #${safeTab + 1}`}
+              </button>
+            )
+          })()}
         </div>
 
         {/* Optional clip stitching & export */}

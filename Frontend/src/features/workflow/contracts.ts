@@ -99,6 +99,8 @@ export interface ScenePlan {
   videoUrl?: string | null
   outputFilePath?: string | null
   thumbnailUrl?: string | null
+  startFramePath?: string | null
+  startFramePreviewUrl?: string | null
   jobId?: string | null
   renderStatus?: 'idle' | 'queued' | 'submitting' | 'generating' | 'done' | 'error'
   renderProgress?: number
