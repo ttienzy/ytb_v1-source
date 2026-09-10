@@ -16,6 +16,12 @@ import {
   ExternalLink,
   Maximize2,
   Scissors,
+  ArrowRight,
+  Image as ImageIcon,
+  Package,
+  User,
+  AlertCircle,
+  Eye,
 } from 'lucide-react'
 import type { VeoFlowStudioNodeData } from '../types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
@@ -58,16 +64,32 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
     data.onSelectScene?.(idx)
   }
 
-  const totalDuration = scenes.reduce((sum, s) => sum + (s.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS), 0)
+  const totalDuration = scenes.reduce(
+    (sum, s) => sum + (s.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS),
+    0
+  )
   const clipDurations = [...new Set(scenes.map((scene) => scene.durationSec).filter(Boolean))]
   const durationLabel = clipDurations.length === 1 ? `${clipDurations[0]}s/clip` : 'thời lượng linh hoạt'
   const isStartNode = data.isStartNode ?? false
   const isOrphan = data.isOrphan ?? false
 
+  const validProductImages = (data.refImages?.productUrls || []).filter((u): u is string => Boolean(u && u.trim()))
+  const modelImage = data.refImages?.modelUrl
+  const sceneImage = data.refImages?.sceneUrl
+
+  const primaryRefImage = validProductImages[0] || modelImage || sceneImage || null
+  const primaryRefLabel = validProductImages[0] ? '📦 Sản phẩm' : modelImage ? '👤 Người mẫu' : sceneImage ? '🌄 Bối cảnh' : null
+  const totalRefImagesCount = validProductImages.length + (modelImage ? 1 : 0) + (sceneImage ? 1 : 0)
+  const hasAnyRefImages = totalRefImagesCount > 0
+
+  const allClipsCompleted = scenes.length > 0 && scenes.every((s) => Boolean(s.videoUrl || s.outputFilePath))
+  const completedCount = scenes.filter((s) => Boolean(s.videoUrl || s.outputFilePath)).length
+
   return (
     <div
-      className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
-      style={{ width: 440 }}
+      className={`wf-node-card wf-veo-studio-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${
+        isOrphan ? 'is-orphan' : ''
+      }`}
     >
       {isStartNode && (
         <div className="wf-start-banner">
@@ -79,29 +101,27 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
         </div>
       )}
 
-      {/* Top handles receiving asset wires from Product and Character nodes */}
+      {/* Target Handle: Assets from Product and Character Nodes */}
       <Handle
         type="target"
-        position={Position.Top}
+        position={Position.Left}
         id="from-assets"
-        style={{ left: '30%' }}
+        style={{ top: 78 }}
         className="wf-handle wf-handle-target"
-        title="Nhận ảnh sản phẩm & nhân vật"
+        title="Nhận ảnh sản phẩm & nhân vật (Assets)"
       />
 
-
-      {/* Left handle receiving script wires from GPT node */}
+      {/* Target Handle: Scripts from ChatGPT Node */}
       <Handle
         type="target"
         position={Position.Left}
         id="from-gpt"
-        style={{ top: '35%' }}
+        style={{ top: 155 }}
         className="wf-handle wf-handle-target"
-        title="Nhận kịch bản từ ChatGPT"
+        title="Nhận kịch bản từ ChatGPT (Scripts)"
       />
 
-
-      {/* Header */}
+      {/* ─── 1. HEADER SECTION ──────────────────────────────────────────────── */}
       <div className="wf-node-header" style={{ background: '#fdf2f8', borderBottom: '1px solid #fce7f3' }}>
         <div className="wf-node-title-group">
           <div
@@ -112,19 +132,19 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               boxShadow: '0 2px 6px rgba(244, 63, 94, 0.3)',
             }}
           >
-            <Film size={15} />
+            <Film size={16} />
           </div>
           <div>
-            <div className="wf-node-title" style={{ color: '#881337' }}>
-              {data.title || 'Veo AI • Tạo Video'}
+            <div className="wf-node-title" style={{ color: '#881337', fontSize: 13.5 }}>
+              {data.title || 'Veo AI • Đạo Diễn Video'}
             </div>
             <div style={{ fontSize: 10, color: '#e11d48', fontWeight: 600 }}>
-              Render phân cảnh kịch bản
+              Chuỗi kịch bản & phân cảnh liên hoàn (Multi-Clip Chaining)
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {isOrphan && (
             <span className="wf-orphan-badge" title="Node này chưa được nối dây với quy trình">
               Chưa nối
@@ -143,6 +163,37 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
           </button>
 
+          {/* Project setup button */}
+          <button
+            type="button"
+            className="wf-btn"
+            onClick={() => data.onOpenVeoSetup?.()}
+            style={{
+              padding: '3px 9px',
+              fontSize: 10.5,
+              fontWeight: 600,
+              color: data.activeProject ? '#065f46' : '#b45309',
+              background: data.activeProject ? '#ecfdf5' : '#fffbeb',
+              border: data.activeProject ? '1px solid #a7f3d0' : '1px solid #fde68a',
+            }}
+            title="Mở cấu hình Dự án Google Flow"
+          >
+            <Sliders size={11} />
+            {data.activeProject ? data.activeProject.name : 'Chọn Dự Án'}
+          </button>
+
+          {/* Video Library Modal trigger */}
+          <button
+            type="button"
+            className="wf-btn"
+            onClick={() => data.onOpenLibrary?.()}
+            style={{ padding: '3px 8px', fontSize: 10.5, fontWeight: 600, color: '#4338ca' }}
+            title="Thư viện video đã xuất"
+          >
+            <Layers size={11} />
+            Thư viện ({data.exportedCount ?? 0})
+          </button>
+
           <span
             className="wf-node-badge"
             style={{
@@ -154,6 +205,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           >
             {scenes.length} Clip • {durationLabel}
           </span>
+
           <button
             type="button"
             className="wf-node-del-btn"
@@ -161,835 +213,1044 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               e.stopPropagation()
               data.onDelete?.()
             }}
-            title="Xóa Flow Studio"
+            title="Xóa node"
           >
-            <Trash2 size={12} />
+            <Trash2 size={13} />
           </button>
         </div>
       </div>
 
+      {/* ─── 2. INPUT ASSET RIBBON ────────────────────────────────────────── */}
+      <div className="wf-asset-ribbon">
+        <div className="wf-asset-ribbon-left">
+          <span style={{ fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Package size={12} color="#6366f1" />
+            Nguyên liệu đầu vào:
+          </span>
 
-      {/* Body */}
-      <div className="wf-node-body" style={{ padding: '12px 14px' }}>
-        {/* Veo Project & Config Status Bar */}
+          {hasAnyRefImages ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {validProductImages.map((imgUrl, i) => (
+                <div key={i} style={{ position: 'relative' }}>
+                  <img
+                    src={imgUrl}
+                    alt={`Sản phẩm ${i + 1}`}
+                    className="wf-asset-mini-thumb"
+                    title={`Ảnh sản phẩm #${i + 1}`}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      bottom: -2,
+                      right: -2,
+                      background: '#1e293b',
+                      color: '#ffffff',
+                      fontSize: 8,
+                      fontWeight: 700,
+                      padding: '1px 3px',
+                      borderRadius: 3,
+                    }}
+                  >
+                    SP{i + 1}
+                  </span>
+                </div>
+              ))}
+
+              {modelImage && (
+                <div style={{ position: 'relative' }}>
+                  <img
+                    src={modelImage}
+                    alt="Nhân vật"
+                    className="wf-asset-mini-thumb"
+                    title="Người mẫu / MC / KOL"
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      bottom: -2,
+                      right: -2,
+                      background: '#7c3aed',
+                      color: '#ffffff',
+                      fontSize: 8,
+                      fontWeight: 700,
+                      padding: '1px 3px',
+                      borderRadius: 3,
+                    }}
+                  >
+                    Model
+                  </span>
+                </div>
+              )}
+
+              {sceneImage && (
+                <div style={{ position: 'relative' }}>
+                  <img
+                    src={sceneImage}
+                    alt="Bối cảnh"
+                    className="wf-asset-mini-thumb"
+                    title="Bối cảnh / Không gian quay"
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      bottom: -2,
+                      right: -2,
+                      background: '#059669',
+                      color: '#ffffff',
+                      fontSize: 8,
+                      fontWeight: 700,
+                      padding: '1px 3px',
+                      borderRadius: 3,
+                    }}
+                  >
+                    Cảnh
+                  </span>
+                </div>
+              )}
+
+              <span style={{ fontSize: 9.5, color: '#059669', fontWeight: 600, marginLeft: 2 }}>
+                ({totalRefImagesCount} ảnh tham chiếu)
+              </span>
+            </div>
+          ) : (
+            <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: 10 }}>
+              (Chưa nối ảnh tham chiếu — tạo thuần từ văn bản)
+            </span>
+          )}
+        </div>
+
+        {/* ChatGPT Angle & Sync Status */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: '#6b21a8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Sparkles size={12} color="#9333ea" />
+            {data.isSourceScriptStale
+              ? 'Kịch bản cũ (cần sinh lại)'
+              : data.selectedGptScriptAngle || 'Kịch bản ChatGPT'}
+          </span>
+          {data.availableGptScripts && data.availableGptScripts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => data.onApplyAllGptScripts?.()}
+              disabled={data.isSourceScriptStale}
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 7px',
+                borderRadius: 4,
+                border: '1px solid #c084fc',
+                background: '#f3e8ff',
+                color: '#6b21a8',
+                cursor: data.isSourceScriptStale ? 'not-allowed' : 'pointer',
+                opacity: data.isSourceScriptStale ? 0.55 : 1,
+              }}
+              title="Đồng bộ lại toàn bộ kịch bản sang các clip"
+            >
+              Đồng bộ lại ({scenes.length})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ─── 3. STORYBOARD SEQUENCE TRACK (TRỤC PHÂN CẢNH LIÊN HOÀN) ────────── */}
+      <div className="wf-storyboard-container">
+        <div className="wf-storyboard-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>
+              🎬 TRỤC PHÂN CẢNH LIÊN HOÀN
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#059669',
+                background: '#ecfdf5',
+                padding: '1px 6px',
+                borderRadius: 4,
+                border: '1px solid #a7f3d0',
+              }}
+            >
+              {completedCount}/{scenes.length} Hoàn thành
+            </span>
+            <span style={{ fontSize: 10, color: '#64748b' }}>
+              (Click từng clip để đạo diễn & xem trước)
+            </span>
+          </div>
+
+          {/* Sequential Chain Run Button */}
+          {scenes.length > 1 && data.onRenderAllScenes && (
+            <button
+              type="button"
+              className="wf-btn"
+              onClick={() => {
+                if (!data.activeProject) {
+                  data.onOpenVeoSetup?.()
+                } else {
+                  data.onRenderAllScenes?.()
+                }
+              }}
+              disabled={isRendering}
+              style={{
+                padding: '3px 9px',
+                fontSize: 10.5,
+                fontWeight: 700,
+                background: '#fdf2f8',
+                border: '1px solid #fbcfe8',
+                color: '#db2777',
+                cursor: isRendering ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+              title="Tự động render Clip 1 -> cắt End Frame -> render Clip 2 nối tiếp -> tiếp tục đến hết"
+            >
+              <Sparkles size={11} color="#db2777" />
+              ⚡ Render Chuỗi Liên Hoàn ({scenes.length})
+            </button>
+          )}
+        </div>
+
+        {/* Horizontal Storyboard Track */}
+        <div className="wf-storyboard-track">
+          {scenes.map((scene, idx) => {
+            const isSelected = safeTab === idx
+            const isClipRendering = scene.isRendering || (isRendering && safeTab === idx)
+            const isDone = Boolean(scene.videoUrl || scene.outputFilePath)
+            const isChained = idx > 0 && scene.chainFromPrevious !== false
+            const prevClipReady = idx > 0 ? Boolean(scenes[idx - 1]?.videoUrl || scenes[idx - 1]?.outputFilePath) : true
+
+            return (
+              <React.Fragment key={idx}>
+                {/* Individual Clip Storyboard Card */}
+                <div
+                  className={`wf-clip-card ${isSelected ? 'active' : ''}`}
+                  onClick={() => handleTabClick(idx)}
+                >
+                  {/* Card Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: isSelected ? '#be123c' : '#334155' }}>
+                      #{idx + 1} ({scene.durationSec || 10}s)
+                    </span>
+                    {isDone ? (
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          color: '#059669',
+                          background: '#ecfdf5',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                        }}
+                      >
+                        <CheckCircle2 size={10} /> Đã xong
+                      </span>
+                    ) : isClipRendering ? (
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          color: '#be123c',
+                          background: '#fff1f2',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                        }}
+                      >
+                        <Sparkles size={10} className="animate-spin" /> {scene.renderProgress ?? 20}%
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 600,
+                          color: '#64748b',
+                          background: '#f1f5f9',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                        }}
+                      >
+                        Chưa tạo
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Visual Slot: Video thumbnail OR Input Asset preview */}
+                  <div
+                    style={{
+                      height: 74,
+                      borderRadius: 6,
+                      background: '#0f172a',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {isDone ? (
+                      <>
+                        {scene.thumbnailUrl ? (
+                          <img
+                            src={scene.thumbnailUrl}
+                            alt={`Clip ${idx + 1}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <video
+                            src={scene.videoUrl || undefined}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        )}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: 'rgba(0,0,0,0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: '50%',
+                              background: 'rgba(255,255,255,0.9)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                            }}
+                          >
+                            <Play size={12} fill="#0f172a" style={{ marginLeft: 2 }} />
+                          </div>
+                        </div>
+                      </>
+                    ) : isClipRendering ? (
+                      <div
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0 10px',
+                          gap: 5,
+                        }}
+                      >
+                        <Sparkles size={16} color="#f43f5e" className="animate-spin" />
+                        <div style={{ fontSize: 9.5, color: '#f8fafc', fontWeight: 600 }}>
+                          {scene.renderProgress ?? 20}%
+                        </div>
+                        <div
+                          style={{
+                            width: '100%',
+                            height: 4,
+                            background: 'rgba(255,255,255,0.2)',
+                            borderRadius: 2,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: '100%',
+                              width: `${scene.renderProgress ?? 20}%`,
+                              background: 'linear-gradient(90deg, #f43f5e, #8b5cf6)',
+                              transition: 'width 0.3s ease',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : idx === 0 ? (
+                      /* Clip 1: Show primary reference image */
+                      primaryRefImage ? (
+                        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+                          <img
+                            src={primaryRefImage}
+                            alt="Ảnh tham chiếu"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                          <span
+                            style={{
+                              position: 'absolute',
+                              bottom: 4,
+                              left: 4,
+                              fontSize: 8.5,
+                              fontWeight: 700,
+                              background: 'rgba(15, 23, 42, 0.8)',
+                              color: '#f8fafc',
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                            }}
+                          >
+                            {primaryRefLabel}
+                          </span>
+                        </div>
+                      ) : (
+                        <div style={{ color: '#64748b', fontSize: 10, textAlign: 'center', padding: 4 }}>
+                          <Film size={20} color="#475569" style={{ margin: '0 auto 2px auto' }} />
+                          <span>Từ Text Prompt</span>
+                        </div>
+                      )
+                    ) : isChained ? (
+                      /* Clip 2+: Show Start Frame inherited from previous clip */
+                      scene.startFramePreviewUrl ? (
+                        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+                          <img
+                            src={scene.startFramePreviewUrl}
+                            alt={`Start frame clip ${idx + 1}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                          <span
+                            style={{
+                              position: 'absolute',
+                              bottom: 4,
+                              left: 4,
+                              fontSize: 8.5,
+                              fontWeight: 700,
+                              background: 'rgba(124, 58, 237, 0.85)',
+                              color: '#ffffff',
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                            }}
+                          >
+                            🔗 Start Frame
+                          </span>
+                        </div>
+                      ) : (
+                        <div style={{ color: '#94a3b8', fontSize: 9.5, textAlign: 'center', padding: 4 }}>
+                          <Scissors size={16} color="#64748b" style={{ margin: '0 auto 2px auto' }} />
+                          <span>Chờ End Frame Clip #{idx}</span>
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ color: '#64748b', fontSize: 10, textAlign: 'center' }}>
+                        <span>Độc lập (Không nối)</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Prompt Preview (2 lines) */}
+                  <div
+                    style={{
+                      fontSize: 9.5,
+                      color: '#475569',
+                      lineHeight: 1.3,
+                      height: 25,
+                      overflow: 'hidden',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                    }}
+                    title={scene.prompt}
+                  >
+                    {scene.prompt || '(Chưa có nội dung prompt)'}
+                  </div>
+
+                  {/* Card Quick Action */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+                    <span style={{ fontSize: 9, color: '#94a3b8' }}>{scene.aspectRatio || '9:16'}</span>
+                    {isDone ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          data.onOpenPreviewModal?.(
+                            scene.videoUrl!,
+                            `Clip #${idx + 1}: ${scene.title || 'Video'}`,
+                            scene.prompt
+                          )
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#2563eb',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 2,
+                          padding: 0,
+                        }}
+                      >
+                        <Eye size={10} /> Xem to
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTabClick(idx)
+                          data.onRenderScene?.(idx)
+                        }}
+                        disabled={isClipRendering || (isChained && !prevClipReady)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: isChained && !prevClipReady ? '#94a3b8' : '#be123c',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          cursor: isChained && !prevClipReady ? 'not-allowed' : 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        {isChained && !prevClipReady ? 'Chờ clip trước' : '▶️ Tạo'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Handover Arrow Connector between Clips */}
+                {idx < scenes.length - 1 && (
+                  <div className="wf-storyboard-connector" title="Frame cuối của clip này sẽ nối sang làm Start Frame của clip tiếp theo">
+                    <span style={{ color: '#7c3aed', fontSize: 11 }}>🔗</span>
+                    <span style={{ fontSize: 8, color: '#7c3aed' }}>End Frame</span>
+                    <ArrowRight size={14} color="#a855f7" />
+                  </div>
+                )}
+              </React.Fragment>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ─── 4. INSPECTOR & DIRECTOR MONITOR (CHI TIẾT CLIP ĐANG CHỌN) ──────── */}
+      <div style={{ background: '#ffffff' }}>
         <div
           style={{
-            marginBottom: 10,
-            padding: '7px 10px',
-            background: data.activeProject ? '#f0fdf4' : '#fffbeb',
-            border: data.activeProject ? '1px solid #bbf7d0' : '1px solid #fde68a',
-            borderRadius: 8,
+            padding: '8px 14px',
+            background: '#fafafa',
+            borderBottom: '1px solid #f1f5f9',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, overflow: 'hidden' }}>
-            <span style={{ fontWeight: 700, color: data.activeProject ? '#166534' : '#b45309', whiteSpace: 'nowrap' }}>
-              {data.activeProject ? `📁 ${data.activeProject.name}` : '⚠️ Chưa chọn Project'}
-            </span>
-            <span style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap' }}>
-              • {data.videoConfig?.model || 'Omni 1.1 Flash'} • {data.videoConfig?.aspectRatio || '9:16'} • {data.videoConfig?.resolution || '720p'}
-            </span>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: '#e11d48' }}>●</span>
+            <span>ĐANG ĐẠO DIỄN: CLIP #{safeTab + 1} — {currentScene.title || 'Phân cảnh'}</span>
           </div>
 
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              data.onOpenVeoSetup?.()
-            }}
-            style={{
-              background: '#ffffff',
-              border: '1px solid #cbd5e1',
-              borderRadius: 6,
-              padding: '3px 8px',
-              fontSize: 10,
-              fontWeight: 700,
-              color: '#334155',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              cursor: 'pointer',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-              whiteSpace: 'nowrap',
-            }}
-            title="Mở Modal thiết lập Project và thông số video"
-          >
-            <Sliders size={11} style={{ color: '#e11d48' }} />
-            Cấu hình Veo
-          </button>
-        </div>
-
-        {/* GPT Script Sync Status */}
-        {data.availableGptScripts && data.availableGptScripts.length > 0 && (
-          <div
-            style={{
-              marginBottom: 10,
-              padding: '6px 10px',
-              background: '#faf5ff',
-              border: '1px solid #f3e8ff',
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              fontSize: 11,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#6b21a8' }}>
-              <Sparkles size={12} style={{ color: '#9333ea' }} />
-              <span style={{ fontWeight: 600 }}>
-                {data.isSourceScriptStale
-                  ? 'Kịch bản đã cũ — cần sinh lại'
-                  : data.selectedGptScriptAngle || 'Kịch bản ChatGPT'}
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button
-                type="button"
-                onClick={() => data.onApplyAllGptScripts?.()}
-                disabled={data.isSourceScriptStale}
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  padding: '2px 7px',
-                  borderRadius: 4,
-                  border: '1px solid #c084fc',
-                  background: '#f3e8ff',
-                  color: '#6b21a8',
-                  cursor: data.isSourceScriptStale ? 'not-allowed' : 'pointer',
-                  opacity: data.isSourceScriptStale ? 0.55 : 1,
-                  whiteSpace: 'nowrap',
-                }}
-                title={`Đẩy ${data.availableGptScripts.length} kịch bản vào ${data.availableGptScripts.length} clip độc lập`}
-              >
-                ⚡ Đồng bộ {data.availableGptScripts.length} Clip
-              </button>
-              <select
-                disabled={data.isSourceScriptStale}
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  padding: '2px 5px',
-                  borderRadius: 4,
-                  border: '1px solid #d8b4fe',
-                  background: '#ffffff',
-                  color: '#7e22ce',
-                  cursor: data.isSourceScriptStale ? 'not-allowed' : 'pointer',
-                  opacity: data.isSourceScriptStale ? 0.55 : 1,
-                }}
-                onChange={(e) => {
-                  const val = e.target.value
-                  if (val === 'all') {
-                    data.onApplyAllGptScripts?.()
-                  } else {
-                    data.onApplyGptScript?.(Number(val))
-                  }
-                }}
-                defaultValue=""
-              >
-                <option value="" disabled>Nạp kịch bản vào Clip #{safeTab + 1}...</option>
-                {data.availableGptScripts.map((s, i) => (
-                  <option key={i} value={i}>
-                    {`#${i + 1} — ${s.angle || s.title || `Kịch bản ${i + 1}`}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Clip Navigation Tabs */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            background: '#f1f5f9',
-            padding: 3,
-            borderRadius: 8,
-            marginBottom: 10,
-          }}
-        >
-          {scenes.map((scene, idx) => {
-            const isActive = idx === safeTab
-            return (
-              <button
-                key={scene.sceneNumber || idx}
-                type="button"
-                onClick={() => handleTabClick(idx)}
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                  padding: '5px 8px',
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontWeight: isActive ? 700 : 500,
-                  border: 'none',
-                  background: isActive ? '#ffffff' : 'transparent',
-                  color: isActive ? '#0f172a' : '#64748b',
-                  boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: scene.thumbnailUrl ? '#10b981' : isActive ? '#6366f1' : '#cbd5e1',
-                  }}
-                />
-                Clip #{idx + 1}
-              </button>
-            )
-          })}
-        </div>
-
-        {/* Cinema Video Preview Window */}
-        <div
-          style={{
-            width: '100%',
-            height: 170,
-            background: '#050811',
-            borderRadius: 8,
-            overflow: 'hidden',
-            position: 'relative',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid #1e293b',
-            marginBottom: 10,
-          }}
-        >
-          {currentScene.videoUrl ? (
-            <>
-              <video
-                src={currentScene.videoUrl}
-                controls
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                poster={currentScene.thumbnailUrl || undefined}
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  data.onOpenPreviewModal?.(
-                    currentScene.videoUrl!,
-                    `Clip #${safeTab + 1}: ${currentScene.title || 'Video'}`,
-                    currentScene.prompt
-                  )
-                }
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  zIndex: 5,
-                  padding: '3px 7px',
-                  borderRadius: 6,
-                  border: 'none',
-                  background: 'rgba(15, 23, 42, 0.75)',
-                  backdropFilter: 'blur(4px)',
-                  color: '#f8fafc',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
-                }}
-                title="Mở xem video toàn cảnh chất lượng cao"
-              >
-                <Maximize2 size={11} />
-                Toàn cảnh
-              </button>
-            </>
-          ) : currentScene.thumbnailUrl ? (
-            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-              <img
-                src={currentScene.thumbnailUrl}
-                alt="Scene frame"
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: 'rgba(0,0,0,0.35)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.9)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#0f172a',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Play size={16} fill="#0f172a" style={{ marginLeft: 2 }} />
-                </div>
-              </div>
-            </div>
-          ) : isRendering ? (
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background: 'rgba(15, 23, 42, 0.92)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                padding: '0 20px',
-              }}
-            >
-              <Sparkles size={22} color="#f43f5e" className="animate-spin" />
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc' }}>
-                Đang tạo Clip #{safeTab + 1}... {renderProgress}%
-              </div>
-              <div
-                style={{
-                  width: '80%',
-                  height: 6,
-                  background: 'rgba(255,255,255,0.15)',
-                  borderRadius: 3,
-                  overflow: 'hidden',
-                }}
-              >
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${renderProgress}%`,
-                    background: 'linear-gradient(90deg, #f43f5e, #8b5cf6)',
-                    transition: 'width 0.3s ease',
-                  }}
-                />
-              </div>
-            </div>
-          ) : (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-                color: '#64748b',
-              }}
-            >
-              <Film size={28} color="#475569" />
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>Chưa tạo Clip #{safeTab + 1}</span>
-            </div>
-          )}
-
-          {/* Quick overlay badges */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 8,
-              left: 8,
-              display: 'flex',
-              gap: 4,
-              zIndex: 2,
-            }}
-          >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#64748b' }}>Định dạng:</span>
             <span
               style={{
                 fontSize: 10,
                 fontWeight: 700,
-                background: 'rgba(15, 23, 42, 0.75)',
-                color: '#f8fafc',
+                background: '#f1f5f9',
                 padding: '2px 6px',
                 borderRadius: 4,
-                backdropFilter: 'blur(4px)',
+                color: '#334155',
               }}
             >
               {currentScene.aspectRatio || '9:16'}
             </span>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                background: 'rgba(15, 23, 42, 0.75)',
-                color: '#f8fafc',
-                padding: '2px 6px',
-                borderRadius: 4,
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              {currentScene.cameraMotion || 'Cinematic Motion'}
-            </span>
           </div>
         </div>
 
-        {/* Frame Continuity Strip (Clip #2+) hoặc Root Indicator (Clip #1) */}
-        {safeTab === 0 ? (
-          <div
-            style={{
-              marginBottom: 10,
-              padding: '6px 10px',
-              background: '#ecfdf5',
-              border: '1px solid #a7f3d0',
-              borderRadius: 8,
-              fontSize: 10.5,
-              fontWeight: 600,
-              color: '#065f46',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <span style={{ fontSize: 13 }}>🟢</span>
-            <span>Clip Khởi Đầu: Render từ Prompt & Ảnh tham chiếu (Frame cuối sẽ truyền sang Clip #2)</span>
-          </div>
-        ) : (
-          <div
-            style={{
-              marginBottom: 10,
-              padding: '8px 10px',
-              background: currentScene.chainFromPrevious !== false ? '#f5f3ff' : '#f8fafc',
-              border: currentScene.chainFromPrevious !== false ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
-              borderRadius: 8,
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: currentScene.chainFromPrevious !== false ? '#6b21a8' : '#64748b', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={currentScene.chainFromPrevious !== false}
-                  onChange={(e) => data.onToggleChainFrames?.(safeTab, e.target.checked)}
-                  style={{ width: 14, height: 14, accentColor: '#7c3aed', cursor: 'pointer' }}
-                />
-                <span>🔗 Nối tiếp từ End Frame Clip #{safeTab}</span>
-              </label>
-
-              {currentScene.chainFromPrevious !== false && prevScene?.videoUrl && (
-                <button
-                  type="button"
-                  onClick={() => data.onExtractLastFrame?.(safeTab - 1)}
-                  disabled={currentScene.isExtractingFrame}
+        <div className="wf-inspector-grid">
+          {/* Left Column: Video Player / Monitor View */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div
+              style={{
+                width: '100%',
+                height: 220,
+                background: '#090d16',
+                borderRadius: 10,
+                overflow: 'hidden',
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)',
+                border: '1px solid #1e293b',
+              }}
+            >
+              {currentScene.videoUrl ? (
+                <>
+                  <video
+                    src={currentScene.videoUrl}
+                    controls
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    poster={currentScene.thumbnailUrl || undefined}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      data.onOpenPreviewModal?.(
+                        currentScene.videoUrl!,
+                        `Clip #${safeTab + 1}: ${currentScene.title || 'Video'}`,
+                        currentScene.prompt
+                      )
+                    }
+                    style={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      zIndex: 5,
+                      padding: '3px 7px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'rgba(15, 23, 42, 0.8)',
+                      color: '#f8fafc',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                    title="Mở xem video toàn cảnh chất lượng cao"
+                  >
+                    <Maximize2 size={11} />
+                    Toàn cảnh
+                  </button>
+                </>
+              ) : isRendering ? (
+                <div
                   style={{
-                    background: '#ffffff',
-                    border: '1px solid #c084fc',
-                    borderRadius: 5,
-                    padding: '2px 7px',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: '#7e22ce',
-                    cursor: currentScene.isExtractingFrame ? 'wait' : 'pointer',
+                    position: 'absolute',
+                    inset: 0,
+                    background: 'rgba(15, 23, 42, 0.95)',
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
-                    gap: 4,
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '0 20px',
                   }}
-                  title={`Cắt lại frame cuối cùng của Clip #${safeTab}`}
                 >
-                  <Scissors size={11} />
-                  {currentScene.isExtractingFrame ? 'Đang cắt...' : 'Cắt lại Frame'}
-                </button>
+                  <Sparkles size={24} color="#f43f5e" className="animate-spin" />
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc' }}>
+                    Đang tạo Clip #{safeTab + 1}... {renderProgress}%
+                  </div>
+                  <div
+                    style={{
+                      width: '85%',
+                      height: 6,
+                      background: 'rgba(255,255,255,0.15)',
+                      borderRadius: 3,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${renderProgress}%`,
+                        background: 'linear-gradient(90deg, #f43f5e, #8b5cf6)',
+                        transition: 'width 0.3s ease',
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : currentScene.startFramePreviewUrl ? (
+                <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+                  <img
+                    src={currentScene.startFramePreviewUrl}
+                    alt="Start Frame"
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 8,
+                      left: 8,
+                      background: 'rgba(124, 58, 237, 0.85)',
+                      color: '#ffffff',
+                      fontSize: 9.5,
+                      fontWeight: 700,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                    }}
+                  >
+                    🔗 Start Frame (từ Clip #{safeTab})
+                  </div>
+                </div>
+              ) : safeTab === 0 && primaryRefImage ? (
+                <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+                  <img
+                    src={primaryRefImage}
+                    alt={primaryRefLabel || 'Ảnh tham chiếu'}
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 8,
+                      left: 8,
+                      background: 'rgba(15, 23, 42, 0.85)',
+                      color: '#ffffff',
+                      fontSize: 9.5,
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      backdropFilter: 'blur(4px)',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    }}
+                  >
+                    {primaryRefLabel || 'Ảnh tham chiếu'}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: '#64748b' }}>
+                  <Film size={30} color="#475569" />
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>Chưa tạo Clip #{safeTab + 1}</span>
+                </div>
               )}
             </div>
 
-            {currentScene.chainFromPrevious !== false ? (
-              currentScene.startFramePreviewUrl ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ffffff', padding: 6, borderRadius: 6, border: '1px solid #ede9fe' }}>
-                  <img
-                    src={currentScene.startFramePreviewUrl}
-                    alt={`End frame clip ${safeTab}`}
-                    style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 4, border: '1px solid #cbd5e1' }}
-                  />
-                  <div style={{ flex: 1, overflow: 'hidden' }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#059669', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <CheckCircle2 size={12} color="#10b981" /> Start Frame đã sẵn sàng
-                    </div>
-                    <div style={{ fontSize: 9.5, color: '#64748b', marginTop: 2 }}>
-                      Trích xuất từ cuối Clip #{safeTab} • Chế độ Frames (Start Frame)
-                    </div>
+            {/* Sub badges below player */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
+              <span>Tỉ lệ: <b>{currentScene.aspectRatio || '9:16'}</b></span>
+              <span>Chuyển động: <b>{currentScene.cameraMotion || 'Cinematic Motion'}</b></span>
+            </div>
+          </div>
+
+          {/* Right Column: Continuity Strip, Prompt Editor & Action Buttons */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Continuity Box */}
+            {safeTab === 0 ? (
+              <div
+                style={{
+                  padding: '7px 10px',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 6,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 5,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, color: '#0f172a' }}>
+                    <span>🎬 Clip Khởi Đầu (#1)</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 500, color: '#64748b' }}>
+                      (Render từ Prompt & Ảnh tham chiếu, End Frame ➔ Start Clip #2)
+                    </span>
                   </div>
-                </div>
-              ) : prevScene?.videoUrl ? (
-                <div style={{ fontSize: 10, color: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ffffff', padding: '5px 8px', borderRadius: 6, border: '1px dashed #d8b4fe' }}>
-                  <span>Clip #{safeTab} đã tạo xong. Sẵn sàng cắt frame cuối!</span>
-                  <button
-                    type="button"
-                    onClick={() => data.onExtractLastFrame?.(safeTab - 1)}
-                    disabled={currentScene.isExtractingFrame}
+                  <span
                     style={{
-                      background: '#7c3aed',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: 4,
-                      padding: '3px 8px',
-                      fontSize: 10,
+                      fontSize: 9,
                       fontWeight: 700,
+                      color: hasAnyRefImages ? '#059669' : '#64748b',
+                      background: hasAnyRefImages ? '#ecfdf5' : '#f1f5f9',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      border: hasAnyRefImages ? '1px solid #a7f3d0' : '1px solid #e2e8f0',
+                    }}
+                  >
+                    {hasAnyRefImages ? `✓ Nạp ${totalRefImagesCount} ảnh` : 'Chỉ Text Prompt'}
+                  </span>
+                </div>
+
+                {/* Compact mini thumbnails of all input assets */}
+                {hasAnyRefImages && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingTop: 2 }}>
+                    <span style={{ fontSize: 9.5, color: '#64748b', fontWeight: 600 }}>Ảnh nạp vào:</span>
+                    {validProductImages.map((img, idx) => (
+                      <div
+                        key={`sp-${idx}`}
+                        title={`Sản phẩm #${idx + 1}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '2px 5px',
+                          background: '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: 4,
+                          fontSize: 9,
+                          color: '#334155',
+                        }}
+                      >
+                        <img src={img} alt={`SP ${idx + 1}`} style={{ width: 16, height: 16, borderRadius: 2, objectFit: 'cover' }} />
+                        <span>SP #{idx + 1}</span>
+                      </div>
+                    ))}
+                    {modelImage && (
+                      <div
+                        title="Người mẫu / MC"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '2px 5px',
+                          background: '#fff7ed',
+                          border: '1px solid #fed7aa',
+                          borderRadius: 4,
+                          fontSize: 9,
+                          color: '#9a3412',
+                          fontWeight: 600,
+                        }}
+                      >
+                        <img src={modelImage} alt="Model" style={{ width: 16, height: 16, borderRadius: 2, objectFit: 'cover' }} />
+                        <span>👤 Người mẫu</span>
+                      </div>
+                    )}
+                    {sceneImage && (
+                      <div
+                        title="Bối cảnh"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '2px 5px',
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          borderRadius: 4,
+                          fontSize: 9,
+                          color: '#166534',
+                          fontWeight: 600,
+                        }}
+                      >
+                        <img src={sceneImage} alt="Scene" style={{ width: 16, height: 16, borderRadius: 2, objectFit: 'cover' }} />
+                        <span>🌄 Bối cảnh</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: '7px 10px',
+                  background: currentScene.chainFromPrevious !== false ? '#f5f3ff' : '#f8fafc',
+                  border: currentScene.chainFromPrevious !== false ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+                  borderRadius: 6,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: currentScene.chainFromPrevious !== false ? '#6b21a8' : '#64748b',
                       cursor: 'pointer',
                     }}
                   >
-                    {currentScene.isExtractingFrame ? 'Đang cắt...' : '✂️ Cắt Frame Ngay'}
-                  </button>
+                    <input
+                      type="checkbox"
+                      checked={currentScene.chainFromPrevious !== false}
+                      onChange={(e) => data.onToggleChainFrames?.(safeTab, e.target.checked)}
+                      style={{ width: 14, height: 14, accentColor: '#7c3aed', cursor: 'pointer' }}
+                    />
+                    <span>🔗 Nối tiếp từ End Frame Clip #{safeTab}</span>
+                  </label>
+
+                  {currentScene.chainFromPrevious !== false && prevScene?.videoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => data.onExtractLastFrame?.(safeTab - 1)}
+                      disabled={currentScene.isExtractingFrame}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #c084fc',
+                        borderRadius: 4,
+                        padding: '2px 7px',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: '#7e22ce',
+                        cursor: currentScene.isExtractingFrame ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                      title={`Cắt lại frame cuối cùng của Clip #${safeTab}`}
+                    >
+                      <Scissors size={11} />
+                      {currentScene.isExtractingFrame ? 'Đang cắt...' : 'Cắt lại Frame'}
+                    </button>
+                  )}
                 </div>
-              ) : (
-                <div style={{ fontSize: 10, color: '#92400e', background: '#fffbeb', padding: '5px 8px', borderRadius: 5, border: '1px solid #fde68a' }}>
-                  ⏳ Chờ Clip #{safeTab} tạo xong để tự động bắt End Frame nối sang Clip này.
-                </div>
-              )
-            ) : (
-              <div style={{ fontSize: 9.5, color: '#94a3b8', fontStyle: 'italic' }}>
-                Đã tắt nối tiếp — Clip #{safeTab + 1} sẽ tạo độc lập từ Prompt hoặc ảnh tham chiếu chung.
+
+                {currentScene.chainFromPrevious !== false && (
+                  <div style={{ marginTop: 5, fontSize: 10, color: currentScene.startFramePreviewUrl ? '#059669' : '#b45309' }}>
+                    {currentScene.startFramePreviewUrl
+                      ? '✅ Start Frame đã sẵn sàng từ Clip trước'
+                      : prevScene?.videoUrl
+                      ? '⚠️ Chưa cắt frame cuối từ Clip trước. Bấm "Cắt lại Frame" hoặc hệ thống sẽ tự cắt khi bấm Tạo.'
+                      : `⏳ Clip #${safeTab} chưa tạo. Cần render Clip #${safeTab} trước để lấy End Frame.`}
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Clip Prompt & Parameters */}
-        <div style={{ marginBottom: 10 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 4,
-            }}
-          >
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>
-              Prompt cho Clip #{safeTab + 1}:
-            </label>
-            <span style={{ fontSize: 10, color: '#94a3b8' }}>
-              {currentScene.title || 'Mô tả hình ảnh'}
-            </span>
-          </div>
-
-          <textarea
-            className="wf-input-textarea"
-            rows={2}
-            value={currentScene.prompt || ''}
-            onChange={(e) => data.onUpdateScenePrompt?.(safeTab, e.target.value)}
-            placeholder="Mô tả chi tiết góc quay điện ảnh, hành động của nhân vật, ánh sáng bối cảnh..."
-            style={{ minHeight: 50 }}
-          />
-        </div>
-
-        {/* Quick Clip Controls: Duration & Render Button */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 12,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 11, color: '#64748b' }}>Thời lượng chung:</span>
-            {(data.durationOptions?.length ? data.durationOptions : [currentScene.durationSec]).map((sec) => (
-              <button
-                key={sec}
-                type="button"
-                onClick={() => data.onUpdateSceneDuration?.(safeTab, sec)}
+            {/* Prompt Editor */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>
+                  📝 Prompt kịch bản Clip #{safeTab + 1}:
+                </label>
+                <span style={{ fontSize: 10, color: '#64748b' }}>
+                  {(currentScene.prompt || '').trim().split(/\s+/).filter(Boolean).length} từ
+                </span>
+              </div>
+              <textarea
+                value={currentScene.prompt || ''}
+                onChange={(e) => data.onUpdateScenePrompt?.(safeTab, e.target.value)}
+                placeholder="Mô tả chuyển động máy quay, nhân vật, ánh sáng bối cảnh..."
+                rows={3}
                 style={{
-                  padding: '3px 7px',
-                  borderRadius: 4,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  border: currentScene.durationSec === sec ? '1px solid #f43f5e' : '1px solid #e2e8f0',
-                  background: currentScene.durationSec === sec ? '#fff1f2' : '#ffffff',
-                  color: currentScene.durationSec === sec ? '#e11d48' : '#64748b',
-                  cursor: 'pointer',
-                }}
-              >
-                {sec}s
-              </button>
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {scenes.length > 1 && data.onRenderAllScenes && (
-              <button
-                type="button"
-                className="wf-btn"
-                onClick={() => {
-                  if (!data.activeProject) {
-                    data.onOpenVeoSetup?.()
-                  } else {
-                    data.onRenderAllScenes?.()
-                  }
-                }}
-                disabled={isRendering}
-                style={{
-                  padding: '5px 9px',
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  background: '#fdf2f8',
-                  border: '1px solid #fbcfe8',
-                  color: '#db2777',
-                  cursor: isRendering ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  whiteSpace: 'nowrap',
-                }}
-                title="Tự động render Clip #1 -> cắt End Frame -> render Clip #2 nối tiếp -> tiếp tục đến hết"
-              >
-                <Sparkles size={11} color="#db2777" />
-                Render Liên Hoàn ({scenes.length})
-              </button>
-            )}
-
-            {(() => {
-              const isChained = safeTab > 0 && currentScene.chainFromPrevious !== false
-            const prevNotReady = isChained && !prevScene?.videoUrl
-            return (
-              <button
-                type="button"
-                className="wf-btn wf-btn-accent"
-                onClick={() => {
-                  if (!data.activeProject) {
-                    data.onOpenVeoSetup?.()
-                  } else {
-                    data.onRenderScene?.(safeTab)
-                  }
-                }}
-                disabled={isRendering || prevNotReady}
-                style={{
-                  padding: '5px 12px',
+                  width: '100%',
                   fontSize: 11,
-                  opacity: prevNotReady ? 0.6 : 1,
-                  cursor: prevNotReady ? 'not-allowed' : 'pointer',
+                  lineHeight: 1.4,
+                  padding: '7px 9px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  resize: 'vertical',
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box',
                 }}
-                title={
-                  !data.activeProject
-                    ? 'Bấm để cấu hình và chọn Project trước'
-                    : prevNotReady
-                    ? `Cần tạo Clip #${safeTab} trước để có End Frame nối tiếp`
-                    : `Tạo clip #${safeTab + 1}`
-                }
-              >
-                <Video size={13} />
-                {isRendering
-                  ? 'Đang tạo...'
-                  : !data.activeProject
-                  ? 'Cấu hình Project'
-                  : prevNotReady
-                  ? `Chờ Clip #${safeTab}`
-                  : isChained
-                  ? `Tạo Clip #${safeTab + 1} (Nối tiếp)`
-                  : `Tạo Clip #${safeTab + 1}`}
-              </button>
-            )
-          })()}
+              />
+            </div>
+
+            {/* Duration Selector & Render Button */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 10.5, color: '#64748b', fontWeight: 600 }}>Thời lượng:</span>
+                {(data.durationOptions && data.durationOptions.length > 0 ? data.durationOptions : [4, 6, 8, 10]).map(
+                  (sec) => (
+                    <button
+                      key={sec}
+                      type="button"
+                      onClick={() => data.onUpdateSceneDuration?.(safeTab, sec)}
+                      style={{
+                        padding: '2px 7px',
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        borderRadius: 4,
+                        border: currentScene.durationSec === sec ? '1px solid #f43f5e' : '1px solid #e2e8f0',
+                        background: currentScene.durationSec === sec ? '#fff1f2' : '#ffffff',
+                        color: currentScene.durationSec === sec ? '#e11d48' : '#64748b',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {sec}s
+                    </button>
+                  )
+                )}
+              </div>
+
+              {/* Single Clip Render Button */}
+              {(() => {
+                const isChained = safeTab > 0 && currentScene.chainFromPrevious !== false
+                const prevNotReady = isChained && !prevScene?.videoUrl
+                return (
+                  <button
+                    type="button"
+                    className="wf-btn wf-btn-accent"
+                    onClick={() => {
+                      if (!data.activeProject) {
+                        data.onOpenVeoSetup?.()
+                      } else {
+                        data.onRenderScene?.(safeTab)
+                      }
+                    }}
+                    disabled={isRendering || prevNotReady}
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: 11,
+                      opacity: prevNotReady ? 0.6 : 1,
+                      cursor: prevNotReady ? 'not-allowed' : 'pointer',
+                    }}
+                    title={
+                      !data.activeProject
+                        ? 'Bấm để cấu hình và chọn Project trước'
+                        : prevNotReady
+                        ? `Cần tạo Clip #${safeTab} trước để có End Frame nối tiếp`
+                        : `Tạo clip #${safeTab + 1}`
+                    }
+                  >
+                    <Video size={13} />
+                    {isRendering
+                      ? 'Đang tạo...'
+                      : !data.activeProject
+                      ? 'Cấu hình Project'
+                      : prevNotReady
+                      ? `Chờ Clip #${safeTab}`
+                      : isChained
+                      ? `Tạo Clip #${safeTab + 1} (Nối tiếp)`
+                      : `Tạo Clip #${safeTab + 1}`}
+                  </button>
+                )
+              })()}
+            </div>
+          </div>
         </div>
 
-        {/* Optional clip stitching & export */}
+        {/* ─── 5. MASTER BOTTOM TIMELINE & STITCH EXPORT BAR ────────────────── */}
         <div
           style={{
             borderTop: '1px solid #f1f5f9',
-            paddingTop: 10,
-            background: '#f8fafc',
-            margin: '0 -14px -12px -14px',
             padding: '10px 14px',
-            borderBottomLeftRadius: 14,
-            borderBottomRightRadius: 14,
+            background: '#f8fafc',
+            borderBottomLeftRadius: 16,
+            borderBottomRightRadius: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 8,
-            }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Layers size={13} color="#6366f1" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Layers size={14} color="#6366f1" />
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>
               Ghép {scenes.length} clip ({totalDuration}s)
-            </div>
-            <span style={{ fontSize: 10, color: '#64748b' }}>Định dạng: MP4 1080p</span>
+            </span>
+            <span style={{ fontSize: 10, color: '#94a3b8' }}>• Định dạng MP4 1080p</span>
           </div>
 
-          {/* Timeline Sequence strip */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              marginBottom: 10,
-            }}
-          >
-            {scenes.map((sc, i) => (
-              <React.Fragment key={i}>
-                <div
-                  style={{
-                    flex: sc.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS,
-                    height: 28,
-                    borderRadius: 6,
-                    background: sc.thumbnailUrl ? '#ecfdf5' : '#ffffff',
-                    border: sc.thumbnailUrl ? '1px solid #a7f3d0' : '1px solid #e2e8f0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: sc.thumbnailUrl ? '#059669' : '#64748b',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    padding: '0 4px',
-                  }}
-                >
-                  #{i + 1} ({sc.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS}s)
-                </div>
-                {i < scenes.length - 1 && (
-                  <ChevronRight size={12} color="#cbd5e1" style={{ flexShrink: 0 }} />
-                )}
-              </React.Fragment>
-            ))}
-          </div>
-
-          {/* Export Button & Progress */}
-          {isExporting ? (
-            <div
-              style={{
-                background: '#e0e7ff',
-                borderRadius: 8,
-                padding: '8px 12px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#3730a3',
-                }}
-              >
-                <span>Đang ghép các clip đã chọn...</span>
-                <span>{exportProgress}%</span>
-              </div>
-              <div style={{ height: 4, background: '#c7d2fe', borderRadius: 2, overflow: 'hidden' }}>
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${exportProgress}%`,
-                    background: '#4f46e5',
-                    transition: 'width 0.3s ease',
-                  }}
-                />
-              </div>
-            </div>
-          ) : data.finalVideoUrl ? (
-            <div
-              style={{
-                background: '#ecfdf5',
-                border: '1px solid #a7f3d0',
-                borderRadius: 8,
-                padding: '10px 12px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: '#065f46',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                  }}
-                >
-                  <CheckCircle2 size={14} color="#059669" /> Bản ghép tuỳ chọn đã sẵn sàng!
-                </span>
-                <span style={{ fontSize: 10, color: '#047857', fontWeight: 600 }}>MP4 • 1080p</span>
-              </div>
-
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {data.finalVideoUrl ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <button
                   type="button"
                   className="wf-btn"
-                  style={{
-                    flex: 1,
-                    justifyContent: 'center',
-                    padding: '5px 8px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    background: '#ffffff',
-                    color: '#065f46',
-                    border: '1px solid #a7f3d0',
-                  }}
                   onClick={() =>
-                    data.onOpenPreviewModal?.(
-                      data.finalVideoUrl!,
-                      'Video ghép từ các clip',
-                      undefined
-                    )
+                    data.onOpenPreviewModal?.(data.finalVideoUrl!, 'Video Hoàn Chỉnh Ghép Nối', 'Toàn bộ quy trình')
                   }
+                  style={{ padding: '4px 10px', fontSize: 10.5, fontWeight: 600, color: '#059669', background: '#ecfdf5', border: '1px solid #a7f3d0' }}
                 >
-                  <Play size={12} fill="#065f46" /> Phát Video
+                  <Eye size={12} /> Xem Video Hoàn Chỉnh
                 </button>
-
-                <button
-                  type="button"
-                  className="wf-btn"
-                  style={{
-                    flex: 1,
-                    justifyContent: 'center',
-                    padding: '5px 8px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    background: '#ffffff',
-                    color: '#4338ca',
-                    border: '1px solid #c7d2fe',
-                  }}
-                  onClick={() => data.onOpenLibrary?.()}
-                >
-                  <Film size={12} color="#6366f1" /> Thư viện
-                </button>
-
                 <a
                   href={data.finalVideoUrl}
                   download="workflow_final_video.mp4"
                   className="wf-btn wf-btn-primary"
-                  style={{
-                    padding: '5px 10px',
-                    fontSize: 11,
-                    textDecoration: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
+                  style={{ padding: '4px 10px', fontSize: 10.5, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}
                 >
                   <Download size={12} /> Tải MP4
                 </a>
               </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="wf-btn wf-btn-primary"
-              style={{ width: '100%', justifyContent: 'center', padding: '8px' }}
-              onClick={() => data.onExportVideo?.()}
-            >
-              <Download size={14} />
-              Ghép Clip Hoàn Chỉnh (MP4)
-            </button>
-          )}
+            ) : (
+              <button
+                type="button"
+                className="wf-btn wf-btn-primary"
+                onClick={() => data.onExportVideo?.()}
+                disabled={isExporting || !allClipsCompleted}
+                style={{
+                  padding: '5px 14px',
+                  fontSize: 11,
+                  opacity: !allClipsCompleted ? 0.6 : 1,
+                  cursor: !allClipsCompleted ? 'not-allowed' : 'pointer',
+                }}
+                title={!allClipsCompleted ? 'Cần render đủ tất cả clip trước khi ghép' : 'Ghép toàn bộ clip thành 1 file MP4'}
+              >
+                <Download size={13} />
+                {isExporting ? `Đang ghép... ${exportProgress}%` : 'Ghép Video Hoàn Chỉnh (MP4)'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

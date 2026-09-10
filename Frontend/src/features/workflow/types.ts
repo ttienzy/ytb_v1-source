@@ -214,6 +214,7 @@ export interface VeoFlowStudioNodeData {
     modelUrl?: string | null
     sceneUrl?: string | null
   }
+  exportedCount?: number
   onOpenVeoSetup?: () => void
   onApplyGptScript?: (scriptIndex: number) => void
   onApplyAllGptScripts?: () => void

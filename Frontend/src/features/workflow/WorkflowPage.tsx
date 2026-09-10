@@ -1479,6 +1479,45 @@ function WorkflowCanvas() {
             .map((profile) => profile.duration_seconds)
         )].sort((a, b) => a - b)
 
+        const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: node.id })
+        const prodNode = nodes.find(
+          (n) =>
+            n.type === 'productAssets' &&
+            (edges.some((e) => e.target === node.id && e.source === n.id) ||
+              (sourceGptNode && edges.some((e) => e.target === sourceGptNode.id && e.source === n.id)))
+        )
+        const productUrls = (
+          prodRes.ok && prodRes.data?.rawImages?.length
+            ? prodRes.data.rawImages
+            : ((prodNode?.data?.images as (string | null)[]) || [])
+        ).filter((u): u is string => Boolean(u && u.trim()))
+
+        const charRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: node.id })
+        const charNode = nodes.find(
+          (n) =>
+            n.type === 'characterScene' &&
+            (edges.some((e) => e.target === node.id && e.source === n.id) ||
+              (sourceGptNode && edges.some((e) => e.target === sourceGptNode.id && e.source === n.id)))
+        )
+        const modelUrl =
+          (charRes.data?.model as any)?.previewUrl ||
+          (charNode?.data?.modelAsset as any)?.previewUrl ||
+          (charNode?.data?.modelImage as string) ||
+          (charRes.data?.model as any)?.url ||
+          null
+        const sceneUrl =
+          (charRes.data?.scene as any)?.previewUrl ||
+          (charNode?.data?.sceneAsset as any)?.previewUrl ||
+          (charNode?.data?.sceneImage as string) ||
+          (charRes.data?.scene as any)?.url ||
+          null
+
+        const refImages = {
+          productUrls,
+          modelUrl,
+          sceneUrl,
+        }
+
         return {
           ...node,
           data: {
@@ -1488,6 +1527,8 @@ function WorkflowCanvas() {
             durationOptions: durationOptions.length > 0 ? durationOptions : [veoVideoConfig.duration],
             isSourceScriptStale,
             availableGptScripts,
+            refImages,
+            exportedCount,
             onOpenVeoSetup: () => setIsVeoModalOpen(true),
             onOpenLibrary: () => setIsLibraryOpen(true),
             onOpenPreviewModal: handleOpenPreviewModal,
@@ -1538,6 +1579,7 @@ function WorkflowCanvas() {
     handleDeleteNode,
     handleSetStartNode,
     handleOpenPreviewModal,
+    exportedCount,
   ])
 
   // Attach onDeleteEdge to edges data

@@ -355,3 +355,31 @@ def test_exported_videos_library(tmp_path):
     finally:
         if dummy_file.exists():
             dummy_file.unlink()
+
+
+def test_concat_workflow_scenes_filename_and_veo_id_resolution(monkeypatch, tmp_path):
+    dummy_mp4 = tmp_path / "00066213-f95.mp4"
+    dummy_mp4.write_bytes(b"\x00" * 100)
+
+    from app.veo import service as veo_service
+    monkeypatch.setattr(veo_service, "get_video_path", lambda vid: dummy_mp4 if "00066213-f95" in str(vid) else None)
+
+    from app.workflow import service as wf_service
+    monkeypatch.setattr(wf_service, "concat_segments", lambda segs, out, work: out)
+    monkeypatch.setattr(wf_service, "ffprobe_duration", lambda p: 10.0)
+
+    # Test với tên file trần "00066213-f95.mp4"
+    res = concat_workflow_scenes(
+        scene_video_paths=["00066213-f95.mp4"],
+        output_filename="test_raw_filename.mp4",
+    )
+    assert res.status == "done"
+    assert res.duration_sec == 10.0
+
+    # Test với ID trần "00066213-f95"
+    res2 = concat_workflow_scenes(
+        scene_video_paths=["00066213-f95"],
+        output_filename="test_raw_id.mp4",
+    )
+    assert res2.status == "done"
+

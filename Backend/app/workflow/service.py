@@ -833,29 +833,67 @@ def concat_workflow_scenes(
     for sp in scene_video_paths:
         p: Path | None = None
 
-        # 1. Hỗ trợ phân giải tự động nếu nhận URL preview dạng /api/veo/history/{id}/file
-        veo_match = re.search(r"/api/veo/history/([^/]+)/file", sp)
+        # 1. Hỗ trợ phân giải tự động nếu nhận URL preview dạng:
+        # /api/veo/history/{id}/file, /api/veo/outputs/{file}, /api/veo/stream/{file}, /api/workflow/exports/{file}
+        veo_match = re.search(
+            r"/api/(?:veo/(?:history/([^/]+)/file|outputs/([^/?#]+)|stream/([^/?#]+))|workflow/exports/([^/?#]+))",
+            sp,
+        )
         if veo_match:
-            video_id = veo_match.group(1)
+            extracted_id = next((g for g in veo_match.groups() if g), None)
+            if extracted_id:
+                try:
+                    from app.veo import service as veo_service
+                    veo_path = (
+                        veo_service.get_video_path(extracted_id)
+                        or veo_service.get_video_path(Path(extracted_id).stem)
+                    )
+                    if veo_path and veo_path.exists() and veo_path.is_file():
+                        p = veo_path
+                except Exception as e:
+                    logger.warning(f"Không thể phân giải extracted_id '{extracted_id}' từ URL: {e}")
+
+        # 2. Thử phân giải trực tiếp qua Veo service (nhận ID '00066213-f95' hoặc tên file '00066213-f95.mp4')
+        if p is None:
             try:
                 from app.veo import service as veo_service
-                veo_path = veo_service.get_video_path(video_id)
+                clean_name = Path(sp).name
+                veo_path = (
+                    veo_service.get_video_path(sp)
+                    or veo_service.get_video_path(clean_name)
+                    or veo_service.get_video_path(Path(clean_name).stem)
+                )
                 if veo_path and veo_path.exists() and veo_path.is_file():
                     p = veo_path
             except Exception as e:
-                logger.warning(f"Không thể phân giải video_id '{video_id}' từ veo history: {e}")
+                logger.warning(f"Không thể tra cứu qua veo_service cho '{sp}': {e}")
 
-        # 2. Thử tìm trực tiếp file path trên disk
+        # 3. Thử tìm trực tiếp file path trên disk hoặc trong các thư mục media chuẩn
         if p is None:
             cand = Path(sp)
             if cand.exists() and cand.is_file():
                 p = cand
             else:
-                alt_p = DATA_DIR / sp
-                if alt_p.exists() and alt_p.is_file():
-                    p = alt_p
-                else:
-                    raise FileNotFoundError(f"Không tìm thấy file video phân cảnh: {sp}")
+                clean_name = Path(sp).name
+                for candidate_dir in [
+                    DATA_DIR,
+                    DATA_DIR / "media" / "veo_outputs",
+                    DATA_DIR / "media" / "workflow_exports",
+                    WORKFLOW_ASSETS_DIR,
+                    WORKFLOW_EXPORTS_DIR,
+                ]:
+                    test_p = candidate_dir / clean_name
+                    if test_p.exists() and test_p.is_file():
+                        p = test_p
+                        break
+                    if not clean_name.endswith(".mp4"):
+                        test_mp4 = candidate_dir / f"{clean_name}.mp4"
+                        if test_mp4.exists() and test_mp4.is_file():
+                            p = test_mp4
+                            break
+
+        if p is None:
+            raise FileNotFoundError(f"Không tìm thấy file video phân cảnh: {sp}")
 
         valid_paths.append(p)
 
@@ -871,6 +909,7 @@ def concat_workflow_scenes(
         raise ValueError(f"Tên file export không hợp lệ (nguy cơ path traversal): {output_filename}")
 
     work_dir = WORKFLOW_EXPORTS_DIR / f"temp_{job_id}"
+    out_file.unlink(missing_ok=True)
 
     final_path = concat_segments(valid_paths, out_file, work_dir)
     duration = 0.0
