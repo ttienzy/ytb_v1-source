@@ -571,6 +571,19 @@
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
 }
 
+/* Đảm bảo toàn bộ input và select trong các node không bị vỡ layout bởi CSS toàn cục (47px) */
+.wf-node-card input:not([type="checkbox"]):not([type="radio"]),
+.wf-node-card select {
+  height: 28px !important;
+  line-height: normal;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.wf-node-card select {
+  cursor: pointer;
+}
+
 /* Timeline Export Strip */
 .wf-timeline-strip {
   display: flex;

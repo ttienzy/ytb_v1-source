@@ -78,8 +78,71 @@ class VeoCapabilitiesTests(unittest.TestCase):
             "duration_seconds": 10,
             "aspect_ratio": "9:16",
             "input_mode": "frames",
+            "image_path": "fake_start.png",
         }
-        self.assertEqual(service._resolve_provider_model_id(job), "omni_flash_i2v_10s_first")
+        self.assertEqual(service._resolve_provider_model_id(job), "abra_r2v_10s")
+
+        job_both = {
+            "model_display_name": "Omni 1.1 Flash",
+            "duration_seconds": 6,
+            "aspect_ratio": "16:9",
+            "input_mode": "frames",
+            "image_path": "fake_start.png",
+            "end_image_path": "fake_end.png",
+        }
+        self.assertEqual(service._resolve_provider_model_id(job_both), "omni_flash_i2v_10s_first_last")
+
+        job_only_end = {
+            "model_display_name": "Omni 1.1 Flash",
+            "duration_seconds": 6,
+            "aspect_ratio": "16:9",
+            "input_mode": "frames",
+            "image_path": None,
+            "end_image_path": "fake_end.png",
+        }
+        self.assertEqual(service._resolve_provider_model_id(job_only_end), "abra_r2v_6s")
+
+    def test_submit_job_frames_mode_validations(self):
+        from app.veo.schemas import VeoJobRequest, InputMode, AspectRatio
+        from app.veo.models import VeoProject
+
+        # Mock active project
+        fake_proj = VeoProject(id="p-1", name="Test Proj", flow_project_id="f-1")
+        orig_get_active = service.get_active_project
+        service.get_active_project = lambda: fake_proj
+
+        try:
+            # 1. End frame without start frame -> raises ValueError
+            req_invalid = VeoJobRequest(
+                prompt="test prompt",
+                model_display_name="Omni 1.1 Flash",
+                input_mode=InputMode.FRAMES,
+                aspect_ratio=AspectRatio.PORTRAIT,
+                duration_seconds=6,
+                resolution="720p",
+                image_path=None,
+                end_image_path="fake_end.png",
+            )
+            with self.assertRaises(ValueError) as ctx:
+                service.submit_job(req_invalid)
+            self.assertIn("End Frame", str(ctx.exception))
+
+            # 2. Neither frame provided -> raises ValueError
+            req_empty = VeoJobRequest(
+                prompt="test prompt",
+                model_display_name="Omni 1.1 Flash",
+                input_mode=InputMode.FRAMES,
+                aspect_ratio=AspectRatio.PORTRAIT,
+                duration_seconds=6,
+                resolution="720p",
+                image_path=None,
+                end_image_path=None,
+            )
+            with self.assertRaises(ValueError) as ctx2:
+                service.submit_job(req_empty)
+            self.assertIn("Start Frame", str(ctx2.exception))
+        finally:
+            service.get_active_project = orig_get_active
 
     def test_build_verified_flow_request_frames_encoding(self):
         import tempfile
@@ -102,7 +165,7 @@ class VeoCapabilitiesTests(unittest.TestCase):
             }
             req = service._build_verified_flow_request(job)
             self.assertEqual(req["input_mode"], "frames")
-            self.assertEqual(req["provider_model_id"], "omni_flash_i2v_10s_first")
+            self.assertEqual(req["provider_model_id"], "abra_r2v_10s")
             self.assertIsNotNone(req["image_base64"])
             self.assertEqual(req["image_mime"], "image/png")
             self.assertIsNone(req["end_image_base64"])

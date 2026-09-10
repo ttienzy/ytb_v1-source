@@ -1087,6 +1087,8 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
       throw new Error('Unsupported Flow configuration: aspect_ratio');
     }
 
+    const dur = [4, 5, 6, 8, 10].includes(Number(flowRequest?.duration_seconds)) ? Number(flowRequest.duration_seconds) : 6;
+
     // Dynamic model ID resolution
     function resolveModelId(req) {
       const isFrames = req.input_mode === 'frames';
@@ -1095,16 +1097,15 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
         return req.provider_model_id;
       }
       const modelName = (req.model_display_name || '').toLowerCase();
-      const dur = [4, 5, 6, 8, 10].includes(Number(req.duration_seconds)) ? Number(req.duration_seconds) : 6;
       const isPortrait = req.aspect_ratio === '9:16';
 
       if (isIngredients) {
         return `abra_r2v_${dur}s`;
       }
       if (isFrames) {
-        return req.end_image_base64
-          ? `omni_flash_i2v_${dur}s_first_last`
-          : `omni_flash_i2v_${dur}s_first`;
+        return (req.image_base64 && req.end_image_base64)
+          ? 'omni_flash_i2v_10s_first_last'
+          : `abra_r2v_${dur}s`;
       }
       if (modelName.includes('omni') || modelName.includes('flash')) {
         return `abra_t2v_${dur}s`;
@@ -1118,7 +1119,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
       return 'veo_3_1_t2v_lite';
     }
 
-    const modelId = resolveModelId(flowRequest);
+    let modelId = resolveModelId(flowRequest);
 
     let route = location.pathname.match(/^\/(u\/\d+)\/project\/([^/?#]+)/);
     let accountPath = route ? `/${route[1]}` : '';
@@ -1173,11 +1174,13 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
         const trimmed = line.trim();
         if (!trimmed.startsWith('[')) continue;
         try {
-          const payload = findRpcEnvelope(JSON.parse(trimmed), rpcId);
+          const parsed = JSON.parse(trimmed);
+          const payload = findRpcEnvelope(parsed, rpcId);
           if (payload !== null) return JSON.parse(payload);
         } catch { }
       }
-      throw new Error(`Flow RPC ${rpcId} returned no usable payload`);
+      const preview = (typeof text === 'string' ? text.replace(/\s+/g, ' ').slice(0, 300) : '');
+      throw new Error(`Flow RPC ${rpcId} returned no usable payload. Response: ${preview}`);
     }
 
     async function callRpc(rpcId, payload) {
@@ -1394,7 +1397,10 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
           flowRequest.end_image_name || 'end_frame.png'
         );
       }
-      if (!startFrameMediaId && !endFrameMediaId) {
+      if (!startFrameMediaId) {
+        if (endFrameMediaId) {
+          throw new Error('Chế độ Khung hình yêu cầu phải có Khung hình bắt đầu (Start Frame) khi sử dụng Khung hình kết thúc (End Frame)');
+        }
         logActivity('warn', 'Không có khung hình trong request frames, tự động tạo video từ prompt (text_to_video)');
         isFrames = false;
         modelId = modelId.replace('_i2v_', '_t2v_').replace('_first_last', '').replace('_first', '');
@@ -1428,23 +1434,29 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
       }
     }
 
-    const rpcId = isIngredients ? 'MZZa6b' : (isFrames ? 'nprQif' : 'YhhmEf');
+    const isSingleFrame = isFrames && Boolean(startFrameMediaId) && !endFrameMediaId;
+    const rpcId = isIngredients || isSingleFrame ? 'MZZa6b' : (isFrames ? 'nprQif' : 'YhhmEf');
 
     const requestUuidA = (crypto.randomUUID ? crypto.randomUUID() : 'AD722819-13F6-46E3-A074-9CA0266A4FE0').toUpperCase();
     const requestUuidB = (crypto.randomUUID ? crypto.randomUUID() : '4C8832DC-AD37-4C11-859E-DCFD4FB4903E').toUpperCase();
     const sceneUuid = (crypto.randomUUID ? crypto.randomUUID() : '154922EC-9CE9-4413-A9C0-B2664F7FFB7B').toUpperCase();
     // Google Flow Aspect Ratio Enum: 2 = 16:9 (Landscape), 1 = 9:16 (Portrait)
     const aspectEnum = flowRequest?.aspect_ratio === '16:9' ? 2 : 1;
+    let startSlot = null;
+    let endSlot = null;
 
     let createPayload = null;
-    if (isIngredients) {
+    if (isIngredients || isSingleFrame) {
       // Chuẩn Google Flow HAR flow.google_2.har: MZZa6b nhận mảng reference slots [[null, id1], [null, id2]] ở index 1
-      const refSlots = ingredientMediaIds.map((id) => [null, id]);
+      const refSlots = isSingleFrame
+        ? [[null, startFrameMediaId]]
+        : ingredientMediaIds.map((id) => [null, id]);
+      const activeModelId = isSingleFrame ? (modelId.includes('_r2v_') ? modelId : `abra_r2v_${dur}s`) : modelId;
       createPayload = [
         [[
           [null, null, [[[flowRequest.prompt.trim()]]]],
           refSlots,
-          modelId,
+          activeModelId,
           aspectEnum,
           null,
           [null, null, null, null, requestUuidA, requestUuidB],
@@ -1453,11 +1465,11 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
         [sceneUuid, 2],
       ];
     } else if (isFrames) {
-      // Chuẩn Google Flow HAR: nprQif nhận slot start/end ở index 4 và index 5
+      // Chuẩn Google Flow HAR flow.google_1.har: nprQif nhận slot start/end ở index 4 và index 5 (dành cho chế độ 2 khung hình First & Last)
       // 9:16 portrait dùng crop box [null, 0.341796875, 1, 0.658203125], 16:9 dùng [null, 0, 1, 1]
       const cropCoords = aspectEnum === 1 ? [null, 0.341796875, 1, 0.658203125] : [null, 0, 1, 1];
-      const startSlot = startFrameMediaId ? [null, startFrameMediaId, null, null, null, cropCoords] : null;
-      const endSlot = endFrameMediaId ? [null, endFrameMediaId, null, null, null, cropCoords] : null;
+      startSlot = startFrameMediaId ? [null, startFrameMediaId, null, null, null, cropCoords] : null;
+      endSlot = endFrameMediaId ? [null, endFrameMediaId, null, null, null, cropCoords] : null;
       createPayload = [
         [[
           [null, null, [[[flowRequest.prompt.trim()]]]],
@@ -1489,8 +1501,75 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     try {
       created = findMediaAsset(await callRpc(rpcId, createPayload));
     } catch (rpcErr) {
-      // Fallback nếu Google Flow từ chối model ID cho text-to-video
-      if (modelId.includes('_i2v_') && !isFrames && !isIngredients) {
+      if (isSingleFrame) {
+        // Fallback thông minh cho MZZa6b nếu duration ban đầu gặp lỗi
+        const fallbackDurations = [10, 6, 4].filter((d) => `abra_r2v_${d}s` !== createPayload[0][0][2]);
+        let lastErr = rpcErr;
+        for (const fbDur of fallbackDurations) {
+          try {
+            console.log('[FlowPage] Thử lại MZZa6b cho 1 frame với duration:', fbDur);
+            createPayload[0][0][2] = `abra_r2v_${fbDur}s`;
+            const fbResp = await callRpc(rpcId, createPayload);
+            created = findMediaAsset(fbResp);
+            if (created) {
+              console.log('[FlowPage] Fallback MZZa6b thành công với duration:', fbDur);
+              modelId = `abra_r2v_${fbDur}s`;
+              break;
+            }
+          } catch (fbErr) {
+            lastErr = fbErr;
+          }
+        }
+        if (!created) throw lastErr;
+      } else if (isFrames) {
+        // Fallback thông minh cho nprQif (chế độ 2 khung hình: First & Last Frame)
+        const fallbackCandidates = [
+          { model: 'omni_flash_i2v_10s_first_last', end: endSlot, omitEnd: false },
+          { model: 'omni_flash_i2v_10s_first_last', end: null, omitEnd: true },
+          { model: 'omni_flash_i2v_10s_first', end: null, omitEnd: false },
+          { model: 'omni_flash_i2v_6s_first_last', end: endSlot, omitEnd: false },
+          { model: 'omni_flash_i2v_6s_first', end: null, omitEnd: false },
+        ];
+        let lastErr = rpcErr;
+        for (const cand of fallbackCandidates) {
+          if (cand.model === modelId && !cand.omitEnd) continue;
+          try {
+            console.log('[FlowPage] Thử lại nprQif với candidate:', cand);
+            if (cand.omitEnd) {
+              createPayload[0][0] = [
+                createPayload[0][0][0],
+                cand.model,
+                aspectEnum,
+                null,
+                startSlot,
+                [null, null, null, null, requestUuidA, requestUuidB],
+              ];
+            } else {
+              createPayload[0][0] = [
+                createPayload[0][0][0],
+                cand.model,
+                aspectEnum,
+                null,
+                startSlot,
+                cand.end,
+                [null, null, null, null, requestUuidA, requestUuidB],
+              ];
+            }
+            const fallbackResp = await callRpc(rpcId, createPayload);
+            created = findMediaAsset(fallbackResp);
+            if (created) {
+              console.log('[FlowPage] Fallback nprQif thành công với model:', cand.model);
+              modelId = cand.model;
+              break;
+            }
+          } catch (fbErr) {
+            lastErr = fbErr;
+          }
+        }
+        if (!created) {
+          throw lastErr;
+        }
+      } else if (modelId.includes('_i2v_') && !isFrames && !isIngredients) {
         const fallbackModelId = modelId.replace('_i2v_', '_t2v_');
         createPayload[0][0][1] = fallbackModelId;
         created = findMediaAsset(await callRpc(rpcId, createPayload));

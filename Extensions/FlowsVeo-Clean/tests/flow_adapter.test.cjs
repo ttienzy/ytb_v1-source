@@ -171,12 +171,52 @@ test('adapter uploads frames and dispatches nprQif with frame media asset slots'
   assert.equal(h.calls[1].rpcId, 'maseQ');
   assert.equal(h.calls[2].rpcId, 'nprQif');
   const createPayload = JSON.parse(h.calls[2].outer[0][0][1]);
-  assert.equal(createPayload[0][0][1], 'omni_flash_i2v_6s_first_last');
+  assert.equal(createPayload[0][0][1], 'omni_flash_i2v_10s_first_last');
   const startSlot = createPayload[0][0][4];
   const endSlot = createPayload[0][0][5];
   assert.deepEqual(startSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
   assert.deepEqual(endSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
   assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép hóa rồng');
+});
+
+test('adapter uploads only start frame and dispatches MZZa6b with abra_r2v_6s', async () => {
+  const h = harness();
+  const singleFrameReq = {
+    ...verifiedRequest(),
+    input_mode: 'frames',
+    prompt: 'cá chép bơi lội',
+    duration_seconds: 6,
+    image_base64: Buffer.from('FAKE_CARP_IMAGE').toString('base64'),
+    image_mime: 'image/png',
+    image_name: 'carp.png',
+    end_image_base64: null,
+  };
+  const result = await h.run(singleFrameReq);
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.length, 4); // 1 maseQ upload + 1 MZZa6b + 2 polling
+  assert.equal(h.calls[0].rpcId, 'maseQ');
+  assert.equal(h.calls[1].rpcId, 'MZZa6b');
+  const createPayload = JSON.parse(h.calls[1].outer[0][0][1]);
+  assert.equal(createPayload[0][0][2], 'abra_r2v_6s');
+  const refSlots = createPayload[0][0][1];
+  assert.deepEqual(refSlots, [[null, 'uploaded-frame-media-id']]);
+  assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép bơi lội');
+});
+
+test('adapter rejects frames request if only end frame is provided without start frame', async () => {
+  const h = harness();
+  const invalidReq = {
+    ...verifiedRequest(),
+    input_mode: 'frames',
+    prompt: 'cá chép bơi lội',
+    image_base64: null,
+    end_image_base64: Buffer.from('FAKE_DRAGON_IMAGE').toString('base64'),
+    end_image_mime: 'image/png',
+    end_image_name: 'dragon.png',
+  };
+  const result = await h.run(invalidReq);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Start Frame/);
 });
 
 test('adapter uploads ingredient images and dispatches MZZa6b with reference asset slots', async () => {

@@ -176,6 +176,10 @@ export function ImageToVideoTab({
 
   // ─── Slot Actions ───
   const triggerUpload = (target: SlotTarget) => {
+    if (target === 'end_frame' && !firstFrame) {
+      alert('⚠️ Vui lòng chọn Khung hình bắt đầu (Frame 1) trước khi tải Khung hình kết thúc.')
+      return
+    }
     setActiveSlotTarget(target)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -203,6 +207,10 @@ export function ImageToVideoTab({
   }
 
   const openLibraryPicker = async (target: SlotTarget) => {
+    if (target === 'end_frame' && !firstFrame) {
+      alert('⚠️ Vui lòng chọn Khung hình bắt đầu (Frame 1) trước khi chọn Khung hình kết thúc.')
+      return
+    }
     setActiveSlotTarget(target)
     setLibraryModalOpen(true)
     setLoadingLibrary(true)
@@ -232,19 +240,36 @@ export function ImageToVideoTab({
   }
 
   const applySlotImage = (target: SlotTarget, data: ImageSlotData) => {
-    if (target === 'first_frame') setFirstFrame(data)
-    else if (target === 'end_frame') setEndFrame(data)
-    else if (target === 'subject') setIngredientSlots((prev) => ({ ...prev, subject: data }))
-    else if (target === 'scene') setIngredientSlots((prev) => ({ ...prev, scene: data }))
-    else if (target === 'style') setIngredientSlots((prev) => ({ ...prev, style: data }))
+    if (target === 'first_frame') {
+      setFirstFrame(data)
+    } else if (target === 'end_frame') {
+      if (!firstFrame) {
+        alert('⚠️ Vui lòng chọn Khung hình bắt đầu (Frame 1) trước khi chọn Khung hình kết thúc.')
+        return
+      }
+      setEndFrame(data)
+    } else if (target === 'subject') {
+      setIngredientSlots((prev) => ({ ...prev, subject: data }))
+    } else if (target === 'scene') {
+      setIngredientSlots((prev) => ({ ...prev, scene: data }))
+    } else if (target === 'style') {
+      setIngredientSlots((prev) => ({ ...prev, style: data }))
+    }
   }
 
   const removeSlotImage = (target: SlotTarget) => {
-    if (target === 'first_frame') setFirstFrame(null)
-    else if (target === 'end_frame') setEndFrame(null)
-    else if (target === 'subject') setIngredientSlots((prev) => ({ ...prev, subject: null }))
-    else if (target === 'scene') setIngredientSlots((prev) => ({ ...prev, scene: null }))
-    else if (target === 'style') setIngredientSlots((prev) => ({ ...prev, style: null }))
+    if (target === 'first_frame') {
+      setFirstFrame(null)
+      setEndFrame(null) // Khung hình kết thúc phải luôn đi kèm khung hình bắt đầu
+    } else if (target === 'end_frame') {
+      setEndFrame(null)
+    } else if (target === 'subject') {
+      setIngredientSlots((prev) => ({ ...prev, subject: null }))
+    } else if (target === 'scene') {
+      setIngredientSlots((prev) => ({ ...prev, scene: null }))
+    } else if (target === 'style') {
+      setIngredientSlots((prev) => ({ ...prev, style: null }))
+    }
   }
 
   // ─── Active Background Video Tasks Queue ───
@@ -324,14 +349,14 @@ export function ImageToVideoTab({
     let effectiveInputMode: 'frames' | 'ingredients' | 'text_to_video' = inputMode
 
     if (inputMode === 'frames') {
-      if (firstFrame) {
-        imagePath = firstFrame.path
-        endImagePath = endFrame ? endFrame.path : null
-        baseModeLabel = endFrame ? 'Khung hình (Start → End)' : 'Khung hình (Start)'
-      } else {
-        effectiveInputMode = 'text_to_video'
-        baseModeLabel = 'Khung hình (chỉ Prompt)'
+      if (!firstFrame) {
+        alert('⚠️ Chế độ Khung hình yêu cầu tối thiểu Khung hình bắt đầu (Frame 1). Vui lòng chọn hoặc tải ảnh vào Frame 1.')
+        return
       }
+      imagePath = firstFrame.path
+      endImagePath = endFrame ? endFrame.path : null
+      baseModeLabel = endFrame ? 'Khung hình (Start → End)' : 'Khung hình (Start)'
+      effectiveInputMode = 'frames'
     } else {
       if (ingredientSlots.subject) ingredientPaths.push(ingredientSlots.subject.path)
       if (ingredientSlots.scene) ingredientPaths.push(ingredientSlots.scene.path)
@@ -568,19 +593,21 @@ export function ImageToVideoTab({
             </div>
 
             {/* Transition Arrow */}
-            <div className="veo-frames-connector">
+            <div className={`veo-frames-connector ${!firstFrame || !endFrame ? 'inactive' : 'active'}`}>
               <ArrowRight size={18} />
               <span>Nội suy</span>
             </div>
 
-            {/* Slot 2: End Frame (Tùy chọn) */}
-            <div className="veo-frame-slot-card">
+            {/* Slot 2: End Frame (Tùy chọn - Yêu cầu Frame 1) */}
+            <div className={`veo-frame-slot-card ${!firstFrame ? 'disabled' : ''}`}>
               <div className="veo-slot-header">
                 <div className="veo-slot-title">
-                  <span className="veo-slot-badge optional">Frame 2</span>
+                  <span className={`veo-slot-badge optional ${!firstFrame ? 'locked' : ''}`}>Frame 2</span>
                   <strong>Khung hình kết thúc</strong>
                 </div>
-                <span className="veo-slot-tag optional">Tùy chọn</span>
+                <span className={`veo-slot-tag ${firstFrame ? 'optional' : 'locked'}`}>
+                  {firstFrame ? 'Tùy chọn' : 'Cần Frame 1'}
+                </span>
               </div>
 
               {endFrame ? (
@@ -592,6 +619,7 @@ export function ImageToVideoTab({
                       className="veo-slot-action-btn"
                       onClick={() => openLibraryPicker('end_frame')}
                       title="Đổi ảnh khác"
+                      disabled={!firstFrame}
                     >
                       <FolderOpen size={13} />
                       Đổi ảnh
@@ -612,13 +640,19 @@ export function ImageToVideoTab({
                     <ImagePlus size={22} />
                   </div>
                   <span className="veo-slot-empty-title">
-                    {uploadingSlot === 'end_frame' ? 'Đang tải lên...' : 'Thêm khung hình kết thúc'}
+                    {!firstFrame
+                      ? 'Cần chọn Frame 1 trước'
+                      : uploadingSlot === 'end_frame'
+                        ? 'Đang tải lên...'
+                        : 'Thêm khung hình kết thúc'}
                   </span>
                   <div className="veo-slot-btn-group">
                     <button
                       type="button"
                       className="veo-slot-btn-upload"
                       onClick={() => triggerUpload('end_frame')}
+                      disabled={!firstFrame}
+                      title={!firstFrame ? 'Vui lòng chọn Khung hình bắt đầu (Frame 1) trước' : undefined}
                     >
                       <Upload size={12} />
                       <span>Tải từ máy</span>
@@ -627,6 +661,8 @@ export function ImageToVideoTab({
                       type="button"
                       className="veo-slot-btn-library"
                       onClick={() => openLibraryPicker('end_frame')}
+                      disabled={!firstFrame}
+                      title={!firstFrame ? 'Vui lòng chọn Khung hình bắt đầu (Frame 1) trước' : undefined}
                     >
                       <FolderOpen size={12} />
                       <span>Thư viện Veo</span>
@@ -1025,7 +1061,8 @@ export function ImageToVideoTab({
           !prompt.trim() ||
           !activeProject ||
           !selectedProfile ||
-          isSubmitting
+          isSubmitting ||
+          (inputMode === 'frames' && !firstFrame)
         }
       >
         <Sparkles size={16} />
@@ -1033,19 +1070,19 @@ export function ImageToVideoTab({
           ? 'Vui lòng chọn Project'
           : isSubmitting
             ? `Đang gửi ${variationCount} biến thể...`
-            : variationCount > 1
-              ? `Tạo ${variationCount} Biến Thể ${
-                  inputMode === 'frames'
-                    ? (firstFrame ? 'Khung Hình' : 'từ Prompt')
-                    : (ingredientCount > 0 ? `từ ${ingredientCount} Thành Phần` : 'từ Prompt')
-                } · ${(selectedProfile?.credit_cost ?? 0) * variationCount} credits`
-              : inputMode === 'frames'
-                ? (firstFrame
-                    ? `Tạo Video Khung Hình ${endFrame ? '(Start → End)' : '(Start)'} · ${selectedProfile?.credit_cost ?? '?'} credits`
-                    : `Tạo Video từ Prompt · ${selectedProfile?.credit_cost ?? '?'} credits`)
-                : (ingredientCount > 0
-                    ? `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`
-                    : `Tạo Video từ Prompt · ${selectedProfile?.credit_cost ?? '?'} credits`)}
+            : inputMode === 'frames' && !firstFrame
+              ? 'Vui lòng chọn Khung hình bắt đầu (Frame 1)'
+              : variationCount > 1
+                ? `Tạo ${variationCount} Biến Thể ${
+                    inputMode === 'frames'
+                      ? (endFrame ? 'Khung Hình (Start → End)' : 'Khung Hình (Start)')
+                      : (ingredientCount > 0 ? `từ ${ingredientCount} Thành Phần` : 'từ Prompt')
+                  } · ${(selectedProfile?.credit_cost ?? 0) * variationCount} credits`
+                : inputMode === 'frames'
+                  ? `Tạo Video Khung Hình ${endFrame ? '(Start → End)' : '(Start)'} · ${selectedProfile?.credit_cost ?? '?'} credits`
+                  : (ingredientCount > 0
+                      ? `Tạo Video từ ${ingredientCount} Thành Phần · ${selectedProfile?.credit_cost ?? '?'} credits`
+                      : `Tạo Video từ Prompt · ${selectedProfile?.credit_cost ?? '?'} credits`)}
       </button>
 
       {/* Active Tasks Queue */}

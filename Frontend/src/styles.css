@@ -17560,6 +17560,12 @@ input[type="checkbox"],
   font-size: 11px;
   font-weight: 700;
   padding: 8px 4px;
+  transition: all 0.2s ease;
+}
+
+.veo-frames-connector.inactive {
+  opacity: 0.35;
+  color: #94a3b8;
 }
 
 .veo-frame-slot-card {
@@ -17576,6 +17582,24 @@ input[type="checkbox"],
 .veo-frame-slot-card:hover {
   border-color: #cbd5e1;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.veo-frame-slot-card.disabled {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  opacity: 0.72;
+}
+
+.veo-frame-slot-card.disabled .veo-slot-empty-title {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.veo-frame-slot-card.disabled .veo-slot-btn-upload,
+.veo-frame-slot-card.disabled .veo-slot-btn-library {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .veo-slot-header {
@@ -17611,6 +17635,11 @@ input[type="checkbox"],
   color: #64748b;
 }
 
+.veo-slot-badge.optional.locked {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .veo-slot-tag {
   font-size: 10px;
   font-weight: 600;
@@ -17620,6 +17649,14 @@ input[type="checkbox"],
 .veo-slot-tag.optional {
   color: #94a3b8;
   font-weight: 500;
+}
+
+.veo-slot-tag.locked {
+  color: #d97706;
+  font-weight: 600;
+  background: #fffbeb;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .veo-slot-preview-box {

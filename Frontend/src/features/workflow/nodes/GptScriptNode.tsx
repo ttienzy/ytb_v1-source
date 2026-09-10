@@ -272,24 +272,47 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
         {/* 3. Configuration Bar */}
         <div style={{ marginBottom: 8, padding: '7px 8px', background: '#faf5ff', borderRadius: 6, border: '1px solid #f3e8ff' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.2fr 1fr', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
               Số kịch bản / clip
-              <input
-                type="number"
-                min={1}
-                max={10}
+              <select
                 value={requestedCount}
                 onChange={(event) => handleCountChange(Number(event.target.value) || 1)}
-                style={{ padding: '4px 7px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569' }}
-              />
+                style={{
+                  height: 28,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: 4,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  boxSizing: 'border-box',
+                }}
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+                  <option key={num} value={num}>
+                    {num} kịch bản
+                  </option>
+                ))}
+              </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
               Thể loại nội dung
               <select
                 value={contentMode}
                 onChange={(event) => data.onChangeScriptConfig?.({ contentMode: event.target.value as typeof contentMode })}
-                style={{ padding: '4px 7px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569' }}
+                style={{
+                  height: 28,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: 4,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  boxSizing: 'border-box',
+                }}
               >
                 {CONTENT_MODE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -301,7 +324,17 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
               <select
                 value={platform}
                 onChange={(event) => data.onChangeScriptConfig?.({ platform: event.target.value as typeof platform })}
-                style={{ padding: '4px 7px', fontSize: 10, fontWeight: 700, borderRadius: 4, border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569' }}
+                style={{
+                  height: 28,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: 4,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  boxSizing: 'border-box',
+                }}
               >
                 {PLATFORM_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>

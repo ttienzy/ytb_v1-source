@@ -622,6 +622,13 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
     if not active_proj:
         raise ValueError("Vui lòng tạo hoặc chọn một Project trước khi sử dụng Veo")
 
+    # Validate chế độ Khung hình (Frames) theo chuẩn Google Flow
+    if getattr(request.input_mode, "value", str(request.input_mode)) == "frames":
+        if request.end_image_path and not request.image_path:
+            raise ValueError("Chế độ Khung hình (Frames): Khung hình kết thúc (End Frame) yêu cầu phải có Khung hình bắt đầu (Start Frame).")
+        if not request.image_path and not request.end_image_path:
+            raise ValueError("Chế độ Khung hình (Frames): Vui lòng chọn ít nhất Khung hình bắt đầu (Start Frame).")
+
     job_id = str(uuid.uuid4())[:12]
     now = datetime.now(timezone.utc).isoformat()
 
@@ -777,9 +784,12 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
         if is_ingredients:
             return f"abra_r2v_{dur_mapped}s"
         if is_frames:
+            has_start = bool(job.get("image_path"))
             has_end = bool(job.get("end_image_path"))
-            suffix = "first_last" if has_end else "first"
-            return f"omni_flash_i2v_{dur_mapped}s_{suffix}"
+            if has_start and has_end:
+                return "omni_flash_i2v_10s_first_last"
+            dur_mapped = dur if dur in (4, 6, 8, 10) else 6
+            return f"abra_r2v_{dur_mapped}s"
         return f"abra_t2v_{dur_mapped}s"
 
     if "quality" in model_name:
@@ -823,9 +833,15 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     if mode == "ingredients" and not ingredient_data_list:
         mode = "text_to_video"
         provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
-    elif mode == "frames" and not start_frame_data and not end_frame_data:
-        mode = "text_to_video"
-        provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
+    elif mode == "frames":
+        if not start_frame_data and not end_frame_data:
+            mode = "text_to_video"
+            provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
+        elif not start_frame_data and end_frame_data:
+            logger.warning("Job %s: Chế độ frames có end_frame nhưng thiếu start_frame; vô hiệu hóa end_frame để fallback an toàn", job.get("job_id"))
+            end_frame_data = None
+            mode = "text_to_video"
+            provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
 
     logger.info(
         "Chuẩn bị Flow request cho job %s: mode=%s, model=%s, provider_model_id=%s, duration=%ds, aspect=%s, has_start_frame=%s, has_end_frame=%s, num_ingredients=%d",
