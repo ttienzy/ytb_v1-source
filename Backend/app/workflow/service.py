@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import subprocess
 
 import uuid
 
@@ -39,6 +40,8 @@ from app.workflow.schemas import (
     GptScriptResponse,
     WorkflowAssetUploadResponse,
     WorkflowExportResponse,
+    WorkflowVoiceoverItem,
+    WorkflowVoiceoverResponse,
 )
 
 logger = logging.getLogger("workflow.service")
@@ -126,12 +129,66 @@ def _extract_answer_text(raw: str) -> str | None:
     return max(texts, key=len) if texts else None
 
 
+def execute_9router_vision_analysis(
+    prompt: str,
+    images: list[str],
+    model: str | None = None,
+) -> str:
+    """Sử dụng 9Router (OpenAI-compatible Vision endpoint) để phân tích ảnh sản phẩm bằng AI Vision."""
+    cfg = read_config().get("chatgpt_9router", {})
+    endpoint = cfg.get("endpoint", "http://localhost:20128/v1")
+    api_key = cfg.get("api_key", "").strip() or get_local_cli_secret()
+    target_model = model or cfg.get("default_model", "cx/gpt-5.5")
+
+    if "20128" in endpoint and not is_9router_running(20128):
+        logger.info("[Workflow] 9Router chưa chạy, tiến hành khởi động trên port 20128...")
+        ensure_9router_running(20128)
+
+    valid_images = []
+    for img in images:
+        if not img or not img.strip():
+            continue
+        s = img.strip()
+        if s.startswith("data:") or s.startswith("http://") or s.startswith("https://"):
+            valid_images.append(s)
+        else:
+            # File path cục bộ: Đọc và chuyển sang Data URL base64
+            p = Path(s)
+            if p.exists() and p.is_file():
+                ext = p.suffix.lower().lstrip(".") or "jpeg"
+                if ext == "jpg":
+                    ext = "jpeg"
+                b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+                valid_images.append(f"data:image/{ext};base64,{b64}")
+            else:
+                valid_images.append(s)
+
+    res = chat_completion(
+        endpoint=endpoint,
+        api_key=api_key,
+        model=target_model,
+        prompt=prompt,
+        images=valid_images,
+        timeout=75.0,
+    )
+    if not res.get("ok"):
+        raise RuntimeError(f"Lỗi khi gọi 9Router Vision: {res.get('error', 'Không xác định')}")
+    content = res.get("content", "").strip()
+    if not content:
+        raise RuntimeError("9Router Vision không trả về nội dung phân tích.")
+    return content
+
+
 def execute_gemini_analysis(
     prompt: str,
     images: list[str],
     allow_refresh: bool = True,
-) -> str:
-    """Gọi trực tiếp Google Gemini Web để phân tích hình ảnh và trả về kết quả text Markdown."""
+    fallback_to_9router: bool = False,
+) -> tuple[str, str]:
+    """Gọi Google Gemini Web để phân tích hình ảnh, hỗ trợ auto-refresh siêu tốc và fallback 9Router.
+
+    Trả về tuple: (raw_markdown_text, provider_used)
+    """
     cfg = _gemini_config()
     cookies, ua, inner_template = cfg["cookies"], cfg["user_agent"], cfg["inner_template"]
 
@@ -141,9 +198,16 @@ def execute_gemini_analysis(
             at_val, bl_val, fsid_val = _fresh_tokens(client, cookies, ua)
         except Exception as exc:
             if allow_refresh:
-                logger.warning(f"[Gemini Workflow] Token hết hạn: {exc}. Đang tự động làm mới qua Chrome profile...")
-                _auto_refresh_cookies()
-                return execute_gemini_analysis(prompt, images, allow_refresh=False)
+                logger.warning(f"[Gemini Workflow] Token hết hạn: {exc}. Đang tự động làm mới ngầm siêu tốc qua Chrome...")
+                try:
+                    _auto_refresh_cookies()
+                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_9router=fallback_to_9router)
+                except Exception as refresh_err:
+                    logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
+            if fallback_to_9router:
+                logger.info("[Gemini Workflow] Chuyển hướng phân tích qua 9Router Vision AI...")
+                text = execute_9router_vision_analysis(prompt, images)
+                return text, "9router"
             raise
 
         # Upload ảnh
@@ -193,19 +257,30 @@ def execute_gemini_analysis(
 
         if resp.status_code != 200 or '"er"' in resp.text[:200]:
             if allow_refresh and (resp.status_code in (401, 403) or "unauthenticated" in resp.text.lower()):
-                logger.warning("[Gemini Workflow] Session hết hạn trong lúc gọi StreamGenerate. Refresh cookie...")
-                _auto_refresh_cookies()
-                return execute_gemini_analysis(prompt, images, allow_refresh=False)
+                logger.warning("[Gemini Workflow] Session hết hạn trong lúc gọi StreamGenerate. Tự động làm mới cookie...")
+                try:
+                    _auto_refresh_cookies()
+                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_9router=fallback_to_9router)
+                except Exception as refresh_err:
+                    logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
+            if fallback_to_9router:
+                logger.info("[Gemini Workflow] Gemini StreamGenerate lỗi, chuyển hướng sang 9Router Vision...")
+                text = execute_9router_vision_analysis(prompt, images)
+                return text, "9router"
             raise RuntimeError(f"Gemini Web API error: HTTP {resp.status_code} — {resp.text[:300]}")
 
         answer = _extract_answer_text(resp.text)
         if not answer:
+            if fallback_to_9router:
+                logger.info("[Gemini Workflow] Không trích xuất được text Gemini, chuyển sang 9Router...")
+                text = execute_9router_vision_analysis(prompt, images)
+                return text, "9router"
             raise RuntimeError("Không thể trích xuất nội dung trả lời từ luồng phản hồi của Gemini.")
 
-        return answer
+        return answer, "gemini"
 
 
-def parse_analysis_to_structured(raw_text: str) -> GeminiAnalysisResponse:
+def parse_analysis_to_structured(raw_text: str, provider_used: str = "gemini") -> GeminiAnalysisResponse:
     """Tách câu trả lời text Markdown của Gemini thành các trường có cấu trúc."""
     # Làm sạch citation tags [cite: 1] nếu có
     cleaned = re.sub(r"\[cite:\s*[\d,\s]+\]", "", raw_text).strip()
@@ -311,6 +386,7 @@ def parse_analysis_to_structured(raw_text: str) -> GeminiAnalysisResponse:
             "Góc nghiêng 45 độ làm nổi bật logo & thành phần",
             "Cảnh tương tác thực tế / sử dụng trên tay nhân vật",
         ],
+        provider_used=provider_used,
     )
 
 
@@ -343,10 +419,10 @@ def calculate_voiceover_word_range(
     min_words: int | None = None,
     max_words: int | None = None,
 ) -> tuple[int, int]:
-    """Tính ngân sách lời thoại theo nhịp nhanh 2-3 từ/giây, cho phép cấu hình ghi đè."""
+    """Tính ngân sách lời thoại theo nhịp bán hàng chuẩn 2.0-2.4 từ/giây."""
     duration = max(1, round(float(clip_duration_seconds)))
-    resolved_min = int(min_words) if min_words is not None else max(1, round(duration * 2))
-    resolved_max = int(max_words) if max_words is not None else max(1, round(duration * 3))
+    resolved_min = int(min_words) if min_words is not None else max(1, round(duration * 2.0))
+    resolved_max = int(max_words) if max_words is not None else max(resolved_min, round(duration * 2.4))
     if resolved_min > resolved_max:
         raise ValueError("min_words không được lớn hơn max_words")
     return resolved_min, resolved_max
@@ -395,6 +471,15 @@ def format_product_data_from_structured(
         if asset_notes:
             parts.append("Tài nguyên hình ảnh đính kèm: " + ", ".join(asset_notes))
 
+    # Character & Scene Profile (English) cho bilingual prompt
+    if script_config:
+        char_profile = script_config.get("character_profile", "") or ""
+        scene_profile_text = script_config.get("scene_profile", "") or ""
+        if char_profile.strip():
+            parts.append(f"Character Profile (English — inject into visual_direction):\n{char_profile.strip()}")
+        if scene_profile_text.strip():
+            parts.append(f"Scene / Environment Profile (English — inject into visual_direction):\n{scene_profile_text.strip()}")
+
     target_count = None
     if script_config and script_config.get("count"):
         target_count = script_config.get("count")
@@ -402,13 +487,15 @@ def format_product_data_from_structured(
         target_count = scene_config.get("count")
 
     if target_count:
-        parts.append(f"Yêu cầu kịch bản: Tạo đúng {target_count} kịch bản độc lập.")
+        story_mode = (script_config or {}).get("story_mode", "sequential")
+        mode_label = "liên hoàn theo phễu bán hàng" if story_mode == "sequential" else "độc lập"
+        parts.append(f"Yêu cầu kịch bản: Tạo đúng {target_count} phân cảnh {mode_label}.")
 
     if script_config:
         clip_duration = script_config.get("clip_duration_seconds")
         if clip_duration:
             parts.append(
-                f"Đầu ra Google Flow: Mỗi kịch bản tạo một clip độc lập dài {clip_duration} giây."
+                f"Đầu ra Google Flow: Mỗi phân cảnh tạo một clip dài {clip_duration} giây."
             )
 
     return "\n\n".join(parts) if parts else "Chưa có văn bản mô tả, hãy quan sát kỹ ảnh sản phẩm đính kèm để trích xuất USP."
@@ -481,13 +568,25 @@ def execute_gpt_script_generation(
         filled_prompt = f"{filled_prompt}\n\n[Dữ liệu sản phẩm]:\n{data_str}"
 
     # Các bất biến của pipeline nằm ở system prompt để prompt người dùng vẫn tùy biến được.
+    story_mode = (script_config or {}).get("story_mode", "sequential") if script_config else "sequential"
+    if story_mode == "sequential":
+        mode_instruction = (
+            f"Tạo chính xác {target_count} phân cảnh liên hoàn theo phễu bán hàng video ngắn TikTok: "
+            f"Hook → Reveal → Demo → CTA. Tất cả phân cảnh tạo thành 1 cốt truyện duy nhất xuyên suốt. "
+            f"CHỈ đặt CTA ở phân cảnh cuối cùng, các phân cảnh trước KHÔNG có CTA. "
+        )
+    else:
+        mode_instruction = f"Tạo chính xác {target_count} kịch bản độc lập, mỗi kịch bản có CTA riêng. "
+
     system_instruction = (
-        f"Tạo chính xác {target_count} kịch bản độc lập. "
-        f"Mỗi kịch bản tương ứng với đúng một clip Google Flow dài {clip_duration_seconds} giây, "
-        f"không tự chia thành nhiều cảnh. Lời thoại mỗi kịch bản từ {min_words} đến {max_words} từ. "
-        "Mỗi mục phải có tiêu đề, góc tiếp cận, hook, gợi ý hình ảnh cho một clip liền mạch, "
-        "lời thoại, chữ trên màn hình và CTA. Voiceover là toàn bộ lời đọc theo đúng thứ tự, "
-        "từ hook đến CTA; hook và CTA chỉ là metadata tách lại từ voiceover. "
+        f"{mode_instruction}"
+        f"Mỗi phân cảnh tương ứng với đúng một clip Google Flow dài {clip_duration_seconds} giây. "
+        f"Lời thoại mỗi phân cảnh từ {min_words} đến {max_words} từ tiếng Việt. "
+        "QUY TẮC NGÔN NGỮ BẮT BUỘC: "
+        "1) visual_direction PHẢI viết 100% TIẾNG ANH dùng thuật ngữ điện ảnh (camera motion, lighting, character action). "
+        "2) voiceover PHẢI viết 100% TIẾNG VIỆT nhịp nhanh bắt tai. "
+        "3) Nếu có Character Profile, bắt buộc lồng mô tả nhân vật vào visual_direction bằng tiếng Anh. "
+        "4) Cuối visual_direction bắt buộc có dòng: 'The narrator speaks naturally in Vietnamese: \"[trích voiceover]\"'. "
         "Chỉ sử dụng dữ liệu đầu vào; không tự tạo claim. "
         "Chỉ trả về JSON object hợp lệ theo dạng {\"scripts\": [...]}, không dùng Markdown."
     )
@@ -552,6 +651,7 @@ def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptI
                 for idx, item in enumerate(raw_items):
                     if not isinstance(item, dict):
                         continue
+                    phase = item.get("phase") or None
                     angle = item.get("angle") or ""
                     title = item.get("title") or ""
                     voiceover = item.get("voiceover") or item.get("voice_over")
@@ -566,6 +666,7 @@ def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptI
 
                     scripts.append(
                         GptScriptItem(
+                            phase=phase,
                             angle=angle,
                             title=title,
                             content=content,
@@ -689,21 +790,28 @@ def validate_gpt_scripts(
         errors.append(f"Cần đúng {expected_count} kịch bản, nhận được {len(scripts)}")
 
     seen_angles: set[str] = set()
-    required_fields = (
+    # CTA chỉ bắt buộc ở phân cảnh cuối (sequential mode)
+    base_required_fields = (
         ("angle", "góc tiếp cận"),
         ("title", "tiêu đề"),
         ("hook", "hook"),
         ("visual_direction", "gợi ý hình ảnh"),
         ("voiceover", "lời thoại"),
         ("on_screen_text", "chữ trên màn hình"),
-        ("cta", "CTA"),
     )
 
     for index, script in enumerate(scripts, start=1):
-        for field_name, label in required_fields:
+        for field_name, label in base_required_fields:
             value = getattr(script, field_name, None)
             if not isinstance(value, str) or not value.strip():
                 errors.append(f"Kịch bản {index} thiếu {label}")
+
+        # CTA chỉ bắt buộc ở phân cảnh cuối cùng
+        is_last = (index == expected_count)
+        if is_last:
+            cta_val = getattr(script, "cta", None)
+            if not isinstance(cta_val, str) or not cta_val.strip():
+                errors.append(f"Kịch bản {index} (phân cảnh cuối) thiếu CTA")
 
         voiceover = (script.voiceover or script.content or "").strip()
         word_count = len(voiceover.split())
@@ -820,10 +928,106 @@ def get_workflow_asset_path(asset_id: str) -> Path | None:
     return None
 
 
+def sync_voiceover_to_scenes(
+    scene_video_paths: list[Path],
+    voiceover_audio_path: Path,
+    work_dir: Path,
+) -> Path:
+    """Đồng bộ thời lượng voiceover cho khớp từng phân cảnh video (Per-scene time sync):
+
+    1. Tìm các file vo_i.wav riêng lẻ trong cùng thư mục của voiceover_audio_path (nếu được sinh từ batch).
+    2. Với mỗi phân cảnh i:
+       - Đo thời lượng video clip T_i (ffprobe_duration)
+       - Đo thời lượng audio clip D_i (ffprobe_duration)
+       - Nếu D_i > T_i: tăng tốc bằng FFmpeg filter atempo=(D_i / T_i) (cap 1.30x) để vừa khít T_i.
+       - Nếu D_i <= T_i: giữ nguyên tốc độ tự nhiên, đệm khoảng lặng apad để đạt đủ T_i.
+    3. Ghép nối các đoạn synced_vo_i.wav thành synced_combined.wav có tổng thời lượng = sum(T_i).
+    4. Nếu không tìm thấy các file riêng lẻ: co giãn toàn bộ file theo tổng thời lượng video.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    parent_dir = voiceover_audio_path.parent
+
+    vo_item_paths: list[Path] = []
+    for i in range(len(scene_video_paths)):
+        cand = parent_dir / f"vo_{i}.wav"
+        if cand.exists() and cand.is_file():
+            vo_item_paths.append(cand)
+        else:
+            break
+
+    if len(vo_item_paths) == len(scene_video_paths) and len(vo_item_paths) > 0:
+        logger.info(f"[AudioSync] Bắt đầu đồng bộ riêng biệt {len(vo_item_paths)} phân cảnh voiceover theo từng clip video...")
+        synced_segment_paths: list[Path] = []
+        for i, (v_path, a_path) in enumerate(zip(scene_video_paths, vo_item_paths)):
+            t_vid = max(1.0, ffprobe_duration(v_path))
+            t_aud = max(0.1, ffprobe_duration(a_path))
+            out_synced = work_dir / f"synced_vo_{i}.wav"
+            out_synced.unlink(missing_ok=True)
+
+            if t_aud > t_vid:
+                factor = min(1.30, t_aud / t_vid)
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(a_path),
+                    "-filter:a", f"atempo={factor:.4f}",
+                    "-t", f"{t_vid:.3f}",
+                    str(out_synced),
+                ]
+            else:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(a_path),
+                    "-af", "apad",
+                    "-t", f"{t_vid:.3f}",
+                    str(out_synced),
+                ]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if res.returncode == 0 and out_synced.exists() and out_synced.stat().st_size > 0:
+                synced_segment_paths.append(out_synced)
+            else:
+                logger.warning(f"[AudioSync] Không thể sync clip {i}, dùng bản audio gốc: {res.stderr}")
+                synced_segment_paths.append(a_path)
+
+        synced_combined = work_dir / "synced_combined_vo.wav"
+        synced_combined.unlink(missing_ok=True)
+        try:
+            concat_segments(synced_segment_paths, synced_combined, work_dir / "concat_temp")
+            if synced_combined.exists() and synced_combined.stat().st_size > 0:
+                logger.info(f"[AudioSync] Đồng bộ thành công {len(synced_segment_paths)} phân cảnh vào {synced_combined.name}")
+                return synced_combined
+        except Exception as err:
+            logger.warning(f"[AudioSync] Lỗi khi ghép chuỗi synced segments: {err}")
+
+    # Fallback nếu chỉ có 1 file audio tổng duy nhất:
+    total_vid_dur = sum(max(1.0, ffprobe_duration(p)) for p in scene_video_paths)
+    total_aud_dur = max(0.1, ffprobe_duration(voiceover_audio_path))
+    if total_aud_dur > total_vid_dur:
+        factor = min(1.30, total_aud_dur / total_vid_dur)
+        fallback_synced = work_dir / "fallback_synced_vo.wav"
+        fallback_synced.unlink(missing_ok=True)
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(voiceover_audio_path),
+            "-filter:a", f"atempo={factor:.4f}",
+            "-t", f"{total_vid_dur:.3f}",
+            str(fallback_synced),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if res.returncode == 0 and fallback_synced.exists():
+            return fallback_synced
+
+    return voiceover_audio_path
+
+
 def concat_workflow_scenes(
     scene_video_paths: list[str],
     bgm_path: str | None = None,
     output_filename: str | None = None,
+    voiceover_audio_path: str | None = None,
+    mix_original_audio: bool = False,
+    bgm_track_ids: list[str] | None = None,
+    bgm_volume: float = 0.10,
+    veo_ambient_volume: float = 0.0,
 ) -> WorkflowExportResponse:
     """Ghép nối danh sách file video từng phân cảnh bằng FFmpeg concat_segments."""
     WORKFLOW_EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -912,6 +1116,115 @@ def concat_workflow_scenes(
     out_file.unlink(missing_ok=True)
 
     final_path = concat_segments(valid_paths, out_file, work_dir)
+
+    def _has_audio_stream_local(p: Path) -> bool:
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", str(p)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+            )
+            return bool((probe.stdout or "").strip())
+        except Exception:
+            return False
+
+    # 1. Trộn Voiceover đồng bộ theo phân cảnh (loại bỏ hoàn toàn âm thanh gốc Veo)
+    if voiceover_audio_path:
+        vo_p: Path | None = None
+        vo_str = voiceover_audio_path.strip()
+        vo_match = re.search(r"/api/workflow/voiceovers/([^/]+)/([^/?#]+)", vo_str)
+        if vo_match:
+            job_sub, fn = vo_match.groups()
+            cand_vo = VOICEOVER_DIR / job_sub / fn
+            if cand_vo.exists():
+                vo_p = cand_vo
+        if vo_p is None:
+            cand_vo = Path(vo_str)
+            if cand_vo.exists() and cand_vo.is_file():
+                vo_p = cand_vo
+
+        if vo_p and vo_p.exists():
+            mixed_output = WORKFLOW_EXPORTS_DIR / f"mixed_{safe_name}"
+            try:
+                # Đồng bộ thời lượng voiceover cho từng clip (tránh tràn âm sang cảnh khác)
+                synced_vo = sync_voiceover_to_scenes(valid_paths, vo_p, work_dir)
+
+                # Thay thế hoàn toàn âm thanh: chỉ lấy video từ 0:v và audio đồng bộ từ synced_vo (1:a)
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(final_path),
+                    "-i", str(synced_vo),
+                    "-map", "0:v",
+                    "-map", "1:a",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-shortest",
+                    str(mixed_output),
+                ]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+                if res.returncode == 0 and mixed_output.exists():
+                    final_path.unlink(missing_ok=True)
+                    mixed_output.rename(final_path)
+            except Exception as vo_err:
+                logger.warning(f"[Export] Lỗi khi đồng bộ/trộn voiceover: {vo_err}")
+
+    # 2. Trộn BGM (Polish pass) nếu có cấu hình nhạc nền
+    resolved_bgm_paths: list[Path] = []
+    if bgm_track_ids:
+        try:
+            from app.db import SessionLocal
+            from app.media.service import resolve_for_polish
+            with SessionLocal() as db:
+                b_paths, _ = resolve_for_polish(db, bgm_track_ids)
+                resolved_bgm_paths.extend(b_paths)
+        except Exception as e:
+            logger.warning(f"[Export] Lỗi resolve BGM track IDs {bgm_track_ids}: {e}")
+    elif bgm_path:
+        cand_bgm = Path(bgm_path)
+        if cand_bgm.exists() and cand_bgm.is_file():
+            resolved_bgm_paths.append(cand_bgm)
+        else:
+            test_bgm = DATA_DIR / "media" / "bgm" / cand_bgm.name
+            if test_bgm.exists() and test_bgm.is_file():
+                resolved_bgm_paths.append(test_bgm)
+
+    if resolved_bgm_paths:
+        polished_output = WORKFLOW_EXPORTS_DIR / f"polished_{safe_name}"
+        polished_output.unlink(missing_ok=True)
+        try:
+            if _has_audio_stream_local(final_path):
+                from app.recap.ffmpeg import polish_final
+                polish_final(
+                    src=final_path,
+                    out=polished_output,
+                    bgm_paths=resolved_bgm_paths,
+                    volume=bgm_volume,
+                    work_dir=work_dir,
+                )
+            else:
+                # Video không có audio stream -> add trực tiếp BGM stream
+                bgm_input = resolved_bgm_paths[0]
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(final_path),
+                    "-stream_loop", "-1", "-i", str(bgm_input),
+                    "-filter_complex", f"[1:a]volume={bgm_volume:.3f}[aout]",
+                    "-map", "0:v", "-map", "[aout]",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                    "-shortest",
+                    str(polished_output),
+                ]
+                subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+            if polished_output.exists() and polished_output.stat().st_size > 0:
+                final_path.unlink(missing_ok=True)
+                polished_output.rename(final_path)
+        except Exception as bgm_err:
+            logger.warning(f"[Export] Lỗi khi hòa âm BGM (polish_final): {bgm_err}")
+
     duration = 0.0
     try:
         duration = ffprobe_duration(final_path)
@@ -941,6 +1254,80 @@ def concat_workflow_scenes(
         duration_sec=duration,
         status="done",
     )
+
+
+def extract_character_scene_profiles(
+    model_image: str | None = None,
+    scene_image: str | None = None,
+    model: str | None = None,
+) -> tuple[str, str]:
+    """
+    Trích xuất Canonical Character Profile và Scene Profile bằng tiếng Anh chuẩn cho Veo
+    từ ảnh người mẫu và ảnh bối cảnh được tải lên.
+    """
+    cfg = read_config()
+    chatgpt_cfg = cfg.get("chatgpt", {})
+    endpoint = chatgpt_cfg.get("endpoint", "http://localhost:20128/v1")
+    api_key = chatgpt_cfg.get("api_key", "")
+    if not api_key:
+        api_key = get_local_cli_secret()
+
+    target_model = model or chatgpt_cfg.get("model", "cx/gpt-5.5")
+    char_profile = ""
+    scene_profile = ""
+
+    # 1. Trích xuất Character Profile
+    if model_image and model_image.strip():
+        char_prompt = (
+            "You are an expert Hollywood casting director and AI prompt engineer for video generators (Google Veo, Sora). "
+            "Analyze the person/model in this image. Produce a concise, highly detailed Canonical Character Profile in English (1-2 sentences). "
+            "Specify: apparent age, gender/ethnicity, hair style & color, facial expression, clothing style, colors, accessories, and overall vibe. "
+            "Focus ONLY on the person. Do NOT describe the background, camera equipment, or photo quality. "
+            "Output ONLY the descriptive profile text without preface or quotes."
+        )
+        try:
+            res_char = chat_completion(
+                endpoint=endpoint,
+                api_key=api_key,
+                model=target_model,
+                prompt=char_prompt,
+                images=[model_image.strip()],
+                timeout=45.0,
+            )
+            if res_char.get("ok"):
+                char_profile = res_char.get("content", "").strip().strip('"')
+            else:
+                logger.warning(f"Lỗi khi trích xuất character profile: {res_char.get('error')}")
+        except Exception as e:
+            logger.warning(f"Ngoại lệ khi trích xuất character profile: {e}")
+
+    # 2. Trích xuất Scene Profile
+    if scene_image and scene_image.strip():
+        scene_prompt = (
+            "You are an expert cinematographer and set designer for high-end commercials. "
+            "Analyze the environment/background in this image. Produce a concise, highly detailed Canonical Scene/Environment Profile in English (1-2 sentences). "
+            "Specify: interior/exterior setting, architectural style, specific decor elements, lighting style (e.g. soft natural morning sunlight, warm studio backlight), color palette, and atmosphere. "
+            "Focus ONLY on the setting and environment. Do NOT describe any people. "
+            "Output ONLY the descriptive profile text without preface or quotes."
+        )
+        try:
+            res_scene = chat_completion(
+                endpoint=endpoint,
+                api_key=api_key,
+                model=target_model,
+                prompt=scene_prompt,
+                images=[scene_image.strip()],
+                timeout=45.0,
+            )
+            if res_scene.get("ok"):
+                scene_profile = res_scene.get("content", "").strip().strip('"')
+            else:
+                logger.warning(f"Lỗi khi trích xuất scene profile: {res_scene.get('error')}")
+        except Exception as e:
+            logger.warning(f"Ngoại lệ khi trích xuất scene profile: {e}")
+
+    return char_profile, scene_profile
+
 
 
 EXPORTS_METADATA_FILE = WORKFLOW_EXPORTS_DIR / "exports_history.json"
@@ -1095,7 +1482,7 @@ def delete_exported_video(filename: str) -> bool:
                 logger.error(f"Lỗi khi xóa clip Veo {target_veo}: {e}")
                 raise
 
-    return False
+        return False
 
 
 def open_export_folder_in_explorer(filename: str) -> bool:
@@ -1130,4 +1517,100 @@ def open_export_folder_in_explorer(filename: str) -> bool:
         return False
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# VieNeu-TTS Voiceover Generation
+# ─────────────────────────────────────────────────────────────────────────────
+
+VOICEOVER_DIR = DATA_DIR / "workflow_voiceovers"
+
+
+async def generate_voiceover_batch(
+    voice_id: str,
+    scripts: list[str],
+    combine_all: bool = True,
+) -> WorkflowVoiceoverResponse:
+    """Sinh voiceover cho danh sách lời thoại từ VieNeu-TTS (port 8001).
+
+    Nếu combine_all=True, ghép toàn bộ audio thành 1 file liền mạch bằng FFmpeg.
+    Trả WorkflowVoiceoverResponse với items[] cho từng phân cảnh và combined audio.
+    """
+    import zipfile
+    import io
+    from app.voices import voice_client
+
+    VOICEOVER_DIR.mkdir(parents=True, exist_ok=True)
+    job_id = uuid.uuid4().hex[:8]
+    job_dir = VOICEOVER_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    items_payload = [{"text": text} for text in scripts]
+
+    # Gọi VieNeu-TTS /tts/batch → zip chứa vo_0.wav, vo_1.wav, ..., manifest.json
+    zip_bytes = await voice_client.tts_batch(items_payload, voice_id)
+
+    # Giải nén zip
+    result_items: list[WorkflowVoiceoverItem] = []
+    wav_paths: list[Path] = []
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        manifest = {}
+        if "manifest.json" in zf.namelist():
+            manifest = json.loads(zf.read("manifest.json"))
+
+        manifest_items = manifest.get("items", [])
+
+        for i, text in enumerate(scripts):
+            wav_name = f"vo_{i}.wav"
+            if wav_name not in zf.namelist():
+                logger.warning(f"[VO] Không tìm thấy {wav_name} trong zip TTS batch")
+                continue
+
+            wav_data = zf.read(wav_name)
+            wav_path = job_dir / wav_name
+            wav_path.write_bytes(wav_data)
+            wav_paths.append(wav_path)
+
+            # Duration từ manifest hoặc ffprobe
+            dur = 0.0
+            if i < len(manifest_items):
+                dur = float(manifest_items[i].get("duration_sec", 0.0))
+            if dur == 0.0:
+                try:
+                    dur = ffprobe_duration(wav_path)
+                except Exception:
+                    pass
+
+            result_items.append(WorkflowVoiceoverItem(
+                index=i,
+                text=text,
+                audio_url=f"/api/workflow/voiceovers/{job_id}/{wav_name}",
+                file_path=str(wav_path.resolve()),
+                duration_sec=dur,
+            ))
+
+    total_dur = sum(item.duration_sec for item in result_items)
+
+    combined_url = None
+    combined_path = None
+
+    if combine_all and len(wav_paths) > 1:
+        combined_file = job_dir / "combined.wav"
+        try:
+            concat_segments(wav_paths, combined_file, job_dir / "temp_concat")
+            combined_url = f"/api/workflow/voiceovers/{job_id}/combined.wav"
+            combined_path = str(combined_file.resolve())
+            total_dur = ffprobe_duration(combined_file) or total_dur
+        except Exception as e:
+            logger.warning(f"[VO] Không thể ghép audio: {e}")
+    elif len(wav_paths) == 1:
+        combined_url = result_items[0].audio_url
+        combined_path = result_items[0].file_path
+
+    return WorkflowVoiceoverResponse(
+        voice_id=voice_id,
+        items=result_items,
+        combined_audio_url=combined_url,
+        combined_file_path=combined_path,
+        total_duration_sec=total_dur,
+    )
 

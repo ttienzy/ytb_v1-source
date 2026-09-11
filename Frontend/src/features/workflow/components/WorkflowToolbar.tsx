@@ -122,7 +122,7 @@ export function WorkflowToolbar({
           type="button"
           className={`wf-btn ${isRunning ? 'wf-btn-accent' : 'wf-btn-primary'}`}
           onClick={onSimulateRun}
-          title="Chạy quy trình bắt đầu từ Node chính (Gemini 2.5)"
+          title={`Chạy quy trình bắt đầu từ Node chính (${startNodeTitle})`}
           style={{
             boxShadow: '0 2px 10px rgba(16, 185, 129, 0.35)',
             background: isRunning
@@ -134,12 +134,12 @@ export function WorkflowToolbar({
           {isRunning ? (
             <>
               <Sparkles size={14} className="animate-spin" />
-              Đang chạy từ Gemini...
+              Đang chạy từ {startNodeTitle}...
             </>
           ) : (
             <>
               <Zap size={14} />
-              ⚡ Chạy Từ Node Chính (Gemini)
+              ⚡ Chạy Từ Node Chính ({startNodeTitle})
             </>
           )}
         </button>

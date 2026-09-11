@@ -11,6 +11,8 @@ import {
   RotateCcw,
   Camera,
   FileText,
+  Mic,
+  Film,
 } from 'lucide-react'
 import type { GptScriptNodeData } from '../types'
 import { estimateVoiceoverWordRange, normalizeClipDuration } from '../services/buildScenePlan'
@@ -31,6 +33,23 @@ const PLATFORM_OPTIONS = [
   { value: 'reels', label: 'Reels' },
   { value: 'shorts', label: 'Shorts' },
 ] as const
+
+function getPhaseStyle(phase?: string) {
+  const p = (phase || '').toLowerCase()
+  if (p.includes('hook')) {
+    return { bg: '#ffe4e6', color: '#be123c', border: '#fecdd3' }
+  }
+  if (p.includes('reveal')) {
+    return { bg: '#fef3c7', color: '#b45309', border: '#fde68a' }
+  }
+  if (p.includes('demo')) {
+    return { bg: '#e0e7ff', color: '#3730a3', border: '#c7d2fe' }
+  }
+  if (p.includes('cta')) {
+    return { bg: '#d1fae5', color: '#065f46', border: '#a7f3d0' }
+  }
+  return { bg: '#f3e8ff', color: '#6b21a8', border: '#e9d5ff' }
+}
 
 interface GptScriptNodeProps {
   data: GptScriptNodeData
@@ -53,6 +72,8 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   const requestedCount = data.requestedCount ?? 3
   const contentMode = data.contentMode ?? 'sales'
   const platform = data.platform ?? 'auto'
+  const storyMode = data.storyMode ?? 'sequential'
+  const voiceId = data.voiceId ?? ''
   const clipDurationSeconds = normalizeClipDuration(data.clipDurationSeconds)
   const voiceoverWords = estimateVoiceoverWordRange(clipDurationSeconds)
 
@@ -342,8 +363,63 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
               </select>
             </label>
           </div>
+          {/* Row 2: Story Mode + Voice */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <Film size={10} />
+                Chế độ kịch bản
+              </span>
+              <select
+                value={storyMode}
+                onChange={(event) => data.onChangeScriptConfig?.({ storyMode: event.target.value as 'sequential' | 'independent' })}
+                style={{
+                  height: 28,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: 4,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  boxSizing: 'border-box' as const,
+                }}
+              >
+                <option value="sequential">🎬 Phim liên hoàn</option>
+                <option value="independent">📎 Clip độc lập</option>
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <Mic size={10} />
+                Brand Voice (TTS)
+              </span>
+              <select
+                value={voiceId}
+                onChange={(event) => data.onChangeScriptConfig?.({ voiceId: event.target.value || undefined })}
+                style={{
+                  height: 28,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: 4,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  boxSizing: 'border-box' as const,
+                }}
+              >
+                <option value="">Veo tự sinh giọng</option>
+                <option value="bf4bed06c671">🎙️ Ads_Female</option>
+                <option value="7e16be95b7fd">🎙️ Review</option>
+                <option value="a5b304485f8b">🎙️ Google Voice</option>
+              </select>
+            </label>
+          </div>
           <div style={{ marginTop: 5, fontSize: 9.5, color: '#7e22ce' }}>
-            1 kịch bản = 1 clip Flow {clipDurationSeconds}s
+            {storyMode === 'sequential' ? '🎬 Phễu: Hook → Reveal → Demo → CTA' : '📎 Mỗi clip độc lập, có CTA riêng'}
+            {' · '}{requestedCount} clip × {clipDurationSeconds}s
+            {' · '}Visual 🇬🇧 + Thoại 🇻🇳
           </div>
         </div>
 
@@ -421,27 +497,49 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
             {/* Dynamic Tabs */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
-              {salesScripts.map((s, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => setActiveTab(idx)}
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '4px 8px',
-                    borderRadius: 5,
-                    border: safeTab === idx ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-                    background: safeTab === idx ? '#f5f3ff' : '#f8fafc',
-                    color: safeTab === idx ? '#7c3aed' : '#64748b',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  #{idx + 1} — {s.angle || s.title || `Kịch bản ${idx + 1}`}
-                </button>
-              ))}
+              {salesScripts.map((s, idx) => {
+                const phaseStyle = getPhaseStyle(s.phase)
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setActiveTab(idx)}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '4px 8px',
+                      borderRadius: 5,
+                      border: safeTab === idx ? '1px solid #7c3aed' : '1px solid #e2e8f0',
+                      background: safeTab === idx ? '#f5f3ff' : '#f8fafc',
+                      color: safeTab === idx ? '#7c3aed' : '#64748b',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <span>#{idx + 1}</span>
+                    {s.phase && (
+                      <span
+                        style={{
+                          fontSize: 8.5,
+                          fontWeight: 800,
+                          padding: '1px 4px',
+                          borderRadius: 3,
+                          background: phaseStyle.bg,
+                          color: phaseStyle.color,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {s.phase}
+                      </span>
+                    )}
+                    <span>{s.angle || s.title || `Cảnh ${idx + 1}`}</span>
+                  </button>
+                )
+              })}
             </div>
 
             {/* Active Script Card */}
@@ -457,9 +555,27 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, borderBottom: '1px dashed #d8b4fe', paddingBottom: 4 }}>
-                  <span style={{ fontWeight: 700, color: '#6b21a8' }}>
-                    {currentScript.angle || `Kịch bản #${safeTab + 1}`}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {currentScript.phase && (
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 800,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          background: getPhaseStyle(currentScript.phase).bg,
+                          color: getPhaseStyle(currentScript.phase).color,
+                          border: `1px solid ${getPhaseStyle(currentScript.phase).border}`,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {currentScript.phase}
+                      </span>
+                    )}
+                    <span style={{ fontWeight: 700, color: '#6b21a8' }}>
+                      {currentScript.angle || `Kịch bản #${safeTab + 1}`}
+                    </span>
+                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ fontSize: 9, background: '#f3e8ff', color: '#7e22ce', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>
                       ~{currentScript.wordCount || currentScript.word_count || 0} từ
@@ -486,24 +602,31 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                   </div>
                 </div>
 
-                {/* Visual Direction for Veo */}
+                {/* Visual Direction for Veo (English Cinematic Format) */}
                 {(currentScript.visualDirection || currentScript.visual_direction) && (
-                  <div style={{ marginBottom: 6, padding: '5px 7px', background: '#eff6ff', borderRadius: 5, border: '1px solid #bfdbfe' }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                  <div style={{ marginBottom: 6, padding: '6px 8px', background: '#eff6ff', borderRadius: 5, border: '1px solid #bfdbfe' }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
                       <Camera size={11} />
-                      Gợi ý hình ảnh (Visual Direction cho Veo):
+                      <span>Chỉ dẫn hình ảnh • English Veo Prompt (Cinematic):</span>
                     </div>
-                    <div style={{ fontSize: 10.5, color: '#1e3a8a', lineHeight: 1.4 }}>
+                    <div style={{ fontSize: 10.5, color: '#1e3a8a', lineHeight: 1.45 }}>
                       {currentScript.visualDirection || currentScript.visual_direction}
                     </div>
                   </div>
                 )}
 
-                {/* Voiceover / Script Content */}
+                {/* Voiceover / Script Content (Vietnamese 100%) */}
                 <div style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 9.5, fontWeight: 700, color: '#6b21a8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                    <FileText size={11} />
-                    Lời thoại (Voiceover):
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: '#6b21a8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <FileText size={11} />
+                      <span>Lời thoại • Voiceover (Tiếng Việt 100%):</span>
+                    </div>
+                    {data.voiceId && (
+                      <span style={{ fontSize: 9, color: '#9333ea', background: '#f5f3ff', border: '1px solid #e9d5ff', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>
+                        🎙️ {data.voiceId}
+                      </span>
+                    )}
                   </div>
                   <div
                     style={{

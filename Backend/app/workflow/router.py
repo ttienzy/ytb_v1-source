@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import httpx
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -16,13 +17,22 @@ from app.workflow.schemas import (
     WorkflowAssetUploadResponse,
     WorkflowExportRequest,
     WorkflowExportResponse,
+    WorkflowVoiceoverRequest,
+    WorkflowVoiceoverResponse,
+    WorkflowExtractProfilesRequest,
+    WorkflowExtractProfilesResponse,
     ExportedVideoListResponse,
 )
+from app.ai.gemini.service import login_and_save_cookie
+from app.ai.gemini.recap import _fresh_tokens, _gemini_config
 from app.workflow.service import (
     concat_workflow_scenes,
     delete_exported_video,
     execute_gemini_analysis,
+    execute_9router_vision_analysis,
+    extract_character_scene_profiles,
     generate_validated_gpt_scripts,
+    generate_voiceover_batch,
     get_default_gemini_prompt,
     get_default_gpt_prompt,
     get_workflow_asset_path,
@@ -30,6 +40,7 @@ from app.workflow.service import (
     open_export_folder_in_explorer,
     parse_analysis_to_structured,
     save_workflow_asset,
+    VOICEOVER_DIR,
     WORKFLOW_EXPORTS_DIR,
     VEO_DATA_DIR,
 )
@@ -117,29 +128,65 @@ def get_gemini_prompt() -> GeminiPromptResponse:
     return GeminiPromptResponse(prompt=prompt)
 
 
+@router.post("/gemini/refresh-cookie")
+async def refresh_gemini_cookie():
+    """Tự động mở Chrome profile ngầm trong 3-5 giây để làm mới cookies xác thực Gemini."""
+    try:
+        res = await run_in_threadpool(login_and_save_cookie)
+        return {"ok": True, "cookie_count": res.get("cookie_count", 0), "has_cookie": res.get("has_cookie", False)}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi khi làm mới cookie: {exc}",
+        ) from exc
+
+
+@router.get("/gemini/cookie-status")
+async def get_gemini_cookie_status():
+    """Kiểm tra xem cookie Gemini hiện tại trong config.json còn hạn không."""
+    try:
+        cfg = _gemini_config()
+        with httpx.Client(http2=False, timeout=10) as client:
+            at, bl, fsid = _fresh_tokens(client, cfg["cookies"], cfg["user_agent"])
+            return {"valid": True, "at_prefix": at[:8] if at else ""}
+    except Exception as exc:
+        return {"valid": False, "error": str(exc)}
+
+
 @router.post("/gemini/analyze", response_model=GeminiAnalysisResponse)
 async def analyze_product(req: GeminiAnalysisRequest) -> GeminiAnalysisResponse:
-    """Gửi ảnh sản phẩm và prompt tới Google Gemini Web để phân tích chi tiết."""
+    """Gửi ảnh sản phẩm và prompt tới Google Gemini Web hoặc 9Router Vision để phân tích chi tiết."""
     valid_images = [img for img in req.images if img and img.strip()]
     if not valid_images:
         raise HTTPException(
             status_code=400,
-            detail="Vui lòng cung cấp ít nhất 1 ảnh sản phẩm để Gemini phân tích.",
+            detail="Vui lòng cung cấp ít nhất 1 ảnh sản phẩm để AI phân tích.",
         )
 
     prompt = req.prompt.strip() if req.prompt and req.prompt.strip() else get_default_gemini_prompt()
+    provider = (req.provider or "gemini").lower().strip()
 
     try:
-        raw_text = await run_in_threadpool(
-            execute_gemini_analysis,
-            prompt=prompt,
-            images=valid_images,
-        )
-        return parse_analysis_to_structured(raw_text)
+        if provider == "9router":
+            raw_text = await run_in_threadpool(
+                execute_9router_vision_analysis,
+                prompt=prompt,
+                images=valid_images,
+            )
+            return parse_analysis_to_structured(raw_text, provider_used="9router")
+        else:
+            raw_text, provider_used = await run_in_threadpool(
+                execute_gemini_analysis,
+                prompt=prompt,
+                images=valid_images,
+                allow_refresh=True,
+                fallback_to_9router=False,
+            )
+            return parse_analysis_to_structured(raw_text, provider_used=provider_used)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Lỗi phân tích Gemini: {exc}",
+            detail=f"Lỗi phân tích ({provider}): {exc}",
         ) from exc
 
 
@@ -185,6 +232,21 @@ async def generate_sales_script(req: GptScriptRequest) -> GptScriptResponse:
         ) from exc
 
 
+@router.post("/extract-profiles", response_model=WorkflowExtractProfilesResponse)
+async def extract_profiles(req: WorkflowExtractProfilesRequest) -> WorkflowExtractProfilesResponse:
+    """Trích xuất Canonical Character Profile và Scene Profile tiếng Anh chuẩn từ ảnh nhân vật / bối cảnh."""
+    char_prof, scene_prof = await run_in_threadpool(
+        extract_character_scene_profiles,
+        model_image=req.model_image,
+        scene_image=req.scene_image,
+        model=req.model,
+    )
+    return WorkflowExtractProfilesResponse(
+        character_profile=char_prof,
+        scene_profile=scene_prof,
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Video Concatenation & Export Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +260,11 @@ async def export_workflow_video(req: WorkflowExportRequest) -> WorkflowExportRes
             scene_video_paths=req.scene_video_paths,
             bgm_path=req.bgm_path,
             output_filename=req.output_filename,
+            voiceover_audio_path=req.voiceover_audio_path,
+            mix_original_audio=req.mix_original_audio,
+            bgm_track_ids=req.bgm_track_ids,
+            bgm_volume=req.bgm_volume,
+            veo_ambient_volume=req.veo_ambient_volume,
         )
     except Exception as exc:
         raise HTTPException(
@@ -245,4 +312,31 @@ async def get_exported_video(filename: str):
     return FileResponse(p, media_type="video/mp4")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# VieNeu-TTS Voiceover Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
 
+@router.post("/generate-voiceover", response_model=WorkflowVoiceoverResponse)
+async def generate_voiceover(req: WorkflowVoiceoverRequest) -> WorkflowVoiceoverResponse:
+    """Sinh voiceover cho danh sách lời thoại từ VieNeu-TTS và ghép thành 1 file."""
+    try:
+        return await generate_voiceover_batch(
+            voice_id=req.voice_id,
+            scripts=req.scripts,
+            combine_all=req.combine_all,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi khi sinh voiceover: {exc}",
+        ) from exc
+
+
+@router.get("/voiceovers/{job_id}/{filename}")
+async def get_voiceover_audio(job_id: str, filename: str):
+    """Stream file audio voiceover đã sinh."""
+    base_name = Path(filename).name
+    p = VOICEOVER_DIR / job_id / base_name
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy file audio.")
+    return FileResponse(p, media_type="audio/wav")

@@ -70,11 +70,12 @@ export async function fetchGptDefaultPrompt(): Promise<string> {
 }
 
 /**
- * Gọi Gemini Vision phân tích sản phẩm từ danh sách ảnh và prompt
+ * Gọi Gemini Web hoặc 9Router Vision phân tích sản phẩm từ danh sách ảnh và prompt
  */
 export async function callGeminiAnalysis(
   images: string[],
-  prompt?: string
+  prompt?: string,
+  provider: 'gemini' | '9router' = 'gemini',
 ): Promise<ProductAnalysis> {
   const res = await fetch(`${API_URL}/api/workflow/gemini/analyze`, {
     method: 'POST',
@@ -82,12 +83,13 @@ export async function callGeminiAnalysis(
     body: JSON.stringify({
       images,
       prompt,
+      provider,
     }),
   })
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || `Lỗi phân tích Gemini (HTTP ${res.status})`)
+    throw new Error(err.detail || `Lỗi phân tích ${provider} (HTTP ${res.status})`)
   }
 
   const data = await res.json()
@@ -113,7 +115,34 @@ export async function callGeminiAnalysis(
     classifications,
     modelAttributes: data.model_attributes || data.modelAttributes,
     sceneVibe: data.scene_vibe || data.sceneVibe,
+    providerUsed: data.provider_used || provider,
   }
+}
+
+/**
+ * Tự động làm mới cookie Gemini qua Chrome ngầm (3-5 giây)
+ */
+export async function callRefreshGeminiCookie(): Promise<{ ok: boolean; cookie_count: number }> {
+  const res = await fetch(`${API_URL}/api/workflow/gemini/refresh-cookie`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Lỗi làm mới cookie (HTTP ${res.status})`)
+  }
+  return res.json()
+}
+
+/**
+ * Kiểm tra trạng thái cookie Gemini
+ */
+export async function callCheckGeminiCookieStatus(): Promise<{ valid: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/api/workflow/gemini/cookie-status`)
+  if (!res.ok) {
+    return { valid: false, error: `HTTP ${res.status}` }
+  }
+  return res.json()
 }
 
 /**
@@ -143,6 +172,10 @@ export async function callGptScriptGeneration(params: {
         ? {
             count: params.scriptConfig.count,
             content_mode: params.scriptConfig.contentMode,
+            story_mode: params.scriptConfig.storyMode,
+            voice_id: params.scriptConfig.voiceId,
+            character_profile: params.scriptConfig.characterProfile,
+            scene_profile: params.scriptConfig.sceneProfile,
             clip_duration_seconds: params.scriptConfig.clipDurationSeconds,
             min_words: params.scriptConfig.minWords,
             max_words: params.scriptConfig.maxWords,
@@ -163,6 +196,7 @@ export async function callGptScriptGeneration(params: {
   const rawScripts = (data.scripts || []) as any[]
   const normalizedScripts: SalesScript[] = rawScripts.map((s: any) => ({
     id: s.id,
+    phase: s.phase,
     angle: s.angle || '',
     title: s.title || '',
     content: s.content || s.voiceover || s.voice_over || '',
@@ -200,12 +234,94 @@ export async function callGptScriptGeneration(params: {
 }
 
 /**
+ * Trích xuất Canonical Character Profile & Scene Profile tiếng Anh bằng AI từ ảnh người mẫu / bối cảnh
+ */
+export async function callExtractProfiles(params: {
+  modelImage?: string | null
+  sceneImage?: string | null
+  model?: string
+}): Promise<{ characterProfile: string; sceneProfile: string }> {
+  const res = await fetch(`${API_URL}/api/workflow/extract-profiles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model_image: params.modelImage || null,
+      scene_image: params.sceneImage || null,
+      model: params.model,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Lỗi trích xuất profile bằng AI (HTTP ${res.status})`)
+  }
+
+  const data = await res.json()
+  return {
+    characterProfile: data.character_profile || '',
+    sceneProfile: data.scene_profile || '',
+  }
+}
+
+/**
+ * Gọi VieNeu-TTS sinh file âm thanh đọc lời thoại voiceover
+ */
+export async function callGenerateVoiceover(params: {
+  voiceId: string
+  scripts: string[]
+  combineAll?: boolean
+}): Promise<{
+  voiceId: string
+  items: { index: number; text: string; audioUrl: string; filePath: string; durationSec: number }[]
+  combinedAudioUrl?: string | null
+  combinedFilePath?: string | null
+  totalDurationSec: number
+}> {
+  const res = await fetch(`${API_URL}/api/workflow/generate-voiceover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      voice_id: params.voiceId,
+      scripts: params.scripts,
+      combine_all: params.combineAll ?? true,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Lỗi tạo voiceover TTS (HTTP ${res.status})`)
+  }
+
+  const data = await res.json()
+  return {
+    voiceId: data.voice_id,
+    items: (data.items || []).map((it: any) => ({
+      index: it.index,
+      text: it.text,
+      audioUrl: it.audio_url?.startsWith('http') ? it.audio_url : `${API_URL}${it.audio_url}`,
+      filePath: it.file_path,
+      durationSec: it.duration_sec,
+    })),
+    combinedAudioUrl: data.combined_audio_url
+      ? (data.combined_audio_url.startsWith('http') ? data.combined_audio_url : `${API_URL}${data.combined_audio_url}`)
+      : null,
+    combinedFilePath: data.combined_file_path || null,
+    totalDurationSec: data.total_duration_sec || 0,
+  }
+}
+
+/**
  * Gọi backend ghép các file video phân cảnh bằng FFmpeg
  */
 export async function callWorkflowVideoExport(
   sceneVideoPaths: string[],
   bgmPath?: string,
-  outputFilename?: string
+  outputFilename?: string,
+  voiceoverAudioPath?: string,
+  mixOriginalAudio?: boolean,
+  bgmTrackIds?: string[],
+  bgmVolume?: number,
+  veoAmbientVolume?: number
 ): Promise<WorkflowExportResponse> {
   const res = await fetch(`${API_URL}/api/workflow/export`, {
     method: 'POST',
@@ -214,6 +330,11 @@ export async function callWorkflowVideoExport(
       scene_video_paths: sceneVideoPaths,
       bgm_path: bgmPath,
       output_filename: outputFilename,
+      voiceover_audio_path: voiceoverAudioPath,
+      mix_original_audio: mixOriginalAudio ?? true,
+      bgm_track_ids: bgmTrackIds && bgmTrackIds.length > 0 ? bgmTrackIds : undefined,
+      bgm_volume: bgmVolume ?? 0.10,
+      veo_ambient_volume: veoAmbientVolume ?? 0.10,
     }),
   })
 

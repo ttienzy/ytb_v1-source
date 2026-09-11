@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2, ImageDown } from 'lucide-react'
+import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2, ImageDown, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
 import type { CharacterSceneNodeData } from '../types'
 import type { AssetRef } from '../contracts'
 import { uploadWorkflowAsset } from '../services/workflowApi'
@@ -16,6 +16,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
   const currentSlotRef = useRef<'modelImage' | 'sceneImage'>('modelImage')
   const [veoPickerOpen, setVeoPickerOpen] = useState(false)
   const [activeSlot, setActiveSlot] = useState<'modelImage' | 'sceneImage'>('modelImage')
+  const [isProfilesOpen, setIsProfilesOpen] = useState(false)
 
   const handleSlotClick = (slot: 'modelImage' | 'sceneImage') => {
     currentSlotRef.current = slot
@@ -98,7 +99,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
   return (
     <div
       className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
-      style={{ width: 350 }}
+      style={{ width: 360 }}
     >
       {isStartNode && (
         <div className="wf-start-banner">
@@ -403,6 +404,135 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
           >
             <CheckCircle2 size={12} /> {count > 0 ? `Đã nạp ${count}/2` : 'Tùy chọn'}
           </span>
+        </div>
+
+        {/* Canonical AI Profiles for English Veo Prompts */}
+        <div
+          style={{
+            marginTop: 10,
+            padding: '8px 10px',
+            background: '#faf5ff',
+            border: '1px solid #e9d5ff',
+            borderRadius: 7,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+            onClick={() => setIsProfilesOpen((prev) => !prev)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#6b21a8' }}>
+              <Sparkles size={12} color="#7c3aed" />
+              <span>AI Canonical Profiles (Veo EN)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button
+                type="button"
+                className="wf-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  data.onAutoExtractProfile?.()
+                }}
+                disabled={data.isExtractingProfile || (!data.modelImage && !data.sceneImage)}
+                style={{
+                  padding: '2px 7px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  background: '#7c3aed',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: (data.isExtractingProfile || (!data.modelImage && !data.sceneImage)) ? 'not-allowed' : 'pointer',
+                  opacity: (!data.modelImage && !data.sceneImage) ? 0.5 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                }}
+                title={
+                  !data.modelImage && !data.sceneImage
+                    ? 'Tải ảnh người mẫu hoặc bối cảnh trước khi trích xuất'
+                    : 'AI quan sát ảnh và tự viết Canonical Profile tiếng Anh chuẩn cho Veo'
+                }
+              >
+                <Sparkles size={10} className={data.isExtractingProfile ? 'animate-spin' : ''} />
+                {data.isExtractingProfile ? 'Đang trích xuất...' : 'Trích xuất AI'}
+              </button>
+              {isProfilesOpen ? <ChevronUp size={12} color="#7c3aed" /> : <ChevronDown size={12} color="#7c3aed" />}
+            </div>
+          </div>
+
+          {isProfilesOpen && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {/* Character Profile */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#4c1d95', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span>👤 Nhân vật (Character Profile - EN):</span>
+                  {data.characterProfile && (
+                    <span style={{ fontSize: 9, color: '#059669', fontWeight: 700 }}>✓ Sẵn sàng</span>
+                  )}
+                </div>
+                <textarea
+                  className="nodrag"
+                  rows={2}
+                  value={data.characterProfile || ''}
+                  onChange={(e) => data.onChangeProfile?.('characterProfile', e.target.value)}
+                  placeholder="e.g. Young 24yo Asian female influencer, glowing skin, minimalist linen blazer, natural bright smile..."
+                  style={{
+                    width: '100%',
+                    fontSize: 10.5,
+                    fontFamily: 'inherit',
+                    padding: '4px 6px',
+                    borderRadius: 4,
+                    border: '1px solid #d8b4fe',
+                    background: '#ffffff',
+                    color: '#1e293b',
+                    resize: 'vertical',
+                    lineHeight: 1.35,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              {/* Scene Profile */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#4c1d95', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span>🌄 Bối cảnh & Ánh sáng (Scene Profile - EN):</span>
+                  {data.sceneProfile && (
+                    <span style={{ fontSize: 9, color: '#059669', fontWeight: 700 }}>✓ Sẵn sàng</span>
+                  )}
+                </div>
+                <textarea
+                  className="nodrag"
+                  rows={2}
+                  value={data.sceneProfile || ''}
+                  onChange={(e) => data.onChangeProfile?.('sceneProfile', e.target.value)}
+                  placeholder="e.g. Modern minimalist aesthetics room, soft natural sunlight streaming through window, pastel tones..."
+                  style={{
+                    width: '100%',
+                    fontSize: 10.5,
+                    fontFamily: 'inherit',
+                    padding: '4px 6px',
+                    borderRadius: 4,
+                    border: '1px solid #d8b4fe',
+                    background: '#ffffff',
+                    color: '#1e293b',
+                    resize: 'vertical',
+                    lineHeight: 1.35,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ fontSize: 9.5, color: '#7c3aed', opacity: 0.85, fontStyle: 'italic' }}>
+                💡 Tự động gắn vào visual_direction tiếng Anh của mỗi clip Veo để giữ tính nhất quán.
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

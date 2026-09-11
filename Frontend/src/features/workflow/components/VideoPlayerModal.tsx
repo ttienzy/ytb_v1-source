@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Download, Copy, Check, Film, Sparkles } from 'lucide-react'
 
 interface VideoPlayerModalProps {
@@ -20,7 +21,17 @@ export function VideoPlayerModal({
   durationSec,
   aspectRatio = '9:16',
 }: VideoPlayerModalProps) {
-  const [copied, setCopied] = React.useState(false)
+  const [copied, setCopied] = useState(false)
+
+  // Đóng modal khi nhấn phím Escape (ESC)
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   if (!isOpen || !videoUrl) return null
 
@@ -39,21 +50,63 @@ export function VideoPlayerModal({
     document.body.removeChild(a)
   }
 
-  return (
+  const modalContent = (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 10000,
-        background: 'rgba(10, 15, 30, 0.85)',
-        backdropFilter: 'blur(8px)',
+        zIndex: 9999999,
+        background: 'rgba(5, 8, 18, 0.88)',
+        backdropFilter: 'blur(10px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
+        padding: '24px 20px',
       }}
       onClick={onClose}
     >
+      {/* Nút thoát nổi ở góc trên bên phải màn hình (Luôn luôn bấm được dù màn hình nhỏ hay lớn) */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onClose()
+        }}
+        style={{
+          position: 'fixed',
+          top: 18,
+          right: 24,
+          zIndex: 10000000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '7px 14px',
+          borderRadius: 24,
+          border: '1px solid rgba(255, 255, 255, 0.3)',
+          background: 'rgba(15, 23, 42, 0.8)',
+          color: '#ffffff',
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: 'pointer',
+          backdropFilter: 'blur(8px)',
+          boxShadow: '0 4px 18px rgba(0,0,0,0.5)',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = '#ef4444'
+          e.currentTarget.style.borderColor = '#ef4444'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'rgba(15, 23, 42, 0.8)'
+          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'
+        }}
+        title="Đóng xem video (Phím ESC)"
+      >
+        <X size={16} />
+        <span>Đóng (ESC)</span>
+      </button>
+
+      {/* Khung chứa nội dung Modal */}
       <div
         style={{
           width: '100%',
@@ -62,15 +115,15 @@ export function VideoPlayerModal({
           background: '#0f172a',
           borderRadius: 16,
           border: '1px solid rgba(255, 255, 255, 0.15)',
-          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.6)',
+          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.7)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          animation: 'wfModalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+          position: 'relative',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* Header - Luôn cố định, không bị co ép */}
         <div
           style={{
             padding: '12px 18px',
@@ -78,10 +131,11 @@ export function VideoPlayerModal({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            background: 'rgba(30, 41, 59, 0.5)',
+            background: 'rgba(30, 41, 59, 0.7)',
+            flexShrink: 0,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <div
               style={{
                 width: 28,
@@ -92,12 +146,22 @@ export function VideoPlayerModal({
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#ffffff',
+                flexShrink: 0,
               }}
             >
               <Film size={15} />
             </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: '#f8fafc',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {title}
               </div>
               <div style={{ fontSize: 10.5, color: '#94a3b8', display: 'flex', gap: 8 }}>
@@ -107,7 +171,7 @@ export function VideoPlayerModal({
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <button
               type="button"
               onClick={handleCopyUrl}
@@ -157,14 +221,24 @@ export function VideoPlayerModal({
                 width: 28,
                 height: 28,
                 borderRadius: 6,
-                border: 'none',
-                background: 'rgba(255, 255, 255, 0.08)',
-                color: '#94a3b8',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                background: 'rgba(239, 68, 68, 0.15)',
+                color: '#fca5a5',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                transition: 'all 0.15s ease',
               }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#ef4444'
+                e.currentTarget.style.color = '#ffffff'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'
+                e.currentTarget.style.color = '#fca5a5'
+              }}
+              title="Đóng (ESC)"
             >
               <X size={15} />
             </button>
@@ -180,7 +254,7 @@ export function VideoPlayerModal({
             alignItems: 'center',
             justifyContent: 'center',
             position: 'relative',
-            minHeight: aspectRatio === '9:16' ? 420 : 320,
+            minHeight: aspectRatio === '9:16' ? 380 : 320,
             maxHeight: '68vh',
           }}
         >
@@ -198,7 +272,7 @@ export function VideoPlayerModal({
           />
         </div>
 
-        {/* Prompt Information footer if available */}
+        {/* Prompt Information footer if available - Cố định không bị trôi */}
         {prompt && (
           <div
             style={{
@@ -207,8 +281,9 @@ export function VideoPlayerModal({
               borderTop: '1px solid rgba(255, 255, 255, 0.08)',
               fontSize: 11,
               color: '#cbd5e1',
-              maxHeight: 120,
+              maxHeight: 110,
               overflowY: 'auto',
+              flexShrink: 0,
             }}
           >
             <div style={{ fontWeight: 700, color: '#f43f5e', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -222,4 +297,6 @@ export function VideoPlayerModal({
       </div>
     </div>
   )
+
+  return createPortal(modalContent, document.body)
 }

@@ -17,8 +17,8 @@ from app.workflow.service import (
 
 
 def test_voiceover_word_range_follows_clip_duration():
-    assert calculate_voiceover_word_range(10) == (20, 30)
-    assert calculate_voiceover_word_range(6) == (12, 18)
+    assert calculate_voiceover_word_range(10) == (20, 24)
+    assert calculate_voiceover_word_range(6) == (12, 14)
     assert calculate_voiceover_word_range(10, min_words=16, max_words=24) == (16, 24)
 
     with pytest.raises(ValueError, match="min_words"):
@@ -57,7 +57,7 @@ def test_gpt_prompt_uses_dynamic_clip_contract(monkeypatch):
     )
 
     assert raw_text == "mock response"
-    assert "Tạo 5 kịch bản ugc cho reels, clip 10s, 20-30 từ" in captured["prompt"]
+    assert "Tạo 5 kịch bản ugc cho reels, clip 10s, 20-24 từ" in captured["prompt"]
     assert "Sản phẩm thử nghiệm" in captured["prompt"]
     assert "đúng một clip Google Flow dài 10 giây" in captured["system_prompt"]
 
@@ -139,7 +139,7 @@ def test_generate_validated_scripts_repairs_once(monkeypatch):
     assert model == "mock-model"
     assert len(scripts) == 1
     assert repaired is True
-    assert (duration, min_words, max_words) == (10, 20, 30)
+    assert (duration, min_words, max_words) == (10, 20, 24)
     assert responses == []
 
 
@@ -382,4 +382,73 @@ def test_concat_workflow_scenes_filename_and_veo_id_resolution(monkeypatch, tmp_
         output_filename="test_raw_id.mp4",
     )
     assert res2.status == "done"
+
+
+def test_sync_voiceover_to_scenes_per_clip(tmp_path):
+    from app.workflow.service import sync_voiceover_to_scenes
+
+    # Tạo 2 clip video giả lập
+    v1 = tmp_path / "clip_0.mp4"
+    v2 = tmp_path / "clip_1.mp4"
+    v1.write_bytes(b"\x00" * 10)
+    v2.write_bytes(b"\x00" * 10)
+
+    # Thư mục voiceover chứa vo_0.wav (dài hơn: 12s -> cần atempo) và vo_1.wav (ngắn hơn: 8s -> cần apad)
+    vo_dir = tmp_path / "voiceover_job"
+    vo_dir.mkdir()
+    vo_0 = vo_dir / "vo_0.wav"
+    vo_1 = vo_dir / "vo_1.wav"
+    vo_combined = vo_dir / "combined.wav"
+    vo_0.write_bytes(b"\x00" * 10)
+    vo_1.write_bytes(b"\x00" * 10)
+    vo_combined.write_bytes(b"\x00" * 10)
+
+    work_dir = tmp_path / "work"
+
+    # Mock ffprobe_duration
+    dur_map = {
+        str(v1): 10.0,
+        str(v2): 10.0,
+        str(vo_0): 12.0,  # D > T -> atempo
+        str(vo_1): 8.0,   # D <= T -> apad
+        str(vo_combined): 20.0,
+    }
+
+    import subprocess
+    orig_run = subprocess.run
+    commands_executed = []
+
+    def fake_run(cmd, *args, **kwargs):
+        commands_executed.append(cmd)
+        out_file = Path(cmd[-1])
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\x00" * 50)
+        class MockProc:
+            returncode = 0
+            stdout = "10.0"
+            stderr = ""
+        return MockProc()
+
+    from app.workflow import service as wf_service
+    wf_service.ffprobe_duration = lambda p: dur_map.get(str(p), 10.0)
+
+    import subprocess
+    old_run = subprocess.run
+    subprocess.run = fake_run
+    try:
+        synced_result = sync_voiceover_to_scenes([v1, v2], vo_combined, work_dir)
+        assert synced_result.name == "synced_combined_vo.wav"
+        # Kiểm tra đã gọi atempo cho clip 0 (factor = 1.20)
+        assert any("atempo=1.2000" in " ".join(c) for c in commands_executed if isinstance(c, list))
+        # Kiểm tra đã gọi apad cho clip 1
+        assert any("apad" in " ".join(c) for c in commands_executed if isinstance(c, list))
+    finally:
+        subprocess.run = old_run
+
+
+def test_bgm_import_session_local_exists():
+    # Kiểm tra SessionLocal có thể import được từ app.db
+    from app.db import SessionLocal
+    assert SessionLocal is not None
+
 

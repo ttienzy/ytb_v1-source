@@ -17,6 +17,8 @@ export interface AssetBundle {
   products: AssetRef[]
   model?: AssetRef | null
   scene?: AssetRef | null
+  characterProfile?: string
+  sceneProfile?: string
 }
 
 export interface ProductClassificationItem {
@@ -37,20 +39,31 @@ export interface ProductAnalysis {
   classifications?: ProductClassificationItem[]
   modelAttributes?: string
   sceneVibe?: string
+  providerUsed?: 'gemini' | '9router'
 }
 
 export interface ScriptGenerationConfig {
   count: number
   contentMode: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
+  /** sequential = phễu liên hoàn; independent = các clip độc lập */
+  storyMode?: 'sequential' | 'independent'
   /** Thời lượng của một clip Google Flow mà mỗi kịch bản sẽ tạo ra. */
   clipDurationSeconds?: number
   minWords?: number
   maxWords?: number
   platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
+  /** ID giọng đọc VieNeu-TTS cho Brand Voice */
+  voiceId?: string
+  /** Mô tả nhân vật tham chiếu bằng tiếng Anh (Canonical Character Profile) */
+  characterProfile?: string
+  /** Mô tả bối cảnh/không gian bằng tiếng Anh (Canonical Scene Profile) */
+  sceneProfile?: string
 }
 
 export interface SalesScript {
   id?: string
+  /** Giai đoạn phễu: Hook | Reveal | Demo | CTA */
+  phase?: string
   angle: string
   title: string
   content: string
@@ -79,6 +92,8 @@ export interface ScriptCollection {
   promptTemplate: string
   requestedModel: string
   generationModel?: string
+  storyMode?: string
+  voiceId?: string
 }
 
 export interface ScenePlanConfig {
@@ -110,6 +125,10 @@ export interface ScenePlan {
 export interface WorkflowExportRequest {
   sceneVideoPaths: string[]
   bgmPath?: string
+  /** Đường dẫn file voiceover VieNeu-TTS (đè lên audio Veo) */
+  voiceoverAudioPath?: string
+  /** True = trộn ambient Veo (volume 0.15) + VO; False = chỉ VO */
+  mixOriginalAudio?: boolean
   resolution?: string
 }
 

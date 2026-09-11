@@ -22,6 +22,10 @@ import {
   User,
   AlertCircle,
   Eye,
+  Mic,
+  Music,
+  Loader2,
+  FolderOpen,
 } from 'lucide-react'
 import type { VeoFlowStudioNodeData } from '../types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
@@ -83,7 +87,24 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
   const hasAnyRefImages = totalRefImagesCount > 0
 
   const allClipsCompleted = scenes.length > 0 && scenes.every((s) => Boolean(s.videoUrl || s.outputFilePath))
-  const completedCount = scenes.filter((s) => Boolean(s.videoUrl || s.outputFilePath)).length
+  const completedScenes = scenes.filter((s) => Boolean(s.videoUrl || s.outputFilePath))
+  const completedCount = completedScenes.length
+  const completedDuration = completedScenes.reduce(
+    (sum, s) => sum + (s.durationSec || data.videoConfig?.duration || DEFAULT_CLIP_DURATION_SECONDS),
+    0
+  )
+  const canExport = completedCount >= 2
+  const firstPendingIdx = scenes.findIndex((s) => !s.videoUrl && !s.outputFilePath)
+  const chainButtonLabel = allClipsCompleted
+    ? `⚡ Render Lại Toàn Bộ (${scenes.length})`
+    : completedCount > 0
+    ? `⚡ Tiếp tục Chuỗi (Clip #${firstPendingIdx + 1} → #${scenes.length})`
+    : `⚡ Render Chuỗi Liên Hoàn (${scenes.length})`
+  const chainButtonTitle = allClipsCompleted
+    ? 'Tất cả clip đã hoàn thành. Bấm để render lại toàn bộ từ đầu.'
+    : completedCount > 0
+    ? `Đã xong ${completedCount}/${scenes.length} clip. Bấm để tự động tiếp tục render từ Clip #${firstPendingIdx + 1} đến hết.`
+    : 'Tự động render Clip 1 -> cắt End Frame -> render Clip 2 nối tiếp -> tiếp tục đến hết.'
 
   return (
     <div
@@ -205,6 +226,26 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           >
             {scenes.length} Clip • {durationLabel}
           </span>
+
+          {data.voiceId && (
+            <span
+              className="wf-node-badge"
+              style={{
+                background: '#faf5ff',
+                color: '#7c3aed',
+                border: '1px solid #ddd6fe',
+                fontWeight: 700,
+                fontSize: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+              title={`Brand Voice được gán từ ChatGPT: ${data.voiceId}`}
+            >
+              <Mic size={10} />
+              <span>{data.voiceId}</span>
+            </span>
+          )}
 
           <button
             type="button"
@@ -401,10 +442,10 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 alignItems: 'center',
                 gap: 4,
               }}
-              title="Tự động render Clip 1 -> cắt End Frame -> render Clip 2 nối tiếp -> tiếp tục đến hết"
+              title={chainButtonTitle}
             >
               <Sparkles size={11} color="#db2777" />
-              ⚡ Render Chuỗi Liên Hoàn ({scenes.length})
+              {chainButtonLabel}
             </button>
           )}
         </div>
@@ -657,52 +698,102 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
                     <span style={{ fontSize: 9, color: '#94a3b8' }}>{scene.aspectRatio || '9:16'}</span>
                     {isDone ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          data.onOpenPreviewModal?.(
-                            scene.videoUrl!,
-                            `Clip #${idx + 1}: ${scene.title || 'Video'}`,
-                            scene.prompt
-                          )
-                        }}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: '#2563eb',
-                          fontSize: 10,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 2,
-                          padding: 0,
-                        }}
-                      >
-                        <Eye size={10} /> Xem to
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            data.onOpenVideoPicker?.(idx)
+                          }}
+                          style={{
+                            background: '#f1f5f9',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: 4,
+                            color: '#475569',
+                            fontSize: 9.5,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            padding: '1px 5px',
+                          }}
+                          title="Đổi clip Veo khác từ thư viện 51 clip có sẵn"
+                        >
+                          <FolderOpen size={10} /> Đổi
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            data.onOpenPreviewModal?.(
+                              scene.videoUrl!,
+                              `Clip #${idx + 1}: ${scene.title || 'Video'}`,
+                              scene.prompt
+                            )
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#2563eb',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            padding: 0,
+                          }}
+                        >
+                          <Eye size={10} /> Xem to
+                        </button>
+                      </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleTabClick(idx)
-                          data.onRenderScene?.(idx)
-                        }}
-                        disabled={isClipRendering || (isChained && !prevClipReady)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: isChained && !prevClipReady ? '#94a3b8' : '#be123c',
-                          fontSize: 10,
-                          fontWeight: 700,
-                          cursor: isChained && !prevClipReady ? 'not-allowed' : 'pointer',
-                          padding: 0,
-                        }}
-                      >
-                        {isChained && !prevClipReady ? 'Chờ clip trước' : '▶️ Tạo'}
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            data.onOpenVideoPicker?.(idx)
+                          }}
+                          style={{
+                            background: '#ecfdf5',
+                            border: '1px solid #a7f3d0',
+                            borderRadius: 4,
+                            color: '#059669',
+                            fontSize: 9.5,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            padding: '1px 5px',
+                          }}
+                          title="Chọn clip Veo có sẵn từ thư viện (Không tốn credit)"
+                        >
+                          <FolderOpen size={10} /> Thư viện
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleTabClick(idx)
+                            data.onRenderScene?.(idx)
+                          }}
+                          disabled={isClipRendering || (isChained && !prevClipReady)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: isChained && !prevClipReady ? '#94a3b8' : '#be123c',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: isChained && !prevClipReady ? 'not-allowed' : 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          {isChained && !prevClipReady ? 'Chờ clip trước' : '▶️ Tạo'}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1141,6 +1232,29 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 )}
               </div>
 
+              {/* Button Chọn từ thư viện */}
+              <button
+                type="button"
+                className="wf-btn"
+                onClick={() => data.onOpenVideoPicker?.(safeTab)}
+                style={{
+                  padding: '5px 10px',
+                  fontSize: 11,
+                  background: '#f8fafc',
+                  color: '#0f172a',
+                  border: '1px solid #cbd5e1',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  cursor: 'pointer',
+                  borderRadius: 6,
+                }}
+                title="Chọn clip Veo có sẵn từ thư viện (Không tốn credit)"
+              >
+                <FolderOpen size={13} color="#475569" />
+                {currentScene.videoUrl ? 'Đổi từ Thư viện' : 'Chọn từ Thư viện'}
+              </button>
+
               {/* Single Clip Render Button */}
               {(() => {
                 const isChained = safeTab > 0 && currentScene.chainFromPrevious !== false
@@ -1197,60 +1311,191 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             borderBottomLeftRadius: 16,
             borderBottomRightRadius: 16,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
+            flexDirection: 'column',
+            gap: 8,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Layers size={14} color="#6366f1" />
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>
-              Ghép {scenes.length} clip ({totalDuration}s)
-            </span>
-            <span style={{ fontSize: 10, color: '#94a3b8' }}>• Định dạng MP4 1080p</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {data.finalVideoUrl ? (
+          {/* Voiceover Row if Brand Voice is active */}
+          {data.voiceId && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 10px',
+                background: '#faf5ff',
+                borderRadius: 8,
+                border: '1px solid #e9d5ff',
+                fontSize: 11,
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Mic size={13} color="#7c3aed" />
+                <span style={{ fontWeight: 700, color: '#6b21a8' }}>
+                  Lồng tiếng VieNeu-TTS:
+                </span>
+                <span style={{ color: '#7e22ce', fontWeight: 600 }}>
+                  {data.voiceId}
+                </span>
+                {data.voiceoverUrl && (
+                  <span style={{ fontSize: 9.5, color: '#059669', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                    ✓ Audio sẵn sàng ({data.voiceoverDurationSec ? `${Math.round(data.voiceoverDurationSec)}s` : 'OK'})
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {data.voiceoverUrl ? (
+                  <>
+                    <audio src={data.voiceoverUrl} controls style={{ height: 26, maxWidth: 170 }} />
+                    <span style={{ fontSize: 10, color: '#6d28d9', background: '#ede9fe', border: '1px solid #ddd6fe', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>
+                      ⚡ Đồng bộ chuẩn theo clip
+                    </span>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="wf-btn"
+                    onClick={() => data.onGenerateVoiceover?.()}
+                    disabled={data.isGeneratingVoiceover}
+                    style={{
+                      padding: '3px 10px',
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      background: '#7c3aed',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 5,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Mic size={11} className={data.isGeneratingVoiceover ? 'animate-spin' : ''} />
+                    {data.isGeneratingVoiceover ? 'Đang đọc TTS...' : 'Tạo Audio Lồng Tiếng'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Stitch Concat Export Row */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Layers size={14} color="#6366f1" />
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>
+                {completedCount >= 2 && completedCount < scenes.length
+                  ? `Ghép ${completedCount}/${scenes.length} clip (${completedDuration}s)`
+                  : `Ghép ${scenes.length} clip (${totalDuration}s)`}
+              </span>
+              <span style={{ fontSize: 10, color: '#94a3b8' }}>
+                • MP4 1080p {data.voiceoverUrl ? '+ Voiceover' : ''}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {data.finalVideoUrl ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="wf-btn"
+                    onClick={() =>
+                      data.onOpenPreviewModal?.(data.finalVideoUrl!, 'Video Hoàn Chỉnh Ghép Nối', 'Toàn bộ quy trình')
+                    }
+                    style={{ padding: '4px 10px', fontSize: 10.5, fontWeight: 600, color: '#059669', background: '#ecfdf5', border: '1px solid #a7f3d0' }}
+                  >
+                    <Eye size={12} /> Xem Video Hoàn Chỉnh
+                  </button>
+                  <a
+                    href={data.finalVideoUrl}
+                    download="workflow_final_video.mp4"
+                    className="wf-btn wf-btn-primary"
+                    style={{ padding: '4px 10px', fontSize: 10.5, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Download size={12} /> Tải MP4
+                  </a>
+                </div>
+              ) : (
                 <button
                   type="button"
-                  className="wf-btn"
-                  onClick={() =>
-                    data.onOpenPreviewModal?.(data.finalVideoUrl!, 'Video Hoàn Chỉnh Ghép Nối', 'Toàn bộ quy trình')
-                  }
-                  style={{ padding: '4px 10px', fontSize: 10.5, fontWeight: 600, color: '#059669', background: '#ecfdf5', border: '1px solid #a7f3d0' }}
-                >
-                  <Eye size={12} /> Xem Video Hoàn Chỉnh
-                </button>
-                <a
-                  href={data.finalVideoUrl}
-                  download="workflow_final_video.mp4"
                   className="wf-btn wf-btn-primary"
-                  style={{ padding: '4px 10px', fontSize: 10.5, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}
+                  onClick={() => data.onExportVideo?.()}
+                  disabled={isExporting || !canExport}
+                  style={{
+                    padding: '5px 14px',
+                    fontSize: 11,
+                    opacity: !canExport ? 0.6 : 1,
+                    cursor: !canExport ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                  title={
+                    !canExport
+                      ? 'Cần tạo thành công ít nhất 2 clip trước khi ghép'
+                      : completedCount < scenes.length
+                      ? `Ghép ${completedCount} clip đã hoàn thành thành 1 file MP4`
+                      : 'Ghép toàn bộ clip thành 1 file MP4'
+                  }
                 >
-                  <Download size={12} /> Tải MP4
-                </a>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="wf-btn wf-btn-primary"
-                onClick={() => data.onExportVideo?.()}
-                disabled={isExporting || !allClipsCompleted}
-                style={{
-                  padding: '5px 14px',
-                  fontSize: 11,
-                  opacity: !allClipsCompleted ? 0.6 : 1,
-                  cursor: !allClipsCompleted ? 'not-allowed' : 'pointer',
-                }}
-                title={!allClipsCompleted ? 'Cần render đủ tất cả clip trước khi ghép' : 'Ghép toàn bộ clip thành 1 file MP4'}
-              >
-                <Download size={13} />
-                {isExporting ? `Đang ghép... ${exportProgress}%` : 'Ghép Video Hoàn Chỉnh (MP4)'}
-              </button>
-            )}
+                  {isExporting ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Đang xuất video... {exportProgress}%</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download size={13} />
+                      <span>
+                        {data.voiceoverUrl
+                          ? (completedCount < scenes.length ? `Ghép ${completedCount} Clip + Lồng Tiếng` : 'Ghép Video + Lồng Tiếng (MP4)')
+                          : (completedCount < scenes.length ? `Ghép ${completedCount} Clip (MP4)` : 'Ghép Video Hoàn Chỉnh (MP4)')}
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Thanh Loading Tiến Trình Ghép Video Động */}
+          {isExporting && (
+            <div
+              style={{
+                marginTop: 2,
+                padding: '8px 12px',
+                background: '#eef2ff',
+                borderRadius: 8,
+                border: '1px solid #c7d2fe',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, fontWeight: 700, color: '#4338ca' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Loader2 size={13} className="animate-spin" color="#4f46e5" />
+                  {exportProgress < 30
+                    ? '1/3 Đang chuẩn bị kịch bản & khởi động FFmpeg...'
+                    : exportProgress < 65
+                    ? '2/3 Đang ghép nối các clip Veo thành một luồng video...'
+                    : '3/3 Đang hòa âm VieNeu-TTS Voiceover & Nhạc nền BGM...'}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#4f46e5' }}>{exportProgress}%</span>
+              </div>
+              <div style={{ width: '100%', height: 6, background: '#cbd5e1', borderRadius: 3, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    width: `${exportProgress}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #4f46e5, #06b6d4, #10b981)',
+                    borderRadius: 3,
+                    transition: 'width 0.5s ease',
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

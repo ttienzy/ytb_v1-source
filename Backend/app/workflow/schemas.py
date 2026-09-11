@@ -13,6 +13,7 @@ class GeminiPromptResponse(BaseModel):
 class GeminiAnalysisRequest(BaseModel):
     images: list[str] = Field(default_factory=list, description="Danh sách ảnh (data URLs base64 hoặc file paths)")
     prompt: Optional[str] = Field(default=None, description="Prompt tùy chỉnh. Nếu None, dùng prompt mặc định từ file.")
+    provider: Optional[str] = Field(default="gemini", description="AI provider: 'gemini' (mặc định với auto-refresh) hoặc '9router' (ChatGPT vision)")
 
 
 class GeminiProductClassification(BaseModel):
@@ -30,6 +31,7 @@ class GeminiAnalysisResponse(BaseModel):
     classifications: list[GeminiProductClassification] = Field(default_factory=list, description="Phân loại chi tiết từng sản phẩm")
     key_selling_points: list[str] = Field(default_factory=list, description="Gạch đầu dòng các USP chính")
     suggested_angles: list[str] = Field(default_factory=list, description="Gợi ý góc quay / góc thể hiện video")
+    provider_used: Optional[str] = Field(default="gemini", description="AI provider đã xử lý phân tích")
 
 
 class GptPromptResponse(BaseModel):
@@ -37,11 +39,12 @@ class GptPromptResponse(BaseModel):
 
 
 class GptScriptItem(BaseModel):
+    phase: Optional[str] = Field(default=None, description="Giai đoạn phễu: Hook | Reveal | Demo | CTA")
     angle: str = Field(description="Tên góc tiếp cận (Góc 1 / Góc 2 / Review chân thực...)")
     title: str = Field(default="", description="Tiêu đề tóm tắt kịch bản")
     content: str = Field(description="Toàn văn kịch bản")
-    voiceover: Optional[str] = Field(default=None, description="Lời đọc thoại (Voiceover)")
-    visual_direction: Optional[str] = Field(default=None, description="Chỉ dẫn hình ảnh / góc máy cho Veo")
+    voiceover: Optional[str] = Field(default=None, description="Lời đọc thoại tiếng Việt (Voiceover)")
+    visual_direction: Optional[str] = Field(default=None, description="Chỉ dẫn hình ảnh tiếng Anh cho Veo (camera, lighting, character)")
     on_screen_text: Optional[str] = Field(default=None, description="Chữ hiển thị trên màn hình")
     hook: Optional[str] = Field(default=None, description="Câu mở đầu thu hút (Hook)")
     problem: Optional[str] = Field(default=None, description="Vấn đề / nhu cầu")
@@ -54,10 +57,14 @@ class GptScriptItem(BaseModel):
 class ScriptGenerationConfig(BaseModel):
     count: int = Field(default=3, ge=1, le=10, description="Số lượng kịch bản mong muốn")
     content_mode: str = Field(default="sales", description="Loại nội dung: sales, review, ugc, lifestyle, tutorial, unboxing")
+    story_mode: str = Field(default="sequential", description="sequential (chuỗi liên hoàn) hoặc independent (clip độc lập)")
     clip_duration_seconds: int = Field(default=DEFAULT_CLIP_DURATION_SECONDS, ge=1, le=60, description="Thời lượng một clip Google Flow")
     min_words: Optional[int] = Field(default=None, ge=1, description="Số từ tối thiểu; để trống để tính theo thời lượng clip")
     max_words: Optional[int] = Field(default=None, ge=1, description="Số từ tối đa; để trống để tính theo thời lượng clip")
     platform: Optional[str] = Field(default="auto", description="Nền tảng mục tiêu: auto, tiktok, reels, shorts")
+    voice_id: Optional[str] = Field(default=None, description="ID giọng đọc VieNeu-TTS cho Brand Voice")
+    character_profile: Optional[str] = Field(default=None, description="Mô tả nhân vật tham chiếu bằng tiếng Anh")
+    scene_profile: Optional[str] = Field(default=None, description="Mô tả bối cảnh không gian bằng tiếng Anh")
 
 
 class GptScriptRequest(BaseModel):
@@ -92,9 +99,38 @@ class WorkflowAssetUploadResponse(BaseModel):
     size_bytes: int = Field(default=0, description="Dung lượng file")
 
 
+class WorkflowVoiceoverItem(BaseModel):
+    """Kết quả TTS cho 1 phân cảnh."""
+    index: int = Field(description="Số thứ tự phân cảnh (0-based)")
+    text: str = Field(description="Lời thoại gốc")
+    audio_url: str = Field(description="URL để stream/download audio")
+    file_path: str = Field(description="Đường dẫn file trên disk")
+    duration_sec: float = Field(default=0.0, description="Thời lượng audio giây")
+
+
+class WorkflowVoiceoverRequest(BaseModel):
+    """Yêu cầu sinh voiceover cho danh sách lời thoại từ VieNeu-TTS."""
+    voice_id: str = Field(..., description="ID giọng đọc trong voice-service")
+    scripts: list[str] = Field(..., min_length=1, description="Danh sách lời thoại voiceover từng phân cảnh")
+    combine_all: bool = Field(default=True, description="Ghép thành 1 file duy nhất hay trả riêng từng phân cảnh")
+
+
+class WorkflowVoiceoverResponse(BaseModel):
+    voice_id: str
+    items: list[WorkflowVoiceoverItem] = Field(default_factory=list)
+    combined_audio_url: Optional[str] = None
+    combined_file_path: Optional[str] = None
+    total_duration_sec: float = 0.0
+
+
 class WorkflowExportRequest(BaseModel):
     scene_video_paths: list[str] = Field(..., min_length=1, description="Danh sách đường dẫn video từng phân cảnh cần ghép")
     bgm_path: Optional[str] = Field(default=None, description="Đường dẫn audio nền (tùy chọn)")
+    bgm_track_ids: Optional[list[str]] = Field(default=None, description="Danh sách track ID nhạc nền từ DB")
+    bgm_volume: float = Field(default=0.10, description="Volume nhạc nền (0.03 - 0.30, mặc định 0.10)")
+    voiceover_audio_path: Optional[str] = Field(default=None, description="Đường dẫn file voiceover VieNeu-TTS (đè lên audio Veo)")
+    mix_original_audio: bool = Field(default=False, description="True = trộn ambient Veo + VO; False = chỉ VO (tắt hoàn toàn tạp âm Veo)")
+    veo_ambient_volume: float = Field(default=0.0, description="Volume ambient Veo clips nếu mix_original_audio=True (0.0 - 0.25)")
     output_filename: Optional[str] = Field(default=None, description="Tên file video thành phẩm")
 
 
@@ -127,4 +163,17 @@ class ExportedVideoItem(BaseModel):
 class ExportedVideoListResponse(BaseModel):
     items: list[ExportedVideoItem] = Field(default_factory=list)
     total: int = Field(default=0)
+
+
+class WorkflowExtractProfilesRequest(BaseModel):
+    """Yêu cầu trích xuất Canonical Character Profile & Scene Profile từ ảnh nhân vật/bối cảnh bằng AI."""
+    model_image: Optional[str] = Field(default=None, description="URL hoặc data URL ảnh người mẫu/KOL")
+    scene_image: Optional[str] = Field(default=None, description="URL hoặc data URL ảnh không gian/bối cảnh")
+    model: Optional[str] = Field(default=None, description="Model AI sử dụng (mặc định theo cấu hình 9Router hoặc gpt-4o)")
+
+
+class WorkflowExtractProfilesResponse(BaseModel):
+    """Kết quả trích xuất profile tiếng Anh chuẩn hóa cho Veo."""
+    character_profile: str = Field(default="", description="Mô tả nhân vật chuẩn hóa bằng tiếng Anh")
+    scene_profile: str = Field(default="", description="Mô tả không gian/bối cảnh chuẩn hóa bằng tiếng Anh")
 

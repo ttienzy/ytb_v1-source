@@ -143,6 +143,8 @@ export function resolveCharacterSceneInput(params: {
   const sceneAsset = (nodeData.sceneAsset as AssetRef | null | undefined) || undefined
   const modelUrl = nodeData.modelImage as string | null
   const sceneUrl = nodeData.sceneImage as string | null
+  const characterProfile = (nodeData.characterProfile as string) || undefined
+  const sceneProfile = (nodeData.sceneProfile as string) || undefined
 
   const bundle: AssetBundle = {
     products: [],
@@ -166,6 +168,8 @@ export function resolveCharacterSceneInput(params: {
           uploadStatus: 'uploaded',
         }
       : undefined,
+    characterProfile,
+    sceneProfile,
   }
 
   return {

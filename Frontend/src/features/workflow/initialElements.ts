@@ -134,7 +134,17 @@ export const initialEdges: Edge[] = [
     style: { stroke: '#10b981', strokeWidth: 2.5 },
   },
 
-
+  // 3. Character & Scene to ChatGPT Script (Vertical Down)
+  {
+    id: 'edge-charscene-gpt',
+    source: 'node-character-scene',
+    sourceHandle: 'to-gpt',
+    target: 'node-gpt',
+    targetHandle: 'from-charscene',
+    type: 'removable',
+    animated: true,
+    style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '4 4' },
+  },
 
   // 4. Products to Flow Studio (Across Top to Flow)
   {

@@ -37,12 +37,12 @@ export function normalizeClipDuration(
     : fallback
 }
 
-/** Khoảng lời thoại gợi ý theo nhịp nói nhanh 2-3 từ/giây. */
+/** Khoảng lời thoại gợi ý theo nhịp bán hàng TikTok 3.5-4.5 từ/giây. */
 export function estimateVoiceoverWordRange(durationSeconds?: number): { min: number; max: number } {
   const duration = normalizeClipDuration(durationSeconds)
   return {
-    min: Math.max(1, Math.round(duration * 2)),
-    max: Math.max(1, Math.round(duration * 3)),
+    min: Math.max(1, Math.round(duration * 3.5)),
+    max: Math.max(1, Math.round(duration * 4.5)),
   }
 }
 
@@ -64,7 +64,9 @@ export function isScriptCollectionStale(
 }
 
 /**
- * Lấy toàn bộ nội dung text của 1 kịch bản, ưu tiên visualDirection cho Veo
+ * Lấy toàn bộ nội dung text của 1 kịch bản để gửi cho Veo.
+ * Ưu tiên visual_direction (tiếng Anh) làm prompt chính cho Veo vì đã chứa sẵn
+ * cinematic direction + Vietnamese dialogue reference.
  */
 export function getFullScriptContent(s?: SalesScript): string {
   if (!s) return ''
@@ -72,10 +74,19 @@ export function getFullScriptContent(s?: SalesScript): string {
   const voice = s.voiceover || (s as any).voice_over
   const onScreen = s.onScreenText || (s as any).on_screen_text
 
-  const parts: string[] = []
+  // Nếu có visual_direction (tiếng Anh) — dùng làm prompt chính cho Veo
   if (visual) {
-    parts.push(`Hình ảnh: ${visual}`)
+    // visual_direction đã chứa cinematic direction
+    // KHÔNG ghép voiceover vào prompt Veo — voice sẽ được lồng riêng bằng VieNeu-TTS
+    const parts: string[] = [visual]
+    if (onScreen) {
+      parts.push(`On-screen text overlay: "${onScreen}"`)
+    }
+    return parts.join('\n\n')
   }
+
+  // Fallback: ghép các phần như cũ
+  const parts: string[] = []
   if (voice) {
     parts.push(`Lời thoại: ${voice}`)
   }

@@ -20,12 +20,17 @@ import {
   Ratio,
   Monitor,
   Video,
+  Mic,
+  Music,
 } from 'lucide-react'
+import { API_URL } from '../../../shared/constants'
 import type { ExportedVideoItem } from '../contracts'
 import {
   fetchExportedVideos,
   deleteExportedVideo,
   openExportFolder,
+  callWorkflowVideoExport,
+  callGenerateVoiceover,
 } from '../services/workflowApi'
 import * as veoApi from '../../veo-studio/services/veoApi'
 
@@ -50,6 +55,114 @@ export function VideoLibraryModal({
   const [filterType, setFilterType] = useState<'all' | 'export' | 'veo_scene'>('all')
   const [isExtractingFrame, setIsExtractingFrame] = useState(false)
   const [frameSaved, setFrameSaved] = useState(false)
+
+  // Chế độ Ghép Nhanh (Remix Multi-clip)
+  const [isRemixMode, setIsRemixMode] = useState(false)
+  const [selectedRemixClips, setSelectedRemixClips] = useState<ExportedVideoItem[]>([])
+  const [remixVoiceId, setRemixVoiceId] = useState<string>('bf4bed06c671')
+  const [remixBgmTrackId, setRemixBgmTrackId] = useState<string>('none')
+  const [availableBgm, setAvailableBgm] = useState<Array<{ track_id: string; name: string }>>([])
+  const [isRemixing, setIsRemixing] = useState(false)
+
+  // Tải danh sách BGM khi mở modal
+  useEffect(() => {
+    if (isOpen) {
+      fetch(`${API_URL}/api/bgm`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          const rawTracks = Array.isArray(data) ? data : (data?.tracks || [])
+          const tracks = rawTracks.map((t: any) => ({
+            track_id: t.track_id || t.id,
+            name: t.name || t.title || t.track_id,
+          }))
+          setAvailableBgm(tracks)
+        })
+        .catch((err) => console.warn('Lỗi tải danh sách BGM:', err))
+    }
+  }, [isOpen])
+
+  const toggleRemixClip = (clip: ExportedVideoItem) => {
+    setSelectedRemixClips((prev) => {
+      const existing = prev.findIndex((c) => c.filename === clip.filename)
+      if (existing >= 0) {
+        return prev.filter((c) => c.filename !== clip.filename)
+      } else {
+        return [...prev, clip]
+      }
+    })
+  }
+
+  const totalRemixDuration = selectedRemixClips.reduce(
+    (acc, c) => acc + (c.durationSec && c.durationSec > 0 ? c.durationSec : 10),
+    0
+  )
+
+  const handleExecuteRemix = async () => {
+    if (selectedRemixClips.length < 2) {
+      alert('Vui lòng chọn ít nhất 2 clip Veo để ghép video!')
+      return
+    }
+
+    const validPaths = selectedRemixClips.map((c) => c.filePath || c.videoUrl).filter(Boolean)
+    if (validPaths.length < selectedRemixClips.length) {
+      alert('Một số clip không có đường dẫn file hợp lệ.')
+      return
+    }
+
+    setIsRemixing(true)
+    try {
+      let voiceoverAudioPath: string | undefined = undefined
+
+      // Nếu chọn Brand Voice và có prompt trong các clip
+      if (remixVoiceId && remixVoiceId !== 'none') {
+        const textsToSpeak: string[] = []
+        selectedRemixClips.forEach((c) => {
+          if (c.prompt && c.prompt.trim()) {
+            textsToSpeak.push(c.prompt.trim())
+          }
+        })
+
+        if (textsToSpeak.length > 0) {
+          try {
+            const voRes = await callGenerateVoiceover({
+              voiceId: remixVoiceId,
+              scripts: textsToSpeak,
+              combineAll: true,
+            })
+            voiceoverAudioPath = voRes.combinedFilePath || voRes.combinedAudioUrl || undefined
+          } catch (voErr) {
+            console.warn('Lỗi tạo giọng đọc cho remix, vẫn tiếp tục ghép video:', voErr)
+          }
+        }
+      }
+
+      const bgmTrackIds = remixBgmTrackId && remixBgmTrackId !== 'none' ? [remixBgmTrackId] : undefined
+
+      const exportRes = await callWorkflowVideoExport(
+        validPaths,
+        undefined,
+        undefined,
+        voiceoverAudioPath,
+        false, // Tắt âm thanh môi trường Veo để video trong trẻo
+        bgmTrackIds,
+        0.10,
+        0.0
+      )
+
+      // Tải lại danh sách video
+      await loadVideos()
+      setFilterType('export') // Chuyển sang tab video hoàn chỉnh
+      setIsRemixMode(false)
+      setSelectedRemixClips([])
+      setSelectedIndex(0)
+      alert(`🎉 Ghép video Remix thành công! Video "${exportRes.outputFilename}" đã được tạo và lưu vào thư viện.`)
+    } catch (err: any) {
+      console.error('Lỗi khi ghép video Remix:', err)
+      alert(`Lỗi ghép video: ${err.message || err}`)
+    } finally {
+      setIsRemixing(false)
+    }
+  }
 
   const loadVideos = async () => {
     setIsLoading(true)
@@ -270,6 +383,38 @@ export function VideoLibraryModal({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Nút Chế độ Ghép Nhanh Remix */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode = !isRemixMode
+                setIsRemixMode(nextMode)
+                if (nextMode) {
+                  setFilterType('veo_scene')
+                }
+              }}
+              style={{
+                height: 30,
+                padding: '0 11px',
+                borderRadius: 6,
+                border: isRemixMode ? '1px solid #6366f1' : '1px solid #cbd5e1',
+                background: isRemixMode ? '#4f46e5' : '#f8fafc',
+                color: isRemixMode ? '#ffffff' : '#334155',
+                fontSize: 11.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                transition: 'all 0.15s ease',
+                boxShadow: isRemixMode ? '0 2px 6px rgba(99, 102, 241, 0.3)' : 'none',
+              }}
+              title="Bật/tắt chế độ chọn nhiều clip Veo để ghép video mới (Remix)"
+            >
+              <Sparkles size={13} color={isRemixMode ? '#ffffff' : '#4f46e5'} />
+              <span>{isRemixMode ? `Remix (${selectedRemixClips.length} clip)` : '⚡ Ghép Nhanh (Remix)'}</span>
+            </button>
+
             <button
               type="button"
               onClick={loadVideos}
@@ -487,16 +632,22 @@ export function VideoLibraryModal({
               ) : (
                 filtered.map((item, idx) => {
                   const isSelected = item.filename === currentVideo?.filename
+                  const remixIndex = selectedRemixClips.findIndex((c) => c.filename === item.filename)
                   return (
                     <div
                       key={item.filename}
-                      onClick={() => setSelectedIndex(idx)}
+                      onClick={() => {
+                        setSelectedIndex(idx)
+                        if (isRemixMode) {
+                          toggleRemixClip(item)
+                        }
+                      }}
                       style={{
                         padding: '8px 10px',
                         borderRadius: 8,
-                        border: isSelected ? '1.5px solid #334155' : '1px solid #e2e8f0',
-                        background: isSelected ? '#ffffff' : '#ffffff',
-                        boxShadow: isSelected ? '0 2px 6px rgba(15, 23, 42, 0.08)' : '0 1px 2px rgba(0,0,0,0.02)',
+                        border: remixIndex >= 0 ? '1.5px solid #6366f1' : isSelected ? '1.5px solid #334155' : '1px solid #e2e8f0',
+                        background: remixIndex >= 0 ? '#f5f3ff' : '#ffffff',
+                        boxShadow: remixIndex >= 0 ? '0 2px 6px rgba(99, 102, 241, 0.12)' : isSelected ? '0 2px 6px rgba(15, 23, 42, 0.08)' : '0 1px 2px rgba(0,0,0,0.02)',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
                         position: 'relative',
@@ -504,22 +655,53 @@ export function VideoLibraryModal({
                     >
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1, minWidth: 0 }}>
-                          <div
-                            style={{
-                              width: 32,
-                              height: 32,
-                              borderRadius: 6,
-                              background: isSelected ? '#0f172a' : '#f1f5f9',
-                              color: isSelected ? '#ffffff' : '#64748b',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              flexShrink: 0,
-                              marginTop: 1,
-                            }}
-                          >
-                            <Play size={12} fill={isSelected ? '#ffffff' : '#64748b'} />
-                          </div>
+                          {isRemixMode ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleRemixClip(item)
+                              }}
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 6,
+                                background: remixIndex >= 0 ? '#4f46e5' : '#f1f5f9',
+                                border: remixIndex >= 0 ? '2px solid #6366f1' : '1px solid #cbd5e1',
+                                color: remixIndex >= 0 ? '#ffffff' : '#64748b',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                                marginTop: 1,
+                                cursor: 'pointer',
+                                boxShadow: remixIndex >= 0 ? '0 2px 5px rgba(79, 70, 229, 0.3)' : 'none',
+                                transition: 'all 0.15s ease',
+                              }}
+                              title={remixIndex >= 0 ? `Clip thứ #${remixIndex + 1} (Bấm để bỏ chọn)` : 'Bấm để thêm clip vào danh sách ghép'}
+                            >
+                              {remixIndex >= 0 ? remixIndex + 1 : '+'}
+                            </button>
+                          ) : (
+                            <div
+                              style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 6,
+                                background: isSelected ? '#0f172a' : '#f1f5f9',
+                                color: isSelected ? '#ffffff' : '#64748b',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                                marginTop: 1,
+                              }}
+                            >
+                              <Play size={12} fill={isSelected ? '#ffffff' : '#64748b'} />
+                            </div>
+                          )}
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div
                               style={{
@@ -1066,6 +1248,218 @@ export function VideoLibraryModal({
             )}
           </div>
         </div>
+
+        {/* ─── REMIX FLOATING BOTTOM ACTION BAR ─── */}
+        {isRemixMode && (
+          <div
+            style={{
+              padding: '10px 20px',
+              background: '#0f172a',
+              borderTop: '1px solid #1e293b',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+              color: '#ffffff',
+              flexShrink: 0,
+              boxShadow: '0 -4px 15px rgba(0,0,0,0.2)',
+            }}
+          >
+            {/* Left Info & Selected Order */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 6,
+                    background: '#6366f1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    fontSize: 12,
+                  }}
+                >
+                  ⚡
+                </span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
+                    Remix: {selectedRemixClips.length} clip{' '}
+                    <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>
+                      (Tổng ~{Math.round(totalRemixDuration)}s)
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: '#94a3b8' }}>
+                    {selectedRemixClips.length < 2
+                      ? 'Chọn thêm ít nhất 1 clip Veo nữa để ghép'
+                      : 'Ghép nối theo đúng thứ tự đánh số [1], [2]...'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Clip Sequence Badges */}
+              {selectedRemixClips.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    overflowX: 'auto',
+                    maxWidth: 240,
+                    padding: '2px 0',
+                  }}
+                >
+                  {selectedRemixClips.map((clip, idx) => (
+                    <div
+                      key={clip.filename}
+                      style={{
+                        background: '#1e293b',
+                        border: '1px solid #334155',
+                        borderRadius: 5,
+                        padding: '2px 6px',
+                        fontSize: 10,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span style={{ color: '#818cf8', fontWeight: 700 }}>#{idx + 1}</span>
+                      <span
+                        style={{
+                          maxWidth: 60,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          color: '#e2e8f0',
+                        }}
+                        title={clip.title || clip.filename}
+                      >
+                        {clip.title || clip.filename}
+                      </span>
+                      <X
+                        size={10}
+                        color="#94a3b8"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => toggleRemixClip(clip)}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRemixClips([])}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#f87171',
+                      fontSize: 10,
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    Xóa
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Middle Controls: Voice & BGM */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {/* Giọng đọc */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Mic size={13} color="#a5b4fc" />
+                <select
+                  value={remixVoiceId}
+                  onChange={(e) => setRemixVoiceId(e.target.value)}
+                  style={{
+                    background: '#1e293b',
+                    border: '1px solid #334155',
+                    color: '#e2e8f0',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '5px 8px',
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="bf4bed06c671">🎙️ Ads_Female (Nữ quảng cáo)</option>
+                  <option value="7e16be95b7fd">🎙️ Review (Review tự nhiên)</option>
+                  <option value="a5b304485f8b">🎙️ Google Voice (Chuẩn)</option>
+                  <option value="none">🔇 Không lồng tiếng</option>
+                </select>
+              </div>
+
+              {/* Nhạc nền BGM */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Music size={13} color="#a5b4fc" />
+                <select
+                  value={remixBgmTrackId}
+                  onChange={(e) => setRemixBgmTrackId(e.target.value)}
+                  style={{
+                    background: '#1e293b',
+                    border: '1px solid #334155',
+                    color: '#e2e8f0',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '5px 8px',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    maxWidth: 150,
+                  }}
+                >
+                  <option value="none">🔇 Không nhạc nền</option>
+                  {availableBgm.map((bgm) => (
+                    <option key={bgm.track_id} value={bgm.track_id}>
+                      🎵 {bgm.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Right Action Button */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={handleExecuteRemix}
+                disabled={selectedRemixClips.length < 2 || isRemixing}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 7,
+                  border: 'none',
+                  background:
+                    selectedRemixClips.length < 2 || isRemixing
+                      ? '#334155'
+                      : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                  color: '#ffffff',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: selectedRemixClips.length < 2 || isRemixing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  boxShadow:
+                    selectedRemixClips.length < 2 || isRemixing
+                      ? 'none'
+                      : '0 4px 12px rgba(99, 102, 241, 0.4)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {isRemixing ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Đang ghép video & audio...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={14} />
+                    <span>⚡ Ghép Video Mới ({selectedRemixClips.length} clip)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

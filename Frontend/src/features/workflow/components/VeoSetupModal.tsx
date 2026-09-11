@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   X,
   Clapperboard,
@@ -9,7 +9,13 @@ import {
   Sparkles,
   Layers,
   Film,
+  Mic,
+  Music,
+  Volume2,
+  Play,
+  Pause,
 } from 'lucide-react'
+import { API_URL } from '../../../shared/constants'
 import type { GptSalesScriptItem, VeoVideoConfig } from '../types'
 import type { VeoCapabilities, VeoProject } from '../../veo-studio/types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
@@ -47,6 +53,114 @@ export function VeoSetupModal({
   const [duration, setDuration] = useState<number>(currentConfig.duration || DEFAULT_CLIP_DURATION_SECONDS)
   const [resolution, setResolution] = useState<string>(currentConfig.resolution || '720p')
   const [variations, setVariations] = useState<number>(currentConfig.variations || 1)
+
+  // Audio settings — Voice (VieNeu-TTS)
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(currentConfig.voiceEnabled !== false)
+  const [voiceId, setVoiceId] = useState<string>(currentConfig.voiceId || 'bf4bed06c671')
+  const [keepVeoAmbient, setKeepVeoAmbient] = useState<boolean>(currentConfig.keepVeoAmbient !== false)
+  const [veoAmbientVolume, setVeoAmbientVolume] = useState<number>(currentConfig.veoAmbientVolume ?? 0.10)
+
+  // Audio settings — BGM
+  const [bgmEnabled, setBgmEnabled] = useState<boolean>(currentConfig.bgmEnabled !== false)
+  const [bgmTrackIds, setBgmTrackIds] = useState<string[]>(currentConfig.bgmTrackIds || [])
+  const [bgmVolume, setBgmVolume] = useState<number>(currentConfig.bgmVolume ?? 0.10)
+
+  // Voice & BGM library data
+  const [availableVoices, setAvailableVoices] = useState<Array<{ voice_id: string; name: string }>>([
+    { voice_id: 'bf4bed06c671', name: '🎙️ Ads_Female (Quảng cáo nữ - Truyền cảm)' },
+    { voice_id: '7e16be95b7fd', name: '🎙️ Review (Review sản phẩm - Tự nhiên)' },
+    { voice_id: 'a5b304485f8b', name: '🎙️ Google Voice (Giọng đọc chuẩn - Rõ ràng)' },
+  ])
+  const [availableBgm, setAvailableBgm] = useState<Array<{ track_id: string; name: string; duration_sec?: number; needs_attribution?: boolean }>>([])
+  const [playingBgmId, setPlayingBgmId] = useState<string | null>(null)
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Sync state & fetch Voice + BGM data when modal opens
+  useEffect(() => {
+    if (!isOpen) {
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.pause()
+        bgmAudioRef.current = null
+      }
+      setPlayingBgmId(null)
+      return
+    }
+
+    setModel(currentConfig.model || 'Omni 1.1 Flash')
+    setAspectRatio(currentConfig.aspectRatio || '9:16')
+    setDuration(currentConfig.duration || DEFAULT_CLIP_DURATION_SECONDS)
+    setResolution(currentConfig.resolution || '720p')
+    setVariations(currentConfig.variations || 1)
+    setVoiceEnabled(currentConfig.voiceEnabled !== false)
+    setVoiceId(currentConfig.voiceId || 'bf4bed06c671')
+    setKeepVeoAmbient(currentConfig.keepVeoAmbient !== false)
+    setVeoAmbientVolume(currentConfig.veoAmbientVolume ?? 0.10)
+    setBgmEnabled(currentConfig.bgmEnabled !== false)
+    setBgmTrackIds(currentConfig.bgmTrackIds || [])
+    setBgmVolume(currentConfig.bgmVolume ?? 0.10)
+
+    // Load available voices from backend
+    fetch(`${API_URL}/api/voices`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const rawVoices = data?.voices ?? (Array.isArray(data) ? data : null)
+        if (rawVoices && rawVoices.length > 0) {
+          setAvailableVoices(
+            rawVoices.map((v: any) => ({
+              voice_id: v.voice_id || v.id,
+              name: `🎙️ ${v.name || v.voice_id}`,
+            }))
+          )
+        }
+      })
+      .catch(() => {})
+
+    // Load BGM library
+    fetch(`${API_URL}/api/bgm`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setAvailableBgm(data)
+          if (data.length > 0) {
+            setBgmTrackIds((prev) => {
+              if (prev && prev.length > 0) return prev
+              if (currentConfig.bgmTrackIds && currentConfig.bgmTrackIds.length > 0) return currentConfig.bgmTrackIds
+              return [data[0].track_id]
+            })
+          }
+        }
+      })
+      .catch(() => {})
+  }, [isOpen, currentConfig])
+
+  // Play / Pause BGM preview
+  const handleTogglePlayBgm = (trackId: string) => {
+    if (playingBgmId === trackId) {
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.pause()
+      }
+      setPlayingBgmId(null)
+      return
+    }
+
+    if (bgmAudioRef.current) {
+      bgmAudioRef.current.pause()
+    }
+
+    const audio = new Audio(`${API_URL}/api/bgm/${trackId}/audio`)
+    audio.volume = bgmVolume
+    audio.onended = () => setPlayingBgmId(null)
+    audio.onerror = () => setPlayingBgmId(null)
+    audio.play().catch(() => setPlayingBgmId(null))
+    bgmAudioRef.current = audio
+    setPlayingBgmId(trackId)
+  }
+
+  const handleToggleBgmTrack = (trackId: string) => {
+    setBgmTrackIds((prev) =>
+      prev.includes(trackId) ? prev.filter((id) => id !== trackId) : [...prev, trackId]
+    )
+  }
 
   // Project creation state
   const [isCreatingProject, setIsCreatingProject] = useState(false)
@@ -108,6 +222,11 @@ export function VeoSetupModal({
   }
 
   const handleSave = () => {
+    if (bgmAudioRef.current) {
+      bgmAudioRef.current.pause()
+      bgmAudioRef.current = null
+    }
+    setPlayingBgmId(null)
     onSaveConfig(
       {
         model,
@@ -116,6 +235,13 @@ export function VeoSetupModal({
         resolution,
         variations,
         creditCost,
+        voiceEnabled,
+        voiceId: voiceEnabled ? voiceId : undefined,
+        bgmEnabled,
+        bgmTrackIds: bgmEnabled ? bgmTrackIds : [],
+        bgmVolume,
+        keepVeoAmbient: false,
+        veoAmbientVolume: 0.0,
       },
     )
     onClose()
@@ -562,9 +688,204 @@ export function VeoSetupModal({
                   </span>
                 ))}
               </div>
-
             </div>
           )}
+
+          {/* 4. Voiceover (VieNeu-TTS) Unified Voice Section */}
+          <div style={{ padding: 14, background: '#faf5ff', borderRadius: 10, border: '1px solid #e9d5ff' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Mic size={14} style={{ color: '#7c3aed' }} />
+                <label style={{ fontSize: 11, fontWeight: 800, color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Lồng Tiếng Độc Quyền (VieNeu-TTS)
+                </label>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#7c3aed' }}>
+                <input
+                  type="checkbox"
+                  checked={voiceEnabled}
+                  onChange={(e) => setVoiceEnabled(e.target.checked)}
+                  style={{ accentColor: '#7c3aed', width: 15, height: 15, cursor: 'pointer' }}
+                />
+                <span>{voiceEnabled ? 'Đang BẬT' : 'Đang TẮT'}</span>
+              </label>
+            </div>
+
+            <div style={{ fontSize: 10.5, color: '#6b21a8', marginBottom: voiceEnabled ? 10 : 0, lineHeight: 1.4 }}>
+              Đồng nhất một giọng đọc tiếng Việt duy nhất cho toàn bộ video khi ghép nối (khắc phục lỗi mỗi clip 10s một giọng khác nhau).
+            </div>
+
+            {voiceEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8, borderTop: '1px dashed #e9d5ff' }}>
+                {/* Voice selection */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>
+                    Chọn Brand Voice:
+                  </span>
+                  <select
+                    value={voiceId}
+                    onChange={(e) => setVoiceId(e.target.value)}
+                    style={{
+                      padding: '5px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #c084fc',
+                      background: '#ffffff',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#581c87',
+                      cursor: 'pointer',
+                      outline: 'none',
+                      maxWidth: 320,
+                    }}
+                  >
+                    {availableVoices.map((v) => (
+                      <option key={v.voice_id} value={v.voice_id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Veo Audio Clean Info */}
+                <div style={{ padding: '7px 10px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: '#64748b' }}>
+                  <span>⚡ Tự động loại bỏ tạp âm/giọng nói từ Veo để đồng bộ giọng đọc VieNeu & Nhạc nền BGM trong trẻo nhất.</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 5. Background Music (BGM) Section */}
+          <div style={{ padding: 14, background: '#f0fdf4', borderRadius: 10, border: '1px solid #bbf7d0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Music size={14} style={{ color: '#059669' }} />
+                <label style={{ fontSize: 11, fontWeight: 800, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Nhạc Nền Liền Mạch (BGM)
+                </label>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#059669' }}>
+                <input
+                  type="checkbox"
+                  checked={bgmEnabled}
+                  onChange={(e) => setBgmEnabled(e.target.checked)}
+                  style={{ accentColor: '#059669', width: 15, height: 15, cursor: 'pointer' }}
+                />
+                <span>{bgmEnabled ? 'Đang BẬT' : 'Đang TẮT'}</span>
+              </label>
+            </div>
+
+            <div style={{ fontSize: 10.5, color: '#166534', marginBottom: bgmEnabled ? 10 : 0, lineHeight: 1.4 }}>
+              Nhạc nền phát xuyên suốt toàn bộ video, tự động lặp (loop) và tự giảm âm lượng (ducking) khi có giọng đọc thoại.
+            </div>
+
+            {bgmEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8, borderTop: '1px dashed #bbf7d0' }}>
+                {/* Volume slider */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>
+                    Âm lượng nhạc nền:
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Volume2 size={12} color="#059669" />
+                    <input
+                      type="range"
+                      min="0.03"
+                      max="0.30"
+                      step="0.01"
+                      value={bgmVolume}
+                      onChange={(e) => setBgmVolume(parseFloat(e.target.value))}
+                      style={{ width: 120, accentColor: '#059669', height: 4 }}
+                    />
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#059669', minWidth: 32, textAlign: 'right' }}>
+                      {Math.round(bgmVolume * 100)}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* BGM Track List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#166534', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Chọn bài nhạc nền (chọn 1 để loop hoặc nhiều bài để chuyển cảnh):</span>
+                    {bgmTrackIds.length > 0 && (
+                      <span style={{ color: '#059669', fontWeight: 800 }}>Đã chọn {bgmTrackIds.length} bài</span>
+                    )}
+                  </div>
+
+                  <div style={{ maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, padding: 4, background: '#ffffff', borderRadius: 8, border: '1px solid #dcfce7' }}>
+                    {availableBgm.length === 0 ? (
+                      <div style={{ fontSize: 10.5, color: '#94a3b8', textAlign: 'center', padding: '12px 0' }}>
+                        Đang tải danh sách nhạc nền hoặc thư viện trống...
+                      </div>
+                    ) : (
+                      availableBgm.map((t) => {
+                        const isSelected = bgmTrackIds.includes(t.track_id)
+                        const isPlaying = playingBgmId === t.track_id
+                        return (
+                          <div
+                            key={t.track_id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '5px 8px',
+                              borderRadius: 6,
+                              background: isSelected ? '#f0fdf4' : '#fafafa',
+                              border: isSelected ? '1px solid #86efac' : '1px solid #f1f5f9',
+                              fontSize: 11,
+                            }}
+                          >
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flex: 1, minWidth: 0 }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleBgmTrack(t.track_id)}
+                                style={{ accentColor: '#059669', width: 14, height: 14 }}
+                              />
+                              <span style={{ fontWeight: isSelected ? 700 : 500, color: isSelected ? '#15803d' : '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                🎵 {t.name}
+                              </span>
+                              {t.duration_sec && (
+                                <span style={{ fontSize: 9.5, color: '#64748b' }}>
+                                  ({Math.round(t.duration_sec)}s)
+                                </span>
+                              )}
+                              {t.needs_attribution && (
+                                <span style={{ fontSize: 8.5, color: '#d97706', background: '#fef3c7', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>
+                                  Cần ghi công
+                                </span>
+                              )}
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePlayBgm(t.track_id)}
+                              style={{
+                                padding: '3px 7px',
+                                borderRadius: 4,
+                                border: '1px solid #cbd5e1',
+                                background: isPlaying ? '#ef4444' : '#ffffff',
+                                color: isPlaying ? '#ffffff' : '#475569',
+                                fontSize: 9.5,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 3,
+                              }}
+                              title={isPlaying ? 'Dừng phát' : 'Nghe thử'}
+                            >
+                              {isPlaying ? <Pause size={10} /> : <Play size={10} />}
+                              {isPlaying ? 'Dừng' : 'Thử'}
+                            </button>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Modal Footer */}

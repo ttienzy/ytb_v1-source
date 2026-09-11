@@ -15,6 +15,9 @@ import {
   FileText,
   RotateCcw,
   AlertCircle,
+  RefreshCw,
+  Key,
+  Bot,
 } from 'lucide-react'
 import type { GeminiAnalysisNodeData } from '../types'
 
@@ -124,12 +127,12 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
           <span
             className="wf-node-badge"
             style={{
-              background: res ? '#ecfdf5' : isConnected ? '#eff6ff' : '#f8fafc',
-              color: res ? '#059669' : isConnected ? '#2563eb' : '#64748b',
-              border: res ? '1px solid #a7f3d0' : isConnected ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+              background: data.providerUsed === '9router' ? '#f0fdf4' : res ? '#ecfdf5' : isConnected ? '#eff6ff' : '#f8fafc',
+              color: data.providerUsed === '9router' ? '#166534' : res ? '#059669' : isConnected ? '#2563eb' : '#64748b',
+              border: data.providerUsed === '9router' ? '1px solid #bbf7d0' : res ? '1px solid #a7f3d0' : isConnected ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
             }}
           >
-            {res ? 'Đã phân tích' : isConnected ? 'Đã nối dây' : 'Vision AI'}
+            {data.providerUsed === '9router' ? '🤖 GPT-5.5' : res ? '✨ Gemini' : isConnected ? 'Đã nối dây' : 'Vision AI'}
           </span>
           <button
             type="button"
@@ -147,23 +150,126 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
 
       {/* Body */}
       <div className="wf-node-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* Error Banner */}
-        {data.analysisError && (
+        {/* Cookie Refreshing State Banner */}
+        {data.isRefreshingCookie && (
           <div
             style={{
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
               borderRadius: 6,
               padding: '6px 8px',
-              color: '#b91c1c',
+              color: '#1d4ed8',
               fontSize: 10.5,
               display: 'flex',
-              alignItems: 'flex-start',
+              alignItems: 'center',
               gap: 6,
             }}
           >
-            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div style={{ flex: 1 }}>{data.analysisError}</div>
+            <RefreshCw size={13} className="animate-spin" />
+            <div style={{ flex: 1, fontWeight: 500 }}>
+              Đang tự động làm mới cookie Gemini ngầm qua Chrome (3-5s)...
+            </div>
+          </div>
+        )}
+
+        {/* Actionable Error Card */}
+        {data.analysisError && !data.isRefreshingCookie && (
+          <div
+            style={{
+              background: '#fff1f2',
+              border: '1px solid #fecdd3',
+              borderRadius: 8,
+              padding: '8px 10px',
+              color: '#9f1239',
+              fontSize: 10.5,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1, color: '#e11d48' }} />
+              <div style={{ flex: 1, fontWeight: 500, lineHeight: 1.35 }}>
+                {data.analysisError}
+              </div>
+            </div>
+
+            {/* Action buttons toolbar */}
+            <div style={{ display: 'flex', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="wf-btn"
+                onClick={() => data.onAnalyze?.()}
+                disabled={isAnalyzing || data.isRefreshingCookie}
+                style={{
+                  fontSize: 9.5,
+                  padding: '3px 8px',
+                  background: '#e11d48',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 4,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  cursor: 'pointer',
+                }}
+                title="Thử lại lệnh phân tích"
+              >
+                <RefreshCw size={10} className={isAnalyzing ? 'animate-spin' : ''} />
+                Thử lại ngay
+              </button>
+
+              <button
+                type="button"
+                className="wf-btn"
+                onClick={() => data.onRefreshCookie?.()}
+                disabled={data.isRefreshingCookie}
+                style={{
+                  fontSize: 9.5,
+                  padding: '3px 8px',
+                  background: '#f1f5f9',
+                  color: '#334155',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 4,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  cursor: 'pointer',
+                }}
+                title="Mở Chrome ngầm 3s để cập nhật cookie mới nhất"
+              >
+                <Key size={10} color="#0284c7" />
+                Làm mới Cookie (Fast)
+              </button>
+
+              {data.onAnalyze9Router && (
+                <button
+                  type="button"
+                  className="wf-btn"
+                  onClick={() => data.onAnalyze9Router?.()}
+                  disabled={isAnalyzing}
+                  style={{
+                    fontSize: 9.5,
+                    padding: '3px 8px',
+                    background: '#f0fdf4',
+                    color: '#166534',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: 4,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    cursor: 'pointer',
+                  }}
+                  title="Dùng 9Router Vision (GPT-5.5) thay thế mà không cần cookie Gemini"
+                >
+                  <Bot size={10} color="#16a34a" />
+                  Dùng 9Router AI
+                </button>
+              )}
+            </div>
           </div>
         )}
 

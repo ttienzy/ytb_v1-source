@@ -38,9 +38,17 @@ export interface CharacterSceneNodeData {
   sceneImage?: string | null
   modelAsset?: AssetRef | null
   sceneAsset?: AssetRef | null
+  /** Mô tả nhân vật tham chiếu bằng tiếng Anh (Canonical Character Profile) */
+  characterProfile?: string
+  /** Mô tả bối cảnh/không gian bằng tiếng Anh (Canonical Scene Profile) */
+  sceneProfile?: string
+  /** Đang trích xuất profile từ ảnh bằng AI */
+  isExtractingProfile?: boolean
   isStartNode?: boolean
   isOrphan?: boolean
   onChange?: (key: 'modelImage' | 'sceneImage', value: string | null, asset?: AssetRef | null) => void
+  onChangeProfile?: (key: 'characterProfile' | 'sceneProfile', value: string) => void
+  onAutoExtractProfile?: () => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }
@@ -86,7 +94,12 @@ export interface GeminiAnalysisNodeData {
   isStartNode?: boolean
   isOrphan?: boolean
   analysisResult?: GeminiAnalysisResult | null
+  providerUsed?: 'gemini' | '9router'
+  isRefreshingCookie?: boolean
+  cookieValid?: boolean
   onAnalyze?: () => void
+  onRefreshCookie?: () => void
+  onAnalyze9Router?: () => void
   onChangePrompt?: (prompt: string) => void
   onResetPrompt?: () => void
   onSetStartNode?: () => void
@@ -120,6 +133,8 @@ export interface GeneratedSceneItem {
 
 export interface GptSalesScriptItem {
   id?: string
+  /** Giai đoạn phễu: Hook | Reveal | Demo | CTA */
+  phase?: string
   angle: string
   title?: string
   content: string
@@ -144,6 +159,16 @@ export interface VeoVideoConfig {
   resolution: string
   variations: number
   creditCost?: number
+  // Audio settings — Voice (VieNeu-TTS)
+  voiceEnabled?: boolean       // Tự động tạo voiceover khi ghép
+  voiceId?: string             // ID giọng VieNeu-TTS (e.g. 'bf4bed06c671')
+  // Audio settings — BGM
+  bgmEnabled?: boolean         // Thêm nhạc nền khi ghép
+  bgmTrackIds?: string[]       // Danh sách BGM track IDs đã chọn
+  bgmVolume?: number           // Volume BGM (0.05 - 0.30, default 0.10)
+  // Audio settings — Veo Ambient
+  keepVeoAmbient?: boolean     // Giữ SFX/ambient sound từ Veo clips
+  veoAmbientVolume?: number    // Volume ambient Veo (0.0 - 0.20, default 0.10)
 }
 
 export interface GptScriptNodeData {
@@ -166,6 +191,10 @@ export interface GptScriptNodeData {
   requestedCount?: number
   contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
   platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
+  /** sequential = phễu liên hoàn; independent = clip độc lập */
+  storyMode?: 'sequential' | 'independent'
+  /** ID giọng đọc VieNeu-TTS cho Brand Voice */
+  voiceId?: string
   clipDurationSeconds?: number
   scenes?: GeneratedSceneItem[]
   onGenerate?: () => void
@@ -176,6 +205,8 @@ export interface GptScriptNodeData {
     count?: number
     contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
     platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
+    storyMode?: 'sequential' | 'independent'
+    voiceId?: string
   }) => void
   onPushToVeo?: (scriptIndex: number) => void
   onPushAllToVeo?: () => void
@@ -215,6 +246,12 @@ export interface VeoFlowStudioNodeData {
     sceneUrl?: string | null
   }
   exportedCount?: number
+  voiceId?: string
+  voiceoverUrl?: string | null
+  voiceoverFilePath?: string | null
+  voiceoverDurationSec?: number
+  isGeneratingVoiceover?: boolean
+  mixOriginalAudio?: boolean
   onOpenVeoSetup?: () => void
   onApplyGptScript?: (scriptIndex: number) => void
   onApplyAllGptScripts?: () => void
@@ -226,9 +263,12 @@ export interface VeoFlowStudioNodeData {
   onRenderAllScenes?: () => void
   onExtractLastFrame?: (sourceSceneIndex: number) => void
   onToggleChainFrames?: (sceneIndex: number, enabled: boolean) => void
+  onGenerateVoiceover?: () => void
+  onToggleMixAudio?: (mix: boolean) => void
   onExportVideo?: () => void
   onOpenPreviewModal?: (videoUrl: string, title?: string, prompt?: string) => void
   onOpenLibrary?: () => void
+  onOpenVideoPicker?: (sceneIndex: number) => void
   onSetStartNode?: () => void
   onDelete?: () => void
 }

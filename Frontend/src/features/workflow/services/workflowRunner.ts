@@ -65,6 +65,14 @@ export async function runRealWorkflow(params: {
       edges,
       callbacks,
     })
+  } else if (startNode.type === 'characterScene') {
+    // Nếu chọn Nhân Vật & Bối Cảnh làm điểm bắt đầu, bắt đầu phân tích từ khối Gemini Vision
+    geminiNode = nodes.find((n) => n.type === 'geminiAnalysis')
+    if (!geminiNode) {
+      const errMsg = 'Sơ đồ cần có khối Gemini Vision để phân tích sản phẩm và khởi chạy quy trình.'
+      callbacks.onError(startNode.id, errMsg)
+      return
+    }
   } else {
     callbacks.onError(startNode.id, `Loại node '${startNode.type}' hiện không hỗ trợ làm điểm bắt đầu chạy tự động.`)
     return
@@ -190,6 +198,10 @@ async function executeGptAndDownstream(params: {
       scriptConfig: {
         count: scriptCount,
         contentMode: scriptMode,
+        storyMode: (gptData.storyMode as any) || 'sequential',
+        voiceId: gptData.voiceId,
+        characterProfile: charSceneRes.data?.characterProfile,
+        sceneProfile: charSceneRes.data?.sceneProfile,
         platform,
         clipDurationSeconds,
       },

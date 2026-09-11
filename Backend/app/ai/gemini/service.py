@@ -8,17 +8,17 @@ from app.core.storage import read_config, write_config
 
 
 AUTH_COOKIE_NAMES = {"SID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID"}
-LOGIN_TIMEOUT_SECONDS = 180
+LOGIN_TIMEOUT_SECONDS = 60
 
 
 def login_and_save_cookie() -> dict:
     """Mở Chrome thật để đăng nhập Gemini rồi lưu cookies.
 
-    Không dùng ``launch_persistent_context`` ở đây: Playwright thêm các dấu
-    hiệu automation (như ``--enable-automation``/``navigator.webdriver``), và
-    Google có thể từ chối đăng nhập với thông báo trình duyệt không an toàn.
-    Chrome được khởi động trực tiếp, sau đó Playwright chỉ kết nối qua CDP để
-    đọc cookies.
+    - Ưu tiên chế độ Fast Silent Refresh (3-5s): Mở trực tiếp https://gemini.google.com/app.
+      Nếu profile Chrome đã đăng nhập Google sẵn, session được nhận diện ngay lập tức.
+    - Quét đa tab (multi-tab): Duyệt qua toàn bộ context.pages, không bị kẹt ở tab newtab/blank.
+    - Lọc cookie chuẩn domain https://gemini.google.com (loại trừ cookie trùng lặp gây CookieMismatch).
+    - Nếu chưa đăng nhập, cho phép người dùng đăng nhập trong tối đa 60 giây.
     """
     import subprocess
     import time
@@ -33,8 +33,7 @@ def login_and_save_cookie() -> dict:
 
     try:
         # Chrome thật — không qua Playwright launch — để Google không gắn nhãn
-        # phiên đăng nhập là automation. Thêm --disable-extensions để chặn McAfee
-        # hoặc các extension bên ngoài can thiệp làm che/lỗi đăng nhập.
+        # phiên đăng nhập là automation. Khởi động thẳng vào gemini.google.com/app.
         proc = subprocess.Popen(
             [
                 str(settings.chrome_executable),
@@ -44,7 +43,7 @@ def login_and_save_cookie() -> dict:
                 "--no-default-browser-check",
                 "--disable-extensions",
                 "--disable-default-apps",
-                "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp&service=cl",
+                "https://gemini.google.com/app",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -83,87 +82,70 @@ def login_and_save_cookie() -> dict:
                 raise HTTPException(status_code=504, detail="Không kết nối được Chrome qua CDP.")
 
             context = browser.contexts[0] if browser.contexts else browser.new_context()
+
+            # Đảm bảo có ít nhất 1 tab điều hướng tới Gemini nếu tất cả đều là newtab/blank
             for _ in range(LOGIN_TIMEOUT_SECONDS):
-                # Nếu người dùng tự tắt cửa sổ Chrome trước khi xong
                 if proc.poll() is not None:
                     raise HTTPException(
                         status_code=408,
-                        detail="Trình duyệt Chrome đã bị đóng trước khi hoàn tất đăng nhập.",
+                        detail="Trình duyệt Chrome đã bị đóng trước khi hoàn tất lấy cookie.",
                     )
 
                 pages = context.pages
-                page = pages[0] if pages else None
-                current_url = page.url if page else ""
-
-                # 1. Nếu còn ở màn hình accounts.google.com (nhập email/mật khẩu/2FA) -> tiếp tục chờ
-                if "accounts.google.com" in current_url:
-                    time.sleep(1)
-                    continue
-
-                # 2. Phải chuyển hướng về gemini.google.com
-                if not current_url.startswith("https://gemini.google.com"):
-                    time.sleep(1)
-                    continue
-
-                # 3. Kiểm tra xem đã thực sự đăng nhập trên giao diện Gemini chưa (tránh Guest mode)
-                is_authenticated = False
-                try:
-                    is_authenticated = page.evaluate("""() => {
-                        // Kiểm tra token xác thực phiên SNlM0e
-                        if (window.WIZ_global_data && window.WIZ_global_data.SNlM0e) {
-                            return true;
-                        }
-                        // Kiểm tra xem có nút Sign In / Đăng nhập (Guest Mode)
-                        const text = document.body ? document.body.innerText : '';
-                        if (text.includes('Sign in to save') || text.includes('Đăng nhập để lưu')) {
-                            return false;
-                        }
-                        const signInBtn = document.querySelector(
-                            'a[href*="accounts.google.com/ServiceLogin"], a[href*="accounts.google.com/signin"]'
-                        );
-                        if (signInBtn) {
-                            return false;
-                        }
-                        // Kiểm tra avatar tài khoản / profile
-                        return Boolean(
-                            document.querySelector('a[href*="SignOutOptions"]') ||
-                            document.querySelector('button[aria-label*="Google"]') ||
-                            document.querySelector('button[aria-label*="Tài khoản"]') ||
-                            document.querySelector('img[alt*="Google Account"]') ||
-                            document.querySelector('div[data-user-email]')
-                        );
-                    }""")
-                except Exception:
-                    is_authenticated = False
-
-                if not is_authenticated:
-                    time.sleep(1)
-                    continue
-
-                # 4. Đã xác nhận đăng nhập thật sự, đọc cookies xác thực
-                try:
-                    cookies = context.cookies(["https://gemini.google.com", "https://google.com"])
-                except Exception:
-                    cookies = []
-
-                if any(cookie["name"] in AUTH_COOKIE_NAMES for cookie in cookies):
+                # Tìm tab gemini hoặc accounts
+                gemini_page = None
+                accounts_page = None
+                for p in pages:
                     try:
-                        user_agent = page.evaluate("() => navigator.userAgent")
+                        u = p.url
+                        if "gemini.google.com" in u:
+                            gemini_page = p
+                            break
+                        elif "accounts.google.com" in u:
+                            accounts_page = p
                     except Exception:
-                        user_agent = ""
+                        pass
+
+                # Nếu chưa có tab nào mở gemini hoặc accounts, điều hướng tab đầu tiên tới Gemini
+                if not gemini_page and not accounts_page and pages:
+                    try:
+                        pages[0].goto("https://gemini.google.com/app")
+                    except Exception:
+                        pass
+
+                # 1. Trích xuất cookies chuẩn riêng cho https://gemini.google.com (tránh CookieMismatch)
+                try:
+                    current_cookies = context.cookies(["https://gemini.google.com"])
+                except Exception:
+                    current_cookies = []
+
+                # 2. Kiểm tra các cookie xác thực quan trọng
+                has_auth = any(c["name"] in AUTH_COOKIE_NAMES for c in current_cookies)
+
+                if has_auth:
+                    cookies = current_cookies
+                    target_page = gemini_page or (pages[0] if pages else None)
+                    if target_page:
+                        try:
+                            user_agent = target_page.evaluate("() => navigator.userAgent")
+                        except Exception:
+                            user_agent = ""
                     break
 
                 time.sleep(1)
 
-            if not any(cookie["name"] in AUTH_COOKIE_NAMES for cookie in cookies):
+            if not any(c["name"] in AUTH_COOKIE_NAMES for c in cookies):
                 raise HTTPException(
                     status_code=408,
                     detail=f"Chưa hoàn tất đăng nhập Gemini sau {LOGIN_TIMEOUT_SECONDS} giây.",
                 )
 
-            time.sleep(3)
+            # Chờ 1 giây để cookie ghi ổn định
+            time.sleep(1)
             try:
-                cookies = context.cookies(["https://gemini.google.com", "https://google.com"])
+                refreshed = context.cookies(["https://gemini.google.com"])
+                if any(c["name"] in AUTH_COOKIE_NAMES for c in refreshed):
+                    cookies = refreshed
             except Exception:
                 pass
 
@@ -192,9 +174,10 @@ def login_and_save_cookie() -> dict:
     finally:
         try:
             proc.terminate()
-            proc.wait(timeout=8)
+            proc.wait(timeout=5)
         except Exception:
             try:
                 proc.kill()
             except Exception:
                 pass
+

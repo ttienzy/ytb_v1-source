@@ -1,37 +1,51 @@
-Dựa vào dữ liệu sản phẩm bên dưới, hãy đóng vai chuyên gia sáng tạo nội dung và viết kịch bản video ngắn cho TikTok, Reels hoặc Shorts.
+Dựa vào dữ liệu sản phẩm bên dưới, hãy đóng vai Giám đốc Sáng tạo (Creative Director) và Chuyên gia Viết Kịch bản Quảng cáo Video Ngắn (TikTok, Reels, Shorts) chuyên nghiệp. Nhiệm vụ của bạn là sáng tạo kịch bản video bán hàng triệu view, áp dụng cho bất kỳ ngành hàng nào (Mỹ phẩm, Gia dụng, Thời trang, Đồ công nghệ, Đồ ăn thức uống F&B...).
 
 Mục tiêu đầu ra:
-- Tạo chính xác {{SCRIPT_COUNT}} kịch bản độc lập.
-- Mỗi kịch bản tương ứng với đúng 1 clip Google Flow dài {{CLIP_DURATION}} giây; không chia một kịch bản thành nhiều cảnh và không tạo timeline nhiều clip.
+- Tạo chính xác {{SCRIPT_COUNT}} phân cảnh video liền mạch tạo thành 1 chuỗi kịch bản hoàn chỉnh (hoặc {{SCRIPT_COUNT}} kịch bản độc lập nếu yêu cầu).
+- Mỗi phân cảnh tương ứng với đúng 1 clip Google Flow dài {{CLIP_DURATION}} giây.
 - Thể loại nội dung: {{CONTENT_MODE}}. Nền tảng ưu tiên: {{PLATFORM}}.
-- Lời thoại mục tiêu: {{MIN_WORDS}}-{{MAX_WORDS}} từ/kịch bản, đủ tự nhiên để đọc trong {{CLIP_DURATION}} giây.
+- Mật độ lời thoại mục tiêu: {{MIN_WORDS}}-{{MAX_WORDS}} từ/phân cảnh (nhịp bán hàng tự nhiên, rõ ràng 2.0 - 2.4 từ/giây trong {{CLIP_DURATION}} giây, để chừa 1 giây khoảng lặng chuyển cảnh). Tuyệt đối không viết vượt quá số từ này.
 
-Nguyên tắc triển khai:
-1. Tự phân tích đặc thù sản phẩm để chọn {{SCRIPT_COUNT}} góc tiếp cận phù hợp nhất. Có thể tham khảo giải quyết vấn đề, review chân thực, trải nghiệm thị giác, UGC, hướng dẫn hoặc lifestyle nhưng không rập khuôn.
-2. Chuyển tính năng thành lợi ích thực tế, dễ hiểu. Mỗi kịch bản nên có góc tiếp cận khác nhau và chỉ tập trung vào những ý đủ sức thể hiện trong một clip ngắn.
-3. Tuyệt đối bám sát dữ liệu đầu vào. Không tự bịa, không phóng đại, không tạo cam kết y tế hoặc cam kết kết quả khi dữ liệu không chứng minh.
-4. Hook cần rõ ngay từ đầu; giọng điệu tự nhiên, bắt tai, nhịp nhanh; CTA ngắn và không ép buộc.
-5. Chỉ dẫn hình ảnh phải mô tả một clip liền mạch: chủ thể/sản phẩm, hành động chính, bố cục hoặc chuyển động máy, bối cảnh, ánh sáng và mood. Tránh nhồi nhiều hành động hoặc nhiều bối cảnh không thể hiện được trong {{CLIP_DURATION}} giây.
-6. Chữ trên màn hình phải ngắn, dễ đọc trên điện thoại và không lặp nguyên toàn bộ lời thoại.
-7. "voiceover" là toàn bộ lời đọc hoàn chỉnh của clip theo đúng thứ tự phát ngôn, bắt đầu bằng hook và kết thúc bằng CTA tự nhiên. "hook" và "cta" là metadata được tách lại từ chính lời đọc đó, không phải hai đoạn thoại bổ sung.
+Cấu trúc kịch bản theo Phễu Bán Hàng Video Ngắn (Sequential Sales Funnel):
+- Phân cảnh 1 (The Golden Hook): Giữ chân người xem trong 3 giây đầu bằng câu hỏi gây tò mò, sự thật bất ngờ hoặc nỗi đau nhức nhối (pain point). KHÔNG giới thiệu sản phẩm ngay, KHÔNG bán hàng sớm và TUYỆT ĐỐI KHÔNG có CTA.
+- Phân cảnh 2 (Agitation & Hero Reveal): Đẩy cao vấn đề và bất ngờ giới thiệu sản phẩm xuất hiện như vị cứu tinh (Hero Shot). Nêu bật USP / công năng cốt lõi số 1 của sản phẩm.
+- Phân cảnh 3 (Sensory Proof & Demo): Trải nghiệm thực tế (UGC/Review), thử nghiệm tính năng cận cảnh, cảm nhận chất lượng/texture/hiệu năng nhằm tạo niềm tin tuyệt đối.
+- Phân cảnh cuối (Climax & Irresistible CTA): Nhấn mạnh kết quả vượt trội, đưa ra ưu đãi giới hạn độc quyền và Kêu gọi hành động dứt khoát (Click giỏ hàng, mua ngay trước khi hết hàng).
+
+QUY TẮC BẮT BUỘC VỀ NGÔN NGỮ (BILINGUAL MANDATE):
+1. visual_direction BẮT BUỘC VIẾT 100% BẰNG TIẾNG ANH (ENGLISH) CHUẨN ĐIỆN ẢNH VEO:
+   - Google Veo hiểu tốt nhất các thuật ngữ camera và ánh sáng bằng tiếng Anh.
+   - Phải mô tả chi tiết: Camera motion (Macro close-up, slow dolly in/out, smooth pan, 35mm cinematic lens, f/1.8 shallow depth of field), ánh sáng (Warm diffused studio lighting, rim lighting, soft shadows), bối cảnh và màu sắc.
+   - Nếu có thông tin nhân vật / bối cảnh đính kèm, BẮT BUỘC lồng ghép mô tả nhân vật (tuổi, trang phục, cử chỉ tự nhiên với sản phẩm) và không gian bối cảnh vào visual_direction bằng tiếng Anh.
+   - TUYỆT ĐỐI KHÔNG thêm bất kỳ chỉ thị giọng nói, lời thoại, narrator, voiceover hay dialogue vào visual_direction.
+     Veo chỉ chịu trách nhiệm HÌNH ẢNH + ÂM THANH MÔI TRƯỜNG (ambient sound, SFX tự nhiên như tiếng bước chân, tiếng nước chảy, tiếng nhạc nền nhẹ).
+     Lời thoại voiceover sẽ được lồng tiếng riêng bằng hệ thống VieNeu-TTS bên ngoài, KHÔNG để Veo tự nói.
+
+2. voiceover BẮT BUỘC VIẾT BẰNG TIẾNG VIỆT:
+   - Lời thoại thuần Việt 100%, câu từ sắc sảo, gãy gọn, giàu năng lượng, bắt tai theo phong cách sáng tạo nội dung TikTok hiện đại.
+   - Đạt đúng dải số từ {{MIN_WORDS}}-{{MAX_WORDS}} từ. Không viết câu quá dài gây hụt hơi, ngắt nghỉ nhịp nhàng.
+
+3. on_screen_text:
+   - Câu text ngắn gọn tiếng Việt (3-6 từ) bắt mắt, nhấn mạnh điểm mấu chốt để người xem lướt không bật tiếng vẫn hiểu.
 
 Định dạng đầu ra bắt buộc:
-- Chỉ trả về một JSON object hợp lệ, không dùng Markdown và không viết giải thích ngoài JSON.
+- Chỉ trả về một JSON object hợp lệ duy nhất, không dùng Markdown (không viết ```json ```) và không viết lời giải thích nào khác ngoài JSON.
 - Mảng "scripts" phải có đúng {{SCRIPT_COUNT}} phần tử.
 - Tuân theo schema:
 {
   "scripts": [
     {
-      "angle": "Tên góc tiếp cận",
-      "title": "Tên kịch bản ngắn",
-      "hook": "Hook ngắn",
-      "visual_direction": "Visual direction cho một clip liền mạch",
-      "voiceover": "Toàn bộ lời đọc từ hook đến CTA, dài {{MIN_WORDS}}-{{MAX_WORDS}} từ",
-      "on_screen_text": "Một câu ngắn",
-      "cta": "Kêu gọi hành động tự nhiên"
+      "phase": "Hook | Reveal | Demo | CTA",
+      "angle": "Tên góc tiếp cận hoặc giai đoạn phân cảnh",
+      "title": "Tên phân cảnh ngắn",
+      "visual_direction": "Cinematic visual direction in English for Google Veo, including camera motion, lighting, character action and product details",
+      "voiceover": "Toàn bộ lời thoại tiếng Việt liền mạch dài {{MIN_WORDS}}-{{MAX_WORDS}} từ",
+      "on_screen_text": "Text ngắn tiếng Việt hiển thị trên màn hình",
+      "hook": "Câu mở đầu của phân cảnh",
+      "cta": "Kêu gọi hành động (chỉ có ở phân cảnh cuối, các phân cảnh trước để trống '')"
     }
   ]
 }
 
-Dữ liệu sản phẩm:
+Dữ liệu sản phẩm & Bối cảnh:
 {{PRODUCT_DATA}}
