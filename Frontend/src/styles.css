@@ -865,85 +865,152 @@ button.chip-active:hover {
   color: #30394b;
 }
 
+.workflow-tab-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f1f5f9;
+  padding: 5px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  border: 1px solid #e2e8f0;
+}
+
+.workflow-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 18px;
+  min-height: 48px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  color: #64748b;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: left;
+}
+
+.workflow-tab-btn:hover {
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.workflow-tab-btn.active {
+  background: #ffffff;
+  color: #1e293b;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.workflow-tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.workflow-tab-icon.youtube {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.workflow-tab-btn.active .workflow-tab-icon.youtube {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.workflow-tab-icon.audio {
+  background: #fdf2f8;
+  color: #c026d3;
+}
+
+.workflow-tab-btn.active .workflow-tab-icon.audio {
+  background: #c026d3;
+  color: #ffffff;
+}
+
+.workflow-tab-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workflow-tab-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #475569;
+  line-height: 1.25;
+}
+
+.workflow-tab-btn.active .workflow-tab-title {
+  color: #0f172a;
+}
+
+.workflow-tab-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.25;
+}
+
+.workflow-tab-btn.active .workflow-tab-desc {
+  color: #64748b;
+}
+
+/* Studio Section Titles & Cards */
+.studio-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.studio-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 22px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border: 1px solid #4338ca;
+  border-radius: 9px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+  transition: all 0.15s ease;
+}
+
+.studio-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4338ca, #4f46e5);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+  transform: translateY(-1px);
+}
+
+.studio-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Fallback legacy support */
 .workflow-switcher {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin: -8px 0 22px;
-}
-
-.workflow-card {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  min-height: 88px;
-  padding: 17px 18px;
-  color: #3d4758;
-  background: #fff;
-  border: 1px solid #e5e9f0;
-  border-radius: 14px;
-  box-shadow: 0 5px 16px #26324a08;
-  text-align: left;
-  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
-}
-
-.workflow-card:hover {
-  border-color: #c7d2fe;
-  box-shadow: 0 8px 20px #4f46e51a;
-  transform: translateY(-1px);
-}
-
-.workflow-card.active {
-  border: 1.5px solid #6366f1;
-  background: linear-gradient(135deg, #fafaff, #f5f7ff);
-  box-shadow: 0 8px 22px #6366f124;
-}
-
-.workflow-card-icon {
-  display: grid;
-  flex: 0 0 43px;
-  width: 43px;
-  height: 43px;
-  place-items: center;
-  border-radius: 12px;
-}
-
-.workflow-card-icon.youtube {
-  color: #4f46e5;
-  background: #e9e7ff;
-}
-
-.workflow-card-icon.audio {
-  color: #c026d3;
-  background: #fce7f3;
-}
-
-.workflow-card-copy {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
-.workflow-card-copy strong {
-  color: #252f43;
-  font-size: 14px;
-}
-
-.workflow-card-copy span {
-  color: #8993a3;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.workflow-card-arrow {
-  flex-shrink: 0;
-  color: #a5afbe;
-}
-
-.workflow-card.active .workflow-card-arrow {
-  color: #6366f1;
 }
 
 .audio-workflow-panel {

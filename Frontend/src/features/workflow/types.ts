@@ -171,6 +171,16 @@ export interface VeoVideoConfig {
   veoAmbientVolume?: number    // Volume ambient Veo (0.0 - 0.20, default 0.10)
 }
 
+export interface PromptPresetItem {
+  id: string
+  name: string
+  content_mode: string
+  prompt: string
+  description?: string
+  is_system: boolean
+  updated_at?: string
+}
+
 export interface GptScriptNodeData {
   title: string
   prompt?: string
@@ -189,21 +199,27 @@ export interface GptScriptNodeData {
   isScriptOutputStale?: boolean
   activeScriptIndex?: number
   requestedCount?: number
-  contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
+  contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing' | string
   platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
   /** sequential = phễu liên hoàn; independent = clip độc lập */
   storyMode?: 'sequential' | 'independent'
-  /** ID giọng đọc VieNeu-TTS cho Brand Voice */
+  /** ID giọng đọc VieNeu-TTS cho Brand Voice (legacy) */
   voiceId?: string
   clipDurationSeconds?: number
   scenes?: GeneratedSceneItem[]
+  selectedPresetId?: string
+  availablePresets?: PromptPresetItem[]
   onGenerate?: () => void
   onChangePrompt?: (val: string) => void
   onResetPrompt?: () => void
   onSelectScript?: (index: number) => void
+  onSelectPreset?: (presetId: string) => void
+  onSaveAsNewPreset?: (name: string, contentMode: string, prompt: string) => Promise<void> | void
+  onUpdatePreset?: (presetId: string, prompt: string) => Promise<void> | void
+  onDeletePreset?: (presetId: string) => Promise<void> | void
   onChangeScriptConfig?: (cfg: {
     count?: number
-    contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
+    contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing' | string
     platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
     storyMode?: 'sequential' | 'independent'
     voiceId?: string

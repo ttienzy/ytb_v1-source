@@ -15,8 +15,11 @@ import {
   Play,
   RotateCcw,
   Settings,
+  Sparkles,
   Trash2,
   Upload,
+  Video,
+  Volume2,
   X,
 } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
@@ -26,6 +29,20 @@ import { BatchQueuePanel } from './components/BatchQueuePanel'
 import { PipelineDiagram } from './components/PipelineDiagram'
 import { VideoResultCard } from './components/VideoResultCard'
 import type { JobOut } from './types'
+
+function YoutubeIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      style={style}
+    >
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+    </svg>
+  )
+}
 
 export function StudioPage({
   setActivePage,
@@ -431,43 +448,37 @@ export function StudioPage({
 
   return (
     <section className="settings-page studio-page">
-      <div className="settings-heading">
-        <div>
-          <h1>Workflow</h1>
-          <p className="page-subtitle">
-            Chọn workflow phù hợp để bắt đầu sản xuất nội dung của bạn.
-          </p>
-        </div>
-      </div>
-
-      <div className="workflow-switcher" role="tablist" aria-label="Chọn workflow">
+      {/* ── Workflow Navigation Tabs ── */}
+      <div className="workflow-tab-switcher" role="tablist" aria-label="Chọn workflow">
         <button
           type="button"
           role="tab"
           aria-selected={selectedWorkflow === 'youtube'}
-          className={`workflow-card ${selectedWorkflow === 'youtube' ? 'active' : ''}`}
+          className={`workflow-tab-btn ${selectedWorkflow === 'youtube' ? 'active' : ''}`}
           onClick={() => setSelectedWorkflow('youtube')}
         >
-          <span className="workflow-card-icon youtube"><Play size={20} /></span>
-          <span className="workflow-card-copy">
-            <strong>Workflow YouTube</strong>
-            <span>Recap video, lồng tiếng và ghép tự động</span>
+          <span className="workflow-tab-icon youtube">
+            <YoutubeIcon size={17} />
           </span>
-          <ArrowRight size={17} className="workflow-card-arrow" />
+          <div className="workflow-tab-info">
+            <span className="workflow-tab-title">Workflow YouTube</span>
+            <span className="workflow-tab-desc">Recap video, lồng tiếng và ghép tự động</span>
+          </div>
         </button>
         <button
           type="button"
           role="tab"
           aria-selected={selectedWorkflow === 'audio'}
-          className={`workflow-card ${selectedWorkflow === 'audio' ? 'active' : ''}`}
+          className={`workflow-tab-btn ${selectedWorkflow === 'audio' ? 'active' : ''}`}
           onClick={() => setSelectedWorkflow('audio')}
         >
-          <span className="workflow-card-icon audio"><Headphones size={20} /></span>
-          <span className="workflow-card-copy">
-            <strong>Workflow Audio</strong>
-            <span>Không gian xử lý và tạo nội dung âm thanh</span>
+          <span className="workflow-tab-icon audio">
+            <Headphones size={17} />
           </span>
-          <ArrowRight size={17} className="workflow-card-arrow" />
+          <div className="workflow-tab-info">
+            <span className="workflow-tab-title">Workflow Audio</span>
+            <span className="workflow-tab-desc">Không gian xử lý và tạo nội dung âm thanh</span>
+          </div>
         </button>
       </div>
 
@@ -501,15 +512,28 @@ export function StudioPage({
           <>
             {/* NGUỒN (Đơn lẻ) */}
             <div className="fsection">
-              <p className="foverline">NGUỒN</p>
+              <div className="studio-section-header">
+                <Video size={15} style={{ color: '#ef4444' }} />
+                <span>Nguồn Video &amp; Kịch Bản (Transcript)</span>
+              </div>
               <div className="fgrid">
                 <div className="field">
-                  <label>Link YouTube</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+                    <YoutubeIcon size={14} style={{ color: '#ef4444' }} />
+                    Link YouTube
+                  </label>
                   <input
                     value={youtubeUrl}
                     onChange={e => setYoutubeUrl(e.target.value)}
                     placeholder="https://www.youtube.com/watch?v=..."
                     disabled={Boolean(jobId)}
+                    style={{
+                      height: 42,
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      padding: '0 12px',
+                      fontSize: 13,
+                    }}
                   />
                 </div>
                 <div className="field field-full">
@@ -591,10 +615,13 @@ export function StudioPage({
 
             {/* GIỌNG & NHẠC (Đơn lẻ) */}
             <div className="fsection">
-              <p className="foverline">GIỌNG &amp; NHẠC</p>
+              <div className="studio-section-header">
+                <Volume2 size={15} style={{ color: '#6366f1' }} />
+                <span>Giọng Đọc &amp; Nhạc Nền (Audio Config)</span>
+              </div>
               <div className="fgrid">
                 <div className="field">
-                  <label>Voice</label>
+                  <label style={{ fontWeight: 600 }}>Giọng đọc (Voice)</label>
                   {clonedVoices.length === 0 ? (
                     <p className="settings-message" style={{ marginTop: 4 }}>
                       Chưa có giọng — tạo ở Voices trước.
@@ -606,11 +633,11 @@ export function StudioPage({
                       disabled={Boolean(jobId)}
                       style={{
                         width: '100%',
-                        height: 44,
+                        height: 42,
                         padding: '0 12px',
                         background: 'var(--bg3)',
                         border: '1px solid var(--border)',
-                        borderRadius: 9,
+                        borderRadius: 8,
                         color: 'var(--text)',
                         fontSize: 13,
                       }}
@@ -630,6 +657,7 @@ export function StudioPage({
                       alignItems: 'center',
                       gap: 8,
                       cursor: 'pointer',
+                      fontWeight: 600,
                     }}
                   >
                     <input
@@ -709,16 +737,16 @@ export function StudioPage({
               {!jobId ? (
                 <button
                   type="button"
-                  className="btn-p"
+                  className="studio-btn-primary"
                   onClick={startPipeline}
                   disabled={submitting}
                 >
                   {submitting ? (
-                    <Loader2 size={15} className="spin" />
+                    <Loader2 size={16} className="spin" />
                   ) : (
-                    <Play size={15} />
+                    <Sparkles size={16} />
                   )}
-                  {submitting ? 'Đang khởi động…' : 'Tạo recap video'}
+                  {submitting ? 'Đang khởi động…' : 'Bắt đầu tạo recap video'}
                 </button>
               ) : (
                 <button type="button" className="btn-g" onClick={reset}>
@@ -770,7 +798,10 @@ export function StudioPage({
           <>
             {/* GIỌNG & NHẠC (Batch) */}
             <div className="fsection">
-              <p className="foverline">GIỌNG &amp; NHẠC (DÙNG CHUNG BATCH)</p>
+              <div className="studio-section-header">
+                <Volume2 size={15} style={{ color: '#6366f1' }} />
+                <span>Giọng Đọc &amp; Nhạc Nền (Dùng chung cho Batch)</span>
+              </div>
               <div className="fgrid">
                 <div className="field">
                   <label>Voice</label>

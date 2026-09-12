@@ -11,10 +11,13 @@ import {
   RotateCcw,
   Camera,
   FileText,
-  Mic,
   Film,
+  Plus,
+  Save,
+  Bookmark,
+  X,
 } from 'lucide-react'
-import type { GptScriptNodeData } from '../types'
+import type { GptScriptNodeData, PromptPresetItem } from '../types'
 import { estimateVoiceoverWordRange, normalizeClipDuration } from '../services/buildScenePlan'
 
 const CONTENT_MODE_OPTIONS = [
@@ -73,9 +76,78 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   const contentMode = data.contentMode ?? 'sales'
   const platform = data.platform ?? 'auto'
   const storyMode = data.storyMode ?? 'sequential'
-  const voiceId = data.voiceId ?? ''
   const clipDurationSeconds = normalizeClipDuration(data.clipDurationSeconds)
   const voiceoverWords = estimateVoiceoverWordRange(clipDurationSeconds)
+
+  const availablePresets = data.availablePresets || []
+  const selectedPresetId =
+    data.selectedPresetId ||
+    availablePresets.find((p) => p.content_mode === contentMode)?.id ||
+    availablePresets[0]?.id ||
+    'sales'
+  const currentPreset = availablePresets.find((p) => p.id === selectedPresetId)
+
+  const [isCreatingPreset, setIsCreatingPreset] = useState(false)
+  const [newPresetTitle, setNewPresetTitle] = useState('')
+  const [isSavingPreset, setIsSavingPreset] = useState(false)
+  const [presetNotification, setPresetNotification] = useState<string | null>(null)
+
+  const handleSelectPreset = (presetId: string) => {
+    const preset = availablePresets.find((p) => p.id === presetId)
+    if (preset) {
+      data.onSelectPreset?.(presetId)
+      data.onChangeScriptConfig?.({ contentMode: preset.content_mode })
+      if (preset.prompt) {
+        data.onChangePrompt?.(preset.prompt)
+      }
+    }
+  }
+
+  const handleConfirmCreatePreset = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    if (!newPresetTitle.trim()) return
+    setIsSavingPreset(true)
+    try {
+      await data.onSaveAsNewPreset?.(newPresetTitle.trim(), contentMode, data.prompt || '')
+      setNewPresetTitle('')
+      setIsCreatingPreset(false)
+      setPresetNotification('✓ Đã lưu mẫu kịch bản mới!')
+      setTimeout(() => setPresetNotification(null), 2500)
+    } catch (err: any) {
+      alert(err?.message || 'Lỗi khi lưu preset mới')
+    } finally {
+      setIsSavingPreset(false)
+    }
+  }
+
+  const handleUpdateCurrentPreset = async () => {
+    if (!selectedPresetId) return
+    setIsSavingPreset(true)
+    try {
+      await data.onUpdatePreset?.(selectedPresetId, data.prompt || '')
+      setPresetNotification('✓ Đã cập nhật mẫu!')
+      setTimeout(() => setPresetNotification(null), 2500)
+    } catch (err: any) {
+      alert(err?.message || 'Lỗi khi cập nhật preset')
+    } finally {
+      setIsSavingPreset(false)
+    }
+  }
+
+  const handleDeleteCurrentPreset = async () => {
+    if (!selectedPresetId) return
+    if (confirm(`Bạn có chắc chắn muốn xóa mẫu "${currentPreset?.name}"?`)) {
+      try {
+        await data.onDeletePreset?.(selectedPresetId)
+        setPresetNotification('✓ Đã xóa mẫu kịch bản!')
+        setTimeout(() => setPresetNotification(null), 2500)
+      } catch (err: any) {
+        alert(err?.message || 'Lỗi khi xóa preset')
+      }
+    }
+  }
+
+
 
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text)
@@ -231,129 +303,119 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           </div>
         )}
 
-        {/* 1. Connected Product Images Display */}
-        <div style={{ marginBottom: 8, padding: '6px 8px', background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, fontWeight: 700, color: '#475569', marginBottom: 4 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Camera size={12} style={{ color: '#7c3aed' }} />
-              Ảnh tham chiếu ({validImages.length}/3 ảnh):
-            </span>
-            <span style={{ color: validImages.length > 0 ? '#10b981' : '#94a3b8', fontSize: 9 }}>
-              {validImages.length > 0 ? '✓ Đã đồng bộ' : 'Chờ nạp ảnh'}
-            </span>
-          </div>
-
-          {validImages.length > 0 ? (
-            <div style={{ display: 'flex', gap: 6 }}>
-              {validImages.map((imgUrl, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 5,
-                    overflow: 'hidden',
-                    border: '1px solid #cbd5e1',
-                    background: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <img src={imgUrl} alt={`SP ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ fontSize: 10, color: '#94a3b8', fontStyle: 'italic' }}>
-              Dây nối từ khối [Ảnh Sản Phẩm] để GPT quan sát bao bì thực tế.
-            </div>
-          )}
-        </div>
-
-        {/* 2. Connected Gemini Data Status */}
-        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 6, background: hasProductData ? '#ecfdf5' : '#fffbeb', border: hasProductData ? '1px solid #a7f3d0' : '1px solid #fde68a' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
-            {hasProductData ? (
-              <>
-                <CheckCircle2 size={13} style={{ color: '#059669' }} />
-                <span style={{ color: '#065f46', fontWeight: 600 }}>Dữ liệu Gemini: Đã nạp USP & Phân loại</span>
-              </>
+        {/* 1. Status Bar: Product Images & Gemini Connection */}
+        <div
+          style={{
+            marginBottom: 8,
+            padding: '5px 8px',
+            background: '#f8fafc',
+            borderRadius: 6,
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          {/* Left: Images */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {validImages.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {validImages.map((imgUrl, i) => (
+                  <img
+                    key={i}
+                    src={imgUrl}
+                    alt={`SP ${i + 1}`}
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: 4,
+                      objectFit: 'cover',
+                      border: '1px solid #cbd5e1',
+                    }}
+                  />
+                ))}
+                <span style={{ fontSize: 9.5, color: '#64748b', fontWeight: 500, marginLeft: 2 }}>
+                  {validImages.length} ảnh
+                </span>
+              </div>
             ) : (
-              <>
-                <AlertCircle size={13} style={{ color: '#d97706' }} />
-                <span style={{ color: '#92400e', fontWeight: 500 }}>Chờ Gemini phân tích sản phẩm</span>
-              </>
+              <span style={{ fontSize: 9.5, color: '#94a3b8' }}>Chưa nạp ảnh sản phẩm</span>
             )}
           </div>
-          <span style={{ fontSize: 9, color: hasProductData ? '#059669' : '#b45309', fontWeight: 600 }}>
-            {hasProductData ? 'Sẵn sàng' : 'Chưa có'}
-          </span>
+
+          {/* Right: Gemini status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: hasProductData ? '#10b981' : '#f59e0b',
+                display: 'inline-block',
+              }}
+            />
+            <span
+              style={{
+                fontSize: 9.5,
+                fontWeight: 600,
+                color: hasProductData ? '#059669' : '#d97706',
+              }}
+            >
+              {hasProductData ? 'Gemini: Đã phân tích' : 'Chờ Gemini'}
+            </span>
+          </div>
         </div>
 
-        {/* 3. Configuration Bar */}
-        <div style={{ marginBottom: 8, padding: '7px 8px', background: '#faf5ff', borderRadius: 6, border: '1px solid #f3e8ff' }}>
+        {/* 2. Configuration Grid: Count, Platform, Story Mode */}
+        <div
+          style={{
+            marginBottom: 8,
+            padding: '8px 10px',
+            background: '#ffffff',
+            borderRadius: 6,
+            border: '1px solid #e2e8f0',
+          }}
+        >
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
-              Số kịch bản / clip
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 600, color: '#64748b' }}>
+              Số kịch bản
               <select
                 value={requestedCount}
                 onChange={(event) => handleCountChange(Number(event.target.value) || 1)}
                 style={{
                   height: 28,
-                  padding: '3px 6px',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  borderRadius: 4,
+                  padding: '2px 6px',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  borderRadius: 5,
                   border: '1px solid #cbd5e1',
                   background: '#ffffff',
-                  color: '#475569',
+                  color: '#1e293b',
                   boxSizing: 'border-box',
                 }}
               >
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
                   <option key={num} value={num}>
-                    {num} kịch bản
+                    {num} clip
                   </option>
                 ))}
               </select>
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
-              Thể loại nội dung
-              <select
-                value={contentMode}
-                onChange={(event) => data.onChangeScriptConfig?.({ contentMode: event.target.value as typeof contentMode })}
-                style={{
-                  height: 28,
-                  padding: '3px 6px',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  borderRadius: 4,
-                  border: '1px solid #cbd5e1',
-                  background: '#ffffff',
-                  color: '#475569',
-                  boxSizing: 'border-box',
-                }}
-              >
-                {CONTENT_MODE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 600, color: '#64748b' }}>
               Nền tảng
               <select
                 value={platform}
                 onChange={(event) => data.onChangeScriptConfig?.({ platform: event.target.value as typeof platform })}
                 style={{
                   height: 28,
-                  padding: '3px 6px',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  borderRadius: 4,
+                  padding: '2px 6px',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  borderRadius: 5,
                   border: '1px solid #cbd5e1',
                   background: '#ffffff',
-                  color: '#475569',
+                  color: '#1e293b',
                   boxSizing: 'border-box',
                 }}
               >
@@ -362,107 +424,297 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                 ))}
               </select>
             </label>
-          </div>
-          {/* Row 2: Story Mode + Voice */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Film size={10} />
-                Chế độ kịch bản
-              </span>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 600, color: '#64748b' }}>
+              Chế độ kịch bản
               <select
                 value={storyMode}
                 onChange={(event) => data.onChangeScriptConfig?.({ storyMode: event.target.value as 'sequential' | 'independent' })}
                 style={{
                   height: 28,
-                  padding: '3px 6px',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  borderRadius: 4,
+                  padding: '2px 6px',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  borderRadius: 5,
                   border: '1px solid #cbd5e1',
                   background: '#ffffff',
-                  color: '#475569',
-                  boxSizing: 'border-box' as const,
+                  color: '#1e293b',
+                  boxSizing: 'border-box',
                 }}
               >
-                <option value="sequential">🎬 Phim liên hoàn</option>
-                <option value="independent">📎 Clip độc lập</option>
+                <option value="sequential">Phim liên hoàn</option>
+                <option value="independent">Clip độc lập</option>
               </select>
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#6b21a8' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Mic size={10} />
-                Brand Voice (TTS)
-              </span>
-              <select
-                value={voiceId}
-                onChange={(event) => data.onChangeScriptConfig?.({ voiceId: event.target.value || undefined })}
+          </div>
+        </div>
+
+        {/* 3. Preset Selector */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: '#64748b' }}>
+              Thể loại kịch bản:
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {currentPreset && !currentPreset.is_system && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleUpdateCurrentPreset}
+                    disabled={isSavingPreset}
+                    style={{
+                      background: '#f1f5f9',
+                      border: '1px solid #cbd5e1',
+                      color: '#0f172a',
+                      fontSize: 9.5,
+                      fontWeight: 600,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 3,
+                    }}
+                    title="Lưu các chỉnh sửa prompt hiện tại vào mẫu này"
+                  >
+                    <Save size={10} />
+                    Cập nhật
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteCurrentPreset}
+                    style={{
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      color: '#e11d48',
+                      fontSize: 9.5,
+                      fontWeight: 600,
+                      padding: '2px 5px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                    }}
+                    title="Xóa mẫu tùy chỉnh này"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsCreatingPreset(!isCreatingPreset)}
                 style={{
-                  height: 28,
-                  padding: '3px 6px',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  color: '#475569',
+                  fontSize: 9.5,
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                }}
+                title="Lưu nội dung prompt hiện tại thành thể loại kịch bản mới"
+              >
+                <Plus size={10} />
+                Lưu mẫu mới
+              </button>
+            </div>
+          </div>
+
+          <select
+            value={selectedPresetId}
+            onChange={(e) => handleSelectPreset(e.target.value)}
+            style={{
+              width: '100%',
+              height: 29,
+              padding: '3px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              borderRadius: 5,
+              border: '1px solid #cbd5e1',
+              background: '#ffffff',
+              color: '#1e293b',
+              boxSizing: 'border-box',
+              cursor: 'pointer',
+            }}
+          >
+            {availablePresets.length > 0 ? (
+              <>
+                <optgroup label="Mẫu chuẩn hệ thống">
+                  {availablePresets
+                    .filter((p) => p.is_system)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </optgroup>
+                {availablePresets.some((p) => !p.is_system) && (
+                  <optgroup label="Mẫu tùy chỉnh">
+                    {availablePresets
+                      .filter((p) => !p.is_system)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          ★ {p.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+              </>
+            ) : (
+              CONTENT_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            )}
+          </select>
+
+          {/* Inline Form for Creating New Preset */}
+          {isCreatingPreset && (
+            <form
+              onSubmit={handleConfirmCreatePreset}
+              style={{
+                marginTop: 6,
+                padding: '6px 8px',
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Tên thể loại mới (vd: Kịch bản hài, Gen Z)..."
+                value={newPresetTitle}
+                onChange={(e) => setNewPresetTitle(e.target.value)}
+                autoFocus
+                style={{
+                  flex: 1,
+                  padding: '4px 7px',
+                  fontSize: 10.5,
+                  borderRadius: 4,
+                  border: '1px solid #cbd5e1',
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="submit"
+                disabled={isSavingPreset || !newPresetTitle.trim()}
+                style={{
+                  padding: '4px 9px',
                   fontSize: 10,
-                  fontWeight: 700,
+                  fontWeight: 600,
+                  borderRadius: 4,
+                  border: 'none',
+                  background: '#1e293b',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {isSavingPreset ? 'Đang lưu...' : 'Lưu'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCreatingPreset(false)}
+                style={{
+                  padding: '4px 6px',
+                  fontSize: 10,
                   borderRadius: 4,
                   border: '1px solid #cbd5e1',
                   background: '#ffffff',
-                  color: '#475569',
-                  boxSizing: 'border-box' as const,
+                  color: '#64748b',
+                  cursor: 'pointer',
                 }}
               >
-                <option value="">Veo tự sinh giọng</option>
-                <option value="bf4bed06c671">🎙️ Ads_Female</option>
-                <option value="7e16be95b7fd">🎙️ Review</option>
-                <option value="a5b304485f8b">🎙️ Google Voice</option>
-              </select>
+                <X size={11} />
+              </button>
+            </form>
+          )}
+
+          {presetNotification && (
+            <div style={{ marginTop: 4, fontSize: 9.5, color: '#059669', fontWeight: 600 }}>
+              {presetNotification}
+            </div>
+          )}
+        </div>
+
+        {/* 4. Prompt Editor */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <label style={{ fontSize: 10.5, fontWeight: 600, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
+              Chỉ thị kịch bản:
+              {currentPreset && (
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 500,
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    background: '#f1f5f9',
+                    color: '#475569',
+                    border: '1px solid #e2e8f0',
+                  }}
+                >
+                  {currentPreset.is_system ? 'Mẫu chuẩn' : 'Tùy chỉnh'}
+                </span>
+              )}
             </label>
+            <button
+              type="button"
+              onClick={() => data.onResetPrompt?.()}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#64748b',
+                fontSize: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+              title="Khôi phục prompt kịch bản gốc từ Backend"
+            >
+              <RotateCcw size={10} />
+              Mặc định
+            </button>
           </div>
-          <div style={{ marginTop: 5, fontSize: 9.5, color: '#7e22ce' }}>
-            {storyMode === 'sequential' ? '🎬 Phễu: Hook → Reveal → Demo → CTA' : '📎 Mỗi clip độc lập, có CTA riêng'}
-            {' · '}{requestedCount} clip × {clipDurationSeconds}s
-            {' · '}Visual 🇬🇧 + Thoại 🇻🇳
-          </div>
-        </div>
 
-        {/* 4. Prompt Template input */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <FileText size={12} style={{ color: '#7c3aed' }} />
-            Chỉ thị kịch bản (Prompt System):
-          </label>
-          <button
-            type="button"
-            onClick={() => data.onResetPrompt?.()}
+          <textarea
+            className="wf-input-textarea"
+            rows={5}
+            value={data.prompt}
+            onChange={(e) => data.onChangePrompt?.(e.target.value)}
+            placeholder="Nhập chỉ thị kịch bản... (Hệ thống tự động đồng bộ dữ liệu sản phẩm & toàn bộ phân tích từ Gemini)"
             style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#7c3aed',
-              fontSize: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 3,
-              cursor: 'pointer',
-              fontWeight: 600,
+              minHeight: 90,
+              fontSize: 10.5,
+              fontFamily: 'monospace',
+              border: '1px solid #cbd5e1',
+              borderRadius: 6,
+              padding: '6px 8px',
+              width: '100%',
+              boxSizing: 'border-box',
+              resize: 'vertical',
             }}
-            title="Khôi phục prompt kịch bản gốc từ Backend"
-          >
-            <RotateCcw size={10} />
-            Mặc định
-          </button>
+          />
         </div>
 
-        <textarea
-          className="wf-input-textarea"
-          rows={5}
-          value={data.prompt}
-          onChange={(e) => data.onChangePrompt?.(e.target.value)}
-          placeholder="Có thể dùng {{SCRIPT_COUNT}}, {{CLIP_DURATION}}, {{MIN_WORDS}}, {{MAX_WORDS}}, {{CONTENT_MODE}}, {{PLATFORM}} và {{PRODUCT_DATA}}..."
-          style={{ minHeight: 85, fontSize: 10.5, fontFamily: 'monospace' }}
-        />
-
-        {/* Action button */}
-        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* 5. Footer Bar: Summary & Action */}
+        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 10, color: '#64748b' }}>
-            Mục tiêu: <strong>{requestedCount} clip × {clipDurationSeconds}s</strong> · lời thoại khoảng {voiceoverWords.min}–{voiceoverWords.max} từ/clip
+            {requestedCount} clip × {clipDurationSeconds}s · ~{voiceoverWords.min}–{voiceoverWords.max} từ/clip
           </div>
 
           <button
@@ -472,8 +724,10 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             disabled={isGenerating}
             style={{
               padding: '6px 14px',
-              background: 'linear-gradient(135deg, #9333ea, #7c3aed)',
-              borderColor: '#7c3aed',
+              background: '#7c3aed',
+              borderColor: '#6d28d9',
+              fontWeight: 600,
+              fontSize: 11,
             }}
           >
             <Sparkles size={13} className={isGenerating ? 'animate-spin' : ''} />

@@ -42,6 +42,10 @@ from app.workflow.schemas import (
     WorkflowExportResponse,
     WorkflowVoiceoverItem,
     WorkflowVoiceoverResponse,
+    PromptPresetItem,
+    PromptPresetCreateRequest,
+    PromptPresetUpdateRequest,
+    PromptPresetListResponse,
 )
 
 logger = logging.getLogger("workflow.service")
@@ -414,6 +418,93 @@ def get_default_gpt_prompt() -> str:
     )
 
 
+PROMPT_PRESETS_FILE = DATA_DIR / "workflow_prompt_presets.json"
+
+
+def get_all_prompt_presets() -> list[dict[str, Any]]:
+    """Đọc danh sách preset từ Backend/data/workflow_prompt_presets.json."""
+    if not PROMPT_PRESETS_FILE.exists():
+        return []
+    try:
+        data = json.loads(PROMPT_PRESETS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+    except Exception as e:
+        logger.error(f"Lỗi đọc prompt presets {PROMPT_PRESETS_FILE}: {e}")
+    return []
+
+
+def save_prompt_presets(presets: list[dict[str, Any]]) -> None:
+    """Ghi danh sách preset vào Backend/data/workflow_prompt_presets.json."""
+    PROMPT_PRESETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROMPT_PRESETS_FILE.write_text(json.dumps(presets, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def create_prompt_preset(
+    name: str,
+    prompt: str,
+    content_mode: str = "custom",
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Tạo mới một preset thể loại nội dung kèm prompt tùy chỉnh."""
+    from datetime import datetime, timezone
+    presets = get_all_prompt_presets()
+    preset_id = f"custom_{uuid.uuid4().hex[:8]}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    new_item = {
+        "id": preset_id,
+        "name": name.strip(),
+        "content_mode": content_mode or "custom",
+        "description": description.strip() if description else f"Mẫu {name.strip()} do người dùng tạo",
+        "prompt": prompt.strip(),
+        "is_system": False,
+        "updated_at": now_iso,
+    }
+    presets.append(new_item)
+    save_prompt_presets(presets)
+    return new_item
+
+
+def update_prompt_preset(
+    preset_id: str,
+    name: str | None = None,
+    prompt: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Cập nhật tên, prompt hoặc mô tả của một preset."""
+    from datetime import datetime, timezone
+    presets = get_all_prompt_presets()
+    found = None
+    for p in presets:
+        if p["id"] == preset_id:
+            found = p
+            break
+    if not found:
+        raise ValueError(f"Không tìm thấy preset có ID '{preset_id}'")
+    if name is not None and name.strip():
+        found["name"] = name.strip()
+    if prompt is not None and prompt.strip():
+        found["prompt"] = prompt.strip()
+    if description is not None:
+        found["description"] = description.strip()
+    found["updated_at"] = datetime.now(timezone.utc).isoformat()
+    save_prompt_presets(presets)
+    return found
+
+
+def delete_prompt_preset(preset_id: str) -> bool:
+    """Xóa một preset tùy chỉnh (mẫu hệ thống is_system=True không được xóa)."""
+    presets = get_all_prompt_presets()
+    for p in presets:
+        if p["id"] == preset_id:
+            if p.get("is_system"):
+                raise ValueError("Không thể xóa mẫu kịch bản mặc định của hệ thống!")
+            presets.remove(p)
+            save_prompt_presets(presets)
+            return True
+    raise ValueError(f"Không tìm thấy preset có ID '{preset_id}'")
+
+
 def calculate_voiceover_word_range(
     clip_duration_seconds: int | float,
     min_words: int | None = None,
@@ -428,6 +519,61 @@ def calculate_voiceover_word_range(
     return resolved_min, resolved_max
 
 
+def extract_gemini_analysis_text(product_analysis: dict[str, Any] | None) -> str:
+    """Trích xuất TOÀN BỘ nội dung phản hồi từ Gemini AI (rawText + cấu trúc bóc tách USPs)."""
+    if not product_analysis or not isinstance(product_analysis, dict):
+        return ""
+
+    parts: list[str] = []
+
+    # 1. Trích xuất các USPs và đặc điểm nổi bật
+    selling_points = product_analysis.get("sellingPoints") or product_analysis.get("key_selling_points") or []
+    if isinstance(selling_points, list) and selling_points:
+        parts.append("Key Selling Points (USPs):\n" + "\n".join(f"- {usp}" for usp in selling_points if usp))
+
+    features = product_analysis.get("features") or []
+    if isinstance(features, list) and features:
+        parts.append("Đặc điểm sản phẩm:\n" + "\n".join(f"- {f}" for f in features if f))
+
+    classifications = product_analysis.get("classifications") or []
+    if isinstance(classifications, list) and classifications:
+        c_lines = ["Phân loại chi tiết:"]
+        for c in classifications:
+            if isinstance(c, dict):
+                c_str = f"- Tên: {c.get('name', '')}"
+                core_ben = c.get("coreBenefits") or c.get("core_benefits")
+                if core_ben:
+                    c_str += f" | Công dụng: {core_ben}"
+                main_ing = c.get("mainIngredients") or c.get("main_ingredients")
+                if main_ing:
+                    c_str += f" | Thành phần: {main_ing}"
+                c_lines.append(c_str)
+        if len(c_lines) > 1:
+            parts.append("\n".join(c_lines))
+
+    # 2. TOÀN BỘ PHẢN HỒI GỐC DẠNG VĂN BẢN TỪ GEMINI (rawText)
+    raw_text = (
+        product_analysis.get("rawText")
+        or product_analysis.get("raw_text")
+        or product_analysis.get("product_features")
+        or ""
+    )
+    if isinstance(raw_text, str) and raw_text.strip():
+        parts.append(f"Toàn bộ phân tích chi tiết từ Gemini AI:\n{raw_text.strip()}")
+
+    return "\n\n".join(parts)
+
+
+def extract_usp_text(product_analysis: dict[str, Any] | None) -> str:
+    """Trích xuất riêng danh sách Key Selling Points (USP) từ kết quả Gemini."""
+    if not product_analysis or not isinstance(product_analysis, dict):
+        return ""
+    selling_points = product_analysis.get("sellingPoints") or product_analysis.get("key_selling_points") or []
+    if isinstance(selling_points, list) and selling_points:
+        return "\n".join(f"- {usp}" for usp in selling_points if usp)
+    return ""
+
+
 def format_product_data_from_structured(
     product_data: str,
     product_analysis: dict[str, Any] | None = None,
@@ -435,27 +581,20 @@ def format_product_data_from_structured(
     scene_config: dict[str, Any] | None = None,
     script_config: dict[str, Any] | None = None,
 ) -> str:
-    """Định dạng dữ liệu sản phẩm từ Object sang văn bản chi tiết cho ChatGPT."""
-    parts: list[str] = []
-    if product_data and product_data.strip():
-        parts.append(product_data.strip())
-    elif product_analysis:
-        if product_analysis.get("features"):
-            parts.append("Đặc điểm sản phẩm:\n" + "\n".join(f"- {f}" for f in product_analysis["features"]))
-        if product_analysis.get("sellingPoints"):
-            parts.append("Key Selling Points (USPs):\n" + "\n".join(f"- {usp}" for usp in product_analysis["sellingPoints"]))
-        if product_analysis.get("classifications"):
-            parts.append("Phân loại chi tiết:")
-            for c in product_analysis["classifications"]:
-                c_str = f"- Tên: {c.get('name', '')}"
-                if c.get("coreBenefits"):
-                    c_str += f" | Công dụng: {c['coreBenefits']}"
-                if c.get("mainIngredients"):
-                    c_str += f" | Thành phần: {c['mainIngredients']}"
-                parts.append(c_str)
-        if not parts and product_analysis.get("rawText"):
-            parts.append(product_analysis["rawText"])
+    """Định dạng dữ liệu sản phẩm từ Object sang văn bản chi tiết cho ChatGPT, lưu toàn bộ phản hồi Gemini."""
+    sections: list[str] = []
 
+    # 1. Văn bản mô tả sản phẩm ban đầu từ người dùng (nếu có)
+    user_desc = (product_data or "").strip()
+    if user_desc:
+        sections.append(f"Mô tả sản phẩm:\n{user_desc}")
+
+    # 2. TOÀN BỘ PHẢN HỒI TỪ GEMINI AI (Không dùng elif để không bị nuốt mất dữ liệu)
+    gemini_text = extract_gemini_analysis_text(product_analysis)
+    if gemini_text:
+        sections.append(f"Phân tích chuyên sâu từ Gemini AI:\n{gemini_text}")
+
+    # 3. Tài nguyên hình ảnh đính kèm
     if assets:
         prods = assets.get("products", [])
         prod_count = len(prods) if isinstance(prods, list) else 0
@@ -469,16 +608,16 @@ def format_product_data_from_structured(
         if has_scene:
             asset_notes.append("Có ảnh bối cảnh / không gian quay")
         if asset_notes:
-            parts.append("Tài nguyên hình ảnh đính kèm: " + ", ".join(asset_notes))
+            sections.append("Tài nguyên hình ảnh đính kèm: " + ", ".join(asset_notes))
 
-    # Character & Scene Profile (English) cho bilingual prompt
+    # 4. Canonical Character & Scene Profile (English)
     if script_config:
         char_profile = script_config.get("character_profile", "") or ""
         scene_profile_text = script_config.get("scene_profile", "") or ""
         if char_profile.strip():
-            parts.append(f"Character Profile (English — inject into visual_direction):\n{char_profile.strip()}")
+            sections.append(f"Character Profile (English — inject into visual_direction):\n{char_profile.strip()}")
         if scene_profile_text.strip():
-            parts.append(f"Scene / Environment Profile (English — inject into visual_direction):\n{scene_profile_text.strip()}")
+            sections.append(f"Scene / Environment Profile (English — inject into visual_direction):\n{scene_profile_text.strip()}")
 
     target_count = None
     if script_config and script_config.get("count"):
@@ -489,16 +628,16 @@ def format_product_data_from_structured(
     if target_count:
         story_mode = (script_config or {}).get("story_mode", "sequential")
         mode_label = "liên hoàn theo phễu bán hàng" if story_mode == "sequential" else "độc lập"
-        parts.append(f"Yêu cầu kịch bản: Tạo đúng {target_count} phân cảnh {mode_label}.")
+        sections.append(f"Yêu cầu kịch bản: Tạo đúng {target_count} phân cảnh {mode_label}.")
 
     if script_config:
         clip_duration = script_config.get("clip_duration_seconds")
         if clip_duration:
-            parts.append(
+            sections.append(
                 f"Đầu ra Google Flow: Mỗi phân cảnh tạo một clip dài {clip_duration} giây."
             )
 
-    return "\n\n".join(parts) if parts else "Chưa có văn bản mô tả, hãy quan sát kỹ ảnh sản phẩm đính kèm để trích xuất USP."
+    return "\n\n".join(sections) if sections else "Chưa có văn bản mô tả, hãy quan sát kỹ ảnh sản phẩm đính kèm để trích xuất USP."
 
 
 def execute_gpt_script_generation(
@@ -547,7 +686,11 @@ def execute_gpt_script_generation(
     )
 
     template = (prompt_template or "").strip() or get_default_gpt_prompt()
-    data_str = format_product_data_from_structured(
+    user_desc = (product_data or "").strip()
+    gemini_text = extract_gemini_analysis_text(product_analysis)
+    usp_text = extract_usp_text(product_analysis)
+
+    unified_data_str = format_product_data_from_structured(
         product_data,
         product_analysis,
         assets,
@@ -555,8 +698,32 @@ def execute_gpt_script_generation(
         script_config,
     )
 
-    # Thay thế các biến runtime; prompt tùy chỉnh có thể dùng toàn bộ hoặc một phần.
-    filled_prompt = re.sub(r"\{\{\s*PRODUCT_DATA\s*\}\}", data_str, template, flags=re.IGNORECASE)
+    # 1. Thay thế các biến mở rộng tường minh
+    filled_prompt = template
+    # Nếu template có {{GEMINI_ANALYSIS}} hoặc {{PRODUCT_ANALYSIS}}
+    filled_prompt = re.sub(
+        r"\{\{\s*(?:GEMINI_ANALYSIS|PRODUCT_ANALYSIS)\s*\}\}",
+        gemini_text or "Đã phân tích từ hình ảnh sản phẩm đính kèm.",
+        filled_prompt,
+        flags=re.IGNORECASE,
+    )
+    # Thay thế {{USP}} hoặc {{SELLING_POINTS}}
+    filled_prompt = re.sub(
+        r"\{\{\s*(?:USP|SELLING_POINTS)\s*\}\}",
+        usp_text or "Tập trung vào công năng nổi bật của sản phẩm.",
+        filled_prompt,
+        flags=re.IGNORECASE,
+    )
+
+    # Nếu template có cả {{PRODUCT_DATA}} và {{GEMINI_ANALYSIS}}, thì {{PRODUCT_DATA}} chỉ chứa mô tả gốc
+    # Nếu template chỉ dùng {{PRODUCT_DATA}}, thì điền unified_data_str (gộp cả 2 để tương thích ngược)
+    has_explicit_gemini_var = bool(
+        re.search(r"\{\{\s*(?:GEMINI_ANALYSIS|PRODUCT_ANALYSIS)\s*\}\}", template, flags=re.IGNORECASE)
+    )
+    product_data_replacement = user_desc if (has_explicit_gemini_var and user_desc) else unified_data_str
+    filled_prompt = re.sub(r"\{\{\s*PRODUCT_DATA\s*\}\}", product_data_replacement, filled_prompt, flags=re.IGNORECASE)
+
+    # Thay thế các biến tham số kỹ thuật
     filled_prompt = re.sub(r"\{\{\s*SCRIPT_COUNT\s*\}\}", str(target_count), filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*CONTENT_MODE\s*\}\}", content_mode, filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*PLATFORM\s*\}\}", platform, filled_prompt, flags=re.IGNORECASE)
@@ -564,8 +731,43 @@ def execute_gpt_script_generation(
     filled_prompt = re.sub(r"\{\{\s*MIN_WORDS\s*\}\}", str(min_words), filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*MAX_WORDS\s*\}\}", str(max_words), filled_prompt, flags=re.IGNORECASE)
 
-    if not re.search(r"\{\{\s*PRODUCT_DATA\s*\}\}", template, flags=re.IGNORECASE):
-        filled_prompt = f"{filled_prompt}\n\n[Dữ liệu sản phẩm]:\n{data_str}"
+    # 2. Tự động gắn Dữ liệu sản phẩm & Phân tích Gemini nếu prompt chưa có bất kỳ biến nào
+    has_any_data_var = bool(
+        re.search(r"\{\{\s*(?:PRODUCT_DATA|GEMINI_ANALYSIS|PRODUCT_ANALYSIS|USP|SELLING_POINTS)\s*\}\}", template, flags=re.IGNORECASE)
+    )
+    if not has_any_data_var:
+        filled_prompt = f"{filled_prompt}\n\n[Dữ liệu sản phẩm & Toàn bộ phân tích từ Gemini AI]:\n{unified_data_str}"
+
+    # 3. Tự động bù đắp (Auto-Injection) cấu trúc JSON & Quy tắc song ngữ nếu prompt người dùng thiếu
+    has_json_contract = bool(
+        re.search(r'["\']scripts["\']\s*:', template)
+        and re.search(r'visual_direction', template, flags=re.IGNORECASE)
+    )
+    if not has_json_contract:
+        auto_json_contract = (
+            f"\n\n--- ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (MANDATORY OUTPUT FORMAT) ---\n"
+            f"Chỉ trả về DUY NHẤT một JSON object hợp lệ, tuyệt đối không dùng Markdown (không viết ```json) và không giải thích ngoài JSON:\n"
+            f'{{\n'
+            f'  "scripts": [\n'
+            f'    {{\n'
+            f'      "phase": "Hook | Reveal | Demo | CTA",\n'
+            f'      "angle": "Tên góc tiếp cận phân cảnh",\n'
+            f'      "title": "Tên phân cảnh ngắn",\n'
+            f'      "visual_direction": "Cinematic visual direction in English for Google Veo, including camera motion, lighting, character action and product details",\n'
+            f'      "voiceover": "Toàn bộ lời thoại tiếng Việt liền mạch từ {min_words} đến {max_words} từ",\n'
+            f'      "on_screen_text": "Text ngắn tiếng Việt hiển thị trên màn hình (3-6 từ)",\n'
+            f'      "hook": "Câu mở đầu của phân cảnh",\n'
+            f'      "cta": "Kêu gọi hành động (chỉ có ở phân cảnh cuối, các phân cảnh trước để trống \'\')"\n'
+            f'    }}\n'
+            f'  ]\n'
+            f'}}\n\n'
+            f"QUY TẮC BẮT BUỘC VỀ NGÔN NGỮ & ĐỘ DÀI:\n"
+            f'1. Mảng "scripts" phải có CHÍNH XÁC {target_count} phần tử tương ứng {target_count} clip {clip_duration_seconds} giây.\n'
+            f'2. visual_direction: 100% TIẾNG ANH điện ảnh cho Google Veo. Tuyệt đối không để Veo tự nói lời thoại.\n'
+            f'3. voiceover: 100% TIẾNG VIỆT tự nhiên bắt tai, chuẩn xác {min_words}-{max_words} từ/phân cảnh.\n'
+            f'4. on_screen_text: Text tiếng Việt ngắn gọn 3-6 từ.'
+        )
+        filled_prompt = f"{filled_prompt}\n{auto_json_contract}"
 
     # Các bất biến của pipeline nằm ở system prompt để prompt người dùng vẫn tùy biến được.
     story_mode = (script_config or {}).get("story_mode", "sequential") if script_config else "sequential"

@@ -22,17 +22,24 @@ from app.workflow.schemas import (
     WorkflowExtractProfilesRequest,
     WorkflowExtractProfilesResponse,
     ExportedVideoListResponse,
+    PromptPresetItem,
+    PromptPresetCreateRequest,
+    PromptPresetUpdateRequest,
+    PromptPresetListResponse,
 )
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
 from app.workflow.service import (
     concat_workflow_scenes,
+    create_prompt_preset,
     delete_exported_video,
+    delete_prompt_preset,
     execute_gemini_analysis,
     execute_9router_vision_analysis,
     extract_character_scene_profiles,
     generate_validated_gpt_scripts,
     generate_voiceover_batch,
+    get_all_prompt_presets,
     get_default_gemini_prompt,
     get_default_gpt_prompt,
     get_workflow_asset_path,
@@ -40,6 +47,7 @@ from app.workflow.service import (
     open_export_folder_in_explorer,
     parse_analysis_to_structured,
     save_workflow_asset,
+    update_prompt_preset,
     VOICEOVER_DIR,
     WORKFLOW_EXPORTS_DIR,
     VEO_DATA_DIR,
@@ -195,6 +203,53 @@ def get_gpt_prompt() -> GptPromptResponse:
     """Lấy prompt mẫu sinh số lượng kịch bản động từ file Backend."""
     prompt = get_default_gpt_prompt()
     return GptPromptResponse(prompt=prompt)
+
+
+@router.get("/prompt-presets", response_model=PromptPresetListResponse)
+def list_prompt_presets() -> PromptPresetListResponse:
+    """Lấy danh sách các mẫu thể loại kịch bản kèm prompt chuyên biệt."""
+    presets = get_all_prompt_presets()
+    return PromptPresetListResponse(presets=[PromptPresetItem(**p) for p in presets])
+
+
+@router.post("/prompt-presets", response_model=PromptPresetItem)
+def create_new_prompt_preset(req: PromptPresetCreateRequest) -> PromptPresetItem:
+    """Lưu một mẫu thể loại kịch bản mới kèm prompt tùy chỉnh."""
+    try:
+        new_preset = create_prompt_preset(
+            name=req.name,
+            prompt=req.prompt,
+            content_mode=req.content_mode or "custom",
+            description=req.description,
+        )
+        return PromptPresetItem(**new_preset)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/prompt-presets/{preset_id}", response_model=PromptPresetItem)
+def update_existing_prompt_preset(preset_id: str, req: PromptPresetUpdateRequest) -> PromptPresetItem:
+    """Cập nhật nội dung prompt hoặc tên của thể loại kịch bản."""
+    try:
+        updated = update_prompt_preset(
+            preset_id=preset_id,
+            name=req.name,
+            prompt=req.prompt,
+            description=req.description,
+        )
+        return PromptPresetItem(**updated)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/prompt-presets/{preset_id}")
+def delete_existing_prompt_preset(preset_id: str) -> dict[str, Any]:
+    """Xóa một mẫu thể loại kịch bản tùy chỉnh (không thể xóa mẫu hệ thống)."""
+    try:
+        ok = delete_prompt_preset(preset_id)
+        return {"ok": ok, "deleted_id": preset_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/gpt/generate-script", response_model=GptScriptResponse)

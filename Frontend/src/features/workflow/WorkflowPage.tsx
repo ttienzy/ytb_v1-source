@@ -36,7 +36,7 @@ import { VideoPlayerModal } from './components/VideoPlayerModal'
 import { VeoVideoPickerModal } from './components/VeoVideoPickerModal'
 import * as veoApi from '../veo-studio/services/veoApi'
 import type { VeoCapabilities, VeoProject } from '../veo-studio/types'
-import type { GeneratedSceneItem, GptSalesScriptItem, VeoVideoConfig } from './types'
+import type { GeneratedSceneItem, GptSalesScriptItem, PromptPresetItem, VeoVideoConfig } from './types'
 import type { AssetRef, ExportedVideoItem, ProductAnalysis, SalesScript, ScriptCollection } from './contracts'
 import {
   resolveProductAssetsInput,
@@ -55,6 +55,10 @@ import {
   fetchGeminiDefaultPrompt,
   fetchGptDefaultPrompt,
   fetchExportedVideos,
+  fetchPromptPresets,
+  createPromptPreset,
+  updatePromptPreset,
+  deletePromptPreset,
 } from './services/workflowApi'
 import {
   buildClipPlans,
@@ -92,6 +96,7 @@ function WorkflowCanvas() {
   // Exported video library and player modal states
   const [isLibraryOpen, setIsLibraryOpen] = useState(false)
   const [exportedCount, setExportedCount] = useState<number>(0)
+  const [promptPresets, setPromptPresets] = useState<PromptPresetItem[]>([])
   const [previewModalData, setPreviewModalData] = useState<{
     isOpen: boolean
     videoUrl: string
@@ -104,11 +109,36 @@ function WorkflowCanvas() {
     sceneIndex: number
   } | null>(null)
 
-  // Load exported video count & default BGM tracks on mount
+  // Load exported video count, prompt presets & default BGM tracks on mount
   useEffect(() => {
     fetchExportedVideos().then((items) => {
       setExportedCount(items.length)
     })
+    fetchPromptPresets()
+      .then((presets) => {
+        if (presets && presets.length > 0) {
+          setPromptPresets(presets)
+          const defaultSales = presets.find((p) => p.id === 'sales') || presets[0]
+          setNodes((nds) =>
+            nds.map((n) => {
+              if (n.type === 'gptScript' && !n.data?.prompt) {
+                return {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    selectedPresetId: defaultSales.id,
+                    contentMode: defaultSales.content_mode,
+                    prompt: defaultSales.prompt,
+                  },
+                }
+              }
+              return n
+            })
+          )
+        }
+      })
+      .catch(console.warn)
+
     fetch(`${API_URL}/api/bgm`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -655,6 +685,87 @@ function WorkflowCanvas() {
         }
       })
       .catch((err) => console.error(err))
+  }, [])
+
+  // Select a prompt preset
+  const handleSelectGptPreset = useCallback(
+    (nodeId: string, presetId: string) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const preset = promptPresets.find((p) => p.id === presetId)
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                selectedPresetId: presetId,
+                contentMode: preset ? preset.content_mode : n.data?.contentMode,
+                prompt: preset?.prompt || n.data?.prompt,
+              },
+            }
+          }
+          return n
+        })
+      )
+    },
+    [promptPresets]
+  )
+
+  // Save new prompt preset
+  const handleSaveAsNewPreset = useCallback(
+    async (nodeId: string, name: string, contentMode: string, prompt: string) => {
+      const created = await createPromptPreset(name, prompt, contentMode)
+      setPromptPresets((prev) => [...prev, created])
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  selectedPresetId: created.id,
+                  contentMode: created.content_mode,
+                  prompt: created.prompt,
+                },
+              }
+            : n
+        )
+      )
+    },
+    []
+  )
+
+  // Update existing preset
+  const handleUpdatePreset = useCallback(async (nodeId: string, presetId: string, prompt: string) => {
+    const updated = await updatePromptPreset(presetId, { prompt })
+    setPromptPresets((prev) => prev.map((p) => (p.id === presetId ? updated : p)))
+  }, [])
+
+  // Delete preset
+  const handleDeletePreset = useCallback(async (nodeId: string, presetId: string) => {
+    await deletePromptPreset(presetId)
+    setPromptPresets((prev) => {
+      const filtered = prev.filter((p) => p.id !== presetId)
+      const fallback = filtered[0]
+      if (fallback) {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    selectedPresetId: fallback.id,
+                    contentMode: fallback.content_mode,
+                    prompt: fallback.prompt,
+                  },
+                }
+              : n
+          )
+        )
+      }
+      return filtered
+    })
   }, [])
 
   // Trigger Gemini or 9Router Analysis directly via Backend API (Sử dụng graphResolver & workflowApi)
@@ -1857,6 +1968,12 @@ function WorkflowCanvas() {
             ? geminiRes.data.rawText || (geminiRes.data.features || []).join(', ') || ''
             : ''
 
+        const selectedPresetId =
+          (node.data?.selectedPresetId as string) ||
+          promptPresets.find((p) => p.content_mode === node.data?.contentMode)?.id ||
+          promptPresets[0]?.id ||
+          'sales'
+
         return {
           ...node,
           data: {
@@ -1866,10 +1983,16 @@ function WorkflowCanvas() {
             productDataPreview,
             clipDurationSeconds,
             isScriptOutputStale,
+            availablePresets: promptPresets,
+            selectedPresetId,
+            onSelectPreset: (presetId: string) => handleSelectGptPreset(node.id, presetId),
+            onSaveAsNewPreset: (name: string, cm: string, p: string) => handleSaveAsNewPreset(node.id, name, cm, p),
+            onUpdatePreset: (presetId: string, p: string) => handleUpdatePreset(node.id, presetId, p),
+            onDeletePreset: (presetId: string) => handleDeletePreset(node.id, presetId),
             onChangePrompt: (val: string) => handleGptPromptChange(node.id, val),
             onResetPrompt: () => handleResetGptPrompt(node.id),
             onGenerate: () => handleGenerateGptScript(node.id),
-            onChangeScriptConfig: (cfg: { count?: number; contentMode?: any; platform?: any }) => {
+            onChangeScriptConfig: (cfg: { count?: number; contentMode?: any; platform?: any; storyMode?: any }) => {
               setNodes((nds) =>
                 nds.map((n) =>
                   n.id === node.id
@@ -1880,6 +2003,7 @@ function WorkflowCanvas() {
                           requestedCount: cfg.count ?? n.data?.requestedCount,
                           contentMode: cfg.contentMode ?? n.data?.contentMode,
                           platform: cfg.platform ?? n.data?.platform,
+                          storyMode: cfg.storyMode ?? n.data?.storyMode,
                         },
                       }
                     : n

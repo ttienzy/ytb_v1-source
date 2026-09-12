@@ -177,3 +177,30 @@ class WorkflowExtractProfilesResponse(BaseModel):
     character_profile: str = Field(default="", description="Mô tả nhân vật chuẩn hóa bằng tiếng Anh")
     scene_profile: str = Field(default="", description="Mô tả không gian/bối cảnh chuẩn hóa bằng tiếng Anh")
 
+
+class PromptPresetItem(BaseModel):
+    id: str = Field(description="Mã định danh duy nhất của preset")
+    name: str = Field(description="Tên thể loại nội dung hiển thị")
+    content_mode: str = Field(default="sales", description="Mã content mode: sales, review, ugc, lifestyle, tutorial, comparison, unboxing, custom...")
+    prompt: str = Field(description="Nội dung template prompt")
+    description: Optional[str] = Field(default=None, description="Mô tả ngắn về thể loại này")
+    is_system: bool = Field(default=False, description="True nếu là mẫu mặc định của hệ thống")
+    updated_at: Optional[str] = Field(default=None, description="Thời gian cập nhật gần nhất (ISO format)")
+
+
+class PromptPresetCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, description="Tên thể loại mới")
+    content_mode: Optional[str] = Field(default="custom", description="Mã content mode")
+    prompt: str = Field(..., min_length=10, description="Nội dung prompt template")
+    description: Optional[str] = Field(default=None, max_length=300, description="Mô tả ngắn")
+
+
+class PromptPresetUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100, description="Tên thể loại")
+    prompt: Optional[str] = Field(default=None, min_length=10, description="Nội dung prompt template")
+    description: Optional[str] = Field(default=None, max_length=300, description="Mô tả ngắn")
+
+
+class PromptPresetListResponse(BaseModel):
+    presets: list[PromptPresetItem] = Field(default_factory=list)
+

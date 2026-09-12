@@ -15,6 +15,7 @@ import type {
   WorkflowExportResponse,
   ExportedVideoItem,
 } from '../contracts'
+import type { PromptPresetItem } from '../types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from './buildScenePlan'
 
 /**
@@ -411,4 +412,73 @@ export async function openExportFolder(filename: string): Promise<boolean> {
     console.error('Lỗi khi mở thư mục video:', err)
     return false
   }
+}
+
+/**
+ * Lấy danh sách các mẫu thể loại kịch bản kèm prompt chuyên biệt
+ */
+export async function fetchPromptPresets(): Promise<PromptPresetItem[]> {
+  try {
+    const res = await fetch(`${API_URL}/api/workflow/prompt-presets`)
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.presets || []
+  } catch (err) {
+    console.warn('Lỗi khi lấy danh sách prompt presets:', err)
+    return []
+  }
+}
+
+/**
+ * Lưu mẫu thể loại mới kèm prompt tùy chỉnh
+ */
+export async function createPromptPreset(
+  name: string,
+  prompt: string,
+  contentMode: string = 'custom',
+  description?: string,
+): Promise<PromptPresetItem> {
+  const res = await fetch(`${API_URL}/api/workflow/prompt-presets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, prompt, content_mode: contentMode, description }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể tạo preset mới (HTTP ${res.status})`)
+  }
+  return res.json()
+}
+
+/**
+ * Cập nhật preset kịch bản
+ */
+export async function updatePromptPreset(
+  presetId: string,
+  data: { name?: string; prompt?: string; description?: string },
+): Promise<PromptPresetItem> {
+  const res = await fetch(`${API_URL}/api/workflow/prompt-presets/${encodeURIComponent(presetId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể cập nhật preset (HTTP ${res.status})`)
+  }
+  return res.json()
+}
+
+/**
+ * Xóa một preset kịch bản tùy chỉnh
+ */
+export async function deletePromptPreset(presetId: string): Promise<boolean> {
+  const res = await fetch(`${API_URL}/api/workflow/prompt-presets/${encodeURIComponent(presetId)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể xóa preset (HTTP ${res.status})`)
+  }
+  return true
 }
