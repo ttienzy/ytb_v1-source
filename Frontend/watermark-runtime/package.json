@@ -1,0 +1,15 @@
+{
+  "name": "google-search-watermark-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned runtime dependencies bundled with the desktop watermark feature.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "dependencies": {
+    "@pilio/gemini-watermark-remover": "1.0.43",
+    "playwright": "1.63.0",
+    "sharp": "0.35.4"
+  }
+}

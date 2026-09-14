@@ -16,13 +16,19 @@ uv run uvicorn app.main:app --port 8001
 ```
 
 Lần đầu `uv sync`/start sẽ tải weights ONNX từ HuggingFace (`pnnbao-ump/VieNeu-TTS-v3-Turbo`)
-về cache — khá nặng, một lần thôi. Offline: đặt weights vào `models/` + `ONNX_DIR=models/onnx_int8`
-trong `.env` (Phase 5).
+về `MODEL_CACHE_DIR` (mặc định `data/models`, hoặc `HF_HOME` nếu đã đặt) — khá nặng,
+nhưng chỉ tải một lần. Bản Electron đặt cache này trong `userData/voice_data/models` để các lần
+khởi động sau dùng lại. Offline: đặt weights vào `models/` + `ONNX_DIR=models/onnx_int8`
+trong `.env`.
+
+Khi clone giọng, service tìm FFmpeg theo `FFMPEG_PATH` trước rồi mới fallback sang `PATH` để
+thuận tiện khi dev. Bản Electron đóng gói `ffmpeg-static` tại `resources/bin/ffmpeg.exe` và truyền
+`FFMPEG_PATH` tự động; máy người dùng không cần cài FFmpeg riêng.
 
 Verify:
 ```bash
 curl http://127.0.0.1:8001/health
-# {"status":"ok","model_loaded":true,"backend":"onnx","device":"cpu","precision":"int8","voices_count":20,"error":null}
+# {"status":"ok","model_loaded":true,"backend":"onnx","ffmpeg_available":true,"voices_count":20,"error":null}
 ```
 
 ## Cấu trúc
@@ -44,7 +50,7 @@ data/
 
 | Method | Path | Trả về |
 | --- | --- | --- |
-| GET | `/health` | `{status, model_loaded, backend, device, precision, voices_count, error}` |
+| GET | `/health` | `{status, model_loaded, model_cache_dir, ffmpeg_available, backend, device, precision, voices_count, error}` |
 | GET | `/internal/voices/presets` | Danh sách voice preset |
 | POST | `/internal/voices/{id}` | Đăng ký voice clone bằng audio mẫu |
 | DELETE | `/internal/voices/{id}` | Xóa voice clone |

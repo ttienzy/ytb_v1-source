@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from app.config import settings
+from app.config import MODEL_CACHE_DIR, resolve_ffmpeg_path, settings
 
 logger = logging.getLogger("voice.engine")
 
@@ -94,10 +94,12 @@ class VoiceEngine:
                 voices_count = 0
         return {
             "model_loaded": self.ready,
+            "model_cache_dir": str(MODEL_CACHE_DIR),
             "backend": self.backend,
             "device": settings.device,
             "precision": settings.precision,
             "voices_count": voices_count,
+            "ffmpeg_available": resolve_ffmpeg_path() is not None,
             "error": self.error,
         }
 

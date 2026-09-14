@@ -47,6 +47,11 @@ node_modules/
 Frontend/out/
 Frontend/dist/
 Frontend/release/
+Frontend/watermark-runtime/node_modules/
+Backend/build/
+Backend/dist/
+services/voice-service/build/
+services/voice-service/dist/
 Desktop/node_modules/
 *.log
 npm-debug.log*

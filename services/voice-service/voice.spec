@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import sys
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 service_dir = Path(SPECPATH).resolve()
@@ -10,9 +11,9 @@ a = Analysis(
     ['run_server.py'],
     pathex=[str(service_dir)],
     binaries=[],
-    datas=[
-        (str(service_dir / 'data'), 'data'),
-    ],
+    # Runtime voices/model cache live under APP_DATA_DIR and must never be baked
+    # into a release. Only VieNeu's built-in preset assets belong in the EXE.
+    datas=collect_data_files('vieneu', includes=['assets/**/*']),
     hiddenimports=[
         'uvicorn',
         'uvicorn.logging',

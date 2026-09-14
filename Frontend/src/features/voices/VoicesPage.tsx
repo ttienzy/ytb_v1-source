@@ -10,6 +10,10 @@ export function VoicesPage() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [serviceReady, setServiceReady] = useState(false)
+  const [serviceMessage, setServiceMessage] = useState(
+    'Đang khởi động Voice Service hoặc tải model lần đầu…'
+  )
   const [generatingVoiceId, setGeneratingVoiceId] = useState<string | null>(null)
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null)
   const [previewText, setPreviewText] = useState('')
@@ -30,33 +34,67 @@ export function VoicesPage() {
     setPlayingVoiceId(null)
   }
 
-  const loadVoicesAndPresets = (retryCount = 0) => {
-    fetch(`${API_URL}/api/voices`)
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error('not ok'))))
-      .then(d => {
-        setVoices(d.voices ?? d ?? [])
-        setMessage('')
-      })
-      .catch(() => {
-        if (retryCount < 8) {
-          setTimeout(() => loadVoicesAndPresets(retryCount + 1), 1500)
-        } else {
-          setMessage('Voice service chưa sẵn sàng. Vui lòng kiểm tra tiến trình Voice.')
-        }
-      })
-
-    fetch(`${API_URL}/api/voices/presets`)
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error('not ok'))))
-      .then(setPresets)
-      .catch(() => {
-        /* preset là tuỳ chọn */
-      })
-  }
-
   useEffect(() => {
-    loadVoicesAndPresets()
+    let stopped = false
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+
+    const pollVoiceService = async (attempt = 0) => {
+      if (stopped) return
+
+      try {
+        const healthResponse = await fetch(`${API_URL}/api/voices/health`)
+        if (healthResponse.ok) {
+          const health = await healthResponse.json()
+          if (!health.model_loaded) {
+            setServiceReady(false)
+            setServiceMessage(
+              health.error
+                ? `Voice Service không khởi tạo được: ${health.error}`
+                : 'Voice Service chưa tải xong model.'
+            )
+            return
+          }
+
+          const [voicesResponse, presetsResponse] = await Promise.all([
+            fetch(`${API_URL}/api/voices`),
+            fetch(`${API_URL}/api/voices/presets`),
+          ])
+          if (!voicesResponse.ok || !presetsResponse.ok) {
+            throw new Error('Voice API chưa sẵn sàng')
+          }
+
+          const [voicesData, presetsData] = await Promise.all([
+            voicesResponse.json(),
+            presetsResponse.json(),
+          ])
+          if (stopped) return
+          setVoices(voicesData.voices ?? voicesData ?? [])
+          setPresets(presetsData ?? [])
+          setServiceReady(true)
+          setServiceMessage('')
+          return
+        }
+      } catch {
+        // Backend hoặc Voice Service còn đang khởi động; tiếp tục poll bên dưới.
+      }
+
+      if (attempt < 180) {
+        setServiceReady(false)
+        setServiceMessage('Đang khởi động Voice Service hoặc tải model lần đầu…')
+        retryTimer = setTimeout(() => void pollVoiceService(attempt + 1), 2000)
+      } else {
+        setServiceReady(false)
+        setServiceMessage(
+          'Voice Service chưa sẵn sàng sau 6 phút. Hãy khởi động lại ứng dụng và kiểm tra kết nối mạng.'
+        )
+      }
+    }
+
+    void pollVoiceService()
 
     return () => {
+      stopped = true
+      if (retryTimer) clearTimeout(retryTimer)
       stopAudio()
     }
   }, [])
@@ -165,6 +203,8 @@ export function VoicesPage() {
         </div>
       </div>
 
+      {serviceMessage && <p className="settings-message">{serviceMessage}</p>}
+
       <div className="settings-card">
         <div className="integration-title">
           <div className="gemini-icon">
@@ -202,7 +242,7 @@ export function VoicesPage() {
             type="button"
             className="primary-button"
             onClick={create}
-            disabled={loading}
+            disabled={loading || !serviceReady}
           >
             <Plus size={16} /> Tạo giọng
           </button>
@@ -261,7 +301,7 @@ export function VoicesPage() {
                       type="button"
                       className="primary-button"
                       onClick={() => togglePreview(v.voice_id)}
-                      disabled={isGenerating}
+                      disabled={isGenerating || !serviceReady}
                       style={
                         isPlaying
                           ? { background: '#ef4444', borderColor: '#dc2626', color: '#fff' }
@@ -328,7 +368,7 @@ export function VoicesPage() {
                       type="button"
                       className="primary-button"
                       onClick={() => togglePreview(p.name)}
-                      disabled={isGenerating}
+                      disabled={isGenerating || !serviceReady}
                       style={
                         isPlaying
                           ? { background: '#ef4444', borderColor: '#dc2626', color: '#fff' }

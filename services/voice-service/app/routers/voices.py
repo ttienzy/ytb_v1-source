@@ -4,11 +4,11 @@ Nhận ref audio (multipart), gọi ``engine.add_voice`` (extract speaker embedd
 rồi ``save_voices`` ra ``data/voices.json``. Khởi động sau, engine nạp lại từ file đó.
 """
 from pathlib import Path
-import shutil
 import subprocess
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from app.config import resolve_ffmpeg_path
 from app.engine import engine
 from app.schemas import PresetList, PresetVoice, VoiceRegistered, VoiceRemoved
 from app.storage import delete_ref_audio, save_ref_audio, voices_dir, voices_file_path
@@ -39,9 +39,12 @@ async def register_voice(
     source_path = save_ref_audio(voice_id, data, f".upload{source_suffix}")
     ref_path = voices_dir() / f"{voice_id}.wav"
     try:
-        ffmpeg = shutil.which("ffmpeg")
+        ffmpeg = resolve_ffmpeg_path()
         if not ffmpeg:
-            raise RuntimeError("Không tìm thấy FFmpeg để chuyển audio mẫu sang WAV.")
+            raise RuntimeError(
+                "Không tìm thấy FFmpeg. Bản desktop cần đóng gói resources/bin/ffmpeg.exe "
+                "và truyền FFMPEG_PATH cho Voice Service."
+            )
         converted = subprocess.run(
             [
                 ffmpeg,

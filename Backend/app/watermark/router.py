@@ -92,15 +92,14 @@ class ProcessRequest(BaseModel):
 @router.get("/check")
 def check_cli() -> dict:
     """Kiểm tra gwr CLI đã cài chưa."""
-    available = service._gwr_available()
-    return {
-        "gwr_available": available,
-        "message": (
-            "gwr CLI sẵn sàng."
-            if available
-            else "gwr chưa được cài. Chạy: npm install -g @pilio/gemini-watermark-remover"
-        ),
-    }
+    status = service.get_gwr_runtime_status()
+    if status["gwr_available"] and status["video_available"]:
+        message = "Công cụ watermark tích hợp đã sẵn sàng cho ảnh và video."
+    elif status["gwr_available"]:
+        message = "Công cụ watermark sẵn sàng cho ảnh, nhưng thiếu trình duyệt xử lý video."
+    else:
+        message = "Watermark runtime tích hợp bị thiếu. Hãy cài lại ứng dụng."
+    return {**status, "message": message}
 
 
 @router.post("/process", status_code=202)
@@ -114,7 +113,7 @@ async def process_paths(req: ProcessRequest) -> JSONResponse:
     if not service._gwr_available():
         raise HTTPException(
             status_code=503,
-            detail="gwr CLI chưa được cài. Chạy: npm install -g @pilio/gemini-watermark-remover",
+            detail="Watermark runtime tích hợp bị thiếu. Hãy cài lại ứng dụng.",
         )
 
     if not req.paths:
@@ -166,7 +165,7 @@ async def process_upload(files: list[UploadFile] = File(...)) -> JSONResponse:
     if not service._gwr_available():
         raise HTTPException(
             status_code=503,
-            detail="gwr CLI chưa được cài. Chạy: npm install -g @pilio/gemini-watermark-remover",
+            detail="Watermark runtime tích hợp bị thiếu. Hãy cài lại ứng dụng.",
         )
     
     if not files:

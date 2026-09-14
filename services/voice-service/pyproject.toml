@@ -8,11 +8,16 @@ license = { text = "Internal" }
 dependencies = [
     # VieNeu-TTS v3 Turbo — torch-free core (ONNX Runtime, CPU, int8, 48kHz).
     # `pip install vieneu` pulls onnxruntime + huggingface_hub + librosa + gradio.
-    "vieneu>=3.3.0",
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
-    "python-multipart>=0.0.9",   # multipart upload (ref audio) cho /internal/voices/{id}
-    "pydantic-settings>=2.5",
+    "vieneu==3.3.0",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.4",
+    "python-multipart==0.0.32",   # multipart upload (ref audio) cho /internal/voices/{id}
+    "pydantic-settings==2.15.0",
+]
+
+[dependency-groups]
+build = [
+    "pyinstaller==6.22.3",
 ]
 
 [tool.uv]

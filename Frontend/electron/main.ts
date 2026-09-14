@@ -1,9 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { join } from 'node:path'
+import { basename, delimiter, join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
-import { basename } from 'node:path'
 import http from 'node:http'
 
 let mainWindow: BrowserWindow | null = null
@@ -39,12 +38,16 @@ function startProductionBackend() {
 
   const userDataDir = app.getPath('userData')
   const resourcesDir = process.resourcesPath
+  const binDir = join(resourcesDir, 'bin')
+  const watermarkModulesDir = join(resourcesDir, 'watermark-runtime', 'node_modules')
+  const watermarkGwrScript = join(watermarkModulesDir, '@pilio', 'gemini-watermark-remover', 'bin', 'gwr.mjs')
+  const watermarkBrowsersDir = join(watermarkModulesDir, 'playwright-core', '.local-browsers')
 
-  const backendExe = join(resourcesDir, 'bin', 'backend_server.exe')
+  const backendExe = join(binDir, 'backend_server.exe')
   if (existsSync(backendExe)) {
     try {
       const backendProc = spawn(backendExe, [], {
-        cwd: join(resourcesDir, 'bin'),
+        cwd: binDir,
         windowsHide: true,
         stdio: 'ignore',
         env: {
@@ -52,6 +55,10 @@ function startProductionBackend() {
           APP_DATA_DIR: userDataDir,
           PORT: '8000',
           HOST: '127.0.0.1',
+          WATERMARK_NODE_PATH: process.execPath,
+          WATERMARK_NODE_IS_ELECTRON: '1',
+          WATERMARK_GWR_SCRIPT: watermarkGwrScript,
+          WATERMARK_PLAYWRIGHT_BROWSERS_PATH: watermarkBrowsersDir,
         },
       })
       backendProcesses.push(backendProc)
@@ -61,18 +68,23 @@ function startProductionBackend() {
     }
   }
 
-  const voiceExe = join(resourcesDir, 'bin', 'voice_server.exe')
+  const voiceExe = join(binDir, 'voice_server.exe')
   if (existsSync(voiceExe)) {
     try {
+      const ffmpegExe = join(binDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
+      const voicePath = [binDir, process.env.PATH].filter(Boolean).join(delimiter)
       const voiceProc = spawn(voiceExe, [], {
-        cwd: join(resourcesDir, 'bin'),
+        cwd: binDir,
         windowsHide: true,
         stdio: 'ignore',
         env: {
           ...process.env,
           APP_DATA_DIR: userDataDir,
+          HF_HOME: join(userDataDir, 'voice_data', 'models'),
+          PATH: voicePath,
           PORT: '8001',
           HOST: '127.0.0.1',
+          ...(existsSync(ffmpegExe) ? { FFMPEG_PATH: ffmpegExe } : {}),
         },
       })
       backendProcesses.push(voiceProc)

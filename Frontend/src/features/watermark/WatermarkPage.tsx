@@ -28,6 +28,7 @@ const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm']
 export function WatermarkPage() {
   const [activeTab, setActiveTab] = useState<'image' | 'video'>('image')
   const [cliOk, setCliOk] = useState<boolean | null>(null)
+  const [videoCliOk, setVideoCliOk] = useState<boolean | null>(null)
   const [cliMsg, setCliMsg] = useState('')
   const [driveStatus, setDriveStatus] = useState<any>(null)
 
@@ -61,6 +62,7 @@ export function WatermarkPage() {
       .then(r => r.json())
       .then(data => {
         setCliOk(data.gwr_available)
+        setVideoCliOk(data.video_available)
         setCliMsg(data.message)
       })
       .catch(() => {
@@ -68,6 +70,7 @@ export function WatermarkPage() {
           setTimeout(() => checkCli(retryCount + 1), 1500)
         } else {
           setCliOk(false)
+          setVideoCliOk(false)
           setCliMsg('Không thể kết nối với Backend service.')
         }
       })
@@ -392,6 +395,7 @@ export function WatermarkPage() {
 
   const isImageTab = activeTab === 'image'
   const activeQueue = isImageTab ? imageQueue : videoQueue
+  const runtimeUnavailable = cliOk === false || (!isImageTab && videoCliOk === false)
 
   const filteredHistoryJobs = useMemo(() => {
     return historyJobs.filter(job => {
@@ -420,7 +424,7 @@ export function WatermarkPage() {
             Xóa Watermark
           </h1>
           <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-            Tự động loại bỏ dấu mờ SynthID và watermark trên hình ảnh và video.
+            Tự động loại bỏ watermark hiển thị trên hình ảnh và video Gemini/Veo.
           </p>
         </div>
 
@@ -519,7 +523,7 @@ export function WatermarkPage() {
       </div>
 
       {/* CLI Warning (Only if error) */}
-      {cliOk === false && (
+      {runtimeUnavailable && (
         <div
           style={{
             display: 'flex',
@@ -536,9 +540,6 @@ export function WatermarkPage() {
         >
           <AlertCircle size={16} />
           <span>{cliMsg || 'Công cụ xử lý watermark chưa sẵn sàng.'}</span>
-          <code style={{ marginLeft: 'auto', background: '#fee2e2', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>
-            npm install -g @pilio/gemini-watermark-remover sharp
-          </code>
         </div>
       )}
 
@@ -927,17 +928,17 @@ export function WatermarkPage() {
               <button
                 type="button"
                 onClick={() => handleStartProcess(activeQueue, isImageTab)}
-                disabled={activeQueue.length === 0 || isProcessing || cliOk === false}
+                disabled={activeQueue.length === 0 || isProcessing || runtimeUnavailable}
                 style={{
                   height: 36,
                   padding: '0 16px',
                   fontSize: 13,
                   fontWeight: 600,
-                  background: activeQueue.length === 0 ? '#94a3b8' : '#0f172a',
+                  background: activeQueue.length === 0 || runtimeUnavailable ? '#94a3b8' : '#0f172a',
                   color: '#fff',
                   border: 'none',
                   borderRadius: 6,
-                  cursor: activeQueue.length === 0 ? 'not-allowed' : 'pointer',
+                  cursor: activeQueue.length === 0 || runtimeUnavailable ? 'not-allowed' : 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,

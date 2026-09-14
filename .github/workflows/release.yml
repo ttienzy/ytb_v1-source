@@ -9,6 +9,7 @@ jobs:
   release:
     name: Build Windows Installer & Create GitHub Release
     runs-on: windows-latest
+    timeout-minutes: 90
     permissions:
       contents: write
 
@@ -21,7 +22,9 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: Backend/requirements.txt
+          cache-dependency-path: |
+            Backend/requirements.txt
+            services/voice-service/uv.lock
 
       - name: Install Python Dependencies & PyInstaller
         run: |
@@ -33,33 +36,136 @@ jobs:
       - name: Build Standalone Backend Executable
         run: |
           cd Backend
+          python -m unittest tests.test_watermark_runtime -v
           pyinstaller --noconfirm backend.spec
 
       - name: Install Voice Service Dependencies & Build Executable
         run: |
           cd services/voice-service
-          pip install pyinstaller vieneu fastapi uvicorn onnxruntime huggingface_hub pydantic-settings python-multipart
-          pyinstaller --noconfirm voice.spec
+          python -m pip install uv==0.12.5
+          uv sync --frozen --group build --python 3.11
+          .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+          .\.venv\Scripts\python.exe -m PyInstaller --noconfirm voice.spec
+          if (-not (Test-Path dist\voice_server.exe)) { throw 'voice_server.exe was not created' }
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
-          cache-dependency-path: Frontend/package-lock.json
+          cache-dependency-path: |
+            Frontend/package-lock.json
+            Frontend/watermark-runtime/package-lock.json
 
       - name: Install Node Dependencies
         run: |
           cd Frontend
-          npm install
+          npm ci
+          npm run typecheck
+
+      - name: Install and Smoke Test Watermark Runtime
+        run: |
+          $env:PLAYWRIGHT_BROWSERS_PATH = '0'
+          cd Frontend\watermark-runtime
+          npm ci
+          npx playwright install --only-shell chromium
+          node .\smoke-test.mjs
+
+      - name: Verify Bundled FFmpeg
+        run: |
+          $ffmpeg = (Resolve-Path Frontend\node_modules\ffmpeg-static\ffmpeg.exe).Path
+          $license = Resolve-Path Frontend\node_modules\ffmpeg-static\LICENSE
+          & $ffmpeg -version
+          Write-Host "FFmpeg license: $license"
+
+      - name: Cache Voice Model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/voice-hf-cache
+          key: voice-model-${{ runner.os }}-${{ hashFiles('services/voice-service/uv.lock') }}
+
+      - name: Smoke Test Packaged Voice Service
+        run: |
+          $voiceExe = (Resolve-Path services\voice-service\dist\voice_server.exe).Path
+          $env:APP_DATA_DIR = Join-Path $env:RUNNER_TEMP 'voice-smoke-data'
+          $env:HF_HOME = Join-Path $env:RUNNER_TEMP 'voice-hf-cache'
+          $env:FFMPEG_PATH = (Resolve-Path Frontend\node_modules\ffmpeg-static\ffmpeg.exe).Path
+          $env:HOST = '127.0.0.1'
+          $env:PORT = '8001'
+          $stdout = Join-Path $env:RUNNER_TEMP 'voice-smoke.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'voice-smoke.stderr.log'
+          $voiceProcess = $null
+          $health = $null
+          try {
+            $voiceProcess = Start-Process -FilePath $voiceExe -PassThru -WindowStyle Hidden `
+              -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $deadline = (Get-Date).AddMinutes(10)
+            do {
+              if ($voiceProcess.HasExited) {
+                throw "Voice Service exited early with code $($voiceProcess.ExitCode)"
+              }
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/health' -TimeoutSec 5
+                if ($health.error) { throw "Voice engine degraded: $($health.error)" }
+                if ($health.model_loaded -and $health.ffmpeg_available) { break }
+              } catch {
+                if ($_.Exception.Message -like 'Voice engine degraded:*') { throw }
+              }
+              Start-Sleep -Seconds 2
+            } while ((Get-Date) -lt $deadline)
+
+            if (-not $health.model_loaded) { throw 'Voice model did not become ready within 10 minutes' }
+            if (-not $health.ffmpeg_available) { throw 'Bundled FFmpeg was not detected by Voice Service' }
+            Write-Host "Voice smoke test passed: $($health | ConvertTo-Json -Compress)"
+          } finally {
+            if ($voiceProcess -and -not $voiceProcess.HasExited) {
+              Stop-Process -Id $voiceProcess.Id -Force
+              $voiceProcess.WaitForExit()
+            }
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+          }
 
       - name: Build and Package Electron App
         run: |
+          @(
+            'Backend\dist\backend_server.exe',
+            'services\voice-service\dist\voice_server.exe',
+            'Frontend\node_modules\ffmpeg-static\ffmpeg.exe',
+            'Frontend\watermark-runtime\node_modules\@pilio\gemini-watermark-remover\bin\gwr.mjs',
+            'Frontend\watermark-runtime\node_modules\sharp\package.json',
+            'Frontend\watermark-runtime\node_modules\playwright-core\.local-browsers'
+          ) | ForEach-Object {
+            if (-not (Test-Path $_)) { throw "Missing release resource: $_" }
+          }
           cd Frontend
           npm run build
           npx electron-builder --win nsis --x64 --publish never
+          if (-not (Get-ChildItem release\*.exe -ErrorAction SilentlyContinue)) {
+            throw 'Electron installer was not created'
+          }
+          $unpackedApp = (Resolve-Path 'release\win-unpacked\Google Search App.exe').Path
+          $runtimeDir = (Resolve-Path 'release\win-unpacked\resources\watermark-runtime').Path
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $runtimeDir 'node_modules\playwright-core\.local-browsers'
+          $smokeScript = Join-Path $runtimeDir 'smoke-test.mjs'
+          $smokeStdout = Join-Path $env:RUNNER_TEMP 'watermark-packaged-smoke.stdout.log'
+          $smokeStderr = Join-Path $env:RUNNER_TEMP 'watermark-packaged-smoke.stderr.log'
+          $smokeProcess = Start-Process -FilePath $unpackedApp -ArgumentList ('"' + $smokeScript + '"') `
+            -PassThru -Wait -WindowStyle Hidden `
+            -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
+          if (Test-Path $smokeStdout) { Get-Content $smokeStdout }
+          if (Test-Path $smokeStderr) { Get-Content $smokeStderr }
+          if ($smokeProcess.ExitCode -ne 0) {
+            throw "Packaged watermark runtime smoke test failed: $($smokeProcess.ExitCode)"
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke Test Packaged Backend Watermark Flow
+        run: |
+          .\.github\scripts\smoke-packaged-watermark.ps1 `
+            -AppRoot 'Frontend\release\win-unpacked'
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
