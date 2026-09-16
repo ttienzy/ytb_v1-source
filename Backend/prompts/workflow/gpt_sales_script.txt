@@ -4,7 +4,7 @@ Mục tiêu đầu ra:
 - Tạo chính xác {{SCRIPT_COUNT}} phân cảnh video liền mạch tạo thành 1 chuỗi kịch bản hoàn chỉnh (hoặc {{SCRIPT_COUNT}} kịch bản độc lập nếu yêu cầu).
 - Mỗi phân cảnh tương ứng với đúng 1 clip Google Flow dài {{CLIP_DURATION}} giây.
 - Thể loại nội dung: {{CONTENT_MODE}}. Nền tảng ưu tiên: {{PLATFORM}}.
-- Mật độ lời thoại mục tiêu: {{MIN_WORDS}}-{{MAX_WORDS}} từ/phân cảnh (nhịp bán hàng tự nhiên, rõ ràng 2.0 - 2.4 từ/giây trong {{CLIP_DURATION}} giây, để chừa 1 giây khoảng lặng chuyển cảnh). Tuyệt đối không viết vượt quá số từ này.
+- Mật độ lời thoại mục tiêu: {{MIN_WORDS}}-{{MAX_WORDS}} từ/phân cảnh (nhịp bán hàng tự nhiên, rõ ràng theo dải từ đã cấu hình trong {{CLIP_DURATION}} giây). Hãy viết câu gãy gọn, súc tích, giàu năng lượng.
 
 Cấu trúc kịch bản theo Phễu Bán Hàng Video Ngắn (Sequential Sales Funnel):
 - Phân cảnh 1 (The Golden Hook): Giữ chân người xem trong 3 giây đầu bằng câu hỏi gây tò mò, sự thật bất ngờ hoặc nỗi đau nhức nhối (pain point). KHÔNG giới thiệu sản phẩm ngay, KHÔNG bán hàng sớm và TUYỆT ĐỐI KHÔNG có CTA.
@@ -23,7 +23,7 @@ QUY TẮC BẮT BUỘC VỀ NGÔN NGỮ (BILINGUAL MANDATE):
 
 2. voiceover BẮT BUỘC VIẾT BẰNG TIẾNG VIỆT:
    - Lời thoại thuần Việt 100%, câu từ sắc sảo, gãy gọn, giàu năng lượng, bắt tai theo phong cách sáng tạo nội dung TikTok hiện đại.
-   - Đạt đúng dải số từ {{MIN_WORDS}}-{{MAX_WORDS}} từ. Không viết câu quá dài gây hụt hơi, ngắt nghỉ nhịp nhàng.
+   - Độ dài tối ưu khoảng {{MIN_WORDS}}-{{MAX_WORDS}} từ. Không viết câu quá dài gây hụt hơi, ngắt nghỉ nhịp nhàng.
 
 3. on_screen_text:
    - Câu text ngắn gọn tiếng Việt (3-6 từ) bắt mắt, nhấn mạnh điểm mấu chốt để người xem lướt không bật tiếng vẫn hiểu.
@@ -39,7 +39,7 @@ QUY TẮC BẮT BUỘC VỀ NGÔN NGỮ (BILINGUAL MANDATE):
       "angle": "Tên góc tiếp cận hoặc giai đoạn phân cảnh",
       "title": "Tên phân cảnh ngắn",
       "visual_direction": "Cinematic visual direction in English for Google Veo, including camera motion, lighting, character action and product details",
-      "voiceover": "Toàn bộ lời thoại tiếng Việt liền mạch dài {{MIN_WORDS}}-{{MAX_WORDS}} từ",
+      "voiceover": "Toàn bộ lời thoại tiếng Việt liền mạch khoảng {{MIN_WORDS}}-{{MAX_WORDS}} từ",
       "on_screen_text": "Text ngắn tiếng Việt hiển thị trên màn hình",
       "hook": "Câu mở đầu của phân cảnh",
       "cta": "Kêu gọi hành động (chỉ có ở phân cảnh cuối, các phân cảnh trước để trống '')"

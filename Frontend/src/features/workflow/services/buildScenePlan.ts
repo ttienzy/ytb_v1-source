@@ -19,7 +19,9 @@ import type {
   ScriptGenerationConfig,
 } from '../contracts'
 
-export const DEFAULT_CLIP_DURATION_SECONDS = 10
+import { getWorkflowConfig } from './workflowConfig.ts'
+
+export const DEFAULT_CLIP_DURATION_SECONDS = getWorkflowConfig().defaultClipDurationSeconds
 
 export const DEFAULT_SCENE_CONFIG: ScenePlanConfig = {
   count: 3,
@@ -30,19 +32,19 @@ export const DEFAULT_SCENE_CONFIG: ScenePlanConfig = {
 
 export function normalizeClipDuration(
   value?: number,
-  fallback = DEFAULT_CLIP_DURATION_SECONDS,
+  fallback = getWorkflowConfig().defaultClipDurationSeconds,
 ): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.round(value)
     : fallback
 }
 
-/** Khoảng lời thoại gợi ý theo nhịp bán hàng TikTok 3.5-4.5 từ/giây. */
+/** Use the same word budget policy exposed by the backend. */
 export function estimateVoiceoverWordRange(durationSeconds?: number): { min: number; max: number } {
   const duration = normalizeClipDuration(durationSeconds)
   return {
-    min: Math.max(1, Math.round(duration * 3.5)),
-    max: Math.max(1, Math.round(duration * 4.5)),
+    min: Math.max(1, Math.round(duration * getWorkflowConfig().voiceoverWordsPerSecond.min)),
+    max: Math.max(1, Math.round(duration * getWorkflowConfig().voiceoverWordsPerSecond.max)),
   }
 }
 
@@ -56,10 +58,13 @@ export function isScriptCollectionStale(
     collection.actualCount !== collection.requestedCount ||
     collection.actualCount !== collection.items.length ||
     collection.contentMode !== current.contentMode ||
+    (collection.storyMode || 'sequential') !== (current.storyMode || 'sequential') ||
+    (current.minWords !== undefined && collection.minWords !== current.minWords) ||
+    (current.maxWords !== undefined && collection.maxWords !== current.maxWords) ||
     collection.platform !== (current.platform || 'auto') ||
     collection.clipDurationSeconds !== normalizeClipDuration(current.clipDurationSeconds) ||
     collection.promptTemplate !== (current.promptTemplate || '') ||
-    collection.requestedModel !== (current.model || 'cx/gpt-5.5')
+    collection.requestedModel !== (current.model || getWorkflowConfig().defaultScriptModel)
   )
 }
 
@@ -152,6 +157,7 @@ export function buildClipPlans(params: {
       sceneNumber: i + 1,
       title,
       prompt,
+      voiceover: script.voiceover || script.content,
       durationSec,
       aspectRatio,
       cameraMotion,
@@ -160,7 +166,7 @@ export function buildClipPlans(params: {
       renderProgress: 0,
       videoUrl: null,
       outputFilePath: null,
-      chainFromPrevious: i > 0,
+      chainFromPrevious: sceneConfig?.storyMode !== 'independent' && i > 0,
       startFramePath: null,
       startFramePreviewUrl: null,
     })
@@ -216,7 +222,7 @@ export function splitScriptToScenes(params: {
   } else {
     const visual = scriptVisual ? `Hình ảnh: ${scriptVisual}\n` : ''
     const fullText = scriptVoice || script.content || ''
-    const paras = fullText.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+    const paras = fullText.split(/\n\s*\n/).map((p: string) => p.trim()).filter(Boolean)
     if (paras.length >= 3) {
       scene1Prompt = `${visual}Mở đầu: ${paras[0]}`
       scene2Prompt = `${visual}Nội dung chính: ${paras.slice(1, -1).join('\n\n')}`

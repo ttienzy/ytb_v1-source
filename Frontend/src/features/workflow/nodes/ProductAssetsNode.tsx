@@ -1,9 +1,10 @@
-import React, { useRef, useState } from 'react'
+import React, { useLayoutEffect, useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { ShoppingBag, Upload, X, CheckCircle2, Trash2, Plus, Sparkles, ImageDown } from 'lucide-react'
 import type { ProductAssetsNodeData } from '../types'
 import type { AssetRef } from '../contracts'
 import { uploadWorkflowAsset } from '../services/workflowApi'
+import { createAssetUploadManager } from '../services/assetUpload'
 import { VeoImagePickerModal } from '../components/VeoImagePickerModal'
 
 interface ProductAssetsNodeProps {
@@ -16,6 +17,20 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
   const activeSlotIndexRef = useRef<number>(0)
   const [veoPickerOpen, setVeoPickerOpen] = useState(false)
   const [activePickerSlot, setActivePickerSlot] = useState<number>(0)
+  const onChangeRef = useRef(data.onChangeImage)
+  onChangeRef.current = data.onChangeImage
+  const uploads = useRef<ReturnType<typeof createAssetUploadManager<number>> | null>(null)
+  useLayoutEffect(() => {
+    const manager = createAssetUploadManager<number>({
+      upload: uploadWorkflowAsset,
+      onChange: (slot, url, asset) => onChangeRef.current?.(slot, url, asset),
+    })
+    uploads.current = manager
+    return () => {
+      manager.dispose()
+      uploads.current = null
+    }
+  }, [])
 
   const images = data.images || [null, null, null]
   const imageCount = images.filter(Boolean).length
@@ -31,7 +46,7 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
   }
 
   const handleSelectVeoImage = (dataUrl: string, assetRef: AssetRef) => {
-    data.onChangeImage?.(activePickerSlot, dataUrl, assetRef)
+    uploads.current?.replace(activePickerSlot, dataUrl, assetRef)
   }
 
 
@@ -39,22 +54,7 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const slotIndex = activeSlotIndexRef.current
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const url = event.target?.result as string
-      data.onChangeImage?.(slotIndex, url)
-
-      // Upload lên Backend trong nền để nhận assetId và backendPath
-      uploadWorkflowAsset(file, 'product')
-        .then((assetRef) => {
-          data.onChangeImage?.(slotIndex, url, assetRef)
-        })
-        .catch((err) => {
-          console.warn('Lỗi khi upload asset lên backend:', err)
-        })
-    }
-    reader.readAsDataURL(file)
+    void uploads.current?.start(activeSlotIndexRef.current, file, 'product')
     e.target.value = ''
   }
 
@@ -64,21 +64,7 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
     const file = e.dataTransfer.files?.[0]
     if (!file || !file.type.startsWith('image/')) return
 
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const url = event.target?.result as string
-      data.onChangeImage?.(index, url)
-
-      // Upload lên Backend trong nền
-      uploadWorkflowAsset(file, 'product')
-        .then((assetRef) => {
-          data.onChangeImage?.(index, url, assetRef)
-        })
-        .catch((err) => {
-          console.warn('Lỗi khi upload asset lên backend:', err)
-        })
-    }
-    reader.readAsDataURL(file)
+    void uploads.current?.start(index, file, 'product')
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -88,7 +74,7 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
 
   const handleRemove = (e: React.MouseEvent, index: number) => {
     e.stopPropagation()
-    data.onChangeImage?.(index, null)
+    uploads.current?.remove(index)
   }
 
   const slotLabels = ['Ảnh chính', 'Góc nghiêng', 'Chi tiết / Tem']
@@ -171,6 +157,7 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
             className="wf-node-del-btn"
             onClick={(e) => {
               e.stopPropagation()
+              uploads.current?.dispose()
               data.onDelete?.()
             }}
             title="Xóa khối sản phẩm này"
@@ -194,6 +181,7 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
         <div className="wf-asset-slot-grid">
           {[0, 1, 2].map((idx) => {
             const imgUrl = images[idx]
+            const asset = data.assets?.[idx]
             return (
               <div
                 key={idx}
@@ -291,6 +279,18 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
                       <span>Thư viện Veo</span>
                     </button>
                   </>
+                )}
+                {(asset?.uploadStatus === 'uploading' || asset?.uploadStatus === 'error') && (
+                  <div
+                    role={asset.uploadStatus === 'error' ? 'alert' : 'status'}
+                    style={{ position: 'absolute', bottom: 18, insetInline: 2, padding: 3, background: '#fff', color: asset.uploadStatus === 'error' ? '#b91c1c' : '#1d4ed8', fontSize: 10, zIndex: 1, maxHeight: '60%', overflowY: 'auto' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {asset.uploadStatus === 'uploading' ? 'Đang tải ảnh…' : `Tải ảnh thất bại: ${asset.error || 'Vui lòng chọn lại ảnh.'}`}
+                    {asset.uploadStatus === 'error' && uploads.current?.canRetry(idx) && (
+                      <button type="button" className="nodrag" onClick={() => { void uploads.current?.retry(idx) }}>Thử lại</button>
+                    )}
+                  </div>
                 )}
               </div>
             )

@@ -81,9 +81,9 @@ export async function getJobs(): Promise<VeoJobOut[]> {
   return resp.json()
 }
 
-export async function getJobStatus(jobId: string): Promise<VeoJobOut | null> {
-  const resp = await fetch(`${BASE}/jobs/${jobId}`)
-  if (!resp.ok) return null
+export async function getJobStatus(jobId: string, signal?: AbortSignal): Promise<VeoJobOut | null> {
+  const resp = await fetch(`${BASE}/jobs/${jobId}`, { signal })
+  if (!resp.ok) throw new Error(`Không đọc được job ${jobId} (HTTP ${resp.status}).`)
   return resp.json()
 }
 

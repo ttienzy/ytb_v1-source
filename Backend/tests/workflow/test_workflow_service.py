@@ -1,6 +1,7 @@
 import json
 
 import pytest
+import shutil
 from pathlib import Path
 from app.workflow.service import (
     calculate_voiceover_word_range,
@@ -14,6 +15,35 @@ from app.workflow.service import (
     delete_exported_video,
     WORKFLOW_EXPORTS_DIR,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_exports(monkeypatch, tmp_path):
+    from app.workflow import service
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    monkeypatch.setattr(service, "WORKFLOW_EXPORTS_DIR", exports)
+    monkeypatch.setattr(service, "EXPORTS_METADATA_FILE", exports / "history.json")
+    monkeypatch.setattr(service, "VEO_DATA_DIR", tmp_path / "veo")
+    monkeypatch.setattr(__import__(__name__, fromlist=["WORKFLOW_EXPORTS_DIR"]), "WORKFLOW_EXPORTS_DIR", exports)
+
+
+def mock_export_media(monkeypatch, duration):
+    from app.workflow import service
+
+    def copy_concat(segs, out, work):
+        shutil.copyfile(segs[0], out)
+        return out
+
+    def copy_audio(src, out, **kwargs):
+        shutil.copyfile(src, out)
+        return out
+
+    monkeypatch.setattr(service, "concat_segments", copy_concat)
+    monkeypatch.setattr(service, "render_audio", copy_audio)
+    monkeypatch.setattr(service, "probe_media", lambda _: {
+        "duration": duration, "width": 1280, "height": 720, "has_audio": False,
+    })
 
 
 def test_voiceover_word_range_follows_clip_duration():
@@ -278,8 +308,7 @@ def test_concat_workflow_scenes_veo_url_resolution(monkeypatch, tmp_path):
 
     # Nếu mock concat_segments để không cần ffmpeg thật
     from app.workflow import service as wf_service
-    monkeypatch.setattr(wf_service, "concat_segments", lambda segs, out, work: out)
-    monkeypatch.setattr(wf_service, "ffprobe_duration", lambda p: 4.0)
+    mock_export_media(monkeypatch, 4.0)
 
     res = concat_workflow_scenes(
         scene_video_paths=["/api/veo/history/mock123/file"],
@@ -365,8 +394,7 @@ def test_concat_workflow_scenes_filename_and_veo_id_resolution(monkeypatch, tmp_
     monkeypatch.setattr(veo_service, "get_video_path", lambda vid: dummy_mp4 if "00066213-f95" in str(vid) else None)
 
     from app.workflow import service as wf_service
-    monkeypatch.setattr(wf_service, "concat_segments", lambda segs, out, work: out)
-    monkeypatch.setattr(wf_service, "ffprobe_duration", lambda p: 10.0)
+    mock_export_media(monkeypatch, 10.0)
 
     # Test với tên file trần "00066213-f95.mp4"
     res = concat_workflow_scenes(
@@ -384,7 +412,7 @@ def test_concat_workflow_scenes_filename_and_veo_id_resolution(monkeypatch, tmp_
     assert res2.status == "done"
 
 
-def test_sync_voiceover_to_scenes_per_clip(tmp_path):
+def test_sync_voiceover_to_scenes_per_clip(tmp_path, monkeypatch):
     from app.workflow.service import sync_voiceover_to_scenes
 
     # Tạo 2 clip video giả lập
@@ -430,7 +458,7 @@ def test_sync_voiceover_to_scenes_per_clip(tmp_path):
         return MockProc()
 
     from app.workflow import service as wf_service
-    wf_service.ffprobe_duration = lambda p: dur_map.get(str(p), 10.0)
+    monkeypatch.setattr(wf_service, "ffprobe_duration", lambda p: dur_map.get(str(p), 10.0))
 
     import subprocess
     old_run = subprocess.run

@@ -1,19 +1,20 @@
-/**
- * Production Workflow Orchestrator (DAG Runner)
- * Duyệt đồ thị từ startNodeId, điều phối tuần tự qua các Service thật (Gemini -> GPT -> Veo)
- * KHÔNG sử dụng mock hay fake timeouts.
- */
-
+/** Reachable DAG execution. Flow handlers build plans; they never submit video jobs. */
 import type { Node, Edge } from '@xyflow/react'
+import type { ScriptGenerationConfig } from '../contracts'
+import type * as WorkflowApi from './workflowApi'
 import {
-  resolveProductAssetsInput,
-  resolveCharacterSceneInput,
+  findSingleConnectedSourceNode,
   resolveGeminiAnalysisInput,
-  findConnectedSourceNodes,
-} from './graphResolver'
-import { callGeminiAnalysis, callGptScriptGeneration } from './workflowApi'
-import { buildClipPlans, normalizeClipDuration } from './buildScenePlan'
-import type { AssetRef, ProductAnalysis, SalesScript } from '../contracts'
+  resolveGptScriptsInput,
+  resolveWorkflowAssetsInput,
+} from './graphResolver.ts'
+import { buildClipPlans, normalizeClipDuration, isScriptCollectionStale } from './buildScenePlan.ts'
+import { getWorkflowConfig } from './workflowConfig.ts'
+import type { WorkflowConfig } from './workflowConfig'
+import { getWorkflowExecutionOrder, WorkflowGraphError } from './workflowGraph.ts'
+import type { WorkflowStartType } from './workflowGraph'
+
+export { SUPPORTED_WORKFLOW_START_TYPES, isSupportedWorkflowStartType } from './workflowGraph.ts'
 
 export interface WorkflowRunCallbacks {
   onNodeStateChange: (nodeId: string, patch: Record<string, any>) => void
@@ -21,240 +22,215 @@ export interface WorkflowRunCallbacks {
   onSuccess: () => void
 }
 
+/** API imports are lazy, so tests can inject services without loading browser code. */
+export interface WorkflowRunnerDependencies {
+  callGeminiAnalysis: typeof WorkflowApi.callGeminiAnalysis
+  callGptScriptGeneration: typeof WorkflowApi.callGptScriptGeneration
+  buildClipPlans: typeof buildClipPlans
+  getWorkflowConfig: typeof getWorkflowConfig
+}
+
+const defaultDependencies: WorkflowRunnerDependencies = {
+  callGeminiAnalysis: async (...args) => (await import('./workflowApi.ts')).callGeminiAnalysis(...args),
+  callGptScriptGeneration: async (...args) => (await import('./workflowApi.ts')).callGptScriptGeneration(...args),
+  buildClipPlans,
+  getWorkflowConfig,
+}
+
+interface RunContext {
+  nodes: Node[]
+  edges: Edge[]
+  scheduled: Set<string>
+  dependencies: WorkflowRunnerDependencies
+  config: WorkflowConfig
+  patch: (node: Node, patch: Record<string, any>) => void
+}
+
+interface NodeHandler {
+  preflight: (context: RunContext, node: Node) => void
+  execute: (context: RunContext, node: Node) => Promise<void>
+  failurePatch?: (message: string) => Record<string, any>
+}
+
+function input(context: RunContext, node: Node) {
+  return { nodes: context.nodes, edges: context.edges, targetNodeId: node.id }
+}
+
+function requireResult<T>(result: { ok: boolean; data?: T; error?: string }, node: Node): T {
+  if (!result.ok || result.data === undefined) throw new WorkflowGraphError(node.id, result.error || 'Missing workflow input')
+  return result.data
+}
+
+function flowDuration(context: RunContext, node: Node): number {
+  const data = node.data as Record<string, any>
+  return normalizeClipDuration(data.videoConfig?.duration ?? data.scenes?.[0]?.durationSec, context.config.defaultClipDurationSeconds)
+}
+
+function scriptConfig(context: RunContext, node: Node): ScriptGenerationConfig {
+  const data = node.data as Record<string, any>
+  const targets = new Set(context.edges.filter((edge) => edge.source === node.id).map((edge) => edge.target))
+  const durations = new Set(context.nodes.filter((child) => targets.has(child.id) && child.type === 'veoFlowStudio')
+    .map((child) => flowDuration(context, child)))
+  // Shared GPT output uses the common downstream duration, or the runtime default
+  // when branches have different durations. Each Flow still builds its own plans.
+  const duration = normalizeClipDuration(data.clipDurationSeconds ?? (durations.size === 1 ? [...durations][0] : undefined),
+    context.config.defaultClipDurationSeconds)
+  return {
+    count: typeof data.requestedCount === 'number' ? data.requestedCount : 3,
+    contentMode: data.contentMode || 'sales',
+    storyMode: data.storyMode || 'sequential',
+    voiceId: data.voiceId,
+    platform: data.platform || 'auto',
+    clipDurationSeconds: duration,
+    minWords: Math.max(1, Math.round(duration * context.config.voiceoverWordsPerSecond.min)),
+    maxWords: Math.max(1, Math.round(duration * context.config.voiceoverWordsPerSecond.max)),
+  }
+}
+
+function requiredParent(context: RunContext, node: Node, type: 'geminiAnalysis' | 'gptScript'): Node {
+  return requireResult(findSingleConnectedSourceNode({ ...input(context, node), expectedSourceType: type }), node)
+}
+
+function providerFor(node: Node): 'gemini' | '9router' {
+  const value = node.data.analysisProvider ?? node.data.providerUsed ?? 'gemini'
+  if (value !== 'gemini' && value !== '9router') throw new WorkflowGraphError(node.id, `Unsupported analysis provider: ${value}`)
+  return value
+}
+
+const passthrough: NodeHandler = { preflight: () => {}, execute: async () => {} }
+
+/** One handler per executable type; legacy video/export nodes deliberately have none. */
+const handlers: Record<WorkflowStartType, NodeHandler> = {
+  productAssets: passthrough,
+  characterScene: passthrough,
+  geminiAnalysis: {
+    preflight(context, node) {
+      requiredProduct(context, node)
+      providerFor(node)
+    },
+    async execute(context, node) {
+      const assets = requiredProduct(context, node)
+      const provider = providerFor(node)
+      context.patch(node, { isAnalyzing: true, analysisError: null })
+      const analysisResult = await context.dependencies.callGeminiAnalysis(assets.rawImages, String(node.data.prompt || ''), provider)
+      requireResult(resolveGeminiAnalysisInput({
+        nodes: [{ ...node, data: { ...node.data, analysisResult, isAnalyzing: false, analysisError: null } }],
+        edges: [{ id: '__result__', source: node.id, target: '__consumer__' }], targetNodeId: '__consumer__',
+      }), node)
+      context.patch(node, { isAnalyzing: false, analysisResult, analysisError: null, providerUsed: analysisResult.providerUsed || provider })
+    },
+    failurePatch: (message) => ({ isAnalyzing: false, analysisError: message }),
+  },
+  gptScript: {
+    preflight(context, node) {
+      const parent = requiredParent(context, node, 'geminiAnalysis')
+      if (!context.scheduled.has(parent.id)) requireResult(resolveGeminiAnalysisInput(input(context, node)), node)
+      requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
+      const config = scriptConfig(context, node)
+      if (!Number.isInteger(config.count) || config.count < 1) throw new WorkflowGraphError(node.id, 'Script count must be a positive integer')
+    },
+    async execute(context, node) {
+      const productAnalysis = requireResult(resolveGeminiAnalysisInput(input(context, node)), node)
+      const assets = requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
+      context.patch(node, { isGenerating: true, scriptError: null })
+      const result = await context.dependencies.callGptScriptGeneration({
+        productAnalysis, images: assets.rawImages, assets,
+        scriptConfig: { ...scriptConfig(context, node), characterProfile: assets.characterProfile, sceneProfile: assets.sceneProfile },
+        promptTemplate: String(node.data.prompt || ''),
+        model: String(node.data.model || context.config.defaultScriptModel),
+      })
+      requireResult(resolveGptScriptsInput({
+        nodes: [{ ...node, data: { ...node.data, salesScripts: result.scripts, scriptInputStale: false, isGenerating: false, scriptError: null } }],
+        edges: [{ id: '__result__', source: node.id, target: '__consumer__' }], targetNodeId: '__consumer__',
+      }), node)
+      context.patch(node, {
+        isGenerating: false, salesScripts: result.scripts, scriptCollection: result.collection,
+        scriptError: null, scriptInputStale: false,
+      })
+    },
+    failurePatch: (message) => ({ isGenerating: false, scriptError: message }),
+  },
+  veoFlowStudio: {
+    preflight(context, node) {
+      const parent = requiredParent(context, node, 'gptScript')
+      if (!context.scheduled.has(parent.id)) {
+        requireResult(resolveGptScriptsInput(input(context, node)), node)
+        const data = parent.data as Record<string, any>
+        if (isScriptCollectionStale(data.scriptCollection, {
+          ...scriptConfig(context, parent), promptTemplate: data.prompt || '', model: data.model || context.config.defaultScriptModel,
+        })) throw new WorkflowGraphError(node.id, 'GPT script collection is stale. Generate scripts again.')
+      }
+      requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
+    },
+    async execute(context, node) {
+      const scripts = requireResult(resolveGptScriptsInput(input(context, node)), node)
+      const assets = requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
+      const parent = requiredParent(context, node, 'gptScript')
+      const data = node.data as Record<string, any>
+      const scenes = context.dependencies.buildClipPlans({
+        scripts,
+        sceneConfig: {
+          count: scripts.length,
+          durations: scripts.map(() => flowDuration(context, node)),
+          aspectRatio: data.videoConfig?.aspectRatio || data.aspectRatio || '9:16',
+          storyMode: parent.data.storyMode === 'independent' ? 'independent' : 'sequential',
+        },
+        assets: assets.assets,
+      })
+      context.patch(node, { scenes, activeSceneIndex: 0, scriptSourceStale: false })
+    },
+  },
+}
+
+function requiredProduct(context: RunContext, node: Node) {
+  requireResult(findSingleConnectedSourceNode({ ...input(context, node), expectedSourceType: 'productAssets' }), node)
+  const assets = requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
+  if (!assets.rawImages.length) throw new WorkflowGraphError(node.id, 'Upload at least one product image before analysis.')
+  return assets
+}
+
 export async function runRealWorkflow(params: {
   startNodeId: string
   nodes: Node[]
   edges: Edge[]
   callbacks: WorkflowRunCallbacks
+  dependencies?: Partial<WorkflowRunnerDependencies>
+  config?: Partial<WorkflowConfig>
 }): Promise<void> {
-  const { startNodeId, nodes, edges, callbacks } = params
-
-  const startNode = nodes.find((n) => n.id === startNodeId)
-  if (!startNode) {
-    throw new Error(`Không tìm thấy node bắt đầu với ID: ${startNodeId}`)
-  }
-
-  // Xác định node bắt đầu và kiểm tra quan hệ theo DAG
-  let geminiNode: Node | undefined
-
-  if (startNode.type === 'geminiAnalysis') {
-    geminiNode = startNode
-  } else if (startNode.type === 'productAssets') {
-    // Tìm node Gemini được nối dây từ productAssets
-    const outEdges = edges.filter((e) => e.source === startNode.id)
-    geminiNode = nodes.find((n) => outEdges.some((e) => e.target === n.id && n.type === 'geminiAnalysis'))
-
-    if (!geminiNode) {
-      const errMsg = 'Khối [Ảnh Sản Phẩm] này chưa được nối dây tới khối Gemini Vision nào trong sơ đồ.'
-      callbacks.onError(startNode.id, errMsg)
-      return
-    }
-  } else if (startNode.type === 'gptScript') {
-    // Chạy từ GPT node trực tiếp nếu Gemini đã phân tích
-    const geminiInput = resolveGeminiAnalysisInput({ nodes, edges, targetNodeId: startNode.id })
-    if (!geminiInput.ok || !geminiInput.data) {
-      const errMsg = geminiInput.error || 'Khối ChatGPT cần được nối dây và nhận kết quả phân tích từ Gemini Vision.'
-      callbacks.onError(startNode.id, errMsg)
-      return
-    }
-    // Thực thi trực tiếp bước GPT
-    return executeGptAndDownstream({
-      gptNode: startNode,
-      analysisResult: geminiInput.data,
-      nodes,
-      edges,
-      callbacks,
-    })
-  } else if (startNode.type === 'characterScene') {
-    // Nếu chọn Nhân Vật & Bối Cảnh làm điểm bắt đầu, bắt đầu phân tích từ khối Gemini Vision
-    geminiNode = nodes.find((n) => n.type === 'geminiAnalysis')
-    if (!geminiNode) {
-      const errMsg = 'Sơ đồ cần có khối Gemini Vision để phân tích sản phẩm và khởi chạy quy trình.'
-      callbacks.onError(startNode.id, errMsg)
-      return
-    }
-  } else {
-    callbacks.onError(startNode.id, `Loại node '${startNode.type}' hiện không hỗ trợ làm điểm bắt đầu chạy tự động.`)
-    return
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // BƯỚC 1: Phân tích sản phẩm qua Gemini Vision
-  // ──────────────────────────────────────────────────────────────────────────
-  callbacks.onNodeStateChange(geminiNode.id, { isAnalyzing: true, analysisError: null })
-
-  const productRes = resolveProductAssetsInput({
-    nodes,
-    edges,
-    targetNodeId: geminiNode.id,
-  })
-
-  if (!productRes.ok || !productRes.data) {
-    const errMsg = productRes.error || 'Thiếu ảnh sản phẩm hợp lệ để phân tích.'
-    callbacks.onNodeStateChange(geminiNode.id, { isAnalyzing: false, analysisError: errMsg })
-    callbacks.onError(geminiNode.id, errMsg)
-    return
-  }
-
-  const validImages = productRes.data.rawImages.filter(Boolean)
-  if (validImages.length === 0) {
-    const errMsg = 'Vui lòng tải ít nhất 1 ảnh sản phẩm vào khối Ảnh Sản Phẩm.'
-    callbacks.onNodeStateChange(geminiNode.id, { isAnalyzing: false, analysisError: errMsg })
-    callbacks.onError(geminiNode.id, errMsg)
-    return
-  }
-
-  const geminiPrompt = (geminiNode.data?.prompt as string) || ''
-  let analysisResult: ProductAnalysis
-
+  const { startNodeId, edges, callbacks } = params
+  if (!params.nodes.some((node) => node.id === startNodeId)) throw new Error(`Start node not found: ${startNodeId}`)
+  const dependencies = { ...defaultDependencies, ...params.dependencies }
+  const nodes = params.nodes.map((node) => ({ ...node, data: { ...node.data } }))
+  let activeId = startNodeId
   try {
-    analysisResult = await callGeminiAnalysis(validImages, geminiPrompt)
-    callbacks.onNodeStateChange(geminiNode.id, {
-      isAnalyzing: false,
-      analysisResult,
-      analysisError: null,
-    })
-  } catch (err: any) {
-    const errMsg = err?.message || 'Lỗi không xác định khi phân tích bằng Gemini.'
-    callbacks.onNodeStateChange(geminiNode.id, { isAnalyzing: false, analysisError: errMsg })
-    callbacks.onError(geminiNode.id, errMsg)
-    return
-  }
-
-  // Cập nhật bản sao nodes trong bộ nhớ để bước tiếp theo đọc được kết quả Gemini vừa xong
-  const currentNodes = nodes.map((n) =>
-    n.id === geminiNode!.id ? { ...n, data: { ...n.data, analysisResult } } : n
-  )
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // BƯỚC 2: Duyệt theo cạnh nối từ Gemini sang GPT (DAG traversal)
-  // ──────────────────────────────────────────────────────────────────────────
-  const gptEdges = edges.filter((e) => e.source === geminiNode!.id)
-  const gptNode = currentNodes.find((n) => gptEdges.some((e) => e.target === n.id && n.type === 'gptScript'))
-
-  if (!gptNode) {
-    // Kết thúc hợp lệ nếu quy trình chỉ dừng ở phân tích Gemini
-    callbacks.onSuccess()
-    return
-  }
-
-  await executeGptAndDownstream({
-    gptNode,
-    analysisResult,
-    nodes: currentNodes,
-    edges,
-    callbacks,
-    productImages: validImages,
-    productAssets: productRes.data.assets,
-  })
-}
-
-async function executeGptAndDownstream(params: {
-  gptNode: Node
-  analysisResult: ProductAnalysis
-  nodes: Node[]
-  edges: Edge[]
-  callbacks: WorkflowRunCallbacks
-  productImages?: string[]
-  productAssets?: AssetRef[]
-}): Promise<void> {
-  const { gptNode, analysisResult, nodes, edges, callbacks } = params
-
-  callbacks.onNodeStateChange(gptNode.id, { isGenerating: true, scriptError: null })
-
-  const charSceneRes = resolveCharacterSceneInput({
-    nodes,
-    edges,
-    targetNodeId: gptNode.id,
-  })
-
-  const prodRes = resolveProductAssetsInput({
-    nodes,
-    edges,
-    targetNodeId: gptNode.id,
-  })
-  const validImages = params.productImages || (prodRes.ok && prodRes.data ? prodRes.data.rawImages : [])
-  const productAssets = params.productAssets || (prodRes.ok && prodRes.data ? prodRes.data.assets : [])
-
-  const gptPromptTemplate = (gptNode.data?.prompt as string) || ''
-  const gptModel = (gptNode.data?.model as string) || 'cx/gpt-5.5'
-  const gptData = (gptNode.data || {}) as Record<string, any>
-  const scriptCount = typeof gptData.requestedCount === 'number' ? gptData.requestedCount : 3
-  const scriptMode = gptData.contentMode || 'sales'
-  const platform = gptData.platform || 'auto'
-  const flowEdges = edges.filter((e) => e.source === gptNode.id)
-  const flowStudioNode = nodes.find((n) => flowEdges.some((e) => e.target === n.id && n.type === 'veoFlowStudio'))
-  const flowData = (flowStudioNode?.data || {}) as Record<string, any>
-  const clipDurationSeconds = normalizeClipDuration(
-    flowData.videoConfig?.duration ?? flowData.scenes?.[0]?.durationSec,
-  )
-  let salesScripts: SalesScript[] = []
-
-  try {
-    const gptRes = await callGptScriptGeneration({
-      images: validImages,
-      productAnalysis: analysisResult,
-      assets: charSceneRes.data,
-      scriptConfig: {
-        count: scriptCount,
-        contentMode: scriptMode,
-        storyMode: (gptData.storyMode as any) || 'sequential',
-        voiceId: gptData.voiceId,
-        characterProfile: charSceneRes.data?.characterProfile,
-        sceneProfile: charSceneRes.data?.sceneProfile,
-        platform,
-        clipDurationSeconds,
+    const ordered = getWorkflowExecutionOrder(nodes, edges, startNodeId)
+    const context: RunContext = {
+      nodes, edges, scheduled: new Set(ordered.map((node) => node.id)), dependencies,
+      config: { ...dependencies.getWorkflowConfig(), ...params.config },
+      patch(node, patch) {
+        Object.assign(node.data, patch)
+        callbacks.onNodeStateChange(node.id, patch)
       },
-      promptTemplate: gptPromptTemplate,
-      model: gptModel,
-    })
-
-    salesScripts = gptRes.scripts
-    callbacks.onNodeStateChange(gptNode.id, {
-      isGenerating: false,
-      salesScripts,
-      scriptCollection: gptRes.collection,
-      scriptError: null,
-    })
-  } catch (err: any) {
-    const errMsg = err?.message || 'Lỗi khi tạo kịch bản bán hàng bằng ChatGPT.'
-    callbacks.onNodeStateChange(gptNode.id, { isGenerating: false, scriptError: errMsg })
-    callbacks.onError(gptNode.id, errMsg)
+    }
+    // Preflight every branch and external dependency before the first paid API call.
+    for (const node of ordered) {
+      activeId = node.id
+      const handler = handlers[node.type as WorkflowStartType]
+      if (!handler) throw new WorkflowGraphError(node.id, `Unsupported workflow node type: ${node.type}`)
+      handler.preflight(context, node)
+    }
+    for (const node of ordered) {
+      activeId = node.id
+      await handlers[node.type as WorkflowStartType].execute(context, node)
+    }
+  } catch (error) {
+    const nodeId = error instanceof WorkflowGraphError ? error.nodeId : activeId
+    const message = error instanceof Error ? error.message : String(error)
+    const node = nodes.find((candidate) => candidate.id === nodeId)
+    const patch = node && handlers[node.type as WorkflowStartType]?.failurePatch?.(message)
+    if (patch) callbacks.onNodeStateChange(nodeId, patch)
+    callbacks.onError(nodeId, message)
     return
   }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // BƯỚC 3: Duyệt theo cạnh nối từ GPT sang Veo Flow Studio (DAG traversal)
-  // ──────────────────────────────────────────────────────────────────────────
-  if (flowStudioNode && salesScripts.length > 0) {
-    const allAssets: AssetRef[] = [
-      ...productAssets,
-      ...(charSceneRes.data?.model ? [charSceneRes.data.model] : []),
-      ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
-    ]
-
-    try {
-      const targetCount = salesScripts.length
-      const clipDurations = Array.from({ length: targetCount }, () => clipDurationSeconds)
-      const newClips = buildClipPlans({
-        scripts: salesScripts,
-        sceneConfig: {
-          count: targetCount,
-          durations: clipDurations,
-          aspectRatio: flowData.aspectRatio || '9:16',
-        },
-        assets: allAssets,
-      })
-
-      callbacks.onNodeStateChange(flowStudioNode.id, {
-        scenes: newClips,
-        activeSceneIndex: 0,
-      })
-    } catch (err: any) {
-      callbacks.onError(flowStudioNode.id, err?.message || 'Lỗi phân phối clip sang Google Flow.')
-      return
-    }
-  }
-
   callbacks.onSuccess()
 }

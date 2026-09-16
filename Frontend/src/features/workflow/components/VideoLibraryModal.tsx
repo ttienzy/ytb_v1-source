@@ -33,6 +33,7 @@ import {
   callGenerateVoiceover,
 } from '../services/workflowApi'
 import * as veoApi from '../../veo-studio/services/veoApi'
+import { getWorkflowConfig } from '../services/workflowConfig'
 
 interface VideoLibraryModalProps {
   isOpen: boolean
@@ -59,7 +60,7 @@ export function VideoLibraryModal({
   // Chế độ Ghép Nhanh (Remix Multi-clip)
   const [isRemixMode, setIsRemixMode] = useState(false)
   const [selectedRemixClips, setSelectedRemixClips] = useState<ExportedVideoItem[]>([])
-  const [remixVoiceId, setRemixVoiceId] = useState<string>('bf4bed06c671')
+  const [remixVoiceId, setRemixVoiceId] = useState<string>(getWorkflowConfig().defaultVoiceId)
   const [remixBgmTrackId, setRemixBgmTrackId] = useState<string>('none')
   const [availableBgm, setAvailableBgm] = useState<Array<{ track_id: string; name: string }>>([])
   const [isRemixing, setIsRemixing] = useState(false)
@@ -93,7 +94,7 @@ export function VideoLibraryModal({
   }
 
   const totalRemixDuration = selectedRemixClips.reduce(
-    (acc, c) => acc + (c.durationSec && c.durationSec > 0 ? c.durationSec : 10),
+    (acc, c) => acc + (c.durationSec && c.durationSec > 0 ? c.durationSec : getWorkflowConfig().defaultClipDurationSeconds),
     0
   )
 

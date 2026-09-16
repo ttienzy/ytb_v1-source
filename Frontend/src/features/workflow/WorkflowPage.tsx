@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react'
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -67,13 +67,22 @@ import {
   isScriptCollectionStale,
   normalizeClipDuration,
 } from './services/buildScenePlan'
-import { RenderJobController } from './services/renderJobService'
+import { useWorkflowRendering } from './hooks/useWorkflowRendering.ts'
 import { runRealWorkflow } from './services/workflowRunner'
+import { getWorkflowConfig, loadWorkflowConfig } from './services/workflowConfig.ts'
+import { useWorkflowState } from './hooks/useWorkflowState.ts'
+import { buildVoiceoverPlan, selectCachedVoiceoverPath } from './services/workflowAudio.ts'
+import { isValidWorkflowConnection } from './services/workflowGraph.ts'
 
 function WorkflowCanvas() {
-  const [nodes, setNodes] = useState<Node[]>(initialNodes)
   const [edges, setEdges] = useState<Edge[]>(initialEdges)
-  const [startNodeId, setStartNodeId] = useState<string>('node-gemini')
+  const { nodes, setNodes, nodesRef, captureRevision } = useWorkflowState(initialNodes, edges)
+  const taskKeys = useRef(new Set<string>())
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [configReady, setConfigReady] = useState(false)
+  const [startNodeId, setStartNodeId] = useState<string>(
+    () => initialNodes.find((node) => node.type === 'geminiAnalysis')?.id || initialNodes[0]?.id || '',
+  )
   const [isRunning, setIsRunning] = useState(false)
   const { fitView } = useReactFlow()
 
@@ -83,15 +92,44 @@ function WorkflowCanvas() {
   const [activeVeoProject, setActiveVeoProject] = useState<VeoProject | null>(null)
   const [veoCapabilities, setVeoCapabilities] = useState<VeoCapabilities | null>(null)
   const [veoVideoConfig, setVeoVideoConfig] = useState<VeoVideoConfig>({
-    model: 'Omni 1.1 Flash',
-    aspectRatio: '9:16',
+    model: getWorkflowConfig().defaultVeoModel,
+    aspectRatio: getWorkflowConfig().defaultAspectRatio,
     duration: DEFAULT_CLIP_DURATION_SECONDS,
-    resolution: '720p',
-    variations: 1,
-    creditCost: 7,
+    resolution: getWorkflowConfig().defaultResolution,
+    variations: getWorkflowConfig().defaultVariations,
+    voiceEnabled: true,
+    keepVeoAmbient: false,
+    veoAmbientVolume: 0,
     bgmEnabled: true,
     bgmVolume: 0.10,
   })
+
+  useEffect(() => {
+    let active = true
+    loadWorkflowConfig(API_URL).then(config => {
+      if (!active) return
+      setNodes(nds => nds.map(node => node.type === 'gptScript'
+        ? { ...node, data: { ...node.data, model: config.defaultScriptModel } } : node))
+      setVeoVideoConfig(current => ({
+        ...current,
+        model: config.defaultVeoModel,
+        aspectRatio: config.defaultAspectRatio,
+        duration: config.defaultClipDurationSeconds,
+        resolution: config.defaultResolution,
+        variations: config.defaultVariations,
+        voiceId: config.defaultVoiceId,
+      }))
+      setConfigReady(true)
+    }).catch(error => {
+      if (!active) return
+      setConfigError(error.message)
+      // Local defaults remain valid for editing when the backend is temporarily unavailable.
+      setConfigReady(true)
+    })
+    return () => {
+      active = false
+    }
+  }, [setNodes])
 
   // Exported video library and player modal states
   const [isLibraryOpen, setIsLibraryOpen] = useState(false)
@@ -225,7 +263,10 @@ function WorkflowCanvas() {
   )
 
   const onConnect = useCallback(
-    (connection: Connection) =>
+    (connection: Connection) => {
+      if (!connection.source || !connection.target || !isValidWorkflowConnection(nodes, edges, connection)) {
+        return
+      }
       setEdges((eds) =>
         addEdge(
           {
@@ -237,8 +278,9 @@ function WorkflowCanvas() {
           },
           eds
         )
-      ),
-    [handleDeleteEdge]
+      )
+    },
+    [edges, handleDeleteEdge, nodes]
   )
 
   // Update product image slot inside productAssets node
@@ -251,7 +293,7 @@ function WorkflowCanvas() {
           const prevAssets = ((node.data?.assets as (AssetRef | null)[]) || [null, null, null]).slice()
           if (asset !== undefined) {
             prevAssets[index] = asset
-          } else if (value === null) {
+          } else {
             prevAssets[index] = null
           }
           return {
@@ -280,7 +322,7 @@ function WorkflowCanvas() {
               data: {
                 ...node.data,
                 [key]: value,
-                [assetKey]: asset !== undefined ? asset : value === null ? null : (node.data as any)?.[assetKey],
+                [assetKey]: asset ?? null,
               },
             }
           }
@@ -327,9 +369,11 @@ function WorkflowCanvas() {
       setNodes((nds) =>
         nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isExtractingProfile: true } } : n))
       )
+      const stillCurrent = captureRevision(nodeId)
 
       try {
         const { characterProfile, sceneProfile } = await callExtractProfiles({ modelImage, sceneImage })
+        if (!stillCurrent()) return
         setNodes((nds) =>
           nds.map((n) => {
             if (n.id === nodeId) {
@@ -347,13 +391,14 @@ function WorkflowCanvas() {
           })
         )
       } catch (err: any) {
+        if (!stillCurrent()) return
         setNodes((nds) =>
           nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isExtractingProfile: false } } : n))
         )
         alert(err?.message || 'Có lỗi khi AI trích xuất profile nhân vật/bối cảnh.')
       }
     },
-    [nodes]
+    [nodes, captureRevision]
   )
 
   // Update prompt in GPT node
@@ -507,10 +552,11 @@ function WorkflowCanvas() {
       const outputIsStale = isScriptCollectionStale(collection, {
         count: Number(gptNode?.data?.requestedCount || scripts.length),
         contentMode: (gptNode?.data?.contentMode || 'sales') as any,
+        storyMode: (gptNode?.data?.storyMode || 'sequential') as any,
         platform: (gptNode?.data?.platform || 'auto') as any,
         clipDurationSeconds: clipDuration,
         promptTemplate: (gptNode?.data?.prompt as string) || '',
-        model: (gptNode?.data?.model as string) || 'cx/gpt-5.5',
+        model: (gptNode?.data?.model as string) || getWorkflowConfig().defaultScriptModel,
       })
       if (outputIsStale) {
         alert('⚠️ Cấu hình đã thay đổi sau lần sinh kịch bản. Vui lòng sinh lại kịch bản trước khi đồng bộ sang Google Flow.')
@@ -546,6 +592,7 @@ function WorkflowCanvas() {
             data: {
               ...n.data,
               scenes: newClips,
+              scriptSourceStale: false,
               activeSceneIndex: 0,
               selectedGptScriptAngle: `${targetCount} kịch bản → ${targetCount} clip độc lập`,
             },
@@ -575,10 +622,11 @@ function WorkflowCanvas() {
       if (isScriptCollectionStale(collection, {
         count: Number(gptNode?.data?.requestedCount || scripts.length),
         contentMode: (gptNode?.data?.contentMode || 'sales') as any,
+        storyMode: (gptNode?.data?.storyMode || 'sequential') as any,
         platform: (gptNode?.data?.platform || 'auto') as any,
         clipDurationSeconds: targetDuration,
         promptTemplate: (gptNode?.data?.prompt as string) || '',
-        model: (gptNode?.data?.model as string) || 'cx/gpt-5.5',
+        model: (gptNode?.data?.model as string) || getWorkflowConfig().defaultScriptModel,
       })) {
         alert('⚠️ Cấu hình đã thay đổi sau lần sinh kịch bản. Vui lòng sinh lại trước khi nạp clip.')
         return nds
@@ -617,6 +665,7 @@ function WorkflowCanvas() {
             data: {
               ...n.data,
               scenes: prevScenes,
+              scriptSourceStale: false,
               selectedGptScriptAngle: targetScript.angle,
             },
           }
@@ -631,6 +680,8 @@ function WorkflowCanvas() {
     setNodes((nds) =>
       nds.map((n) => {
         if (n.type === 'veoFlowStudio') {
+          const previousConfig = (n.data?.videoConfig as VeoVideoConfig | undefined)
+          const scriptTimingChanged = previousConfig?.duration !== config.duration
           const currentScenes = ((n.data?.scenes as GeneratedSceneItem[]) || []).map((sc) => ({
             ...sc,
             aspectRatio: config.aspectRatio || sc.aspectRatio,
@@ -644,6 +695,7 @@ function WorkflowCanvas() {
               aspectRatio: config.aspectRatio,
               resolution: config.resolution,
               scenes: currentScenes,
+              scriptSourceStale: scriptTimingChanged ? true : n.data?.scriptSourceStale,
             },
           }
         }
@@ -770,6 +822,7 @@ function WorkflowCanvas() {
 
   // Trigger Gemini or 9Router Analysis directly via Backend API (Sử dụng graphResolver & workflowApi)
   const handleAnalyzeGemini = useCallback(async (nodeId: string, provider: 'gemini' | '9router' = 'gemini') => {
+    if (!configReady || taskKeys.current.has(nodeId)) return
     const targetNode = nodes.find((n) => n.id === nodeId)
     const promptToSend = (targetNode?.data?.prompt as string) || ''
 
@@ -791,8 +844,11 @@ function WorkflowCanvas() {
       nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: true, analysisError: null } } : n))
     )
 
+    const stillCurrent = captureRevision(nodeId)
+    taskKeys.current.add(nodeId)
     try {
       const data = await callGeminiAnalysis(productRes.data.rawImages, promptToSend, provider)
+      if (!stillCurrent()) return
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === nodeId) {
@@ -811,13 +867,16 @@ function WorkflowCanvas() {
         })
       )
     } catch (err: any) {
+      if (!stillCurrent()) return
       console.error('Analysis error:', err)
       const errMsg = err?.message || `Có lỗi xảy ra khi phân tích bằng ${provider}`
       setNodes((nds) =>
         nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: false, analysisError: errMsg } } : n))
       )
+    } finally {
+      taskKeys.current.delete(nodeId)
     }
-  }, [nodes, edges])
+  }, [nodes, edges, configReady, captureRevision])
 
   // Làm mới cookie Gemini ngầm và tự động retry phân tích ngay lập tức
   const handleRefreshGeminiCookie = useCallback(async (nodeId: string) => {
@@ -842,9 +901,10 @@ function WorkflowCanvas() {
 
   // Trigger GPT Script generation via Backend API (Sử dụng graphResolver & Object payload)
   const handleGenerateGptScript = useCallback(async (nodeId: string) => {
+    if (taskKeys.current.has(nodeId)) return
     const gptNode = nodes.find((n) => n.id === nodeId)
     const promptToSend = (gptNode?.data?.prompt as string) || ''
-    const modelToSend = (gptNode?.data?.model as string) || 'cx/gpt-5.5'
+    const modelToSend = (gptNode?.data?.model as string) || getWorkflowConfig().defaultScriptModel
 
     // 1. Lấy kết quả Gemini phân tích qua graphResolver (KHÔNG hardcode node ID)
     const geminiRes = resolveGeminiAnalysisInput({
@@ -891,6 +951,10 @@ function WorkflowCanvas() {
     const clipDurationSeconds = normalizeClipDuration(
       targetFlowConfig?.duration ?? veoVideoConfig.duration,
     )
+    const revisionChecks = [captureRevision(nodeId)]
+    if (targetFlowNode) revisionChecks.push(captureRevision(targetFlowNode.id))
+    const stillCurrent = () => revisionChecks.every((check) => check())
+    taskKeys.current.add(nodeId)
 
     try {
       const gptRes = await callGptScriptGeneration({
@@ -910,6 +974,10 @@ function WorkflowCanvas() {
         promptTemplate: promptToSend,
         model: modelToSend,
       })
+      if (!stillCurrent()) {
+        setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false } } : n))
+        return
+      }
 
       let newClips: GeneratedSceneItem[] | null = null
       if (targetFlowNode && gptRes.scripts?.length > 0) {
@@ -955,6 +1023,7 @@ function WorkflowCanvas() {
               data: {
                 ...n.data,
                 scenes: newClips,
+                scriptSourceStale: false,
                 activeSceneIndex: 0,
                 selectedGptScriptAngle: `${gptRes.scripts.length} kịch bản → ${gptRes.scripts.length} clip độc lập`,
               },
@@ -964,13 +1033,19 @@ function WorkflowCanvas() {
         })
       )
     } catch (err: any) {
+      if (!stillCurrent()) {
+        setNodes((nds) => nds.map((n) => n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false } } : n))
+        return
+      }
       console.error('GPT Script generation error:', err)
       const errMsg = err?.message || 'Có lỗi xảy ra khi tạo kịch bản bằng ChatGPT'
       setNodes((nds) =>
         nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false, scriptError: errMsg } } : n))
       )
+    } finally {
+      taskKeys.current.delete(nodeId)
     }
-  }, [nodes, edges, veoVideoConfig.duration])
+  }, [nodes, edges, veoVideoConfig.duration, captureRevision])
 
   // Toggle Frame Continuity (🔗 Nối tiếp từ End Frame Clip trước)
   const handleToggleChainFrames = useCallback((nodeId: string, sceneIndex: number, enabled: boolean) => {
@@ -1006,6 +1081,7 @@ function WorkflowCanvas() {
         alert(`⚠️ Clip #${sourceSceneIndex + 1} chưa được tạo video! Vui lòng render Clip #${sourceSceneIndex + 1} trước.`)
         return
       }
+      const stillCurrent = captureRevision(nodeId)
 
       setNodes((nds) =>
         nds.map((n) => {
@@ -1022,6 +1098,7 @@ function WorkflowCanvas() {
 
       try {
         const frameRes = await veoApi.extractLastFrame(videoIdOrPath)
+        if (!stillCurrent()) return
         if (frameRes.ok) {
           const previewUrl = veoApi.getImageFileUrl(frameRes.image_id)
           setNodes((nds) =>
@@ -1047,6 +1124,7 @@ function WorkflowCanvas() {
           throw new Error('Không trích xuất được frame cuối từ video')
         }
       } catch (err: any) {
+        if (!stillCurrent()) return
         setNodes((nds) =>
           nds.map((n) => {
             if (n.id === nodeId) {
@@ -1063,187 +1141,20 @@ function WorkflowCanvas() {
         return { ok: false, error: err?.message }
       }
     },
-    [nodes]
+    [nodes, captureRevision]
   )
 
-  // Render single scene inside Flow Studio (Hỗ trợ Start Frame chaining nối tiếp giữa các clip)
-  const handleRenderFlowScene = useCallback(
-    async (nodeId: string, sceneIndex: number) => {
-      const targetNode = nodes.find((n) => n.id === nodeId)
-      const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
-      const sc = scenes[sceneIndex]
-
-      if (!sc?.prompt?.trim()) {
-        alert(`⚠️ Clip #${sceneIndex + 1} chưa có nội dung prompt! Vui lòng nhập prompt hoặc đồng bộ kịch bản sang Google Flow trước.`)
-        return
-      }
-
-      if (!activeVeoProject) {
-        alert('⚠️ Chưa có Dự án Veo được kích hoạt! Vui lòng chọn hoặc tạo dự án trong "Cấu hình Veo".')
-        return
-      }
-
-      let activeStartFramePath = sc.startFramePath || null
-
-      // Tự động kiểm tra và cắt start frame nếu là Clip #2+ và tùy chọn nối tiếp đang bật
-      if (sceneIndex > 0 && sc.chainFromPrevious !== false) {
-        if (!activeStartFramePath) {
-          const prevScene = scenes[sceneIndex - 1]
-          const prevVideoId = prevScene?.outputFilePath || prevScene?.videoUrl
-          if (!prevVideoId) {
-            alert(
-              `⚠️ Clip #${sceneIndex} chưa được tạo video! Hãy tạo Clip #${sceneIndex} trước để lấy Start Frame nối tiếp, hoặc tắt tùy chọn "Nối tiếp từ End Frame Clip #${sceneIndex}".`
-            )
-            return
-          }
-
-          // Cắt frame từ clip trước
-          try {
-            const frameRes = await veoApi.extractLastFrame(prevVideoId)
-            if (frameRes.ok) {
-              activeStartFramePath = frameRes.file_path
-              const previewUrl = veoApi.getImageFileUrl(frameRes.image_id)
-              setNodes((nds) =>
-                nds.map((n) => {
-                  if (n.id === nodeId) {
-                    const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                    if (scs[sceneIndex]) {
-                      scs[sceneIndex] = {
-                        ...scs[sceneIndex],
-                        startFramePath: frameRes.file_path,
-                        startFramePreviewUrl: previewUrl,
-                      }
-                    }
-                    return { ...n, data: { ...n.data, scenes: scs } }
-                  }
-                  return n
-                })
-              )
-            }
-          } catch (err: any) {
-            console.error('Lỗi tự động cắt start frame:', err)
-          }
-        }
-      }
-
-      const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: nodeId })
-      const charSceneRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: nodeId })
-      const refAssets: AssetRef[] = [
-        ...(prodRes.ok && prodRes.data ? prodRes.data.assets : []),
-        ...(charSceneRes.data?.model ? [charSceneRes.data.model] : []),
-        ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
-      ]
-
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id === nodeId) {
-            const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-            if (scs[sceneIndex]) {
-              scs[sceneIndex] = { ...scs[sceneIndex], isRendering: true, renderProgress: 20 }
-            }
-            return { ...n, data: { ...n.data, scenes: scs } }
-          }
-          return n
-        })
-      )
-
-      const jobController = new RenderJobController()
-      const result = await jobController.renderScene({
-        scene: {
-          sceneNumber: sc.sceneNumber,
-          title: sc.title,
-          prompt: sc.prompt,
-          durationSec: sc.durationSec,
-          aspectRatio: sc.aspectRatio,
-          cameraMotion: sc.cameraMotion,
-          referenceAssets: refAssets,
-          startFramePath: activeStartFramePath || undefined,
-          startFramePreviewUrl: sc.startFramePreviewUrl || undefined,
-        },
-        project: activeVeoProject,
-        videoConfig: veoVideoConfig,
-        referenceAssets: refAssets,
-        onProgress: (prog) => {
-          setNodes((nds) =>
-            nds.map((n) => {
-              if (n.id === nodeId) {
-                const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                if (scs[sceneIndex]) {
-                  scs[sceneIndex] = { ...scs[sceneIndex], renderProgress: prog }
-                }
-                return { ...n, data: { ...n.data, scenes: scs } }
-              }
-              return n
-            })
-          )
-        },
-      })
-
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id === nodeId) {
-            const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-            if (scs[sceneIndex]) {
-              scs[sceneIndex] = {
-                ...scs[sceneIndex],
-                isRendering: false,
-                renderProgress: result.ok ? 100 : 0,
-                videoUrl: result.videoUrl || null,
-                outputFilePath: result.outputFilePath || null,
-              }
-            }
-            return { ...n, data: { ...n.data, scenes: scs } }
-          }
-          return n
-        })
-      )
-
-      if (result.ok) {
-        setExportedCount((prev) => prev + 1)
-
-        // Tự động cắt frame cuối cho clip kế tiếp nếu có và đang bật nối tiếp
-        const nextSceneIndex = sceneIndex + 1
-        const completedVideoId = result.outputFilePath || result.videoUrl
-        if (completedVideoId && nextSceneIndex < scenes.length) {
-          const nextScene = scenes[nextSceneIndex]
-          if (nextScene && nextScene.chainFromPrevious !== false) {
-            try {
-              const autoFrameRes = await veoApi.extractLastFrame(completedVideoId)
-              if (autoFrameRes.ok) {
-                const nextPreviewUrl = veoApi.getImageFileUrl(autoFrameRes.image_id)
-                setNodes((nds) =>
-                  nds.map((n) => {
-                    if (n.id === nodeId) {
-                      const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                      if (scs[nextSceneIndex]) {
-                        scs[nextSceneIndex] = {
-                          ...scs[nextSceneIndex],
-                          startFramePath: autoFrameRes.file_path,
-                          startFramePreviewUrl: nextPreviewUrl,
-                        }
-                      }
-                      return { ...n, data: { ...n.data, scenes: scs } }
-                    }
-                    return n
-                  })
-                )
-              }
-            } catch (frameErr) {
-              console.warn('Tự động trích xuất frame cho clip kế tiếp thất bại:', frameErr)
-            }
-          }
-        }
-      } else {
-        alert(`Lỗi tạo Clip #${sceneIndex + 1}: ${result.error}`)
-      }
-    },
-    [nodes, edges, activeVeoProject, veoVideoConfig]
-  )
+  const { handleRenderFlowScene, handleRenderAllFlowScenes } = useWorkflowRendering({
+    nodesRef, edges, project: activeVeoProject, config: veoVideoConfig, ready: configReady,
+    setNodes, captureRevision, onCompleted: () => setExportedCount(count => count + 1),
+  })
 
   // Gán trực tiếp clip Veo có sẵn từ thư viện vào một phân cảnh Flow Studio
   const handleAssignVideoToScene = useCallback(
     async (nodeId: string, sceneIndex: number, clip: ExportedVideoItem) => {
-      const clipDuration = clip.durationSec && clip.durationSec > 0 ? clip.durationSec : 10
+      const clipDuration = clip.durationSec && clip.durationSec > 0
+        ? clip.durationSec
+        : getWorkflowConfig().defaultClipDurationSeconds
       const clipPath = clip.filePath || clip.videoUrl
 
       setNodes((nds) =>
@@ -1265,6 +1176,7 @@ function WorkflowCanvas() {
           return n
         })
       )
+      const stillCurrent = captureRevision(nodeId)
 
       // Tự động kiểm tra và trích xuất frame cuối cho clip tiếp theo nếu clip sau bật nối tiếp
       const targetNode = nodes.find((n) => n.id === nodeId)
@@ -1276,7 +1188,7 @@ function WorkflowCanvas() {
         if (nextScene && nextScene.chainFromPrevious !== false) {
           try {
             const autoFrameRes = await veoApi.extractLastFrame(clipPath)
-            if (autoFrameRes.ok) {
+            if (autoFrameRes.ok && stillCurrent()) {
               const nextPreviewUrl = veoApi.getImageFileUrl(autoFrameRes.image_id)
               setNodes((nds) =>
                 nds.map((n) => {
@@ -1301,253 +1213,7 @@ function WorkflowCanvas() {
         }
       }
     },
-    [nodes]
-  )
-
-  // Render toàn bộ các clip tuần tự theo chuỗi liên hoàn (Sequential Chain Runner)
-  const handleRenderAllFlowScenes = useCallback(
-    async (nodeId: string) => {
-      const targetNode = nodes.find((n) => n.id === nodeId)
-      const initialScenes = ((targetNode?.data?.scenes as GeneratedSceneItem[]) || []).map((s) => ({ ...s }))
-
-      if (initialScenes.length === 0) {
-        alert('⚠️ Không có clip nào để render.')
-        return
-      }
-
-      if (!activeVeoProject) {
-        alert('⚠️ Chưa có Dự án Veo được kích hoạt! Vui lòng chọn hoặc tạo dự án trong "Cấu hình Veo".')
-        return
-      }
-
-      const allDone = initialScenes.length > 0 && initialScenes.every((s) => Boolean(s.videoUrl || s.outputFilePath))
-      let forceReRenderAll = false
-      if (allDone) {
-        const confirmReRender = window.confirm(
-          'Tất cả các clip đều đã được tạo thành công! Bạn có muốn render lại toàn bộ từ đầu không?'
-        )
-        if (!confirmReRender) return
-        forceReRenderAll = true
-      }
-
-      const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: nodeId })
-      const charSceneRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: nodeId })
-      const refAssets: AssetRef[] = [
-        ...(prodRes.ok && prodRes.data ? prodRes.data.assets : []),
-        ...(charSceneRes.data?.model ? [charSceneRes.data.model] : []),
-        ...(charSceneRes.data?.scene ? [charSceneRes.data.scene] : []),
-      ]
-
-      let previousVideoOutputFile: string | null = null
-
-      for (let idx = 0; idx < initialScenes.length; idx++) {
-        const currentSc = initialScenes[idx]
-        const isDone = Boolean(currentSc.videoUrl || currentSc.outputFilePath)
-
-        // 1. Nếu clip này ĐÃ HOÀN THÀNH và không phải chế độ force re-render toàn bộ:
-        if (isDone && !forceReRenderAll) {
-          previousVideoOutputFile = currentSc.outputFilePath || currentSc.videoUrl || null
-
-          // Tự động kiểm tra và trích xuất frame cho clip kế tiếp nếu clip sau chưa có Start Frame
-          const nextIdx = idx + 1
-          if (nextIdx < initialScenes.length && previousVideoOutputFile) {
-            const nextSc = initialScenes[nextIdx]
-            if (nextSc && nextSc.chainFromPrevious !== false && !nextSc.startFramePath) {
-              try {
-                const frameRes = await veoApi.extractLastFrame(previousVideoOutputFile)
-                if (frameRes.ok) {
-                  const nextPreviewUrl = veoApi.getImageFileUrl(frameRes.image_id)
-                  initialScenes[nextIdx].startFramePath = frameRes.file_path
-                  initialScenes[nextIdx].startFramePreviewUrl = nextPreviewUrl
-                  setNodes((nds) =>
-                    nds.map((n) => {
-                      if (n.id === nodeId) {
-                        const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                        if (scs[nextIdx]) {
-                          scs[nextIdx] = {
-                            ...scs[nextIdx],
-                            startFramePath: frameRes.file_path,
-                            startFramePreviewUrl: nextPreviewUrl,
-                            chainFromPrevious: true,
-                          }
-                        }
-                        return { ...n, data: { ...n.data, scenes: scs } }
-                      }
-                      return n
-                    })
-                  )
-                }
-              } catch (frameErr) {
-                console.warn(`Tự động trích xuất frame từ clip #${idx + 1} cho clip #${nextIdx + 1} thất bại:`, frameErr)
-              }
-            }
-          }
-          // Bỏ qua clip đã hoàn thành, tiếp tục sang clip tiếp theo
-          continue
-        }
-
-        // 2. Chuyển tab hiển thị sang clip cần render
-        handleFlowStudioSelectScene(nodeId, idx)
-
-        if (!currentSc?.prompt?.trim()) {
-          alert(`⚠️ Clip #${idx + 1} chưa có nội dung prompt! Tiến trình liên hoàn dừng lại.`)
-          break
-        }
-
-        let activeStartFramePath = currentSc.startFramePath || null
-        let activePreviewUrl = currentSc.startFramePreviewUrl || null
-
-        // Nếu là clip #2+ và tùy chọn nối tiếp bật, tự động lấy start frame từ video của clip trước nếu chưa có
-        if (idx > 0 && currentSc.chainFromPrevious !== false) {
-          if (!activeStartFramePath && previousVideoOutputFile) {
-            try {
-              const frameRes = await veoApi.extractLastFrame(previousVideoOutputFile)
-              if (frameRes.ok) {
-                activeStartFramePath = frameRes.file_path
-                activePreviewUrl = veoApi.getImageFileUrl(frameRes.image_id)
-                initialScenes[idx].startFramePath = frameRes.file_path
-                initialScenes[idx].startFramePreviewUrl = activePreviewUrl
-                setNodes((nds) =>
-                  nds.map((n) => {
-                    if (n.id === nodeId) {
-                      const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                      if (scs[idx]) {
-                        scs[idx] = {
-                          ...scs[idx],
-                          startFramePath: frameRes.file_path,
-                          startFramePreviewUrl: activePreviewUrl,
-                          chainFromPrevious: true,
-                        }
-                      }
-                      return { ...n, data: { ...n.data, scenes: scs } }
-                    }
-                    return n
-                  })
-                )
-              }
-            } catch (extractErr) {
-              console.error(`Trích xuất frame cho Clip #${idx + 1} thất bại:`, extractErr)
-            }
-          }
-        }
-
-        // Đánh dấu clip đang render
-        setNodes((nds) =>
-          nds.map((n) => {
-            if (n.id === nodeId) {
-              const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-              if (scs[idx]) {
-                scs[idx] = { ...scs[idx], isRendering: true, renderProgress: 20 }
-              }
-              return { ...n, data: { ...n.data, scenes: scs } }
-            }
-            return n
-          })
-        )
-
-        const jobController = new RenderJobController()
-        const result = await jobController.renderScene({
-          scene: {
-            sceneNumber: currentSc.sceneNumber,
-            title: currentSc.title,
-            prompt: currentSc.prompt,
-            durationSec: currentSc.durationSec,
-            aspectRatio: currentSc.aspectRatio,
-            cameraMotion: currentSc.cameraMotion,
-            referenceAssets: refAssets,
-            startFramePath: activeStartFramePath || undefined,
-            startFramePreviewUrl: activePreviewUrl || undefined,
-          },
-          project: activeVeoProject,
-          videoConfig: veoVideoConfig,
-          referenceAssets: refAssets,
-          onProgress: (prog) => {
-            setNodes((nds) =>
-              nds.map((n) => {
-                if (n.id === nodeId) {
-                  const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                  if (scs[idx]) {
-                    scs[idx] = { ...scs[idx], renderProgress: prog }
-                  }
-                  return { ...n, data: { ...n.data, scenes: scs } }
-                }
-                return n
-              })
-            )
-          },
-        })
-
-        initialScenes[idx] = {
-          ...initialScenes[idx],
-          isRendering: false,
-          renderProgress: result.ok ? 100 : 0,
-          videoUrl: result.videoUrl || null,
-          outputFilePath: result.outputFilePath || null,
-        }
-
-        setNodes((nds) =>
-          nds.map((n) => {
-            if (n.id === nodeId) {
-              const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-              if (scs[idx]) {
-                scs[idx] = {
-                  ...scs[idx],
-                  isRendering: false,
-                  renderProgress: result.ok ? 100 : 0,
-                  videoUrl: result.videoUrl || null,
-                  outputFilePath: result.outputFilePath || null,
-                }
-              }
-              return { ...n, data: { ...n.data, scenes: scs } }
-            }
-            return n
-          })
-        )
-
-        if (!result.ok) {
-          alert(`⚠️ Lỗi khi render Clip #${idx + 1}: ${result.error}. Tiến trình liên hoàn tạm dừng.`)
-          break
-        }
-
-        setExportedCount((prev) => prev + 1)
-        previousVideoOutputFile = result.outputFilePath || result.videoUrl || null
-
-        // Tự động cắt frame cuối cho clip kế tiếp nếu có
-        const nextIdx = idx + 1
-        if (nextIdx < initialScenes.length && previousVideoOutputFile) {
-          const nextSc = initialScenes[nextIdx]
-          if (nextSc && nextSc.chainFromPrevious !== false) {
-            try {
-              const autoFrameRes = await veoApi.extractLastFrame(previousVideoOutputFile)
-              if (autoFrameRes.ok) {
-                const nextPreviewUrl = veoApi.getImageFileUrl(autoFrameRes.image_id)
-                initialScenes[nextIdx].startFramePath = autoFrameRes.file_path
-                initialScenes[nextIdx].startFramePreviewUrl = nextPreviewUrl
-                setNodes((nds) =>
-                  nds.map((n) => {
-                    if (n.id === nodeId) {
-                      const scs = ((n.data?.scenes as GeneratedSceneItem[]) || []).slice()
-                      if (scs[nextIdx]) {
-                        scs[nextIdx] = {
-                          ...scs[nextIdx],
-                          startFramePath: autoFrameRes.file_path,
-                          startFramePreviewUrl: nextPreviewUrl,
-                        }
-                      }
-                      return { ...n, data: { ...n.data, scenes: scs } }
-                    }
-                    return n
-                  })
-                )
-              }
-            } catch (autoErr) {
-              console.warn(`Tự động trích xuất frame cho Clip #${nextIdx + 1} thất bại:`, autoErr)
-            }
-          }
-        }
-      }
-    },
-    [nodes, edges, activeVeoProject, veoVideoConfig, handleFlowStudioSelectScene]
+    [nodes, captureRevision]
   )
 
   // Export complete stitched video in Flow Studio (Sử dụng backend FFmpeg concat)
@@ -1559,10 +1225,11 @@ function WorkflowCanvas() {
       .map((s) => s.outputFilePath || s.videoUrl)
       .filter((p): p is string => Boolean(p && p.trim()))
 
-    if (validVideoPaths.length < 2) {
-      alert('⚠️ Chưa thể ghép video! Cần ít nhất 2 clip đã tạo thành công trước khi ghép.')
+    if (scenes.length < 2 || validVideoPaths.length !== scenes.length) {
+      alert('⚠️ Chưa thể ghép video! Cần ít nhất 2 clip và tất cả phân cảnh phải tạo thành công trước khi ghép.')
       return
     }
+    const stillCurrent = captureRevision(nodeId)
 
     let currentProg = 12
     setNodes((nds) =>
@@ -1577,56 +1244,56 @@ function WorkflowCanvas() {
     }, 700)
 
     try {
-      let voiceoverAudioPath = (targetNode?.data?.voiceoverFilePath as string) || (targetNode?.data?.voiceoverUrl as string) || undefined
       const voiceEnabled = veoVideoConfig?.voiceEnabled !== false
-      const voiceId = veoVideoConfig?.voiceId || (targetNode?.data?.voiceId as string) || 'bf4bed06c671'
+      const incomingEdges = edges.filter((e) => e.target === nodeId)
+      const sourceGptNode = nodes.find((n) => incomingEdges.some((e) => e.source === n.id && n.type === 'gptScript'))
+      const gptScripts = (sourceGptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
+      const voiceId = veoVideoConfig?.voiceId || (targetNode?.data?.voiceId as string) || getWorkflowConfig().defaultVoiceId
+      let voiceoverAudioPath: string | undefined
 
-      // Tự động tạo lồng tiếng nếu được bật trong config và chưa có file voiceover
-      if (voiceEnabled && !voiceoverAudioPath) {
-        try {
-          const incomingEdges = edges.filter((e) => e.target === nodeId)
-          const sourceGptNode = nodes.find((n) => incomingEdges.some((e) => e.source === n.id && n.type === 'gptScript'))
-          const gptScripts = (sourceGptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
-          const textsToSpeak: string[] = []
-          scenes.forEach((sc, scIdx) => {
-            if (sc.outputFilePath || sc.videoUrl) {
-              const s = gptScripts[scIdx]
-              const txt = s ? (s.voiceover || s.content) : sc.prompt
-              if (txt && txt.trim()) textsToSpeak.push(txt.trim())
-            }
-          })
-
-          if (textsToSpeak.length > 0) {
+      if (voiceEnabled) {
+        const voicePlan = buildVoiceoverPlan(scenes, voiceId, false, gptScripts)
+        voiceoverAudioPath = selectCachedVoiceoverPath(true, voicePlan.signature, targetNode?.data || {})
+          if (!voiceoverAudioPath) {
             const voRes = await callGenerateVoiceover({
               voiceId,
-              scripts: textsToSpeak,
+              scripts: voicePlan.texts,
               combineAll: true,
             })
             voiceoverAudioPath = voRes.combinedFilePath || voRes.combinedAudioUrl || undefined
+            if (!voiceoverAudioPath) {
+              throw new Error('Dịch vụ voiceover không trả về file âm thanh hợp lệ.')
+            }
+            if (!stillCurrent()) {
+              clearInterval(interval)
+              return
+            }
             setNodes((nds) =>
-              nds.map((n) =>
-                n.id === nodeId
-                  ? {
-                      ...n,
-                      data: {
-                        ...n.data,
-                        voiceId,
-                        voiceoverUrl: voRes.combinedAudioUrl,
-                        voiceoverFilePath: voRes.combinedFilePath,
-                        voiceoverDurationSec: voRes.totalDurationSec,
-                      },
-                    }
-                  : n
-              )
+            nds.map((n) =>
+              n.id === nodeId
+                ? {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      voiceId,
+                      voiceoverSignature: voicePlan.signature,
+                      voiceoverUrl: voRes.combinedAudioUrl,
+                      voiceoverFilePath: voRes.combinedFilePath,
+                      voiceoverDurationSec: voRes.totalDurationSec,
+                    },
+                  }
+                : n
             )
-          }
-        } catch (voErr) {
-          console.warn('Auto voiceover generation during export failed, proceeding with video export:', voErr)
+          )
         }
       }
 
-      const mixOriginalAudio = false
-      const veoAmbientVolume = 0.0
+      const mixOriginalAudio = veoVideoConfig?.keepVeoAmbient === true
+      const veoAmbientVolume = mixOriginalAudio ? (veoVideoConfig?.veoAmbientVolume ?? 0.10) : 0
+      if (!stillCurrent()) {
+        clearInterval(interval)
+        return
+      }
       let bgmTrackIds = veoVideoConfig?.bgmEnabled !== false ? (veoVideoConfig?.bgmTrackIds || []) : []
       if (veoVideoConfig?.bgmEnabled !== false && bgmTrackIds.length === 0) {
         try {
@@ -1653,6 +1320,10 @@ function WorkflowCanvas() {
         bgmVolume,
         veoAmbientVolume
       )
+      if (!stillCurrent()) {
+        clearInterval(interval)
+        return
+      }
       clearInterval(interval)
       setExportedCount((prev) => prev + 1)
       setNodes((nds) =>
@@ -1679,7 +1350,7 @@ function WorkflowCanvas() {
       )
       alert(err?.message || 'Có lỗi xảy ra khi xuất video hoàn chỉnh bằng FFmpeg.')
     }
-  }, [nodes, edges, veoVideoConfig])
+  }, [nodes, edges, veoVideoConfig, captureRevision])
 
   // Generate voiceover from VieNeu-TTS for Flow Studio
   const handleGenerateFlowVoiceover = useCallback(
@@ -1690,26 +1361,19 @@ function WorkflowCanvas() {
       // Find incoming GPT node to extract voiceover scripts & voiceId
       const incomingEdges = edges.filter((e) => e.target === nodeId)
       const sourceGptNode = nodes.find((n) => incomingEdges.some((e) => e.source === n.id && n.type === 'gptScript'))
-      const voiceId = (sourceGptNode?.data?.voiceId as string) || (targetNode.data?.voiceId as string) || 'Ads_Female'
+      const voiceId = (sourceGptNode?.data?.voiceId as string) || (targetNode.data?.voiceId as string) || getWorkflowConfig().defaultVoiceId
 
       const gptScripts = (sourceGptNode?.data?.salesScripts as GptSalesScriptItem[]) || []
       const scenes = (targetNode.data?.scenes as GeneratedSceneItem[]) || []
+      const stillCurrent = captureRevision(nodeId)
 
       const completedScenes = scenes.filter((s) => Boolean((s.outputFilePath || s.videoUrl)?.trim()))
       const filterToCompleted = completedScenes.length >= 2 && completedScenes.length < scenes.length
-
-      // Lấy lời thoại từ kịch bản hoặc phân cảnh
-      const textsToSpeak: string[] = []
-      scenes.forEach((sc, scIdx) => {
-        if (!filterToCompleted || Boolean((sc.outputFilePath || sc.videoUrl)?.trim())) {
-          const s = gptScripts[scIdx]
-          const txt = s ? (s.voiceover || s.content) : sc.prompt
-          if (txt && txt.trim()) textsToSpeak.push(txt.trim())
-        }
-      })
-
-      if (textsToSpeak.length === 0) {
-        alert('⚠️ Chưa có nội dung lời thoại (Voiceover) để đọc! Hãy tạo kịch bản bán hàng bằng ChatGPT trước.')
+      let voicePlan: ReturnType<typeof buildVoiceoverPlan>
+      try {
+        voicePlan = buildVoiceoverPlan(scenes, voiceId, filterToCompleted, gptScripts)
+      } catch (error: any) {
+        alert(error?.message || 'Chưa có nội dung voiceover để tạo giọng đọc.')
         return
       }
 
@@ -1720,9 +1384,13 @@ function WorkflowCanvas() {
       try {
         const res = await callGenerateVoiceover({
           voiceId,
-          scripts: textsToSpeak,
+          scripts: voicePlan.texts,
           combineAll: true,
         })
+        if (!res.combinedFilePath && !res.combinedAudioUrl) {
+          throw new Error('Dịch vụ voiceover không trả về file âm thanh hợp lệ.')
+        }
+        if (!stillCurrent()) return
         setNodes((nds) =>
           nds.map((n) => {
             if (n.id === nodeId) {
@@ -1732,6 +1400,7 @@ function WorkflowCanvas() {
                   ...n.data,
                   isGeneratingVoiceover: false,
                   voiceId,
+                  voiceoverSignature: voicePlan.signature,
                   voiceoverUrl: res.combinedAudioUrl,
                   voiceoverFilePath: res.combinedFilePath,
                   voiceoverDurationSec: res.totalDurationSec,
@@ -1748,7 +1417,7 @@ function WorkflowCanvas() {
         alert(err?.message || 'Có lỗi khi tạo giọng đọc từ VieNeu-TTS.')
       }
     },
-    [nodes, edges]
+    [nodes, edges, captureRevision]
   )
 
   const handleToggleFlowMixAudio = useCallback((nodeId: string, mix: boolean) => {
@@ -1805,7 +1474,7 @@ function WorkflowCanvas() {
           position: { x, y },
           data: {
             title: 'ChatGPT • Kịch Bản',
-            model: 'cx/gpt-5.5',
+            model: getWorkflowConfig().defaultScriptModel,
             provider: 'Viết phân cảnh & lời thoại',
             prompt: '',
             requestedCount: 3,
@@ -1821,10 +1490,10 @@ function WorkflowCanvas() {
           position: { x, y },
           data: {
             title: 'Veo AI • Tạo Video',
-            model: 'Omni 1.1 Flash',
+            model: getWorkflowConfig().defaultVeoModel,
             activeSceneIndex: 0,
             aspectRatio: '9:16',
-            resolution: '1080p',
+            resolution: getWorkflowConfig().defaultResolution,
             scenes: [
               {
                 sceneNumber: 1,
@@ -1955,10 +1624,11 @@ function WorkflowCanvas() {
         const isScriptOutputStale = isScriptCollectionStale(scriptCollection, {
           count: Number(node.data?.requestedCount || 3),
           contentMode: (node.data?.contentMode || 'sales') as any,
+          storyMode: (node.data?.storyMode || 'sequential') as any,
           platform: (node.data?.platform || 'auto') as any,
           clipDurationSeconds,
           promptTemplate: (node.data?.prompt as string) || '',
-          model: (node.data?.model as string) || 'cx/gpt-5.5',
+          model: (node.data?.model as string) || getWorkflowConfig().defaultScriptModel,
         })
 
         const geminiRes = resolveGeminiAnalysisInput({ nodes, edges, targetNodeId: node.id })
@@ -2028,10 +1698,11 @@ function WorkflowCanvas() {
           ? isScriptCollectionStale(sourceCollection, {
               count: Number(sourceGptNode.data?.requestedCount || availableGptScripts.length),
               contentMode: (sourceGptNode.data?.contentMode || 'sales') as any,
+              storyMode: (sourceGptNode.data?.storyMode || 'sequential') as any,
               platform: (sourceGptNode.data?.platform || 'auto') as any,
               clipDurationSeconds: veoVideoConfig.duration,
               promptTemplate: (sourceGptNode.data?.prompt as string) || '',
-              model: (sourceGptNode.data?.model as string) || 'cx/gpt-5.5',
+              model: (sourceGptNode.data?.model as string) || getWorkflowConfig().defaultScriptModel,
             })
           : false
         const durationOptions = [...new Set(
@@ -2089,7 +1760,7 @@ function WorkflowCanvas() {
         const voiceoverFilePath = node.data?.voiceoverFilePath as string | null | undefined
         const voiceoverDurationSec = node.data?.voiceoverDurationSec as number | undefined
         const isGeneratingVoiceover = Boolean(node.data?.isGeneratingVoiceover)
-        const mixOriginalAudio = false
+        const mixOriginalAudio = Boolean(veoVideoConfig.keepVeoAmbient)
 
         return {
           ...node,
@@ -2209,6 +1880,11 @@ function WorkflowCanvas() {
         onOpenLibrary={() => setIsLibraryOpen(true)}
         exportedCount={exportedCount}
       />
+      {configError && (
+        <div style={{ position: 'absolute', top: 12, right: 24, zIndex: 20, padding: '6px 10px', borderRadius: 8, background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: 11 }}>
+          Workflow đang dùng cấu hình cục bộ: {configError}
+        </div>
+      )}
 
 
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>

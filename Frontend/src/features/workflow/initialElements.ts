@@ -1,5 +1,8 @@
 import type { Node, Edge } from '@xyflow/react'
 import { DEFAULT_CLIP_DURATION_SECONDS } from './services/buildScenePlan'
+import { getWorkflowConfig } from './services/workflowConfig'
+
+const defaults = getWorkflowConfig()
 
 export const initialNodes: Node[] = [
   // 1. Product Images Node (Top-Left, up to 3 photos)
@@ -47,7 +50,7 @@ export const initialNodes: Node[] = [
     position: { x: 430, y: 360 },
     data: {
       title: 'ChatGPT • Kịch Bản',
-      model: 'cx/gpt-5.5',
+      model: defaults.defaultScriptModel,
       provider: 'Viết phân cảnh & lời thoại',
       prompt: '',
       requestedCount: 3,
@@ -64,10 +67,10 @@ export const initialNodes: Node[] = [
     position: { x: 840, y: 50 },
     data: {
       title: 'Veo AI • Tạo Video',
-      model: 'Omni 1.1 Flash',
+      model: defaults.defaultVeoModel,
       activeSceneIndex: 0,
       aspectRatio: '9:16',
-      resolution: '1080p',
+      resolution: defaults.defaultResolution,
       scenes: [
         {
           sceneNumber: 1,

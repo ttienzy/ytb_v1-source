@@ -10,6 +10,12 @@ let routerDashboardWindow: BrowserWindow | null = null
 let routerProcess: ChildProcess | null = null
 const backendProcesses: ChildProcess[] = []
 
+const configuredBackendPort = Number.parseInt(process.env.BACKEND_PORT || process.env.PORT || '8000', 10)
+const backendPort = Number.isFinite(configuredBackendPort) && configuredBackendPort > 0 ? configuredBackendPort : 8000
+const backendHost = process.env.BACKEND_HOST?.trim() || '127.0.0.1'
+const backendUrl = (process.env.BACKEND_URL?.trim() || `http://${backendHost}:${backendPort}`).replace(/\/+$/, '')
+const backendReadyUrl = `${backendUrl}/api/workflow/config`
+
 /** Diệt cả cây tiến trình trên Windows / Linux khi app thoát */
 function killProcessTree(pid?: number) {
   if (!pid) return
@@ -33,8 +39,74 @@ function killProcessTree(pid?: number) {
 }
 
 /** Tự động khởi chạy Backend Server trong môi trường đóng gói (Production) */
-function startProductionBackend() {
-  if (!app.isPackaged) return
+function isBackendReady(timeoutMs = 1200): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(backendReadyUrl, (res) => {
+      const ready = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300
+      res.resume()
+      resolve(ready)
+    })
+    req.on('error', () => resolve(false))
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      resolve(false)
+    })
+  })
+}
+
+async function waitForBackend(maxAttempts = 30, intervalMs = 300): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (await isBackendReady()) return true
+    if (attempt < maxAttempts - 1) await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  return false
+}
+
+function findDevBackendDir(): string | null {
+  const candidates = [
+    join(process.cwd(), '..', 'Backend'),
+    join(app.getAppPath(), '..', 'Backend'),
+    join(__dirname, '..', '..', '..', 'Backend'),
+  ]
+  return candidates.find((candidate) => existsSync(join(candidate, 'run_server.py'))) || null
+}
+
+function spawnDevelopmentBackend() {
+  const backendDir = findDevBackendDir()
+  if (!backendDir) {
+    console.error('[Electron] Backend source directory not found; set BACKEND_URL or start Backend manually.')
+    return
+  }
+
+  const venvPython = join(backendDir, '.venv', 'Scripts', 'python.exe')
+  const python = process.env.WORKFLOW_PYTHON?.trim() || (existsSync(venvPython) ? venvPython : 'python')
+  try {
+    const backendProc = spawn(python, ['run_server.py'], {
+      cwd: backendDir,
+      windowsHide: true,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        PORT: String(backendPort),
+        HOST: backendHost,
+      },
+    })
+    backendProc.stdout?.on('data', (data) => console.log(`[Backend] ${String(data).trimEnd()}`))
+    backendProc.stderr?.on('data', (data) => console.error(`[Backend] ${String(data).trimEnd()}`))
+    backendProc.on('error', (err) => console.error('[Electron] Failed to start development backend:', err))
+    backendProcesses.push(backendProc)
+    console.log(`[Electron] Started development backend (PID: ${backendProc.pid})`)
+  } catch (err) {
+    console.error('[Electron] Failed to start development backend:', err)
+  }
+}
+
+async function startProductionBackend() {
+  if (!app.isPackaged) {
+    if (!await isBackendReady()) spawnDevelopmentBackend()
+    if (!await waitForBackend()) console.error(`[Electron] Backend did not become ready at ${backendReadyUrl}`)
+    return
+  }
 
   const userDataDir = app.getPath('userData')
   const resourcesDir = process.resourcesPath
@@ -53,8 +125,8 @@ function startProductionBackend() {
         env: {
           ...process.env,
           APP_DATA_DIR: userDataDir,
-          PORT: '8000',
-          HOST: '127.0.0.1',
+          PORT: String(backendPort),
+          HOST: backendHost,
           WATERMARK_NODE_PATH: process.execPath,
           WATERMARK_NODE_IS_ELECTRON: '1',
           WATERMARK_GWR_SCRIPT: watermarkGwrScript,
@@ -67,6 +139,8 @@ function startProductionBackend() {
       console.error('[Electron] Failed to start backend_server.exe:', err)
     }
   }
+
+  if (!await waitForBackend()) console.error(`[Electron] Backend did not become ready at ${backendReadyUrl}`)
 
   const voiceExe = join(binDir, 'voice_server.exe')
   if (existsSync(voiceExe)) {
@@ -225,8 +299,8 @@ ipcMain.handle('check-9router-status', async () => {
   return { running }
 })
 
-app.whenReady().then(() => {
-  startProductionBackend()
+app.whenReady().then(async () => {
+  await startProductionBackend()
   createWindow()
   if (mainWindow) {
     mainWindow.on('focus', () => {

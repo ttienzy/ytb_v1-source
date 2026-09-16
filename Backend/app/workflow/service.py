@@ -33,7 +33,6 @@ from app.ai.chatgpt.service import (
 )
 from app.recap.ffmpeg import concat_segments, ffprobe_duration
 from app.workflow.schemas import (
-    DEFAULT_CLIP_DURATION_SECONDS,
     GeminiAnalysisResponse,
     GeminiProductClassification,
     GptScriptItem,
@@ -46,11 +45,46 @@ from app.workflow.schemas import (
     PromptPresetCreateRequest,
     PromptPresetUpdateRequest,
     PromptPresetListResponse,
+    WorkflowConfigResponse,
+)
+from app.workflow.config import (
+    resolve_default_script_model,
+    resolve_default_voice_id,
+    workflow_settings,
 )
 
 logger = logging.getLogger("workflow.service")
 
 PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "gemini_product_analysis.txt"
+
+
+def get_workflow_config() -> WorkflowConfigResponse:
+    """Return the single runtime policy consumed by the workflow API and UI.
+
+    Keeping this mapping at the backend boundary prevents the generation code and
+    the frontend from drifting apart when a policy value is changed by env/config.
+    """
+    saved_config = read_config() or {}
+    router_config = saved_config.get("chatgpt_9router", {})
+    return WorkflowConfigResponse(
+        defaultClipDurationSeconds=workflow_settings.clip_duration_seconds,
+        voiceoverWordsPerSecond={
+            "min": workflow_settings.voiceover_words_per_second_min,
+            "max": workflow_settings.voiceover_words_per_second_max,
+        },
+        polling={
+            "intervalMs": workflow_settings.polling_interval_ms,
+            "timeoutMs": workflow_settings.polling_timeout_ms,
+            "requestTimeoutMs": workflow_settings.polling_request_timeout_ms,
+            "maxConsecutiveErrors": workflow_settings.polling_max_consecutive_errors,
+        },
+        defaultScriptModel=resolve_default_script_model(router_config),
+        defaultVoiceId=resolve_default_voice_id(saved_config),
+        defaultVeoModel=workflow_settings.default_veo_model,
+        defaultAspectRatio=workflow_settings.default_aspect_ratio,
+        defaultResolution=workflow_settings.default_resolution,
+        defaultVariations=workflow_settings.default_variations,
+    )
 
 
 def get_default_gemini_prompt() -> str:
@@ -142,7 +176,7 @@ def execute_9router_vision_analysis(
     cfg = read_config().get("chatgpt_9router", {})
     endpoint = cfg.get("endpoint", "http://localhost:20128/v1")
     api_key = cfg.get("api_key", "").strip() or get_local_cli_secret()
-    target_model = model or cfg.get("default_model", "cx/gpt-5.5")
+    target_model = model or resolve_default_script_model(cfg)
 
     if "20128" in endpoint and not is_9router_running(20128):
         logger.info("[Workflow] 9Router chưa chạy, tiến hành khởi động trên port 20128...")
@@ -512,8 +546,12 @@ def calculate_voiceover_word_range(
 ) -> tuple[int, int]:
     """Tính ngân sách lời thoại theo nhịp bán hàng chuẩn 2.0-2.4 từ/giây."""
     duration = max(1, round(float(clip_duration_seconds)))
-    resolved_min = int(min_words) if min_words is not None else max(1, round(duration * 2.0))
-    resolved_max = int(max_words) if max_words is not None else max(resolved_min, round(duration * 2.4))
+    resolved_min = int(min_words) if min_words is not None else max(
+        1, round(duration * workflow_settings.voiceover_words_per_second_min)
+    )
+    resolved_max = int(max_words) if max_words is not None else max(
+        resolved_min, round(duration * workflow_settings.voiceover_words_per_second_max)
+    )
     if resolved_min > resolved_max:
         raise ValueError("min_words không được lớn hơn max_words")
     return resolved_min, resolved_max
@@ -654,7 +692,7 @@ def execute_gpt_script_generation(
     cfg = read_config().get("chatgpt_9router", {})
     endpoint = cfg.get("endpoint", "http://localhost:20128/v1")
     api_key = cfg.get("api_key", "").strip() or get_local_cli_secret()
-    target_model = model or cfg.get("default_model", "cx/gpt-5.5")
+    target_model = model or resolve_default_script_model(cfg)
 
     # Đảm bảo 9Router đang chạy nếu dùng endpoint 20128
     if "20128" in endpoint and not is_9router_running(20128):
@@ -675,7 +713,7 @@ def execute_gpt_script_generation(
     if script_config and script_config.get("platform"):
         platform = str(script_config["platform"])
 
-    clip_duration_seconds = DEFAULT_CLIP_DURATION_SECONDS
+    clip_duration_seconds = workflow_settings.clip_duration_seconds
     if script_config and script_config.get("clip_duration_seconds"):
         clip_duration_seconds = int(script_config["clip_duration_seconds"])
 
@@ -1046,7 +1084,7 @@ def generate_validated_gpt_scripts(
     """Sinh, parse và validate; nếu sai contract thì yêu cầu model tự sửa đúng một lần."""
     config = script_config or {}
     expected_count = int(config.get("count") or (scene_config or {}).get("count") or 3)
-    clip_duration = int(config.get("clip_duration_seconds") or DEFAULT_CLIP_DURATION_SECONDS)
+    clip_duration = int(config.get("clip_duration_seconds") or workflow_settings.clip_duration_seconds)
     min_words, max_words = calculate_voiceover_word_range(
         clip_duration,
         config.get("min_words"),
@@ -1474,7 +1512,7 @@ def extract_character_scene_profiles(
     if not api_key:
         api_key = get_local_cli_secret()
 
-    target_model = model or chatgpt_cfg.get("model", "cx/gpt-5.5")
+    target_model = model or chatgpt_cfg.get("model") or resolve_default_script_model(chatgpt_cfg)
     char_profile = ""
     scene_profile = ""
 

@@ -655,6 +655,9 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         "updated_at": now,
     }
 
+    # Fail before persisting, starting a worker, or sending any paid Flow request.
+    # The worker validates again so removed files cannot cause a text-only render.
+    _build_verified_flow_request(job)
     _jobs[job_id] = job
     _save_jobs()
 
@@ -744,17 +747,18 @@ def _encode_image_file(path_str: str | None) -> dict[str, Any] | None:
     if not path_str:
         return None
     p = Path(path_str)
-    if not p.exists() or not p.is_file():
+    if not p.is_file() and p.parent == Path("."):
         for candidate_dir in (_VEO_UPLOADS_DIR, _VEO_IMAGES_DIR, _VEO_DATA_DIR):
             candidate = candidate_dir / p.name
             if candidate.exists() and candidate.is_file():
                 p = candidate
                 break
     if not p.exists() or not p.is_file():
-        logger.warning("Không tìm thấy file ảnh tại: %s", path_str)
-        return None
+        raise ValueError(f"Image file not found: {path_str}")
     try:
         data = p.read_bytes()
+        if not data:
+            raise ValueError(f"Image file is empty: {path_str}")
         mime, _ = mimetypes.guess_type(str(p))
         if not mime:
             mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
@@ -765,8 +769,7 @@ def _encode_image_file(path_str: str | None) -> dict[str, Any] | None:
             "size": len(data),
         }
     except Exception as e:
-        logger.error("Lỗi khi đọc file ảnh %s: %s", path_str, e)
-        return None
+        raise ValueError(f"Cannot read image file {path_str}: {e}") from e
 
 
 def _resolve_provider_model_id(job: dict[str, Any]) -> str:
@@ -816,6 +819,8 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     model_name = job.get("model_display_name") or "Omni 1.1 Flash"
     res = job.get("resolution") or "720p"
     mode = job.get("input_mode") or "text_to_video"
+    if mode not in ("text_to_video", "frames", "ingredients"):
+        raise ValueError(f"Unsupported input_mode: {mode}")
     provider_model_id = _resolve_provider_model_id(job)
 
     start_frame_data = _encode_image_file(job.get("image_path"))
@@ -824,24 +829,18 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     ingredient_data_list = []
     for ipath in (job.get("ingredient_image_paths") or []):
         enc = _encode_image_file(ipath)
-        if enc:
-            ingredient_data_list.append(enc)
+        if not enc:
+            raise ValueError("Ingredient image path is required")
+        ingredient_data_list.append(enc)
 
     if mode == "ingredients" and not ingredient_data_list and start_frame_data:
         ingredient_data_list.append(start_frame_data)
 
     if mode == "ingredients" and not ingredient_data_list:
-        mode = "text_to_video"
-        provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
+        raise ValueError("Ingredients mode requires at least one readable ingredient image")
     elif mode == "frames":
-        if not start_frame_data and not end_frame_data:
-            mode = "text_to_video"
-            provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
-        elif not start_frame_data and end_frame_data:
-            logger.warning("Job %s: Chế độ frames có end_frame nhưng thiếu start_frame; vô hiệu hóa end_frame để fallback an toàn", job.get("job_id"))
-            end_frame_data = None
-            mode = "text_to_video"
-            provider_model_id = _resolve_provider_model_id({**job, "input_mode": "text_to_video"})
+        if not start_frame_data:
+            raise ValueError("Frames mode requires a readable Start Frame before an End Frame")
 
     logger.info(
         "Chuẩn bị Flow request cho job %s: mode=%s, model=%s, provider_model_id=%s, duration=%ds, aspect=%s, has_start_frame=%s, has_end_frame=%s, num_ingredients=%d",

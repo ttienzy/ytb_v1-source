@@ -19,6 +19,7 @@ import { API_URL } from '../../../shared/constants'
 import type { GptSalesScriptItem, VeoVideoConfig } from '../types'
 import type { VeoCapabilities, VeoProject } from '../../veo-studio/types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
+import { getWorkflowConfig } from '../services/workflowConfig'
 
 interface VeoSetupModalProps {
   isOpen: boolean
@@ -48,7 +49,7 @@ export function VeoSetupModal({
   onSaveConfig,
 }: VeoSetupModalProps) {
   // Local state for video configurations
-  const [model, setModel] = useState<string>(currentConfig.model || 'Omni 1.1 Flash')
+  const [model, setModel] = useState<string>(currentConfig.model || getWorkflowConfig().defaultVeoModel)
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>(currentConfig.aspectRatio || '9:16')
   const [duration, setDuration] = useState<number>(currentConfig.duration || DEFAULT_CLIP_DURATION_SECONDS)
   const [resolution, setResolution] = useState<string>(currentConfig.resolution || '720p')
@@ -56,8 +57,8 @@ export function VeoSetupModal({
 
   // Audio settings — Voice (VieNeu-TTS)
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(currentConfig.voiceEnabled !== false)
-  const [voiceId, setVoiceId] = useState<string>(currentConfig.voiceId || 'bf4bed06c671')
-  const [keepVeoAmbient, setKeepVeoAmbient] = useState<boolean>(currentConfig.keepVeoAmbient !== false)
+  const [voiceId, setVoiceId] = useState<string>(currentConfig.voiceId || getWorkflowConfig().defaultVoiceId)
+  const [keepVeoAmbient, setKeepVeoAmbient] = useState<boolean>(currentConfig.keepVeoAmbient === true)
   const [veoAmbientVolume, setVeoAmbientVolume] = useState<number>(currentConfig.veoAmbientVolume ?? 0.10)
 
   // Audio settings — BGM
@@ -66,11 +67,7 @@ export function VeoSetupModal({
   const [bgmVolume, setBgmVolume] = useState<number>(currentConfig.bgmVolume ?? 0.10)
 
   // Voice & BGM library data
-  const [availableVoices, setAvailableVoices] = useState<Array<{ voice_id: string; name: string }>>([
-    { voice_id: 'bf4bed06c671', name: '🎙️ Ads_Female (Quảng cáo nữ - Truyền cảm)' },
-    { voice_id: '7e16be95b7fd', name: '🎙️ Review (Review sản phẩm - Tự nhiên)' },
-    { voice_id: 'a5b304485f8b', name: '🎙️ Google Voice (Giọng đọc chuẩn - Rõ ràng)' },
-  ])
+  const [availableVoices, setAvailableVoices] = useState<Array<{ voice_id: string; name: string }>>([])
   const [availableBgm, setAvailableBgm] = useState<Array<{ track_id: string; name: string; duration_sec?: number; needs_attribution?: boolean }>>([])
   const [playingBgmId, setPlayingBgmId] = useState<string | null>(null)
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -86,14 +83,14 @@ export function VeoSetupModal({
       return
     }
 
-    setModel(currentConfig.model || 'Omni 1.1 Flash')
+    setModel(currentConfig.model || getWorkflowConfig().defaultVeoModel)
     setAspectRatio(currentConfig.aspectRatio || '9:16')
     setDuration(currentConfig.duration || DEFAULT_CLIP_DURATION_SECONDS)
     setResolution(currentConfig.resolution || '720p')
     setVariations(currentConfig.variations || 1)
     setVoiceEnabled(currentConfig.voiceEnabled !== false)
-    setVoiceId(currentConfig.voiceId || 'bf4bed06c671')
-    setKeepVeoAmbient(currentConfig.keepVeoAmbient !== false)
+    setVoiceId(currentConfig.voiceId || getWorkflowConfig().defaultVoiceId)
+    setKeepVeoAmbient(currentConfig.keepVeoAmbient === true)
     setVeoAmbientVolume(currentConfig.veoAmbientVolume ?? 0.10)
     setBgmEnabled(currentConfig.bgmEnabled !== false)
     setBgmTrackIds(currentConfig.bgmTrackIds || [])
@@ -240,8 +237,8 @@ export function VeoSetupModal({
         bgmEnabled,
         bgmTrackIds: bgmEnabled ? bgmTrackIds : [],
         bgmVolume,
-        keepVeoAmbient: false,
-        veoAmbientVolume: 0.0,
+        keepVeoAmbient,
+        veoAmbientVolume: keepVeoAmbient ? veoAmbientVolume : 0,
       },
     )
     onClose()
@@ -738,6 +735,9 @@ export function VeoSetupModal({
                       maxWidth: 320,
                     }}
                   >
+                    {!availableVoices.some((v) => v.voice_id === voiceId) && (
+                      <option value={voiceId}>Giọng đã chọn ({voiceId})</option>
+                    )}
                     {availableVoices.map((v) => (
                       <option key={v.voice_id} value={v.voice_id}>
                         {v.name}
@@ -746,11 +746,40 @@ export function VeoSetupModal({
                   </select>
                 </div>
 
-                {/* Veo Audio Clean Info */}
-                <div style={{ padding: '7px 10px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: '#64748b' }}>
-                  <span>⚡ Tự động loại bỏ tạp âm/giọng nói từ Veo để đồng bộ giọng đọc VieNeu & Nhạc nền BGM trong trẻo nhất.</span>
-                </div>
               </div>
+            )}
+          </div>
+
+          {/* Original Veo audio is independent of voiceover and BGM. */}
+          <div style={{ padding: 14, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334155' }}>
+              <input
+                type="checkbox"
+                checked={keepVeoAmbient}
+                onChange={(e) => setKeepVeoAmbient(e.target.checked)}
+                aria-describedby="veo-ambient-description"
+                style={{ accentColor: '#4f46e5', width: 15, height: 15, cursor: 'pointer' }}
+              />
+              Giữ âm thanh gốc Veo (ambient)
+            </label>
+            <div id="veo-ambient-description" style={{ fontSize: 10.5, color: '#64748b', marginTop: 8, lineHeight: 1.4 }}>
+              Mặc định TẮT để loại bỏ âm thanh gốc. Khi bật, giữ cả tiếng môi trường và giọng nói có sẵn trong clip Veo.
+            </div>
+            {keepVeoAmbient && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, fontSize: 11, fontWeight: 700, color: '#334155' }}>
+                Âm lượng âm thanh gốc Veo:
+                <input
+                  type="range"
+                  min="0"
+                  max="0.20"
+                  step="0.01"
+                  value={veoAmbientVolume}
+                  onChange={(e) => setVeoAmbientVolume(Number(e.target.value))}
+                  aria-valuetext={`${Math.round(veoAmbientVolume * 100)}%`}
+                  style={{ width: 120, accentColor: '#4f46e5' }}
+                />
+                <span>{Math.round(veoAmbientVolume * 100)}%</span>
+              </label>
             )}
           </div>
 

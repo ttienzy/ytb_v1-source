@@ -26,6 +26,7 @@ from app.workflow.schemas import (
     PromptPresetCreateRequest,
     PromptPresetUpdateRequest,
     PromptPresetListResponse,
+    WorkflowConfigResponse,
 )
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
@@ -42,6 +43,7 @@ from app.workflow.service import (
     get_all_prompt_presets,
     get_default_gemini_prompt,
     get_default_gpt_prompt,
+    get_workflow_config,
     get_workflow_asset_path,
     list_exported_videos,
     open_export_folder_in_explorer,
@@ -56,12 +58,16 @@ from app.workflow.service import (
 router = APIRouter(prefix="/api/workflow", tags=["Workflow"])
 
 
+@router.get("/config", response_model=WorkflowConfigResponse)
+def workflow_config() -> WorkflowConfigResponse:
+    return get_workflow_config()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Asset Management Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
 MAX_ASSET_SIZE = 20 * 1024 * 1024  # 20MB
-ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 VALID_KINDS = {"product", "model", "scene"}
 
@@ -82,14 +88,14 @@ async def upload_asset(
         raise HTTPException(status_code=413, detail="File tải lên quá lớn (tối đa 20MB).")
 
     # Kiểm tra MIME type từ header và magic bytes
-    content_type = (file.content_type or "").lower()
-    is_valid_mime = content_type in ALLOWED_MIME_TYPES
     is_valid_magic = (
         content.startswith(b"\xff\xd8\xff")  # JPEG
         or content.startswith(b"\x89PNG\r\n\x1a\n")  # PNG
         or (content[:4] == b"RIFF" and content[8:12] == b"WEBP")  # WEBP
     )
-    if not is_valid_magic and not is_valid_mime:
+    # A client-controlled MIME header is not sufficient; reject spoofed files
+    # before they reach the AI providers or image decoders.
+    if not is_valid_magic:
         raise HTTPException(
             status_code=400,
             detail="Định dạng file không được hỗ trợ. Chỉ cho phép ảnh JPG, PNG hoặc WEBP.",

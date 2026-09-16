@@ -1,9 +1,34 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
+from app.workflow.config import workflow_settings
 
-DEFAULT_CLIP_DURATION_SECONDS = 10
+DEFAULT_CLIP_DURATION_SECONDS = workflow_settings.clip_duration_seconds
+
+
+class VoiceoverWordRates(BaseModel):
+    min: float
+    max: float
+
+
+class WorkflowPollingConfig(BaseModel):
+    intervalMs: int
+    timeoutMs: int
+    requestTimeoutMs: int
+    maxConsecutiveErrors: int
+
+
+class WorkflowConfigResponse(BaseModel):
+    defaultClipDurationSeconds: int
+    voiceoverWordsPerSecond: VoiceoverWordRates
+    polling: WorkflowPollingConfig
+    defaultScriptModel: str
+    defaultVoiceId: str
+    defaultVeoModel: str
+    defaultAspectRatio: str
+    defaultResolution: str
+    defaultVariations: int
 
 
 class GeminiPromptResponse(BaseModel):
@@ -57,7 +82,7 @@ class GptScriptItem(BaseModel):
 class ScriptGenerationConfig(BaseModel):
     count: int = Field(default=3, ge=1, le=10, description="Số lượng kịch bản mong muốn")
     content_mode: str = Field(default="sales", description="Loại nội dung: sales, review, ugc, lifestyle, tutorial, unboxing")
-    story_mode: str = Field(default="sequential", description="sequential (chuỗi liên hoàn) hoặc independent (clip độc lập)")
+    story_mode: Literal["sequential", "independent"] = Field(default="sequential", description="sequential (chuỗi liên hoàn) hoặc independent (clip độc lập)")
     clip_duration_seconds: int = Field(default=DEFAULT_CLIP_DURATION_SECONDS, ge=1, le=60, description="Thời lượng một clip Google Flow")
     min_words: Optional[int] = Field(default=None, ge=1, description="Số từ tối thiểu; để trống để tính theo thời lượng clip")
     max_words: Optional[int] = Field(default=None, ge=1, description="Số từ tối đa; để trống để tính theo thời lượng clip")
@@ -127,10 +152,10 @@ class WorkflowExportRequest(BaseModel):
     scene_video_paths: list[str] = Field(..., min_length=1, description="Danh sách đường dẫn video từng phân cảnh cần ghép")
     bgm_path: Optional[str] = Field(default=None, description="Đường dẫn audio nền (tùy chọn)")
     bgm_track_ids: Optional[list[str]] = Field(default=None, description="Danh sách track ID nhạc nền từ DB")
-    bgm_volume: float = Field(default=0.10, description="Volume nhạc nền (0.03 - 0.30, mặc định 0.10)")
+    bgm_volume: float = Field(default=0.10, ge=0, le=1, description="Volume nhạc nền (mặc định 0.10)")
     voiceover_audio_path: Optional[str] = Field(default=None, description="Đường dẫn file voiceover VieNeu-TTS (đè lên audio Veo)")
     mix_original_audio: bool = Field(default=False, description="True = trộn ambient Veo + VO; False = chỉ VO (tắt hoàn toàn tạp âm Veo)")
-    veo_ambient_volume: float = Field(default=0.0, description="Volume ambient Veo clips nếu mix_original_audio=True (0.0 - 0.25)")
+    veo_ambient_volume: float = Field(default=0.0, ge=0, le=1, description="Volume ambient Veo clips nếu mix_original_audio=True (mặc định 0.0)")
     output_filename: Optional[str] = Field(default=None, description="Tên file video thành phẩm")
 
 
@@ -138,6 +163,7 @@ class WorkflowExportResponse(BaseModel):
     job_id: str = Field(..., description="ID job xuất video")
     final_video_url: str = Field(..., description="URL video hoàn chỉnh để tải hoặc stream")
     file_path: str = Field(..., description="Đường dẫn file MP4 trên server")
+    output_filename: Optional[str] = Field(default=None, description="Tên file video thành phẩm")
     duration_sec: float = Field(default=0.0, description="Tổng thời lượng video hoàn chỉnh (giây)")
     status: str = Field(default="done", description="done | error")
     error: Optional[str] = Field(default=None, description="Thông báo lỗi nếu có")

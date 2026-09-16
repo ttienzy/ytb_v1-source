@@ -17,6 +17,8 @@ import type {
 } from '../contracts'
 import type { PromptPresetItem } from '../types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from './buildScenePlan'
+import { getWorkflowConfig } from './workflowConfig.ts'
+import { toApiError } from '../../../shared/apiError.ts'
 
 /**
  * Upload file ảnh (Sản phẩm / Mẫu / Bối cảnh) lên backend để lưu file thật
@@ -29,10 +31,15 @@ export async function uploadWorkflowAsset(
   formData.append('file', file)
   formData.append('kind', kind)
 
-  const res = await fetch(`${API_URL}/api/workflow/assets/upload`, {
-    method: 'POST',
-    body: formData,
-  })
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}/api/workflow/assets/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+  } catch (error) {
+    throw toApiError(error, 'tải ảnh workflow')
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -184,7 +191,7 @@ export async function callGptScriptGeneration(params: {
           }
         : undefined,
       prompt_template: params.promptTemplate,
-      model: params.model || 'cx/gpt-5.5',
+      model: params.model || getWorkflowConfig().defaultScriptModel,
     }),
   })
 
@@ -223,12 +230,14 @@ export async function callGptScriptGeneration(params: {
       items: normalizedScripts,
       contentMode: params.scriptConfig?.contentMode || 'sales',
       platform: params.scriptConfig?.platform || 'auto',
+      storyMode: params.scriptConfig?.storyMode || 'sequential',
+      voiceId: params.scriptConfig?.voiceId,
       clipDurationSeconds: data.clip_duration_seconds ?? params.scriptConfig?.clipDurationSeconds ?? DEFAULT_CLIP_DURATION_SECONDS,
       minWords: data.min_words ?? params.scriptConfig?.minWords ?? 0,
       maxWords: data.max_words ?? params.scriptConfig?.maxWords ?? 0,
       repaired: Boolean(data.repaired),
       promptTemplate: params.promptTemplate || '',
-      requestedModel: params.model || 'cx/gpt-5.5',
+      requestedModel: params.model || getWorkflowConfig().defaultScriptModel,
       generationModel: data.model || '',
     },
   }
@@ -332,10 +341,10 @@ export async function callWorkflowVideoExport(
       bgm_path: bgmPath,
       output_filename: outputFilename,
       voiceover_audio_path: voiceoverAudioPath,
-      mix_original_audio: mixOriginalAudio ?? true,
+      mix_original_audio: mixOriginalAudio ?? false,
       bgm_track_ids: bgmTrackIds && bgmTrackIds.length > 0 ? bgmTrackIds : undefined,
       bgm_volume: bgmVolume ?? 0.10,
-      veo_ambient_volume: veoAmbientVolume ?? 0.10,
+      veo_ambient_volume: veoAmbientVolume ?? 0,
     }),
   })
 
@@ -350,6 +359,9 @@ export async function callWorkflowVideoExport(
     finalVideoUrl: data.final_video_url?.startsWith('http')
       ? data.final_video_url
       : `${API_URL}${data.final_video_url}`,
+    filePath: data.file_path,
+    outputFilename: data.output_filename,
+    durationSec: data.duration_sec,
   }
 }
 
@@ -372,7 +384,7 @@ export async function fetchExportedVideos(): Promise<ExportedVideoItem[]> {
       createdAt: item.created_at,
       sceneCount: item.scene_count,
       aspectRatio: item.aspect_ratio || '9:16',
-      resolution: item.resolution || '1080p',
+      resolution: item.resolution || getWorkflowConfig().defaultResolution,
       title: item.title || item.filename,
       sourceType: item.source_type || 'export',
       prompt: item.prompt || '',

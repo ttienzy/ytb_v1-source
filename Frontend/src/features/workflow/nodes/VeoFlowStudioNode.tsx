@@ -501,7 +501,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                           gap: 3,
                         }}
                       >
-                        <Sparkles size={10} className="animate-spin" /> {scene.renderProgress ?? 20}%
+                        <Sparkles size={10} className="animate-spin" /> {scene.renderProgress ?? 0}%
                       </span>
                     ) : (
                       <span
@@ -587,7 +587,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       >
                         <Sparkles size={16} color="#f43f5e" className="animate-spin" />
                         <div style={{ fontSize: 9.5, color: '#f8fafc', fontWeight: 600 }}>
-                          {scene.renderProgress ?? 20}%
+                          {scene.renderProgress ?? 0}%
                         </div>
                         <div
                           style={{
@@ -601,7 +601,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                           <div
                             style={{
                               height: '100%',
-                              width: `${scene.renderProgress ?? 20}%`,
+                              width: `${scene.renderProgress ?? 0}%`,
                               background: 'linear-gradient(90deg, #f43f5e, #8b5cf6)',
                               transition: 'width 0.3s ease',
                             }}
@@ -922,6 +922,21 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc' }}>
                     Đang tạo Clip #{safeTab + 1}... {renderProgress}%
                   </div>
+                  {currentScene.renderStep && (
+                    <div
+                      title={currentScene.renderStep}
+                      style={{
+                        maxWidth: '85%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 9,
+                        color: '#cbd5e1',
+                      }}
+                    >
+                      {currentScene.renderStep}
+                    </div>
+                  )}
                   <div
                     style={{
                       width: '85%',
@@ -1389,7 +1404,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                   : `Ghép ${scenes.length} clip (${totalDuration}s)`}
               </span>
               <span style={{ fontSize: 10, color: '#94a3b8' }}>
-                • MP4 1080p {data.voiceoverUrl ? '+ Voiceover' : ''}
+                • MP4 {data.videoConfig?.resolution || data.resolution || '720p'} {data.voiceoverUrl ? '+ Voiceover' : ''}
               </span>
             </div>
 

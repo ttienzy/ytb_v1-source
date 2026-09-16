@@ -15,7 +15,8 @@ import {
   Workflow as WorkflowIcon,
 } from 'lucide-react'
 
-export const API_URL = 'http://127.0.0.1:8000'
+const configuredApiUrl = import.meta.env?.VITE_API_URL?.trim()
+export const API_URL = (configuredApiUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '')
 
 export type NavItem = {
   label: string

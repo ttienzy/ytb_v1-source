@@ -109,6 +109,9 @@ export interface GeminiAnalysisNodeData {
 
 
 export interface GeneratedSceneItem {
+  voiceover?: string
+  jobId?: string | null
+  errorMessage?: string | null
   sceneNumber: number
   title: string
   prompt: string
@@ -117,6 +120,7 @@ export interface GeneratedSceneItem {
   cameraMotion?: string
   isRendering?: boolean
   renderProgress?: number
+  renderStep?: string | null
   videoUrl?: string | null
   outputFilePath?: string | null
   thumbnailUrl?: string | null
@@ -124,6 +128,7 @@ export interface GeneratedSceneItem {
   startFramePreviewUrl?: string | null
   chainFromPrevious?: boolean
   isExtractingFrame?: boolean
+  renderStatus?: 'idle' | 'queued' | 'captcha' | 'submitting' | 'generating' | 'downloading' | 'done' | 'error'
   refImages?: {
     productUrl?: string | null
     modelUrl?: string | null
@@ -254,6 +259,7 @@ export interface VeoFlowStudioNodeData {
   videoConfig?: VeoVideoConfig
   durationOptions?: number[]
   isSourceScriptStale?: boolean
+  scriptSourceStale?: boolean
   selectedGptScriptAngle?: string
   availableGptScripts?: GptSalesScriptItem[]
   refImages?: {
@@ -266,6 +272,7 @@ export interface VeoFlowStudioNodeData {
   voiceoverUrl?: string | null
   voiceoverFilePath?: string | null
   voiceoverDurationSec?: number
+  voiceoverSignature?: string | null
   isGeneratingVoiceover?: boolean
   mixOriginalAudio?: boolean
   onOpenVeoSetup?: () => void

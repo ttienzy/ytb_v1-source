@@ -1,9 +1,10 @@
-import React, { useRef, useState } from 'react'
+import React, { useLayoutEffect, useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2, ImageDown, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
 import type { CharacterSceneNodeData } from '../types'
 import type { AssetRef } from '../contracts'
 import { uploadWorkflowAsset } from '../services/workflowApi'
+import { createAssetUploadManager } from '../services/assetUpload'
 import { VeoImagePickerModal } from '../components/VeoImagePickerModal'
 
 interface CharacterSceneNodeProps {
@@ -17,6 +18,20 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
   const [veoPickerOpen, setVeoPickerOpen] = useState(false)
   const [activeSlot, setActiveSlot] = useState<'modelImage' | 'sceneImage'>('modelImage')
   const [isProfilesOpen, setIsProfilesOpen] = useState(false)
+  const onChangeRef = useRef(data.onChange)
+  onChangeRef.current = data.onChange
+  const uploads = useRef<ReturnType<typeof createAssetUploadManager<'modelImage' | 'sceneImage'>> | null>(null)
+  useLayoutEffect(() => {
+    const manager = createAssetUploadManager<'modelImage' | 'sceneImage'>({
+      upload: uploadWorkflowAsset,
+      onChange: (slot, url, asset) => onChangeRef.current?.(slot, url, asset),
+    })
+    uploads.current = manager
+    return () => {
+      manager.dispose()
+      uploads.current = null
+    }
+  }, [])
 
   const handleSlotClick = (slot: 'modelImage' | 'sceneImage') => {
     currentSlotRef.current = slot
@@ -29,7 +44,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
   }
 
   const handleSelectVeoImage = (dataUrl: string, assetRef: AssetRef) => {
-    data.onChange?.(activeSlot, dataUrl, assetRef)
+    uploads.current?.replace(activeSlot, dataUrl, assetRef)
   }
 
 
@@ -38,22 +53,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
     if (!file) return
 
     const slot = currentSlotRef.current
-    const kind = slot === 'modelImage' ? 'model' : 'scene'
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const url = event.target?.result as string
-      data.onChange?.(slot, url)
-
-      // Upload lên Backend trong nền
-      uploadWorkflowAsset(file, kind)
-        .then((assetRef) => {
-          data.onChange?.(slot, url, assetRef)
-        })
-        .catch((err) => {
-          console.warn('Lỗi khi upload asset lên backend:', err)
-        })
-    }
-    reader.readAsDataURL(file)
+    void uploads.current?.start(slot, file, slot === 'modelImage' ? 'model' : 'scene')
     e.target.value = ''
   }
 
@@ -63,22 +63,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
     const file = e.dataTransfer.files?.[0]
     if (!file || !file.type.startsWith('image/')) return
 
-    const kind = slot === 'modelImage' ? 'model' : 'scene'
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const url = event.target?.result as string
-      data.onChange?.(slot, url)
-
-      // Upload lên Backend trong nền
-      uploadWorkflowAsset(file, kind)
-        .then((assetRef) => {
-          data.onChange?.(slot, url, assetRef)
-        })
-        .catch((err) => {
-          console.warn('Lỗi khi upload asset lên backend:', err)
-        })
-    }
-    reader.readAsDataURL(file)
+    void uploads.current?.start(slot, file, slot === 'modelImage' ? 'model' : 'scene')
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -88,7 +73,24 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
 
   const handleRemove = (e: React.MouseEvent, slot: 'modelImage' | 'sceneImage') => {
     e.stopPropagation()
-    data.onChange?.(slot, null)
+    uploads.current?.remove(slot)
+  }
+
+  const renderUploadStatus = (slot: 'modelImage' | 'sceneImage') => {
+    const asset = slot === 'modelImage' ? data.modelAsset : data.sceneAsset
+    if (asset?.uploadStatus !== 'uploading' && asset?.uploadStatus !== 'error') return null
+    return (
+      <div
+        role={asset.uploadStatus === 'error' ? 'alert' : 'status'}
+        style={{ position: 'absolute', bottom: 18, insetInline: 2, padding: 3, background: '#fff', color: asset.uploadStatus === 'error' ? '#b91c1c' : '#1d4ed8', fontSize: 10, zIndex: 1, maxHeight: '60%', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {asset.uploadStatus === 'uploading' ? 'Đang tải ảnh…' : `Tải ảnh thất bại: ${asset.error || 'Vui lòng chọn lại ảnh.'}`}
+        {asset.uploadStatus === 'error' && uploads.current?.canRetry(slot) && (
+          <button type="button" className="nodrag" onClick={() => { void uploads.current?.retry(slot) }}>Thử lại</button>
+        )}
+      </div>
+    )
   }
 
   const count = [data.modelImage, data.sceneImage].filter(Boolean).length
@@ -168,6 +170,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
             className="wf-node-del-btn"
             onClick={(e) => {
               e.stopPropagation()
+              uploads.current?.dispose()
               data.onDelete?.()
             }}
             title="Xóa khối nhân vật & bối cảnh này"
@@ -286,6 +289,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                 </button>
               </>
             )}
+            {renderUploadStatus('modelImage')}
           </div>
 
           {/* Slot 2: Scene / Background */}
@@ -385,6 +389,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                 </button>
               </>
             )}
+            {renderUploadStatus('sceneImage')}
           </div>
         </div>
 

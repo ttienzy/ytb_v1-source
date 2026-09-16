@@ -97,6 +97,7 @@ export interface ScriptCollection {
 }
 
 export interface ScenePlanConfig {
+  storyMode?: 'sequential' | 'independent'
   count: number
   durations: number[]
   aspectRatio: '9:16' | '16:9' | '1:1'
@@ -104,6 +105,8 @@ export interface ScenePlanConfig {
 }
 
 export interface ScenePlan {
+  voiceover?: string
+  chainFromPrevious?: boolean
   sceneNumber: number
   title: string
   prompt: string
@@ -117,8 +120,9 @@ export interface ScenePlan {
   startFramePath?: string | null
   startFramePreviewUrl?: string | null
   jobId?: string | null
-  renderStatus?: 'idle' | 'queued' | 'submitting' | 'generating' | 'done' | 'error'
+  renderStatus?: 'idle' | 'queued' | 'captcha' | 'submitting' | 'generating' | 'downloading' | 'done' | 'error'
   renderProgress?: number
+  renderStep?: string | null
   errorMessage?: string | null
 }
 
@@ -136,6 +140,7 @@ export interface WorkflowExportResponse {
   jobId: string
   finalVideoUrl: string
   filePath?: string
+  outputFilename?: string
   durationSec: number
   status: 'done' | 'error'
   error?: string

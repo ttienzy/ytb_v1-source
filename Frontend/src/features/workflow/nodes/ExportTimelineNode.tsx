@@ -37,7 +37,7 @@ export function ExportTimelineNode({ data, selected }: ExportTimelineNodeProps) 
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="wf-node-badge wf-badge-gpt" style={{ background: 'rgba(52, 211, 153, 0.18)', color: '#34d399' }}>
-            {data.resolution || '1080p'} • MP4
+            {data.resolution || '720p'} • MP4
           </span>
           <button
             type="button"

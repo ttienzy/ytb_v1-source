@@ -192,7 +192,7 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
 
   assert.equal(scenes.length, 5, 'Phải tạo đúng 5 clip')
   assert.equal(scenes[0].title, 'Clip 1: Áo polo test')
-  assert.ok(scenes[0].prompt.includes('Hình ảnh: Cận cảnh bàn tay sờ vải'), 'Prompt clip 1 phải có visualDirection')
+  assert.ok(scenes[0].prompt.includes('Cận cảnh bàn tay sờ vải'), 'Prompt clip 1 phải có visualDirection')
   assert.equal(scenes[4].title, 'Clip 5: Feedback')
   console.log('✅ TEST 5 PASSED: buildClipPlans 5 scripts & visualDirection thành công')
 }
@@ -217,7 +217,7 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
 
   assert.equal(scenes.length, 1)
   assert.ok(
-    scenes[0].prompt.includes('Hình ảnh: Cận cảnh sản phẩm xoay 360 độ ánh sáng mềm'),
+    scenes[0].prompt.includes('Cận cảnh sản phẩm xoay 360 độ ánh sáng mềm'),
     'Prompt phải đọc được visual_direction khi trường camelCase visualDirection vắng mặt'
   )
   console.log('✅ TEST 6 PASSED: buildClipPlans đọc trơn tru visual_direction (snake_case)')
