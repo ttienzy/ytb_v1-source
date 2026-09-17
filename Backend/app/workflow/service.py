@@ -103,7 +103,7 @@ def get_default_gemini_prompt() -> str:
 
 
 def _parse_image_data(img_str: str, index: int = 0) -> tuple[bytes, str, str]:
-    """Parse base64 data URL hoặc đường dẫn file cục bộ thành (bytes, filename, mime_type)."""
+    """Parse base64 data URL, workflow asset URL hoặc đường dẫn file cục bộ thành (bytes, filename, mime_type)."""
     # 1. Base64 Data URL: data:image/jpeg;base64,....
     if img_str.startswith("data:image/"):
         match = re.match(r"data:(image\/[a-zA-Z0-9\-\+\.]+);base64,(.+)", img_str)
@@ -116,8 +116,23 @@ def _parse_image_data(img_str: str, index: int = 0) -> tuple[bytes, str, str]:
             filename = f"product_{index + 1}.{ext}"
             return base64.b64decode(b64_data), filename, mime
 
-    # 2. File path cục bộ
+    # 2. Workflow Asset URL: /api/workflow/assets/{asset_id} hoặc http://.../api/workflow/assets/{asset_id}
+    asset_match = re.search(r"/api/workflow/assets/([a-zA-Z0-9_-]+)", img_str)
+    if asset_match:
+        asset_id = asset_match.group(1)
+        asset_p = get_workflow_asset_path(asset_id)
+        if asset_p and asset_p.exists() and asset_p.is_file():
+            mime = "image/jpeg" if asset_p.suffix.lower() in [".jpg", ".jpeg"] else "image/png"
+            return asset_p.read_bytes(), asset_p.name, mime
+
+    # 3. File path cục bộ (tuyệt đối hoặc tương đối)
     p = Path(img_str)
+    if not (p.exists() and p.is_file()):
+        for candidate_dir in [DATA_DIR, DATA_DIR / "media" / "veo_images", WORKFLOW_ASSETS_DIR]:
+            test_p = candidate_dir / img_str
+            if test_p.exists() and test_p.is_file():
+                p = test_p
+                break
     if p.exists() and p.is_file():
         mime = "image/jpeg" if p.suffix.lower() in [".jpg", ".jpeg"] else "image/png"
         return p.read_bytes(), p.name, mime
@@ -1149,6 +1164,11 @@ def save_workflow_asset(file_bytes: bytes, filename: str, kind: str = "product")
     target_path = WORKFLOW_ASSETS_DIR / safe_name
     target_path.write_bytes(file_bytes)
 
+    ext_lower = ext.lower()
+    mime = "image/png" if ext_lower in [".png"] else "image/webp" if ext_lower in [".webp"] else "image/jpeg"
+    b64 = base64.b64encode(file_bytes).decode("ascii")
+    data_url = f"data:{mime};base64,{b64}"
+
     return WorkflowAssetUploadResponse(
         id=asset_id,
         kind=kind,
@@ -1156,14 +1176,71 @@ def save_workflow_asset(file_bytes: bytes, filename: str, kind: str = "product")
         backend_path=str(target_path.resolve()),
         file_name=filename,
         size_bytes=len(file_bytes),
+        data_url=data_url,
     )
+
+
+def import_veo_image_to_workflow(image_id: str, kind: str = "product") -> WorkflowAssetUploadResponse:
+    """Import một ảnh từ Thư viện Veo Studio thành một Asset chính thức của Workflow."""
+    from app.veo import service as veo_service
+
+    clean_id = (image_id or "").strip()
+    if not clean_id:
+        raise ValueError("image_id không được để trống.")
+
+    file_path = veo_service.get_image_file_path(clean_id)
+    file_bytes: bytes | None = None
+    filename: str = f"{clean_id}.jpg"
+
+    # 1. Nếu file đã có sẵn trên đĩa trong veo_images: đọc bytes trực tiếp
+    if file_path and file_path.exists() and file_path.stat().st_size > 0:
+        file_bytes = file_path.read_bytes()
+        filename = file_path.name
+
+    # 2. Nếu chưa có trên đĩa, tra cứu trong DB VeoImage
+    if not file_bytes:
+        img = veo_service.get_image_by_id(clean_id)
+        if img and img.image_url:
+            cdn_url = img.image_url.strip()
+            if cdn_url.startswith("http://") or cdn_url.startswith("https://"):
+                try:
+                    logger.info("[Workflow] Đang tải ảnh %s từ CDN Veo: %s", clean_id, cdn_url[:80])
+                    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+                        resp = client.get(cdn_url)
+                        if resp.status_code == 200 and len(resp.content) > 0:
+                            file_bytes = resp.content
+                            try:
+                                if file_path:
+                                    file_path.write_bytes(file_bytes)
+                            except Exception:
+                                pass
+                except Exception as dl_err:
+                    logger.warning("[Workflow] Lỗi khi tải ảnh từ CDN Veo: %s", dl_err)
+
+    # 3. Fallback: tìm kiếm thêm trong các thư mục media chuẩn
+    if not file_bytes:
+        for candidate_dir in [
+            DATA_DIR / "media" / "veo_images",
+            DATA_DIR / "media" / "veo_outputs",
+            DATA_DIR / "media" / "veo_uploads",
+        ]:
+            cand = candidate_dir / f"{clean_id}.jpg"
+            if cand.exists() and cand.stat().st_size > 0:
+                file_bytes = cand.read_bytes()
+                filename = cand.name
+                break
+
+    if not file_bytes:
+        raise FileNotFoundError(f"Không tìm thấy ảnh '{clean_id}' trong thư viện Veo Studio.")
+
+    return save_workflow_asset(file_bytes=file_bytes, filename=filename, kind=kind)
 
 
 def get_workflow_asset_path(asset_id: str) -> Path | None:
     """Tìm đường dẫn file thật trên disk theo asset_id."""
     WORKFLOW_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     for f in WORKFLOW_ASSETS_DIR.iterdir():
-        if f.stem == asset_id:
+        if f.stem == asset_id or f.name.startswith(f"{asset_id}_") or f.name.startswith(f"{asset_id}."):
             return f
     return None
 

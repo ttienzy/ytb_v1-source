@@ -11,6 +11,7 @@ export interface AssetRef {
   fileName?: string
   uploadStatus: 'idle' | 'uploading' | 'uploaded' | 'error'
   error?: string
+  dataUrl?: string
 }
 
 export interface AssetBundle {

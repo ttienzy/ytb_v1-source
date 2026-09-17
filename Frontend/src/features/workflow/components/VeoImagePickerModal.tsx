@@ -13,6 +13,7 @@ import {
 import * as veoApi from '../../veo-studio/services/veoApi'
 import type { VeoImageItem } from '../../veo-studio/types'
 import type { AssetRef } from '../contracts'
+import { importVeoAssetToWorkflow } from '../services/workflowApi'
 
 interface Props {
   isOpen: boolean
@@ -22,16 +23,6 @@ interface Props {
   kind?: 'product' | 'model' | 'scene'
 }
 
-async function fetchImageAsDataUrl(url: string): Promise<string> {
-  const resp = await fetch(url)
-  const blob = await resp.blob()
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
-}
 
 export function VeoImagePickerModal({
   isOpen,
@@ -92,23 +83,17 @@ export function VeoImagePickerModal({
   const handlePick = async (item: VeoImageItem) => {
     setSelectingId(item.id)
     try {
-      const fileUrl = veoApi.getImageFileUrl(item.id)
-      const dataUrl = await fetchImageAsDataUrl(fileUrl)
-
-      const assetRef: AssetRef = {
-        id: `veo_${item.id}`,
-        kind,
-        previewUrl: fileUrl,
-        backendPath: item.local_path || `Data/media/veo_images/${item.id}.jpg`,
-        fileName: `${item.id}.jpg`,
-        uploadStatus: 'uploaded',
-      }
-
-      onSelect(dataUrl, assetRef, item)
+      const assetRef = await importVeoAssetToWorkflow(item.id, kind)
+      const previewUrl = assetRef.dataUrl || assetRef.previewUrl || veoApi.getImageFileUrl(item.id)
+      onSelect(previewUrl, assetRef, item)
       onClose()
     } catch (err) {
       console.error('Lỗi khi nạp ảnh từ thư viện Veo:', err)
-      alert('Không thể nạp ảnh từ thư viện Veo. Vui lòng thử lại.')
+      alert(
+        err instanceof Error
+          ? `Không thể nạp ảnh từ thư viện Veo: ${err.message}`
+          : 'Không thể nạp ảnh từ thư viện Veo. Vui lòng thử lại.'
+      )
     } finally {
       setSelectingId(null)
     }

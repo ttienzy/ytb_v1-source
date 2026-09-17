@@ -15,6 +15,7 @@ from app.workflow.schemas import (
     GptScriptRequest,
     GptScriptResponse,
     WorkflowAssetUploadResponse,
+    WorkflowAssetImportVeoRequest,
     WorkflowExportRequest,
     WorkflowExportResponse,
     WorkflowVoiceoverRequest,
@@ -45,6 +46,7 @@ from app.workflow.service import (
     get_default_gpt_prompt,
     get_workflow_config,
     get_workflow_asset_path,
+    import_veo_image_to_workflow,
     list_exported_videos,
     open_export_folder_in_explorer,
     parse_analysis_to_structured,
@@ -117,6 +119,24 @@ async def upload_asset(
         raise HTTPException(
             status_code=500,
             detail=f"Lỗi khi upload asset: {exc}",
+        ) from exc
+
+
+@router.post("/assets/from-veo", response_model=WorkflowAssetUploadResponse)
+async def import_asset_from_veo(req: WorkflowAssetImportVeoRequest) -> WorkflowAssetUploadResponse:
+    """Import ảnh từ thư viện Veo Studio thành một Asset chính thức của Workflow."""
+    try:
+        return await run_in_threadpool(
+            import_veo_image_to_workflow,
+            image_id=req.image_id,
+            kind=req.kind or "product",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi khi import ảnh từ Veo: {exc}",
         ) from exc
 
 

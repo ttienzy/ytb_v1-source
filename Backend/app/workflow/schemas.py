@@ -122,6 +122,12 @@ class WorkflowAssetUploadResponse(BaseModel):
     backend_path: str = Field(..., description="Đường dẫn file thực tế trên server")
     file_name: str = Field(..., description="Tên file gốc")
     size_bytes: int = Field(default=0, description="Dung lượng file")
+    data_url: Optional[str] = Field(default=None, description="Data URL base64 nếu cần hiển thị trực tiếp")
+
+
+class WorkflowAssetImportVeoRequest(BaseModel):
+    image_id: str = Field(..., min_length=1, description="ID ảnh trong thư viện Veo Studio")
+    kind: Optional[str] = Field(default="product", description="product | model | scene")
 
 
 class WorkflowVoiceoverItem(BaseModel):

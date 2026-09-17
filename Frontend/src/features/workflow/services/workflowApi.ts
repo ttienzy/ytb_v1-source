@@ -58,6 +58,42 @@ export async function uploadWorkflowAsset(
 }
 
 /**
+ * Import một ảnh từ thư viện Veo Studio thành một Asset chính thức của Workflow
+ */
+export async function importVeoAssetToWorkflow(
+  imageId: string,
+  kind: 'product' | 'model' | 'scene' = 'product'
+): Promise<AssetRef & { dataUrl?: string }> {
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}/api/workflow/assets/from-veo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_id: imageId, kind }),
+    })
+  } catch (error) {
+    throw toApiError(error, 'nhập ảnh từ thư viện Veo')
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể nạp ảnh từ Veo (HTTP ${res.status})`)
+  }
+
+  const data = await res.json()
+  const previewUrl = `${API_URL}${data.preview_url}`
+  return {
+    id: data.id,
+    kind: data.kind as any,
+    previewUrl,
+    backendPath: data.backend_path,
+    fileName: data.file_name,
+    uploadStatus: 'uploaded',
+    dataUrl: data.data_url || previewUrl,
+  }
+}
+
+/**
  * Lấy prompt Gemini mặc định từ backend
  */
 export async function fetchGeminiDefaultPrompt(): Promise<string> {
