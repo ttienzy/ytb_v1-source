@@ -1,7 +1,51 @@
-import { useEffect, useRef, useState } from 'react'
-import { Loader2, Mic, Play, Plus, Square, Trash2, Volume2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  FileAudio,
+  Loader2,
+  Mic,
+  Pause,
+  Play,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react'
 import { API_URL } from '../../shared/constants'
 import type { Preset, Voice } from './types'
+import './VoicesPage.css'
+
+interface UnifiedVoice {
+  id: string
+  name: string
+  description?: string
+  gender?: 'male' | 'female' | string
+  isClone: boolean
+  createdAt?: string
+}
+
+const QUICK_PROMPTS = [
+  {
+    label: 'Review phim',
+    text: 'Đừng bao giờ đánh giá một con người chỉ qua vẻ bề ngoài của họ.',
+  },
+  {
+    label: 'Tin tức',
+    text: 'Bản tin hôm nay cập nhật những diễn biến nóng hổi và bất ngờ nhất vừa diễn ra.',
+  },
+  {
+    label: 'Hài hước',
+    text: 'Cười không nhặt được mồm với màn giải cứu đỉnh cao không thể ngờ tới của anh bạn này.',
+  },
+  {
+    label: 'Kể chuyện',
+    text: 'Trong một thị trấn nhỏ yên bình, có một bí mật đã bị chôn vùi suốt hai mươi năm.',
+  },
+  {
+    label: 'Triết lý',
+    text: 'Cuộc sống không phải là chờ đợi cơn bão đi qua, mà là học cách nhảy múa dưới cơn mưa.',
+  },
+]
 
 export function VoicesPage() {
   const [voices, setVoices] = useState<Voice[]>([])
@@ -10,6 +54,7 @@ export function VoicesPage() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [messageType, setMessageType] = useState<'success' | 'info' | 'error'>('info')
   const [serviceReady, setServiceReady] = useState(false)
   const [serviceMessage, setServiceMessage] = useState(
     'Đang khởi động Voice Service hoặc tải model lần đầu…'
@@ -17,15 +62,28 @@ export function VoicesPage() {
   const [generatingVoiceId, setGeneratingVoiceId] = useState<string | null>(null)
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null)
   const [previewText, setPreviewText] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterTab, setFilterTab] = useState<'all' | 'cloned' | 'preset-male' | 'preset-female'>('all')
+  const [isDragging, setIsDragging] = useState(false)
+  const [showCloneForm, setShowCloneForm] = useState(false)
+  const [sampleAudioPlaying, setSampleAudioPlaying] = useState(false)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const sampleAudioRef = useRef<HTMLAudioElement | null>(null)
   const currentUrlRef = useRef<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   function stopAudio() {
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
       audioRef.current = null
+    }
+    if (sampleAudioRef.current) {
+      sampleAudioRef.current.pause()
+      sampleAudioRef.current.currentTime = 0
+      sampleAudioRef.current = null
+      setSampleAudioPlaying(false)
     }
     if (currentUrlRef.current) {
       URL.revokeObjectURL(currentUrlRef.current)
@@ -34,6 +92,7 @@ export function VoicesPage() {
     setPlayingVoiceId(null)
   }
 
+  // Kết nối và nạp danh sách voices / presets
   useEffect(() => {
     let stopped = false
     let retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -75,17 +134,17 @@ export function VoicesPage() {
           return
         }
       } catch {
-        // Backend hoặc Voice Service còn đang khởi động; tiếp tục poll bên dưới.
+        // Tiếp tục thử lại nếu backend/voice-service đang khởi động
       }
 
       if (attempt < 180) {
         setServiceReady(false)
-        setServiceMessage('Đang khởi động Voice Service hoặc tải model lần đầu…')
+        setServiceMessage('Đang kết nối Voice Service và nạp model VieNeu-TTS…')
         retryTimer = setTimeout(() => void pollVoiceService(attempt + 1), 2000)
       } else {
         setServiceReady(false)
         setServiceMessage(
-          'Voice Service chưa sẵn sàng sau 6 phút. Hãy khởi động lại ứng dụng và kiểm tra kết nối mạng.'
+          'Voice Service chưa sẵn sàng sau 6 phút. Hãy kiểm tra lại terminal voice-service.'
         )
       }
     }
@@ -99,9 +158,11 @@ export function VoicesPage() {
     }
   }, [])
 
+  // Tạo giọng clone từ audio mẫu
   async function create() {
     if (!file || !name.trim()) {
-      setMessage('Cần tên giọng và audio mẫu (3-8s).')
+      setMessage('Vui lòng nhập tên giọng và chọn audio mẫu (3-8 giây).')
+      setMessageType('error')
       return
     }
     setLoading(true)
@@ -114,34 +175,49 @@ export function VoicesPage() {
         method: 'POST',
         body: form,
       })
-      if (!r.ok) throw new Error()
+      if (!r.ok) {
+        const errJson = await r.json().catch(() => null)
+        throw new Error(errJson?.detail || `Lỗi máy chủ (${r.status})`)
+      }
       const v = await r.json()
       setVoices([v, ...voices])
       setName('')
       setFile(null)
-      setMessage('Đã thêm giọng.')
+      setShowCloneForm(false)
+      setMessage(`Đã tạo thành công giọng clone "${name.trim()}".`)
+      setMessageType('success')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Tạo giọng thất bại. Kiểm tra voice-service.')
+      setMessage(error instanceof Error ? error.message : 'Tạo giọng thất bại. Hãy kiểm tra voice-service.')
+      setMessageType('error')
     } finally {
       setLoading(false)
     }
   }
 
-  async function remove(id: string) {
+  // Xóa giọng clone
+  async function remove(id: string, voiceName: string) {
+    if (!window.confirm(`Bạn có chắc chắn muốn xoá giọng "${voiceName}" khỏi danh sách không?`)) {
+      return
+    }
+
     if (playingVoiceId === id) {
       stopAudio()
     }
     try {
-      const r = await fetch(`${API_URL}/api/voices/${id}`, {
+      const r = await fetch(`${API_URL}/api/voices/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       })
       if (!r.ok) throw new Error()
       setVoices(voices.filter(v => v.voice_id !== id))
+      setMessage(`Đã xoá giọng "${voiceName}".`)
+      setMessageType('info')
     } catch {
-      setMessage('Xoá thất bại.')
+      setMessage('Xoá giọng thất bại.')
+      setMessageType('error')
     }
   }
 
+  // Nghe thử giọng (TTS Preview)
   async function togglePreview(id: string) {
     // Nếu đang phát chính giọng này -> Dừng lại
     if (playingVoiceId === id) {
@@ -149,7 +225,7 @@ export function VoicesPage() {
       return
     }
 
-    // Dừng âm thanh đang phát khác
+    // Dừng âm thanh khác đang phát
     stopAudio()
     setGeneratingVoiceId(id)
     setMessage('')
@@ -159,12 +235,12 @@ export function VoicesPage() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: previewText || undefined }),
+          body: JSON.stringify({ text: previewText.trim() || undefined }),
         }
       )
       if (!r.ok) {
         const e = await r.json().catch(() => null)
-        throw new Error(e?.detail || `Lỗi ${r.status}`)
+        throw new Error(e?.detail || `Lỗi máy chủ (${r.status})`)
       }
       const blob = await r.blob()
       const url = URL.createObjectURL(blob)
@@ -184,219 +260,538 @@ export function VoicesPage() {
       await audio.play()
     } catch (error) {
       stopAudio()
-      setMessage(error instanceof Error ? error.message : 'TTS thất bại.')
+      setMessage(error instanceof Error ? error.message : 'Tổng hợp giọng đọc thất bại.')
+      setMessageType('error')
     } finally {
       setGeneratingVoiceId(null)
     }
   }
 
+  // Nghe thử file audio mẫu do người dùng tải lên
+  function toggleSampleAudio() {
+    if (!file) return
+
+    if (sampleAudioPlaying && sampleAudioRef.current) {
+      sampleAudioRef.current.pause()
+      sampleAudioRef.current = null
+      setSampleAudioPlaying(false)
+      return
+    }
+
+    stopAudio()
+    const url = URL.createObjectURL(file)
+    const audio = new Audio(url)
+    sampleAudioRef.current = audio
+    setSampleAudioPlaying(true)
+
+    audio.onended = () => {
+      setSampleAudioPlaying(false)
+      URL.revokeObjectURL(url)
+    }
+    audio.onerror = () => {
+      setSampleAudioPlaying(false)
+      URL.revokeObjectURL(url)
+    }
+
+    void audio.play()
+  }
+
+  // Hợp nhất danh sách giọng để lọc và hiển thị
+  const unifiedVoices: UnifiedVoice[] = useMemo(() => {
+    const list: UnifiedVoice[] = []
+
+    // 1. Giọng clone
+    voices.forEach(v => {
+      list.push({
+        id: v.voice_id,
+        name: v.name,
+        description: `Giọng clone người dùng · ID: ${v.voice_id.slice(0, 8)}`,
+        isClone: true,
+        createdAt: v.created_at,
+      })
+    })
+
+    // 2. Preset voices
+    presets.forEach(p => {
+      const g = (p.gender || '').toLowerCase()
+      list.push({
+        id: p.name,
+        name: p.name,
+        description: p.description || 'Preset giọng chuẩn VieNeu-TTS',
+        gender: g.includes('nữ') || g.includes('female') ? 'female' : 'male',
+        isClone: false,
+      })
+    })
+
+    return list
+  }, [voices, presets])
+
+  // Lọc theo tabs & từ khóa tìm kiếm
+  const filteredVoices = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+
+    return unifiedVoices.filter(v => {
+      // Lọc tab
+      if (filterTab === 'cloned' && !v.isClone) return false
+      if (filterTab === 'preset-male' && (v.isClone || v.gender !== 'male')) return false
+      if (filterTab === 'preset-female' && (v.isClone || v.gender !== 'female')) return false
+
+      // Lọc tìm kiếm
+      if (query) {
+        const matchName = v.name.toLowerCase().includes(query)
+        const matchDesc = (v.description || '').toLowerCase().includes(query)
+        if (!matchName && !matchDesc) return false
+      }
+
+      return true
+    })
+  }, [unifiedVoices, filterTab, searchQuery])
+
+  // Thống kê
+  const totalVoicesCount = unifiedVoices.length
+  const clonedCount = voices.length
+  const maleCount = presets.filter(p => {
+    const g = (p.gender || '').toLowerCase()
+    return !g.includes('nữ') && !g.includes('female')
+  }).length
+  const femaleCount = presets.filter(p => {
+    const g = (p.gender || '').toLowerCase()
+    return g.includes('nữ') || g.includes('female')
+  }).length
+
   return (
-    <section className="settings-page">
-      <div className="settings-heading">
-        <div>
-          <p className="overline">GIỌNG NÓI</p>
-          <h1>Voices</h1>
-          <p className="page-subtitle">
-            Quản lý giọng đọc Việt cho recap — clone từ audio mẫu, chọn giọng khi
-            TTS.
-          </p>
-        </div>
-      </div>
-
-      {serviceMessage && <p className="settings-message">{serviceMessage}</p>}
-
-      <div className="settings-card">
-        <div className="integration-title">
-          <div className="gemini-icon">
-            <Mic size={17} />
-          </div>
-          <div>
-            <h2>Thêm giọng (voice clone)</h2>
-            <p>
-              Tải audio mẫu 3-8 giây — VieNeu-TTS sẽ tự khử ồn rồi clone
-              zero-shot.
+    <div className="voice-studio-page">
+      {/* --------------------------------------------------------------------
+          1. Compact Hero Studio Banner
+          -------------------------------------------------------------------- */}
+      <section className="voice-hero-banner">
+        <div className="voice-hero-top">
+          <div className="voice-hero-brand">
+            <div className="voice-hero-title-row">
+              <h1 className="voice-hero-title">Quản Lý & Thử Nghiệm Giọng Đọc AI</h1>
+            </div>
+            <p className="voice-hero-desc">
+              Giọng đọc recap tiếng Việt qua VieNeu-TTS v3 — clone từ audio mẫu 3–8s và thử giọng trực tiếp.
             </p>
           </div>
+
+          <div className="voice-hero-actions">
+            {/* Trạng thái Voice Engine */}
+            <div className={`voice-engine-status ${serviceReady ? 'ready' : 'loading'}`}>
+              <span className="voice-status-dot" />
+              <span>
+                {serviceReady ? 'VieNeu-TTS Sẵn sàng' : 'Đang nạp Model...'}
+              </span>
+            </div>
+
+            {/* Nút bật/tắt form tạo giọng */}
+            <button
+              type="button"
+              className="voice-btn-primary"
+              onClick={() => setShowCloneForm(!showCloneForm)}
+              title="Mở bảng tạo giọng clone từ audio mẫu"
+            >
+              <Plus size={14} />
+              <span>{showCloneForm ? 'Đóng tạo giọng' : 'Tạo giọng mới'}</span>
+            </button>
+          </div>
         </div>
-        <label>Tên giọng</label>
-        <input
-          value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder="vd: Giọng review hài"
-        />
-        <label style={{ marginTop: 18 }}>
-          Audio mẫu <span>(3-8s, wav/mp3)</span>
-        </label>
-        <div className="voice-file-row">
-          <input
-            type="file"
-            accept="audio/*"
-            onChange={e => setFile(e.target.files?.[0] ?? null)}
-          />
-          <span className="voice-file-name">
-            {file ? file.name : 'Chưa chọn file'}
-          </span>
+
+        {/* Quick Metrics Bar */}
+        <div className="voice-metrics-row">
+          <div className="voice-metric-pill">
+            <span>Tổng:</span>
+            <strong>{totalVoicesCount} giọng</strong>
+          </div>
+          <div className="voice-metric-pill">
+            <span>Giọng clone:</span>
+            <strong>{clonedCount}</strong>
+          </div>
+          <div className="voice-metric-pill">
+            <span>Preset:</span>
+            <strong>{presets.length} ({maleCount} Nam / {femaleCount} Nữ)</strong>
+          </div>
+          <div className="voice-metric-pill">
+            <span>Mô hình:</span>
+            <strong>VieNeu v3 ONNX</strong>
+          </div>
         </div>
-        <div className="settings-actions">
+      </section>
+
+      {/* Thông báo trạng thái hệ thống */}
+      {serviceMessage && (
+        <div className="voice-toast info">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Loader2 size={14} className="spinning" />
+            <span>{serviceMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Thông báo tương tác (Thêm / Xóa / Lỗi) */}
+      {message && (
+        <div className={`voice-toast ${messageType}`}>
+          <span>{message}</span>
           <button
             type="button"
-            className="primary-button"
-            onClick={create}
-            disabled={loading || !serviceReady}
+            onClick={() => setMessage('')}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', display: 'flex' }}
           >
-            <Plus size={16} /> Tạo giọng
+            <X size={14} />
           </button>
         </div>
-        {message && <p className="settings-message">{message}</p>}
-      </div>
+      )}
 
-      <div className="settings-card" style={{ marginTop: 22 }}>
-        <div className="integration-title">
-          <div className="gemini-icon">
-            <Play size={17} />
-          </div>
-          <div>
-            <h2>Nghe thử</h2>
-            <p>Nhập text rồi bấm “Nghe thử” ở bất kỳ giọng nào dưới đây.</p>
-          </div>
-        </div>
-        <label>
-          Text nghe thử <span>(để trống → câu mặc định)</span>
-        </label>
-        <input
-          value={previewText}
-          onChange={e => setPreviewText(e.target.value)}
-          placeholder="vd: Xin chào, đây là giọng đọc thử."
-        />
-      </div>
+      {/* --------------------------------------------------------------------
+          2. Voice Clone Creator Form (Compact Card)
+          -------------------------------------------------------------------- */}
+      {showCloneForm && (
+        <section className="voice-clone-card">
+          <div className="voice-clone-header">
+            <div>
+              <h3 className="voice-section-title">Thêm Giọng Clone Từ Audio Mẫu</h3>
+              <p className="voice-section-sub">
+                Tải đoạn ghi âm 3–8 giây — hệ thống sẽ tự động khử tạp âm và trích xuất đặc trưng giọng.
+              </p>
+            </div>
 
-      <div className="settings-card" style={{ marginTop: 22 }}>
-        <div className="integration-title">
-          <div className="gemini-icon">
-            <Volume2 size={17} />
+            <button
+              type="button"
+              className="voice-btn-del"
+              onClick={() => setShowCloneForm(false)}
+              title="Đóng form"
+            >
+              <X size={15} />
+            </button>
           </div>
-          <div>
-            <h2>Danh sách giọng (đã clone)</h2>
-            <p>Giọng bạn clone từ audio mẫu.</p>
-          </div>
-        </div>
-        {voices.length === 0 ? (
-          <p className="settings-message">Chưa có giọng nào.</p>
-        ) : (
-          <div className="voices-list">
-            {voices.map(v => {
-              const isGenerating = generatingVoiceId === v.voice_id
-              const isPlaying = playingVoiceId === v.voice_id
-              return (
-                <div key={v.voice_id} className="voice-item">
-                  <div className="voice-item-info">
-                    <strong>{v.name}</strong>
-                    <span>
-                      {v.voice_id}
-                      {v.created_at ? ` · ${v.created_at}` : ''}
-                    </span>
+
+          <div className="voice-clone-form-grid">
+            {/* Cột 1: Tên giọng */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className="voice-field-group">
+                <label className="voice-field-label">
+                  Tên giọng đọc <span>(bắt buộc)</span>
+                </label>
+                <input
+                  type="text"
+                  className="voice-input-text"
+                  placeholder="Ví dụ: Giọng Review Hài Hước, Giọng Tin Tức..."
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                />
+              </div>
+
+              <div className="voice-protips">
+                Khuyến nghị audio <strong>3 đến 8 giây</strong>, giọng đọc rõ ràng, không lẫn nhạc nền để đạt chất lượng tốt nhất.
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  className="voice-btn-primary"
+                  onClick={create}
+                  disabled={loading || !serviceReady || !name.trim() || !file}
+                  style={{ width: '100%', justifyContent: 'center' }}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 size={14} className="spinning" />
+                      <span>Đang tạo giọng...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={14} />
+                      <span>Tạo Giọng Clone</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Cột 2: Dropzone */}
+            <div className="voice-field-group">
+              <label className="voice-field-label">
+                Audio mẫu <span>(3–8s, WAV/MP3)</span>
+              </label>
+
+              <div
+                className={`voice-dropzone ${isDragging ? 'dragging' : ''}`}
+                onDragOver={e => {
+                  e.preventDefault()
+                  setIsDragging(true)
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={e => {
+                  e.preventDefault()
+                  setIsDragging(false)
+                  const droppedFile = e.dataTransfer.files?.[0]
+                  if (droppedFile) setFile(droppedFile)
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*"
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const selected = e.target.files?.[0]
+                    if (selected) setFile(selected)
+                  }}
+                />
+
+                <Upload size={16} style={{ color: '#64748b' }} />
+
+                {file ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+                    <div className="voice-file-badge">
+                      <FileAudio size={13} />
+                      <span>{file.name}</span>
+                      <small>({(file.size / 1024).toFixed(0)} KB)</small>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                      <button
+                        type="button"
+                        className="voice-chip"
+                        onClick={e => {
+                          e.stopPropagation()
+                          toggleSampleAudio()
+                        }}
+                      >
+                        {sampleAudioPlaying ? 'Dừng phát' : 'Nghe thử mẫu'}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="voice-chip"
+                        onClick={e => {
+                          e.stopPropagation()
+                          setFile(null)
+                          if (sampleAudioRef.current) {
+                            sampleAudioRef.current.pause()
+                            setSampleAudioPlaying(false)
+                          }
+                        }}
+                        style={{ color: '#dc2626' }}
+                      >
+                        Đổi file
+                      </button>
+                    </div>
                   </div>
-                  <div className="voice-item-actions">
+                ) : (
+                  <>
+                    <p className="voice-dropzone-title">Kéo &amp; thả file audio mẫu vào đây, hoặc bấm để chọn</p>
+                    <p className="voice-dropzone-sub">Định dạng .wav, .mp3 (độ dài khuyên dùng 3 - 8s)</p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* --------------------------------------------------------------------
+          3. Slim Voice Testing Strip (Gọn nhẹ, không icon màu)
+          -------------------------------------------------------------------- */}
+      <section className="voice-testing-strip">
+        <div className="voice-testing-input-row">
+          <input
+            type="text"
+            className="voice-testing-input"
+            placeholder="Nhập câu văn bản muốn nghe thử (để trống: dùng câu mặc định của hệ thống)..."
+            value={previewText}
+            onChange={e => setPreviewText(e.target.value)}
+          />
+          {previewText && (
+            <button
+              type="button"
+              className="voice-testing-clear"
+              onClick={() => setPreviewText('')}
+              title="Xóa câu nghe thử"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {/* Chips không icon màu */}
+        <div className="voice-chips-row">
+          <span className="voice-chips-label">Mẫu câu:</span>
+          {QUICK_PROMPTS.map((item, idx) => {
+            const isActive = previewText === item.text
+            return (
+              <button
+                key={idx}
+                type="button"
+                className={`voice-chip ${isActive ? 'active' : ''}`}
+                onClick={() => setPreviewText(item.text)}
+                title={item.text}
+              >
+                {item.label}
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* --------------------------------------------------------------------
+          4. Toolbar: Search Input & Category Filter Tabs
+          -------------------------------------------------------------------- */}
+      <section className="voice-toolbar">
+        {/* Search */}
+        <div className="voice-search-wrap">
+          <Search size={14} className="voice-search-icon" />
+          <input
+            type="text"
+            className="voice-search-input"
+            placeholder="Tìm theo tên giọng hoặc phong cách..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="voice-search-clear"
+              onClick={() => setSearchQuery('')}
+              title="Xoá tìm kiếm"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="voice-filter-tabs">
+          <button
+            type="button"
+            className={`voice-filter-btn ${filterTab === 'all' ? 'active' : ''}`}
+            onClick={() => setFilterTab('all')}
+          >
+            Tất cả ({totalVoicesCount})
+          </button>
+          <button
+            type="button"
+            className={`voice-filter-btn ${filterTab === 'cloned' ? 'active' : ''}`}
+            onClick={() => setFilterTab('cloned')}
+          >
+            Giọng Clone ({clonedCount})
+          </button>
+          <button
+            type="button"
+            className={`voice-filter-btn ${filterTab === 'preset-male' ? 'active' : ''}`}
+            onClick={() => setFilterTab('preset-male')}
+          >
+            Giọng Nam ({maleCount})
+          </button>
+          <button
+            type="button"
+            className={`voice-filter-btn ${filterTab === 'preset-female' ? 'active' : ''}`}
+            onClick={() => setFilterTab('preset-female')}
+          >
+            Giọng Nữ ({femaleCount})
+          </button>
+        </div>
+      </section>
+
+      {/* --------------------------------------------------------------------
+          5. Compact Voice Table (Chuẩn Audio Matrix, Tinh Gọn)
+          -------------------------------------------------------------------- */}
+      <section className="voice-table-card">
+        <div className="voice-table-head">
+          <span style={{ textAlign: 'center', color: '#94a3b8' }}>#</span>
+          <span>Tên Giọng</span>
+          <span>Phân Loại</span>
+          <span className="voice-col-desc">Phong Cách / Mô Tả</span>
+          <span style={{ textAlign: 'right' }}>Thao Tác</span>
+        </div>
+
+        <div className="voice-table-body">
+          {filteredVoices.length === 0 ? (
+            <div className="voice-empty-box">
+              <p>
+                {searchQuery || filterTab !== 'all'
+                  ? 'Không tìm thấy giọng nào phù hợp với bộ lọc.'
+                  : 'Chưa có giọng nào trong danh sách. Bấm "Tạo giọng mới" để bắt đầu.'}
+              </p>
+            </div>
+          ) : (
+            filteredVoices.map(item => {
+              const isGenerating = generatingVoiceId === item.id
+              const isPlaying = playingVoiceId === item.id
+
+              return (
+                <div
+                  key={item.id}
+                  className={`voice-row ${isPlaying ? 'is-playing' : ''}`}
+                >
+                  {/* Cột 1: Nút Play tròn */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <button
                       type="button"
-                      className="primary-button"
-                      onClick={() => togglePreview(v.voice_id)}
+                      className={`voice-play-btn ${isPlaying ? 'playing' : ''}`}
+                      onClick={() => togglePreview(item.id)}
                       disabled={isGenerating || !serviceReady}
-                      style={
-                        isPlaying
-                          ? { background: '#ef4444', borderColor: '#dc2626', color: '#fff' }
-                          : undefined
-                      }
-                      title={isPlaying ? 'Dừng phát âm thanh' : 'Nghe thử giọng này'}
+                      title={isPlaying ? 'Dừng phát' : 'Nghe thử giọng này'}
                     >
                       {isGenerating ? (
-                        <>
-                          <Loader2 size={14} className="spin" /> Đang tạo...
-                        </>
+                        <Loader2 size={13} className="spinning" />
                       ) : isPlaying ? (
-                        <>
-                          <Square size={13} fill="currentColor" /> Dừng lại
-                        </>
+                        <Pause size={13} />
                       ) : (
-                        <>
-                          <Play size={14} /> Nghe thử
-                        </>
+                        <Play size={12} style={{ marginLeft: 1 }} />
                       )}
                     </button>
-                    <button
-                      type="button"
-                      className="chrome-button"
-                      onClick={() => remove(v.voice_id)}
-                    >
-                      <Trash2 size={15} /> Xoá
-                    </button>
+                  </div>
+
+                  {/* Cột 2: Tên giọng */}
+                  <div className="voice-name-txt" title={item.name}>
+                    <span>{item.name}</span>
+                    {isPlaying && (
+                      <div className="voice-mini-eq" title="Đang phát">
+                        <span className="voice-mini-eq-bar" />
+                        <span className="voice-mini-eq-bar" />
+                        <span className="voice-mini-eq-bar" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Cột 3: Tag phân loại neutral */}
+                  <div>
+                    {item.isClone ? (
+                      <span className="voice-tag clone">Clone</span>
+                    ) : item.gender === 'female' ? (
+                      <span className="voice-tag">Nữ</span>
+                    ) : (
+                      <span className="voice-tag">Nam</span>
+                    )}
+                  </div>
+
+                  {/* Cột 4: Mô tả phong cách */}
+                  <div className="voice-col-desc voice-desc-txt" title={item.description}>
+                    {item.description}
+                  </div>
+
+                  {/* Cột 5: Nút Xóa (cho giọng clone) */}
+                  <div style={{ textAlign: 'right' }}>
+                    {item.isClone ? (
+                      <button
+                        type="button"
+                        className="voice-btn-del"
+                        onClick={() => remove(item.id, item.name)}
+                        title={`Xoá giọng "${item.name}"`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#cbd5e1' }}>—</span>
+                    )}
                   </div>
                 </div>
               )
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="settings-card" style={{ marginTop: 22 }}>
-        <div className="integration-title">
-          <div className="gemini-icon">
-            <Mic size={17} />
-          </div>
-          <div>
-            <h2>Preset voices</h2>
-            <p>20 giọng sẵn dùng của VieNeu — không cần clone.</p>
-          </div>
+            })
+          )}
         </div>
-        {presets.length === 0 ? (
-          <p className="settings-message">
-            Chưa tải được preset (voice-service chưa chạy?).
-          </p>
-        ) : (
-          <div className="voices-list">
-            {presets.map(p => {
-              const isGenerating = generatingVoiceId === p.name
-              const isPlaying = playingVoiceId === p.name
-              return (
-                <div key={p.name} className="voice-item">
-                  <div className="voice-item-info">
-                    <strong>{p.name}</strong>
-                    <span>{p.description}</span>
-                  </div>
-                  <div className="voice-item-actions">
-                    <button
-                      type="button"
-                      className="primary-button"
-                      onClick={() => togglePreview(p.name)}
-                      disabled={isGenerating || !serviceReady}
-                      style={
-                        isPlaying
-                          ? { background: '#ef4444', borderColor: '#dc2626', color: '#fff' }
-                          : undefined
-                      }
-                      title={isPlaying ? 'Dừng phát âm thanh' : 'Nghe thử giọng này'}
-                    >
-                      {isGenerating ? (
-                        <>
-                          <Loader2 size={14} className="spin" /> Đang tạo...
-                        </>
-                      ) : isPlaying ? (
-                        <>
-                          <Square size={13} fill="currentColor" /> Dừng lại
-                        </>
-                      ) : (
-                        <>
-                          <Play size={14} /> Nghe thử
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </section>
+      </section>
+    </div>
   )
 }

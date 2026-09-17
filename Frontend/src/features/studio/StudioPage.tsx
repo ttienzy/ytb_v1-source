@@ -21,6 +21,8 @@ import {
   Video,
   Volume2,
   X,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
 import type { BgmOut } from '../bgm/types'
@@ -29,6 +31,31 @@ import { BatchQueuePanel } from './components/BatchQueuePanel'
 import { PipelineDiagram } from './components/PipelineDiagram'
 import { VideoResultCard } from './components/VideoResultCard'
 import type { JobOut } from './types'
+import './StudioYoutube.css'
+
+const YOUTUBE_AUDIO_CONFIG_KEY = 'yt_workflow_audio_config'
+
+interface SavedAudioConfig {
+  voiceId?: string
+  bgmEnabled?: boolean
+  bgmIds?: string[]
+  bgmVolume?: number
+}
+
+function getSavedAudioConfig(): SavedAudioConfig {
+  try {
+    const raw = localStorage.getItem(YOUTUBE_AUDIO_CONFIG_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveAudioConfig(cfg: SavedAudioConfig) {
+  try {
+    localStorage.setItem(YOUTUBE_AUDIO_CONFIG_KEY, JSON.stringify(cfg))
+  } catch {}
+}
 
 function YoutubeIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
   return (
@@ -51,15 +78,17 @@ export function StudioPage({
   setActivePage: (p: string) => void
   initialUrls?: string[]
 }) {
+  const initialCfg = useMemo(() => getSavedAudioConfig(), [])
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [rawText, setRawText] = useState('')
   const [rawFile, setRawFile] = useState<File | null>(null)
-  const [voiceId, setVoiceId] = useState('')
+  const [voiceId, setVoiceId] = useState(initialCfg.voiceId || '')
   const [clonedVoices, setClonedVoices] = useState<Voice[]>([])
   const [bgmList, setBgmList] = useState<BgmOut[]>([])
-  const [bgmEnabled, setBgmEnabled] = useState(true)
-  const [bgmIds, setBgmIds] = useState<string[]>([])
-  const [bgmVolume, setBgmVolume] = useState(0.1)
+  const [bgmEnabled, setBgmEnabled] = useState(initialCfg.bgmEnabled !== undefined ? initialCfg.bgmEnabled : true)
+  const [bgmIds, setBgmIds] = useState<string[]>(initialCfg.bgmIds || [])
+  const [bgmVolume, setBgmVolume] = useState(initialCfg.bgmVolume !== undefined ? initialCfg.bgmVolume : 0.1)
+  const [showRawTranscript, setShowRawTranscript] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [job, setJob] = useState<JobOut | null>(null)
   const [submitError, setSubmitError] = useState('')
@@ -158,22 +187,46 @@ export function StudioPage({
     }
   }
 
-  // Load voices + bgm on mount
+  // Auto-save audio config to localStorage whenever changed
   useEffect(() => {
+    saveAudioConfig({
+      voiceId,
+      bgmEnabled,
+      bgmIds,
+      bgmVolume,
+    })
+  }, [voiceId, bgmEnabled, bgmIds, bgmVolume])
+
+  // Load voices + bgm on mount & restore user selection
+  useEffect(() => {
+    const saved = getSavedAudioConfig()
     fetch(`${API_URL}/api/voices`)
       .then(r => (r.ok ? r.json() : Promise.reject()))
       .then(d => {
         const list: Voice[] = d.voices ?? d ?? []
         setClonedVoices(list)
-        if (!voiceId && list.length) setVoiceId(list[0].voice_id)
+        if (saved.voiceId && list.some(v => v.voice_id === saved.voiceId)) {
+          setVoiceId(saved.voiceId)
+        } else if (!voiceId && list.length) {
+          setVoiceId(list[0].voice_id)
+        }
       })
       .catch(() => {})
+
     fetch(`${API_URL}/api/bgm`)
       .then(r => (r.ok ? r.json() : Promise.reject()))
       .then((d: BgmOut[]) => {
         const list = d ?? []
         setBgmList(list)
-        if (list.length > 0) {
+        if (saved.bgmIds && Array.isArray(saved.bgmIds) && saved.bgmIds.length > 0) {
+          const validSavedIds = saved.bgmIds.filter(id => list.some(t => t.track_id === id))
+          if (validSavedIds.length > 0) {
+            setBgmIds(validSavedIds)
+            return
+          }
+        }
+        // Fallback chọn tất cả chỉ khi chưa từng có cấu hình đã lưu
+        if (list.length > 0 && bgmIds.length === 0) {
           setBgmIds(list.map(t => t.track_id))
         }
       })
@@ -439,9 +492,7 @@ export function StudioPage({
     setRawText('')
     setRawFile(null)
     setYoutubeUrl('')
-    setBgmEnabled(true)
-    setBgmVolume(0.1)
-    if (bgmList.length > 0) setBgmIds(bgmList.map(t => t.track_id))
+    // Giữ nguyên cấu hình Giọng đọc (voiceId) và Nhạc nền (bgmEnabled, bgmIds, bgmVolume) đã chọn
   }
 
   const allSegs = (job?.recap?.scenes ?? []).flatMap(s => s.segments)
@@ -510,137 +561,150 @@ export function StudioPage({
 
         {mode === 'single' ? (
           <>
-            {/* NGUỒN (Đơn lẻ) */}
-            <div className="fsection">
-              <div className="studio-section-header">
-                <Video size={15} style={{ color: '#ef4444' }} />
-                <span>Nguồn Video &amp; Kịch Bản (Transcript)</span>
-              </div>
-              <div className="fgrid">
-                <div className="field">
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+            <div className="yt-workflow-columns">
+              {/* CỘT TRÁI: NGUỒN VIDEO & KỊCH BẢN */}
+              <div className="yt-workflow-col">
+                <div className="yt-section-header">
+                  <Video size={15} />
+                  <span>Nguồn Video &amp; Kịch Bản</span>
+                </div>
+
+                <div className="yt-field">
+                  <label className="yt-label">
                     <YoutubeIcon size={14} style={{ color: '#ef4444' }} />
-                    Link YouTube
+                    <span>Link YouTube</span>
                   </label>
                   <input
+                    className="yt-input"
                     value={youtubeUrl}
                     onChange={e => setYoutubeUrl(e.target.value)}
                     placeholder="https://www.youtube.com/watch?v=..."
                     disabled={Boolean(jobId)}
-                    style={{
-                      height: 42,
-                      borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      padding: '0 12px',
-                      fontSize: 13,
-                    }}
                   />
                 </div>
-                <div className="field field-full">
-                  <label>
-                    Raw transcript{' '}
-                    <span>
-                      (tùy chọn — đính kèm file hoặc dán text khi YouTube chặn tự
-                      lấy; để trống → tự fetch)
-                    </span>
-                  </label>
-                  <div className="raw-row">
-                    <label
-                      className="file-trig"
-                      style={{
-                        opacity: jobId ? 0.5 : 1,
-                        pointerEvents: jobId ? 'none' : 'auto',
-                      }}
-                    >
-                      <Upload size={15} />
-                      <span className="fname">
-                        {rawFile ? rawFile.name : 'Đính kèm raw.txt'}
-                      </span>
-                      {rawFile && (
-                        <span className="fsize">
-                          · {(rawFile.size / 1024).toFixed(0)} KB
-                        </span>
+
+                {/* Raw transcript collapsible drawer */}
+                <div className="yt-raw-accordion">
+                  <button
+                    type="button"
+                    className="yt-raw-toggle"
+                    onClick={() => setShowRawTranscript(prev => !prev)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {showRawTranscript || rawFile || rawText.trim() ? (
+                        <ChevronUp size={13} />
+                      ) : (
+                        <ChevronDown size={13} />
                       )}
-                      <input
-                        type="file"
-                        accept=".txt,.json"
-                        style={{ display: 'none' }}
-                        onChange={e => setRawFile(e.target.files?.[0] ?? null)}
-                      />
-                      <span
-                        style={{
-                          marginLeft: 'auto',
-                          fontSize: 11,
-                          color: 'var(--indigo2)',
-                        }}
-                      >
-                        {rawFile ? 'Đổi ↑' : 'File ↑'}
+                      <span>Đính kèm raw transcript</span>
+                      <small>(tùy chọn khi YouTube chặn auto-fetch)</small>
+                    </div>
+                    {(rawFile || rawText.trim()) && (
+                      <span className="yt-raw-attached-badge">
+                        {rawFile ? rawFile.name : `${rawText.length.toLocaleString()} ký tự`}
                       </span>
-                    </label>
-                    {rawFile && (
-                      <button
-                        type="button"
-                        className="raw-clear"
-                        onClick={() => setRawFile(null)}
-                      >
-                        ✕ huỷ file
-                      </button>
                     )}
-                  </div>
-                  <textarea
-                    className="raw-input"
-                    value={rawText}
-                    onChange={e => setRawText(e.target.value)}
-                    placeholder={
-                      rawFile
-                        ? 'Đã đính kèm file — text ở đây bị bỏ qua'
-                        : 'Hoặc dán transcript tại đây (mỗi dòng [MM:SS] caption). Bỏ trống cả 2 → tự lấy từ YouTube.'
-                    }
-                    rows={3}
-                    disabled={Boolean(jobId) || Boolean(rawFile)}
-                  />
-                  {(rawFile || rawText.trim()) && (
-                    <span className="raw-hint">
-                      {rawFile
-                        ? `file ${rawFile.name} (${(
-                            rawFile.size / 1024
-                          ).toFixed(0)} KB)`
-                        : `${rawText.length.toLocaleString()} ký tự`}{' '}
-                      · sẽ skip auto-fetch
-                    </span>
+                  </button>
+
+                  {(showRawTranscript || rawFile || rawText.trim()) && (
+                    <div className="yt-raw-body">
+                      <div className="raw-row">
+                        <label
+                          className="file-trig"
+                          style={{
+                            opacity: jobId ? 0.5 : 1,
+                            pointerEvents: jobId ? 'none' : 'auto',
+                          }}
+                        >
+                          <Upload size={14} />
+                          <span className="fname">
+                            {rawFile ? rawFile.name : 'Đính kèm raw.txt'}
+                          </span>
+                          {rawFile && (
+                            <span className="fsize">
+                              · {(rawFile.size / 1024).toFixed(0)} KB
+                            </span>
+                          )}
+                          <input
+                            type="file"
+                            accept=".txt,.json"
+                            style={{ display: 'none' }}
+                            onChange={e => setRawFile(e.target.files?.[0] ?? null)}
+                          />
+                          <span
+                            style={{
+                              marginLeft: 'auto',
+                              fontSize: 11,
+                              color: 'var(--indigo2)',
+                            }}
+                          >
+                            {rawFile ? 'Đổi ↑' : 'File ↑'}
+                          </span>
+                        </label>
+                        {rawFile && (
+                          <button
+                            type="button"
+                            className="raw-clear"
+                            onClick={() => setRawFile(null)}
+                          >
+                            ✕ huỷ file
+                          </button>
+                        )}
+                      </div>
+                      <textarea
+                        className="raw-input"
+                        value={rawText}
+                        onChange={e => setRawText(e.target.value)}
+                        placeholder={
+                          rawFile
+                            ? 'Đã đính kèm file — text ở đây bị bỏ qua'
+                            : 'Hoặc dán transcript tại đây (mỗi dòng [MM:SS] caption). Bỏ trống cả 2 → tự lấy từ YouTube.'
+                        }
+                        rows={2}
+                        disabled={Boolean(jobId) || Boolean(rawFile)}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* GIỌNG & NHẠC (Đơn lẻ) */}
-            <div className="fsection">
-              <div className="studio-section-header">
-                <Volume2 size={15} style={{ color: '#6366f1' }} />
-                <span>Giọng Đọc &amp; Nhạc Nền (Audio Config)</span>
-              </div>
-              <div className="fgrid">
-                <div className="field">
-                  <label style={{ fontWeight: 600 }}>Giọng đọc (Voice)</label>
+              {/* CỘT PHẢI: GIỌNG ĐỌC & NHẠC NỀN */}
+              <div className="yt-workflow-col">
+                <div className="yt-section-header">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Volume2 size={15} />
+                    <span>Giọng Đọc &amp; Nhạc Nền</span>
+                  </div>
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="yt-saved-indicator">✓ Đã lưu</span>
+                    <button
+                      type="button"
+                      className="yt-reset-btn"
+                      title="Chọn lại tất cả bài hát và đặt lại âm lượng 10%"
+                      onClick={() => {
+                        if (bgmList.length > 0) setBgmIds(bgmList.map(t => t.track_id))
+                        setBgmVolume(0.1)
+                        setBgmEnabled(true)
+                        if (clonedVoices.length > 0) setVoiceId(clonedVoices[0].voice_id)
+                      }}
+                    >
+                      Đặt lại
+                    </button>
+                  </div>
+                </div>
+
+                <div className="yt-field">
+                  <label className="yt-label">Giọng đọc (Voice)</label>
                   {clonedVoices.length === 0 ? (
-                    <p className="settings-message" style={{ marginTop: 4 }}>
+                    <p className="settings-message" style={{ marginTop: 2, fontSize: 12 }}>
                       Chưa có giọng — tạo ở Voices trước.
                     </p>
                   ) : (
                     <select
+                      className="yt-select"
                       value={voiceId}
                       onChange={e => setVoiceId(e.target.value)}
                       disabled={Boolean(jobId)}
-                      style={{
-                        width: '100%',
-                        height: 42,
-                        padding: '0 12px',
-                        background: 'var(--bg3)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 8,
-                        color: 'var(--text)',
-                        fontSize: 13,
-                      }}
                     >
                       {clonedVoices.map(v => (
                         <option key={v.voice_id} value={v.voice_id}>
@@ -650,37 +714,27 @@ export function StudioPage({
                     </select>
                   )}
                 </div>
-                <div className="field field-full">
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                    }}
-                  >
+
+                <div className="yt-bgm-block">
+                  <label className="yt-bgm-toggle">
                     <input
                       type="checkbox"
                       checked={bgmEnabled}
                       onChange={e => setBgmEnabled(e.target.checked)}
                       disabled={Boolean(jobId)}
-                      style={{ width: 16, height: 16 }}
                     />
-                    <Music size={15} /> Nhạc nền (BGM){' '}
-                    <span style={{ fontWeight: 400, color: 'var(--text2)' }}>
-                      — mix dưới VO; chọn nhiều → tự nối theo thứ tự, video dài hơn
-                      sẽ lặp
-                    </span>
+                    <Music size={14} />
+                    <span>Nhạc nền (BGM)</span>
                   </label>
+
                   {bgmEnabled && (
-                    <div className="bgm-body">
+                    <div className="yt-bgm-body">
                       {bgmList.length === 0 ? (
                         <p className="bgm-empty">
                           Chưa có track — thêm ở “Thư viện nhạc”.
                         </p>
                       ) : (
-                        <div className="chips">
+                        <div className="yt-bgm-chips">
                           {bgmList.map(t => {
                             const order = bgmIds.indexOf(t.track_id)
                             const on = order >= 0
@@ -711,13 +765,11 @@ export function StudioPage({
                           })}
                         </div>
                       )}
-                      <label className="bgm-vol">
-                        <span className="bgm-vol-label">
-                          Volume: {(bgmVolume * 100).toFixed(0)}%
-                        </span>
+                      <div className="yt-bgm-vol-row">
+                        <span>Âm lượng: {(bgmVolume * 100).toFixed(0)}%</span>
                         <input
                           type="range"
-                          className="bgm-range"
+                          className="yt-bgm-slider"
                           min={0}
                           max={0.5}
                           step={0.01}
@@ -725,7 +777,7 @@ export function StudioPage({
                           onChange={e => setBgmVolume(parseFloat(e.target.value))}
                           disabled={Boolean(jobId)}
                         />
-                      </label>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -733,7 +785,7 @@ export function StudioPage({
             </div>
 
             {/* Footer buttons (Đơn lẻ) */}
-            <div className="ff">
+            <div className="yt-workflow-footer">
               {!jobId ? (
                 <button
                   type="button"
@@ -742,9 +794,9 @@ export function StudioPage({
                   disabled={submitting}
                 >
                   {submitting ? (
-                    <Loader2 size={16} className="spin" />
+                    <Loader2 size={15} className="spin" />
                   ) : (
-                    <Sparkles size={16} />
+                    <Sparkles size={15} />
                   )}
                   {submitting ? 'Đang khởi động…' : 'Bắt đầu tạo recap video'}
                 </button>
@@ -797,32 +849,23 @@ export function StudioPage({
         ) : (
           <>
             {/* GIỌNG & NHẠC (Batch) */}
-            <div className="fsection">
-              <div className="studio-section-header">
-                <Volume2 size={15} style={{ color: '#6366f1' }} />
-                <span>Giọng Đọc &amp; Nhạc Nền (Dùng chung cho Batch)</span>
-              </div>
-              <div className="fgrid">
-                <div className="field">
-                  <label>Voice</label>
+            <div className="yt-workflow-columns" style={{ marginBottom: 16 }}>
+              <div className="yt-workflow-col">
+                <div className="yt-section-header">
+                  <Volume2 size={15} />
+                  <span>Giọng Đọc (Batch)</span>
+                </div>
+                <div className="yt-field">
+                  <label className="yt-label">Giọng đọc dùng chung</label>
                   {clonedVoices.length === 0 ? (
-                    <p className="settings-message" style={{ marginTop: 4 }}>
+                    <p className="settings-message" style={{ marginTop: 2, fontSize: 12 }}>
                       Chưa có giọng — tạo ở Voices trước.
                     </p>
                   ) : (
                     <select
+                      className="yt-select"
                       value={voiceId}
                       onChange={e => setVoiceId(e.target.value)}
-                      style={{
-                        width: '100%',
-                        height: 44,
-                        padding: '0 12px',
-                        background: 'var(--bg3)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 9,
-                        color: 'var(--text)',
-                        fontSize: 13,
-                      }}
                     >
                       {clonedVoices.map(v => (
                         <option key={v.voice_id} value={v.voice_id}>
@@ -832,34 +875,26 @@ export function StudioPage({
                     </select>
                   )}
                 </div>
-                <div className="field field-full">
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      cursor: 'pointer',
-                    }}
-                  >
+              </div>
+
+              <div className="yt-workflow-col">
+                <div className="yt-section-header">
+                  <Music size={15} />
+                  <span>Nhạc Nền (Batch)</span>
+                </div>
+                <div className="yt-bgm-block">
+                  <label className="yt-bgm-toggle">
                     <input
                       type="checkbox"
                       checked={bgmEnabled}
                       onChange={e => setBgmEnabled(e.target.checked)}
-                      style={{ width: 16, height: 16 }}
                     />
-                    <Music size={15} /> Nhạc nền (BGM){' '}
-                    <span style={{ fontWeight: 400, color: 'var(--text2)' }}>
-                      — mix dưới VO; chọn nhiều → tự nối theo thứ tự
-                    </span>
+                    <span>Phối nhạc nền BGM tự động</span>
                   </label>
                   {bgmEnabled && (
-                    <div className="bgm-body">
-                      {bgmList.length === 0 ? (
-                        <p className="bgm-empty">
-                          Chưa có track — thêm ở “Thư viện nhạc”.
-                        </p>
-                      ) : (
-                        <div className="chips">
+                    <div className="yt-bgm-body">
+                      {bgmList.length > 0 && (
+                        <div className="yt-bgm-chips">
                           {bgmList.map(t => {
                             const order = bgmIds.indexOf(t.track_id)
                             const on = order >= 0
@@ -876,33 +911,25 @@ export function StudioPage({
                                   )
                                 }
                               >
-                                {on && (
-                                  <span className="chip-order">{order + 1}. </span>
-                                )}
+                                {on && <span className="chip-order">{order + 1}. </span>}
                                 {t.name}
-                                {t.duration_sec
-                                  ? ` · ${t.duration_sec.toFixed(0)}s`
-                                  : ''}
-                                {t.needs_attribution ? ' · CC' : ''}
                               </button>
                             )
                           })}
                         </div>
                       )}
-                      <label className="bgm-vol">
-                        <span className="bgm-vol-label">
-                          Volume: {(bgmVolume * 100).toFixed(0)}%
-                        </span>
+                      <div className="yt-bgm-vol-row">
+                        <span>Âm lượng: {(bgmVolume * 100).toFixed(0)}%</span>
                         <input
                           type="range"
-                          className="bgm-range"
+                          className="yt-bgm-slider"
                           min={0}
                           max={0.5}
                           step={0.01}
                           value={bgmVolume}
                           onChange={e => setBgmVolume(parseFloat(e.target.value))}
                         />
-                      </label>
+                      </div>
                     </div>
                   )}
                 </div>
