@@ -25,29 +25,30 @@
 }
 
 /* --------------------------------------------------------------------------
-   1. Studio Hero Creation Banner
+   1. Studio Hero Creation Banner (SaaS Light Mode Harmonized)
    -------------------------------------------------------------------------- */
 .studio-hero-banner {
-  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #2e1065 100%);
-  border-radius: 16px;
-  padding: 24px 28px;
-  color: #ffffff;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 55%, #eff6ff 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 20px 24px;
+  color: #0f172a;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 10px 28px -6px rgba(15, 23, 42, 0.22);
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.03);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .studio-hero-banner::before {
   content: '';
   position: absolute;
-  top: -40px;
+  top: -50px;
   right: -40px;
-  width: 240px;
-  height: 240px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.3) 0%, rgba(236, 72, 153, 0) 70%);
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.07) 0%, rgba(99, 102, 241, 0) 70%);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -72,39 +73,38 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
   padding: 3px 9px;
   border-radius: 20px;
   font-size: 11px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #2563eb;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   width: fit-content;
 }
 
 .studio-hero-title {
-  font-size: 22px;
-  font-weight: 800;
-  color: #ffffff;
+  font-size: 21px;
+  font-weight: 700;
+  color: #0f172a;
   margin: 0;
   letter-spacing: -0.02em;
 }
 
 .studio-hero-desc {
-  font-size: 13px;
-  color: #cbd5e1;
+  font-size: 12.5px;
+  color: #64748b;
   margin: 0;
-  max-width: 580px;
-  line-height: 1.4;
+  max-width: 620px;
+  line-height: 1.45;
 }
 
 .studio-hero-sync-btn {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #ffffff;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #334155;
   border-radius: 8px;
   padding: 7px 13px;
   font-size: 12px;
@@ -113,13 +113,14 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  backdrop-filter: blur(6px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: all 0.15s ease;
 }
 
 .studio-hero-sync-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.35);
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
 }
 
 /* Quick Creation Cards */
@@ -138,23 +139,23 @@
 }
 
 .studio-create-card {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 13px 15px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .studio-create-card:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: #ffffff;
+  border-color: #cbd5e1;
   transform: translateY(-2px);
-  box-shadow: 0 8px 18px -4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 6px 18px -4px rgba(0, 0, 0, 0.07);
 }
 
 .studio-create-left {
@@ -173,36 +174,37 @@
   flex-shrink: 0;
 }
 
+/* Vibrant distinct icon styles kept as requested */
 .studio-create-icon.workflow {
   background: linear-gradient(135deg, #3b82f6, #6366f1);
   color: #ffffff;
-  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 3px 8px rgba(59, 130, 246, 0.25);
 }
 
 .studio-create-icon.veo {
   background: linear-gradient(135deg, #a855f7, #ec4899);
   color: #ffffff;
-  box-shadow: 0 4px 10px rgba(168, 85, 247, 0.3);
+  box-shadow: 0 3px 8px rgba(168, 85, 247, 0.25);
 }
 
 .studio-create-icon.publish {
   background: linear-gradient(135deg, #10b981, #06b6d4);
   color: #ffffff;
-  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 3px 8px rgba(16, 185, 129, 0.25);
 }
 
 .studio-create-info h4 {
   font-size: 13px;
   font-weight: 600;
-  color: #ffffff;
+  color: #0f172a;
   margin: 0 0 2px;
 }
 
 .studio-create-info p {
   font-size: 11.5px;
-  color: #cbd5e1;
+  color: #64748b;
   margin: 0;
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
 .studio-create-arrow {
@@ -211,7 +213,7 @@
 }
 
 .studio-create-card:hover .studio-create-arrow {
-  color: #ffffff;
+  color: #0f172a;
   transform: translateX(3px);
 }
 

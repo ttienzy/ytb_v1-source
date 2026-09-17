@@ -308,15 +308,17 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
         </div>
       )}
 
-      {/* Header Banner */}
+      {/* Header Banner (SaaS Light Mode Harmonized) */}
       <div
         className="card"
         style={{
-          padding: 20,
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
-          color: '#fff',
-          borderRadius: 16,
-          boxShadow: '0 8px 30px rgba(15, 23, 42, 0.25)',
+          padding: '20px 24px',
+          background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 55%, #eff6ff 100%)',
+          border: '1px solid #e2e8f0',
+          borderRadius: 14,
+          boxShadow: '0 4px 16px -2px rgba(0, 0, 0, 0.03)',
+          position: 'relative',
+          overflow: 'hidden',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -324,23 +326,24 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div
                 style={{
-                  width: 36,
-                  height: 36,
+                  width: 38,
+                  height: 38,
                   borderRadius: 10,
-                  background: 'rgba(255,255,255,0.12)',
-                  backdropFilter: 'blur(8px)',
+                  background: '#eff6ff',
+                  border: '1px solid #dbeafe',
                   display: 'grid',
                   placeItems: 'center',
+                  boxShadow: '0 2px 6px rgba(59, 130, 246, 0.15)',
                 }}
               >
-                <Compass size={20} color="#38bdf8" />
+                <Compass size={20} color="#0284c7" />
               </div>
-              <h1 style={{ fontSize: 19, fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>
+              <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, letterSpacing: '-0.02em', color: '#0f172a' }}>
                 Khám Phá Kênh &amp; Săn Video Ẩm Thực
               </h1>
             </div>
-            <p style={{ margin: '6px 0 0', fontSize: 13, color: '#94a3b8' }}>
-              Dùng <strong>AI Gemini</strong> rà soát các kênh ẩm thực tiếng Anh nổi tiếng thế giới ➔ Quét video tự động ➔ Đẩy 1-chạm sang Studio Recap.
+            <p style={{ margin: '6px 0 0', fontSize: 13, color: '#64748b', lineHeight: 1.45 }}>
+              Dùng <strong style={{ color: '#0284c7' }}>AI Gemini</strong> rà soát các kênh ẩm thực tiếng Anh nổi tiếng thế giới ➔ Quét video tự động ➔ Đẩy 1-chạm sang Studio Recap.
             </p>
           </div>
 
@@ -349,7 +352,15 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
               type="button"
               className="btn-p"
               onClick={() => setAddChannelModalOpen(true)}
-              style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.2)', fontSize: 12.5 }}
+              style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                color: '#334155',
+                fontSize: 12.5,
+                fontWeight: 600,
+                boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                cursor: 'pointer',
+              }}
             >
               <Plus size={14} /> Thêm Kênh YouTube
             </button>
@@ -368,15 +379,16 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                 width: '100%',
                 height: 42,
                 borderRadius: 10,
-                border: '1px solid rgba(255,255,255,0.2)',
-                background: 'rgba(255,255,255,0.08)',
-                color: '#fff',
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#0f172a',
                 padding: '0 14px 0 38px',
                 fontSize: 13,
                 outline: 'none',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
               }}
             />
-            <Search size={16} style={{ position: 'absolute', left: 12, top: 13, color: '#94a3b8' }} />
+            <Search size={16} style={{ position: 'absolute', left: 12, top: 13, color: '#64748b' }} />
           </div>
 
           <button
@@ -388,12 +400,16 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
               height: 42,
               padding: '0 18px',
               background: 'linear-gradient(135deg, #0284c7 0%, #4f46e5 100%)',
+              color: '#ffffff',
               fontWeight: 700,
               fontSize: 13,
               display: 'inline-flex',
               alignItems: 'center',
               gap: 8,
-              boxShadow: '0 4px 14px rgba(79, 70, 229, 0.4)',
+              border: 'none',
+              borderRadius: 10,
+              boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)',
+              cursor: 'pointer',
             }}
           >
             {searching ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
@@ -401,7 +417,7 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
           </button>
         </div>
 
-        {/* Professional Quick Category Tags (No Childish Icons) */}
+        {/* Professional Quick Category Tags */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
           {QUICK_CATEGORIES.map(cat => {
             const active = activeCategory === cat.id
@@ -414,15 +430,16 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                   height: 30,
                   padding: '0 12px',
                   borderRadius: 6,
-                  border: active ? '1.5px solid #38bdf8' : '1px solid rgba(255,255,255,0.15)',
-                  background: active ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255,255,255,0.05)',
-                  color: active ? '#38bdf8' : '#cbd5e1',
+                  border: active ? '1.5px solid #0284c7' : '1px solid #e2e8f0',
+                  background: active ? '#e0f2fe' : '#ffffff',
+                  color: active ? '#0369a1' : '#475569',
                   fontSize: 12,
                   fontWeight: active ? 700 : 500,
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   whiteSpace: 'nowrap',
+                  boxShadow: active ? 'none' : '0 1px 2px rgba(0,0,0,0.02)',
                   transition: 'all 0.15s ease',
                 }}
               >
