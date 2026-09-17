@@ -1,0 +1,1210 @@
+/* ==========================================================================
+   Dashboard V5 Styling - Professional SaaS & Media Studio (Stripe / Tremor / Vercel)
+   ========================================================================== */
+
+.studio-dashboard {
+  padding: 24px 32px 64px;
+  max-width: 1440px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  color: #0f172a;
+  animation: studioFadeIn 0.25s ease-out;
+}
+
+@keyframes studioFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   1. Studio Hero Creation Banner
+   -------------------------------------------------------------------------- */
+.studio-hero-banner {
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #2e1065 100%);
+  border-radius: 16px;
+  padding: 24px 28px;
+  color: #ffffff;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 28px -6px rgba(15, 23, 42, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.studio-hero-banner::before {
+  content: '';
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 240px;
+  height: 240px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.3) 0%, rgba(236, 72, 153, 0) 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.studio-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  position: relative;
+  z-index: 1;
+}
+
+.studio-hero-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.studio-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  width: fit-content;
+}
+
+.studio-hero-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.studio-hero-desc {
+  font-size: 13px;
+  color: #cbd5e1;
+  margin: 0;
+  max-width: 580px;
+  line-height: 1.4;
+}
+
+.studio-hero-sync-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(6px);
+  transition: all 0.15s ease;
+}
+
+.studio-hero-sync-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* Quick Creation Cards */
+.studio-creation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 900px) {
+  .studio-creation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.studio-create-card {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(8px);
+}
+
+.studio-create-card:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px -4px rgba(0, 0, 0, 0.3);
+}
+
+.studio-create-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.studio-create-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.studio-create-icon.workflow {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);
+}
+
+.studio-create-icon.veo {
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(168, 85, 247, 0.3);
+}
+
+.studio-create-icon.publish {
+  background: linear-gradient(135deg, #10b981, #06b6d4);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+}
+
+.studio-create-info h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0 0 2px;
+}
+
+.studio-create-info p {
+  font-size: 11.5px;
+  color: #cbd5e1;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.studio-create-arrow {
+  color: #94a3b8;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.studio-create-card:hover .studio-create-arrow {
+  color: #ffffff;
+  transform: translateX(3px);
+}
+
+/* --------------------------------------------------------------------------
+   2. KPI Production Metrics Strip
+   -------------------------------------------------------------------------- */
+.studio-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1024px) {
+  .studio-kpi-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .studio-kpi-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.studio-kpi-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+  transition: all 0.15s ease;
+}
+
+.studio-kpi-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.studio-kpi-card.alert {
+  border-left: 3px solid #ef4444;
+}
+
+.studio-kpi-card.success {
+  border-left: 3px solid #10b981;
+}
+
+.studio-kpi-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.studio-kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 1px 0;
+}
+
+.studio-kpi-meta {
+  font-size: 11.5px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.studio-kpi-meta.alert {
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.studio-kpi-meta.success {
+  color: #16a34a;
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   3. Tremor & Stripe SaaS Charts Grid
+   -------------------------------------------------------------------------- */
+.studio-charts-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 1080px) {
+  .studio-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.studio-chart-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.studio-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.studio-chart-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.studio-chart-sub {
+  font-size: 11.5px;
+  color: #64748b;
+  margin: 2px 0 0;
+}
+
+/* Sleek Segmented Tab Switcher (Stripe style) */
+.chart-mode-tabs {
+  display: inline-flex;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: 7px;
+  gap: 2px;
+}
+
+.chart-tab-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chart-tab-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.chart-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-action-link {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #2563eb;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.chart-action-link:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+/* Weekly Publishing Horizon Strip (Clean Minimalist Micro Timeline) */
+.weekly-horizon-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 4px;
+}
+
+@media (max-width: 960px) {
+  .weekly-horizon-strip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 580px) {
+  .weekly-horizon-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.horizon-day-col {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 165px;
+  transition: all 0.15s ease;
+  overflow: hidden;
+}
+
+.horizon-day-col:hover {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.horizon-day-col.today {
+  border-color: #3b82f6;
+  background: #f0f7ff;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+}
+
+/* Day Header */
+.horizon-day-header {
+  padding: 7px 4px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.horizon-day-col.today .horizon-day-header {
+  background: #eff6ff;
+  border-bottom-color: #dbeafe;
+}
+
+.horizon-day-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  letter-spacing: -0.01em;
+}
+
+.horizon-day-col.today .horizon-day-name {
+  color: #1d4ed8;
+}
+
+.horizon-day-date {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.horizon-day-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-top: 1px;
+  letter-spacing: 0.01em;
+}
+
+.horizon-day-badge.active {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.horizon-day-badge.empty {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+/* Day Content Events Body */
+.horizon-day-body {
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.horizon-slots-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Single-line Micro Slot Pill */
+.horizon-slot-pill {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 4px 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: default;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.horizon-slot-pill:hover {
+  transform: translateY(-1px);
+  border-color: #94a3b8;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.06);
+}
+
+.horizon-slot-pill.yt {
+  border-left: 2.5px solid #ef4444;
+}
+
+.horizon-slot-pill.tt {
+  border-left: 2.5px solid #06b6d4;
+}
+
+.horizon-slot-pill.fb {
+  border-left: 2.5px solid #8b5cf6;
+}
+
+.horizon-pill-tag {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 3.5px;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.horizon-pill-tag.yt {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.horizon-pill-tag.tt {
+  background: #cffafe;
+  color: #0e7490;
+}
+
+.horizon-pill-tag.fb {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.horizon-pill-time {
+  font-size: 10px;
+  font-weight: 600;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: -0.02em;
+}
+
+/* More Chip */
+.horizon-more-chip {
+  font-size: 9px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  border-radius: 4px;
+  padding: 3px 2px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
+.horizon-more-chip:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* Empty State Slot in Day Column */
+.horizon-empty-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 70px;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 8px 2px;
+  gap: 4px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.horizon-empty-slot:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.horizon-empty-icon-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.horizon-empty-slot:hover .horizon-empty-icon-btn {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  transform: scale(1.08);
+}
+
+.horizon-empty-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: #2563eb;
+  white-space: nowrap;
+}
+
+/* Smooth Area Spline Chart (Vercel / Stripe Style) */
+.stripe-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  margin-top: 4px;
+}
+
+.stripe-svg-chart {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.stripe-grid-line {
+  stroke: #f1f5f9;
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.stripe-axis-label {
+  font-size: 9.5px;
+  fill: #94a3b8;
+  font-weight: 500;
+}
+
+.stripe-area-fill {
+  transition: d 0.3s ease;
+}
+
+.stripe-line-path {
+  fill: none;
+  stroke: #6366f1;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: d 0.3s ease;
+}
+
+.stripe-dot {
+  cursor: pointer;
+  transition: r 0.15s ease, stroke-width 0.15s ease;
+}
+
+.stripe-dot:hover {
+  r: 5.5;
+  stroke-width: 3;
+}
+
+/* Tooltip floating box */
+.stripe-tooltip-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: #64748b;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+}
+
+/* Multi-Platform Share Progress Bar */
+.platform-share-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.platform-share-bar {
+  height: 8px;
+  width: 100%;
+  background: #f1f5f9;
+  border-radius: 20px;
+  display: flex;
+  overflow: hidden;
+}
+
+.platform-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.platform-share-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.platform-share-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.platform-color-chip {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   4. Main Studio Workspace: Channels Matrix & Video Projects Grid
+   -------------------------------------------------------------------------- */
+.studio-main-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 18px;
+}
+
+@media (max-width: 1080px) {
+  .studio-main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.studio-section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.studio-section-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fafbfc;
+}
+
+.studio-section-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.studio-section-action {
+  background: none;
+  border: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: #4f46e5;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+}
+
+.studio-section-action:hover {
+  text-decoration: underline;
+}
+
+.studio-section-body {
+  padding: 16px 18px;
+  flex: 1;
+}
+
+/* --------------------------------------------------------------------------
+   5. Channel Broadcast Matrix List WITH REAL AVATAR IMAGES
+   -------------------------------------------------------------------------- */
+.channel-matrix-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.channel-matrix-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid #f1f5f9;
+  background: #ffffff;
+  transition: all 0.15s ease;
+}
+
+.channel-matrix-item:hover {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.channel-matrix-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Real Channel Avatar Styling */
+.channel-avatar-wrapper {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+}
+
+.channel-avatar-img {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  object-fit: cover;
+  border: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  display: block;
+}
+
+.channel-avatar-fallback {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  text-transform: uppercase;
+}
+
+.channel-avatar-fallback.youtube {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.channel-avatar-fallback.tiktok {
+  background: linear-gradient(135deg, #0f172a, #334155);
+}
+
+.channel-avatar-fallback.pippit,
+.channel-avatar-fallback.facebook {
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+}
+
+.channel-avatar-dot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+}
+
+.channel-avatar-dot.unposted {
+  background: #ef4444;
+}
+
+.channel-avatar-dot.healthy {
+  background: #10b981;
+}
+
+.channel-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.channel-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.channel-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 190px;
+}
+
+.channel-badge-platform {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.channel-badge-platform.youtube {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.channel-badge-platform.tiktok {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.channel-badge-platform.pippit,
+.channel-badge-platform.facebook {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
+.channel-progress-text {
+  font-size: 11.5px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.channel-matrix-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.channel-status-pill {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.channel-status-pill.unposted {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.channel-status-pill.healthy {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.channel-schedule-btn {
+  background: #0f172a;
+  color: #ffffff;
+  border: 1px solid #0f172a;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.channel-schedule-btn:hover {
+  background: #1e293b;
+  border-color: #1e293b;
+}
+
+.channel-schedule-btn.secondary {
+  background: #ffffff;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.channel-schedule-btn.secondary:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* --------------------------------------------------------------------------
+   6. Visual Video Project Cards
+   -------------------------------------------------------------------------- */
+.video-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.video-project-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #ffffff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.video-project-card:hover {
+  transform: translateY(-2px);
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 16px -4px rgba(0, 0, 0, 0.08);
+}
+
+.video-card-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #0f172a;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-card-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-card-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+}
+
+.video-card-play-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  cursor: pointer;
+}
+
+.video-project-card:hover .video-card-play-overlay {
+  opacity: 1;
+}
+
+.video-card-play-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: scale(0.9);
+  transition: transform 0.15s ease;
+}
+
+.video-project-card:hover .video-card-play-btn {
+  transform: scale(1);
+}
+
+.video-card-badge-ratio {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.video-card-badge-size {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  color: #cbd5e1;
+  font-size: 9.5px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.video-card-body {
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.video-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.video-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 3px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.video-card-date {
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.video-card-folder-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  transition: all 0.15s ease;
+}
+
+.video-card-folder-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.studio-empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: #94a3b8;
+}
+
+.studio-empty-state p {
+  font-size: 12.5px;
+  margin: 6px 0 10px;
+}

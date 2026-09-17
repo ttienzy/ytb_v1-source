@@ -17,9 +17,10 @@ import { VideoPage } from './features/video/VideoPage'
 import { VeoStudioPage } from './features/veo-studio/VeoStudioPage'
 import { YouTubePublisherPage } from './features/youtube-publisher/YouTubePublisherPage'
 import { WorkflowPage } from './features/workflow/WorkflowPage'
+import { DashboardPage } from './features/dashboard/DashboardPage'
 
 export function App() {
-  const [activePage, setActivePage] = useState('Khám Phá Kênh')
+  const [activePage, setActivePage] = useState('Dashboard')
   const [collapsed, setCollapsed] = useState(false)
   const [studioBatchUrls, setStudioBatchUrls] = useState<string[]>([])
   const [monitorSummary, setMonitorSummary] = useState<PublisherDailySummary | null>(null)
@@ -170,6 +171,11 @@ export function App() {
             <HistoryPage />
           ) : activePage === 'Crawl truyện' ? (
             <StoriesPage />
+          ) : activePage === 'Dashboard' ? (
+            <DashboardPage
+              setActivePage={setActivePage}
+              onOpenChannelHealth={() => setShowHealthModal(true)}
+            />
           ) : (
             <section className="empty-state">
               <div className="empty-illustration">
