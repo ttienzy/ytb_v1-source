@@ -31,6 +31,7 @@ function harness() {
     YhhmEf: [asset(2)],
     nprQif: [asset(2)],
     MZZa6b: [asset(2)],
+    jIps6: [asset(2)],
     jwpduf: [asset(3)],
     as29s: [asset(3, 'https://flow-content.google/result.mp4?Signature=test')],
   };
@@ -244,6 +245,61 @@ test('adapter uploads ingredient images and dispatches MZZa6b with reference ass
     [null, 'uploaded-frame-media-id'],
   ]);
   assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép hóa rồng');
+});
+
+test('adapter dispatches uploaded video references through jIps6 video edit', async () => {
+  const h = harness();
+  const result = await h.run({
+    ...verifiedRequest(),
+    input_mode: 'video_edit',
+    prompt: 'Keep the same subject and motion in a sunny garden.',
+    duration_seconds: 10,
+    resolution: '360p',
+    provider_model_id: 'abra_edit_360p',
+    reference_video_id: 'uploaded-video-media-id',
+    reference_video_start_seconds: 0,
+    reference_video_end_seconds: 10,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.length, 3);
+  assert.equal(h.calls[0].rpcId, 'jIps6');
+  const createPayload = JSON.parse(h.calls[0].outer[0][0][1]);
+  const editRequest = createPayload[0][0];
+  assert.deepEqual(editRequest[0], [null, 'uploaded-video-media-id', 0, 240]);
+  assert.equal(editRequest[1][2][0][0][0], 'Keep the same subject and motion in a sunny garden.');
+  assert.equal(editRequest[2], 'abra_edit_360p');
+  assert.equal(editRequest[3], 1);
+  assert.deepEqual(editRequest[12], [4]);
+});
+
+test('adapter combines a video motion source with an uploaded image reference', async () => {
+  const h = harness();
+  const result = await h.run({
+    ...verifiedRequest(),
+    input_mode: 'video_edit',
+    prompt: 'Use the woman from the image and preserve the dance motion from the video.',
+    resolution: '360p',
+    provider_model_id: 'abra_edit_360p',
+    reference_video_id: 'uploaded-video-media-id',
+    reference_video_start_seconds: 0,
+    reference_video_end_seconds: 10,
+    ingredient_images: [{
+      base64: Buffer.from('FAKE_REFERENCE_IMAGE').toString('base64'),
+      mime: 'image/jpeg',
+      filename: 'subject.jpg',
+    }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.length, 4);
+  assert.equal(h.calls[0].rpcId, 'maseQ');
+  assert.equal(h.calls[1].rpcId, 'jIps6');
+  const createPayload = JSON.parse(h.calls[1].outer[0][0][1]);
+  const editRequest = createPayload[0][0];
+  assert.deepEqual(editRequest[0], [null, 'uploaded-video-media-id', 0, 240]);
+  assert.deepEqual(editRequest[8], [[null, 'uploaded-frame-media-id']]);
+  assert.deepEqual(editRequest[12], [4]);
 });
 
 

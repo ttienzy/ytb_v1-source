@@ -313,3 +313,54 @@ def delete_image(image_id: str):
     if not ok:
         raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tìm thấy")
     return {"ok": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Video Upload (reference for Video-to-Video Omni Flash 1.1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel
+
+
+class VideoUploadRequest(BaseModel):
+    project_id: str
+    video_base64: str
+    video_mime: str = "video/mp4"
+    video_filename: str = "reference_video.mp4"
+
+
+@router.post("/upload-video")
+def upload_video_reference(req: VideoUploadRequest):
+    """Upload video lên Google Flow bằng resumable upload để dùng làm reference.
+
+    Chỉ hoạt động với Omni Flash 1.1 (video-to-video).
+    Trả về media_id để dùng trong job submission.
+    """
+    from app.veo import bridge
+
+    ext = bridge.get_extension_info()
+    if not ext.get("connected"):
+        raise HTTPException(status_code=503, detail="Extension chưa kết nối. Hãy mở Chrome + Extension.")
+
+    req_id = bridge.request_video_upload(
+        project_id=req.project_id,
+        video_base64=req.video_base64,
+        video_mime=req.video_mime,
+        video_filename=req.video_filename,
+    )
+    if not req_id:
+        raise HTTPException(status_code=503, detail="Bridge queue đầy hoặc Extension chưa sẵn sàng.")
+
+    result = bridge.wait_video_upload_result(req_id, timeout=120.0)
+    if not result:
+        raise HTTPException(status_code=504, detail="Timeout chờ Extension upload video (120s).")
+
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Upload video thất bại.")
+
+    return {
+        "ok": True,
+        "media_id": result["media_id"],
+        "project_id": result.get("project_id", req.project_id),
+        "filename": req.video_filename,
+    }

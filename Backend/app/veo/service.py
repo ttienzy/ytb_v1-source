@@ -99,6 +99,7 @@ def _load_jobs() -> None:
                 if job.get("status") in ("captcha", "submitting", "generating", "downloading"):
                     job["status"] = "error"
                     job["error_message"] = "Job interrupted by server restart"
+                    job.update(_classify_job_error(job["error_message"], job.get("status")))
                     job["updated_at"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
             logger.warning("Failed to load jobs: %s", e)
@@ -284,6 +285,28 @@ def _build_profiles() -> list[dict[str, Any]]:  # noqa: C901
                         "runtime_verified": False,
                         "note": f"I2V {mode.value} — Theo Google Flow Help",
                     })
+
+    # Omni 1.1 Flash — edit uploaded/generated video with optional ingredients.
+    # Google documents video edits separately from ordinary Omni generations:
+    # 40 credits per generation for every supported length and resolution.
+    # The selected source segment controls the edit length (up to 10 seconds).
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for res in ("720p", "360p"):
+            rows.append({
+                "id": f"omni_flash_video_edit_{aspect_slug}_10s_{res}",
+                "model_display_name": "Omni 1.1 Flash",
+                "provider_model_id": "abra_edit_360p" if res == "360p" else "abra_edit",
+                "input_mode": InputMode.VIDEO_EDIT.value,
+                "aspect_ratio": aspect,
+                "duration_seconds": 10,
+                "resolution": res,
+                "num_outputs": 1,
+                "credit_cost": 40,
+                "documented": True,
+                "runtime_verified": aspect == "9:16" and res == "360p",
+                "note": "Video edit costs 40 credits per generation; source segment up to 10 seconds; 1080p is a separate upscale step",
+            })
 
     # Veo 3.1 Lite — frames (10 credits) + ingredients (10 credits)
     for mode in (InputMode.FRAMES, InputMode.INGREDIENTS):
@@ -629,6 +652,15 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         if not request.image_path and not request.end_image_path:
             raise ValueError("Chế độ Khung hình (Frames): Vui lòng chọn ít nhất Khung hình bắt đầu (Start Frame).")
 
+    if getattr(request.input_mode, "value", str(request.input_mode)) == "video_edit":
+        if not (request.reference_video_id or "").strip():
+            raise ValueError("Video edit mode requires an uploaded reference_video_id")
+        end_seconds = request.reference_video_end_seconds or request.reference_video_start_seconds + 10
+        if end_seconds <= request.reference_video_start_seconds:
+            raise ValueError("Reference video end time must be after its start time")
+        if end_seconds - request.reference_video_start_seconds > 10:
+            raise ValueError("Flow video references support clips up to 10 seconds")
+
     job_id = str(uuid.uuid4())[:12]
     now = datetime.now(timezone.utc).isoformat()
 
@@ -648,8 +680,16 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         "image_path": request.image_path,
         "end_image_path": request.end_image_path,
         "ingredient_image_paths": request.ingredient_image_paths or [],
+        "ingredient_media_ids": request.ingredient_media_ids or [],
+        "reference_video_id": request.reference_video_id,
+        "reference_video_start_seconds": request.reference_video_start_seconds,
+        "reference_video_end_seconds": request.reference_video_end_seconds,
         "current_step": "Đã tạo job, đang chờ xử lý",
         "error_message": None,
+        "error_code": None,
+        "error_stage": None,
+        "error_hint": None,
+        "error_retryable": None,
         "output_files": [],
         "created_at": now,
         "updated_at": now,
@@ -782,6 +822,9 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
     is_frames = (input_mode == "frames")
     is_ingredients = (input_mode == "ingredients")
 
+    if input_mode == "video_edit":
+        return "abra_edit_360p" if (job.get("resolution") or "720p").lower() == "360p" else "abra_edit"
+
     if "omni" in model_name or "flash" in model_name:
         dur_mapped = dur if dur in (4, 6, 8, 10) else 6
         if is_ingredients:
@@ -819,7 +862,7 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     model_name = job.get("model_display_name") or "Omni 1.1 Flash"
     res = job.get("resolution") or "720p"
     mode = job.get("input_mode") or "text_to_video"
-    if mode not in ("text_to_video", "frames", "ingredients"):
+    if mode not in ("text_to_video", "frames", "ingredients", "video_edit"):
         raise ValueError(f"Unsupported input_mode: {mode}")
     provider_model_id = _resolve_provider_model_id(job)
 
@@ -833,11 +876,36 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Ingredient image path is required")
         ingredient_data_list.append(enc)
 
+    ingredient_media_ids = [
+        str(media_id).strip()
+        for media_id in (job.get("ingredient_media_ids") or [])
+        if str(media_id).strip()
+    ]
+    reference_video_id = str(job.get("reference_video_id") or "").strip()
+    reference_video_start_seconds = float(job.get("reference_video_start_seconds") or 0)
+    raw_reference_end = job.get("reference_video_end_seconds")
+    reference_video_end_seconds = (
+        float(raw_reference_end)
+        if raw_reference_end is not None
+        else reference_video_start_seconds + 10
+    )
+
     if mode == "ingredients" and not ingredient_data_list and start_frame_data:
         ingredient_data_list.append(start_frame_data)
 
-    if mode == "ingredients" and not ingredient_data_list:
-        raise ValueError("Ingredients mode requires at least one readable ingredient image")
+    if mode == "ingredients" and not ingredient_data_list and not ingredient_media_ids:
+        raise ValueError("Ingredients mode requires at least one readable image or uploaded media ID")
+    elif mode == "video_edit":
+        if not reference_video_id:
+            raise ValueError("Video edit mode requires an uploaded reference_video_id")
+        if res not in ("360p", "720p"):
+            raise ValueError("Video edit mode supports only 360p or 720p generation")
+        if int(job.get("num_outputs") or 1) != 1:
+            raise ValueError("Video edit adapter currently supports exactly one output")
+        if reference_video_start_seconds < 0 or reference_video_end_seconds <= reference_video_start_seconds:
+            raise ValueError("Reference video trim range is invalid")
+        if reference_video_end_seconds - reference_video_start_seconds > 10:
+            raise ValueError("Flow video references support clips up to 10 seconds")
     elif mode == "frames":
         if not start_frame_data:
             raise ValueError("Frames mode requires a readable Start Frame before an End Frame")
@@ -852,7 +920,7 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         aspect,
         bool(start_frame_data),
         bool(end_frame_data),
-        len(ingredient_data_list),
+        len(ingredient_data_list) + len(ingredient_media_ids),
     )
 
     return {
@@ -868,6 +936,10 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         "image_path": job.get("image_path"),
         "end_image_path": job.get("end_image_path"),
         "ingredient_image_paths": job.get("ingredient_image_paths") or [],
+        "ingredient_media_ids": ingredient_media_ids,
+        "reference_video_id": reference_video_id or None,
+        "reference_video_start_seconds": reference_video_start_seconds,
+        "reference_video_end_seconds": reference_video_end_seconds,
         # Base64 encoded payload cho Extension tải lên Google Flow
         "image_base64": start_frame_data["base64"] if start_frame_data else None,
         "image_mime": start_frame_data["mime"] if start_frame_data else None,
@@ -1003,16 +1075,118 @@ def _recover_current_scene(job_id: str) -> None:
         _update_job(job, JobStatus.ERROR, error=f"Khôi phục Flow thất bại: {exc}")
 
 
+def _classify_job_error(error: str, previous_status: str | None = None) -> dict[str, Any]:
+    """Return stable, UI-friendly metadata without hiding the provider's raw error."""
+    message = (error or "").lower()
+
+    if "bridge server" in message:
+        return {
+            "error_code": "BRIDGE_OFFLINE",
+            "error_stage": "connection",
+            "error_hint": "Khởi động lại Backend/Bridge rồi kiểm tra trạng thái kết nối trước khi thử lại.",
+            "error_retryable": True,
+        }
+    if "extension" in message and ("chưa kết nối" in message or "không thể gửi" in message):
+        return {
+            "error_code": "EXTENSION_DISCONNECTED",
+            "error_stage": "connection",
+            "error_hint": "Mở Google Flow trong Chrome, bật FlowsVeo-Clean và chờ extension báo đã kết nối.",
+            "error_retryable": True,
+        }
+    if "tài khoản google labs" in message or "đăng nhập" in message:
+        return {
+            "error_code": "FLOW_AUTH_REQUIRED",
+            "error_stage": "authentication",
+            "error_hint": "Đăng nhập đúng tài khoản Google Flow trong tab Chrome đang được extension sử dụng.",
+            "error_retryable": True,
+        }
+    if "captcha" in message and ("queue" in message or "đang bận" in message):
+        return {
+            "error_code": "CAPTCHA_QUEUE_BUSY",
+            "error_stage": "captcha",
+            "error_hint": "Extension đang xử lý yêu cầu khác. Chờ một lúc rồi thử lại.",
+            "error_retryable": True,
+        }
+    if "captcha" in message:
+        return {
+            "error_code": "CAPTCHA_FAILED",
+            "error_stage": "captcha",
+            "error_hint": "Giữ tab Google Flow mở, kiểm tra phiên đăng nhập và thử lại.",
+            "error_retryable": True,
+        }
+    if "not found" in message or "không tìm thấy" in message or "empty" in message or "rỗng" in message:
+        return {
+            "error_code": "REFERENCE_INVALID",
+            "error_stage": "reference_upload",
+            "error_hint": "Chọn lại file tham chiếu còn tồn tại và upload lại trước khi chạy.",
+            "error_retryable": True,
+        }
+    if "timeout" in message and ("google flow" in message or "kết quả" in message):
+        return {
+            "error_code": "FLOW_TIMEOUT",
+            "error_stage": "generation",
+            "error_hint": "Flow phản hồi quá lâu. Kiểm tra tab Flow; nếu chưa tạo video, hãy thử lại.",
+            "error_retryable": True,
+        }
+    if "no result" in message or "không trả video" in message or "response không hợp lệ" in message:
+        return {
+            "error_code": "FLOW_EMPTY_RESULT",
+            "error_stage": "generation",
+            "error_hint": "Mở Flow kiểm tra scene hiện tại. Thử lại với prompt hoặc file tham chiếu khác nếu scene bị từ chối.",
+            "error_retryable": True,
+        }
+    if "render ended with status" in message:
+        return {
+            "error_code": "FLOW_RENDER_FAILED",
+            "error_stage": "generation",
+            "error_hint": "Flow đã kết thúc render nhưng không cung cấp lý do cụ thể. Mở scene trên Flow để xem cảnh báo về prompt, nội dung, credits hoặc tham chiếu.",
+            "error_retryable": True,
+        }
+    if "google flow:" in message:
+        return {
+            "error_code": "FLOW_REJECTED",
+            "error_stage": "generation",
+            "error_hint": "Kiểm tra nội dung prompt, file tham chiếu, credits và cảnh báo trực tiếp trên Google Flow.",
+            "error_retryable": True,
+        }
+    if previous_status == JobStatus.DOWNLOADING.value or "tải video" in message:
+        return {
+            "error_code": "DOWNLOAD_FAILED",
+            "error_stage": "download",
+            "error_hint": "Video có thể đã tạo xong trên Flow. Kiểm tra thư viện Flow hoặc dùng chức năng khôi phục scene.",
+            "error_retryable": True,
+        }
+    if "server restart" in message:
+        return {
+            "error_code": "JOB_INTERRUPTED",
+            "error_stage": "backend",
+            "error_hint": "Backend đã khởi động lại khi job đang chạy. Kiểm tra Flow trước khi tạo lại để tránh tốn credits hai lần.",
+            "error_retryable": True,
+        }
+    return {
+        "error_code": "UNKNOWN_ERROR",
+        "error_stage": previous_status or "unknown",
+        "error_hint": "Xem chi tiết lỗi, kiểm tra Backend và tab Google Flow rồi thử lại.",
+        "error_retryable": True,
+    }
+
+
 def _update_job(job: dict, status: JobStatus, step: str = "", error: str | None = None) -> None:
     """Cập nhật trạng thái job."""
+    previous_status = job.get("status")
     job["status"] = status.value
     if step:
         job["current_step"] = step
     if error:
         job["error_message"] = error
         job["current_step"] = f"Lỗi: {error}"
+        job.update(_classify_job_error(error, previous_status))
     elif status != JobStatus.ERROR:
         job["error_message"] = None
+        job["error_code"] = None
+        job["error_stage"] = None
+        job["error_hint"] = None
+        job["error_retryable"] = None
     job["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_jobs()
 
@@ -1032,6 +1206,10 @@ def _job_to_out(job: dict) -> VeoJobOut:
         num_outputs=job.get("num_outputs", 1),
         current_step=job.get("current_step", ""),
         error_message=job.get("error_message"),
+        error_code=job.get("error_code"),
+        error_stage=job.get("error_stage"),
+        error_hint=job.get("error_hint"),
+        error_retryable=job.get("error_retryable"),
         output_files=job.get("output_files", []),
         created_at=job.get("created_at", ""),
         updated_at=job.get("updated_at", ""),

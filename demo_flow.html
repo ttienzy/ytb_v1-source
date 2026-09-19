@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workflow tạo video - UI mẫu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+:root{
+  color-scheme:light;
+  --bg:#F6F7F9; --dot:#D5DAE2; --surface:#fff;
+  --ink:#15181E; --ink-2:#4B5563; --ink-3:#8A93A3;
+  --line:#E5E8EE; --line-2:#EFF1F5;
+  --img:#0E9F8B; --img-soft:#E4F5F2;
+  --vid:#7C5CF0; --vid-soft:#EFEBFD;
+  --txt:#E58A1F; --txt-soft:#FDF0DD;
+  --focus:#2F5BFF;
+}
+html,body{height:100%;margin:0}
+body{
+  font-family:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:var(--bg);color:var(--ink);font-size:13px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+.app{display:grid;grid-template-rows:56px 1fr;height:100vh;height:100dvh}
+
+/* Thanh trên */
+.topbar{display:flex;align-items:center;gap:14px;padding:0 20px;background:#fff;border-bottom:1px solid var(--line);z-index:10}
+.mark{width:30px;height:30px;border-radius:9px;background:var(--ink);color:#fff;display:grid;place-items:center;flex:none}
+.mark svg{width:16px;height:16px}
+.wf-name{width:280px;max-width:40vw;height:34px;padding:0 10px;border:1px solid transparent;border-radius:8px;background:transparent;font-size:15px;font-weight:600}
+.wf-name:hover{border-color:var(--line)}
+.wf-name:focus{border-color:var(--focus);outline:0;background:#fff}
+.badge{font-size:12px;font-weight:500;color:var(--ink-2);background:var(--line-2);padding:3px 10px;border-radius:999px}
+.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:#fff;font-weight:500;font-size:13px;cursor:pointer;transition:background .15s,border-color .15s}
+.btn:hover{background:var(--line-2)}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+.btn.primary:hover{background:#2A2F3A}
+.btn:disabled{opacity:.6;cursor:progress}
+.btn .ic{width:16px;height:16px}
+
+.main{display:grid;grid-template-columns:232px 1fr;min-height:0}
+
+/* Thanh thêm node */
+.palette{background:#fff;border-right:1px solid var(--line);padding:14px 12px;overflow:auto}
+.search{width:100%;height:36px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:#FAFBFC}
+.search:focus{outline:2px solid var(--focus);border-color:transparent;background:#fff}
+.pal-group h3{margin:18px 8px 6px;font-size:12px;font-weight:600;color:var(--ink-3)}
+.pal-item{display:flex;align-items:center;gap:10px;width:100%;padding:8px;border:0;border-radius:10px;background:none;text-align:left;cursor:pointer}
+.pal-item:hover{background:var(--line-2)}
+.pal-item b{display:block;font-weight:500}
+.pal-item small{display:block;color:var(--ink-3);font-size:11.5px;line-height:1.3}
+
+/* Canvas */
+.canvas-wrap{position:relative;min-width:0;min-height:0}
+.canvas{
+  position:absolute;inset:0;overflow:auto;
+  background-color:var(--bg);
+  background-image:radial-gradient(var(--dot) 1px,transparent 1px);
+  background-size:20px 20px;background-attachment:local;
+}
+.zoomer{position:relative;margin:24px}
+.stage{position:absolute;left:0;top:0;width:1504px;height:900px;transform-origin:0 0}
+#wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:0}
+.wire{fill:none;stroke-width:2.25;stroke-linecap:round}
+.wire.img{stroke:var(--img)}
+.wire.vid{stroke:var(--vid)}
+.wire.txt{stroke:var(--txt)}
+.wire.off{stroke:#B4BBC8;stroke-dasharray:5 6}
+
+/* Node */
+.node{
+  --c:var(--txt);--c-soft:var(--txt-soft);
+  position:absolute;width:300px;background:#fff;border:1px solid var(--line);border-radius:14px;z-index:1;
+  box-shadow:0 1px 2px rgba(16,24,40,.05),0 14px 30px -18px rgba(16,24,40,.22);
+  transition:border-color .2s,box-shadow .2s;
+}
+.node[data-type="img"]{--c:var(--img);--c-soft:var(--img-soft)}
+.node[data-type="vid"]{--c:var(--vid);--c-soft:var(--vid-soft)}
+.node.running{border-color:var(--focus);box-shadow:0 0 0 4px rgba(47,91,255,.14),0 14px 30px -18px rgba(16,24,40,.22)}
+.node-h{position:relative;display:flex;align-items:center;gap:10px;height:52px;padding:0 14px;border-bottom:1px solid var(--line-2);cursor:grab;user-select:none;touch-action:none}
+.node-h h2{flex:1;min-width:0;margin:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip{width:28px;height:28px;flex:none;border-radius:8px;display:grid;place-items:center;background:var(--c-soft);color:var(--c)}
+.chip.out{background:var(--line-2);color:var(--ink)}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tag{flex:none;font-size:11.5px;font-weight:500;color:var(--ink-2);background:var(--line-2);padding:2px 9px;border-radius:999px}
+.node-b{padding:14px}
+
+/* Cổng nối */
+.port{position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;border:2.5px solid;z-index:2}
+.port.img{border-color:var(--img)}
+.port.vid{border-color:var(--vid)}
+.port.txt{border-color:var(--txt)}
+.port.img.on{background:var(--img)}
+.port.vid.on{background:var(--vid)}
+.port.out{right:-7px;top:19px}
+.in-row{position:relative;display:flex;align-items:center;gap:8px;min-height:32px}
+.in-row .port{left:-21px;top:50%;margin-top:-7px}
+.in-label{font-weight:500}
+.in-status{margin-left:auto;font-size:12px;color:var(--ink-3)}
+.in-status.ok{color:#1B8E5A}
+
+/* Vùng tải lên */
+.drop{position:relative;height:132px;border-radius:10px}
+.drop-empty{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  border:1.5px dashed #C7CDD8;border-radius:10px;background:#FAFBFC;cursor:pointer;text-align:center;
+  transition:border-color .15s,background .15s;
+}
+.drop-empty:hover,.drop.over .drop-empty,.drop-empty:focus-within{border-color:var(--c);background:var(--c-soft)}
+.drop-empty .up{width:34px;height:34px;border-radius:50%;background:var(--c-soft);color:var(--c);display:grid;place-items:center;margin-bottom:4px}
+.drop-empty .up .ic{width:18px;height:18px}
+.drop-empty b{font-weight:500}
+.drop-empty small{color:var(--ink-3);font-size:11.5px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.drop-preview{position:absolute;inset:0;border-radius:10px;overflow:hidden;background:#EEF0F4}
+.media{position:absolute;inset:0}
+.media svg,.media img,.media video{display:block;width:100%;height:100%;object-fit:cover}
+.media-bar{
+  position:absolute;left:8px;right:8px;bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:5px 6px 5px 10px;border-radius:8px;background:rgba(255,255,255,.93);backdrop-filter:blur(6px);font-size:12px;
+}
+.media-bar .fname{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.media-bar button{flex:none;border:0;border-radius:6px;background:var(--line-2);padding:3px 9px;font-size:12px;cursor:pointer}
+.media-bar button:hover{background:var(--line)}
+.node[data-filled="true"] .drop-empty{display:none}
+.node[data-filled="false"] .drop-preview{display:none}
+
+.ctrl{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--ink-2)}
+.ctrl input[type=range]{flex:1;min-width:0;accent-color:var(--ink)}
+.ctrl output{min-width:34px;text-align:right;font-weight:500;color:var(--ink)}
+select{height:32px;border:1px solid var(--line);border-radius:8px;padding:0 8px;background:#fff;max-width:170px}
+
+/* Ô nhập prompt */
+textarea{width:100%;min-height:92px;resize:none;margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;line-height:1.55}
+textarea:focus{outline:2px solid var(--focus);outline-offset:0;border-color:transparent}
+.foot{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+.btn-soft{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12.5px;font-weight:500;cursor:pointer}
+.btn-soft:hover{background:var(--line-2)}
+.btn-soft .ic{width:14px;height:14px;color:var(--txt)}
+.count{font-size:12px;color:var(--ink-3)}
+
+.lbl{display:block;margin:14px 0 6px;font-size:12px;font-weight:500;color:var(--ink-2)}
+.tpl{padding:12px;border:1px solid var(--line);border-radius:10px;background:#FAFBFC;font-size:13px;line-height:1.95}
+.tok{display:inline-block;padding:0 7px;border-radius:6px;background:var(--txt-soft);color:#A15A0C;font-weight:500;line-height:1.6}
+.field{width:100%;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.field:focus{outline:2px solid var(--focus);border-color:transparent}
+
+/* Node đầu ra */
+.out-prev{height:150px;margin-top:12px;border-radius:10px;background:linear-gradient(135deg,#F3F5F9,#E8EBF2);display:grid;place-items:center}
+.frame{height:88%;aspect-ratio:9/16;border-radius:7px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.1),0 8px 18px -10px rgba(16,24,40,.25);display:grid;place-items:center;color:var(--ink-3);transition:aspect-ratio .2s}
+.frame .ic{width:22px;height:22px}
+.row2{display:grid;grid-template-columns:76px 1fr;align-items:center;gap:10px;margin-top:10px;font-size:12.5px;color:var(--ink-2)}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:2px;padding:3px;border-radius:9px;background:var(--line-2)}
+.seg label{position:relative;text-align:center}
+.seg input{position:absolute;inset:0;opacity:0;cursor:pointer;margin:0}
+.seg span{display:block;padding:5px 0;border-radius:7px;font-size:12.5px;font-weight:500;color:var(--ink-2)}
+.seg input:checked+span{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(16,24,40,.14)}
+.seg input:focus-visible+span{outline:2px solid var(--focus)}
+.btn.block{width:100%;margin-top:14px;height:40px}
+
+/* Chú giải, zoom, toast */
+.legend{position:absolute;left:16px;bottom:16px;display:flex;flex-wrap:wrap;gap:6px 16px;max-width:calc(100% - 200px);padding:9px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:12px;color:var(--ink-2);box-shadow:0 6px 16px -10px rgba(16,24,40,.25)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:50%;border:2.5px solid}
+.legend .dash{width:18px;height:0;border:0;border-top:2px dashed #B4BBC8;border-radius:0}
+.zoom{position:absolute;right:16px;bottom:16px;display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;box-shadow:0 6px 16px -10px rgba(16,24,40,.25)}
+.zoom button{width:34px;height:34px;border:0;background:none;font-size:16px;cursor:pointer}
+.zoom button:hover{background:var(--line-2)}
+.zoom span{min-width:48px;text-align:center;font-size:12px;font-weight:500}
+.toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);max-width:90vw;padding:9px 14px;border-radius:10px;background:var(--ink);color:#fff;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+.toast.show{opacity:1}
+
+@media (max-width:900px){
+  .main{grid-template-columns:1fr}
+  .palette,.hide-sm{display:none}
+  .wf-name{width:160px}
+  .legend{max-width:calc(100% - 32px);bottom:66px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="3"/><path d="M16 10.5l5-3v9l-5-3z"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></symbol>
+    <symbol id="i-merge" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6c5 0 3 6 8 6M8 18c5 0 3-6 8-6"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16v4M17 18h4"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7.5 9.5L12 5l4.5 4.5M5 19h14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-flow" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 7h4a3 3 0 013 3v4a3 3 0 003 3"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <header class="topbar">
+    <div class="mark"><svg class="ic" style="stroke:#fff"><use href="#i-flow"/></svg></div>
+    <input class="wf-name" value="Video giới thiệu nhân vật" aria-label="Tên workflow">
+    <span class="badge">Bản nháp</span>
+    <div class="spacer"></div>
+    <button class="btn hide-sm" data-demo="Đã lưu bản nháp (demo).">Lưu nháp</button>
+    <button class="btn primary run"><svg class="ic"><use href="#i-play"/></svg><span class="run-label">Chạy workflow</span></button>
+  </header>
+
+  <div class="main">
+    <aside class="palette" aria-label="Thêm node">
+      <input class="search" type="search" placeholder="Tìm node" aria-label="Tìm node">
+      <section class="pal-group">
+        <h3>Đầu vào</h3>
+        <button class="pal-item" data-demo="Bản demo: chưa thêm được node mới."><span class="chip" style="--c:var(--img);--c-soft:var(--img-soft)"><svg class="ic"><use href="#i-image"/></svg></span><span><b>Ảnh tham chiếu</b><small>Nhân vật, bối cảnh, sản phẩm</small></span></button>
+        <button class="pal-item" data-demo="Bản demo: chưa thêm được node mới."><span class="chip" style="--c:var(--vid);--c-soft:var(--vid-soft)"><svg class="ic"><use href="#i-video"/></svg></span><span><b>Video tham chiếu</b><small>Học chuyển động, nhịp dựng</small></span></button>
+      </section>
+      <section class="pal-group">
+        <h3>Xử lý</h3>
+        <button class="pal-item" data-demo="Bản demo: chưa thêm được node mới."><span class="chip"><svg class="ic"><use href="#i-text"/></svg></span><span><b>Prompt</b><small>Viết hoặc gợi ý từ đầu vào</small></span></button>
+        <button class="pal-item" data-demo="Bản demo: chưa thêm được node mới."><span class="chip"><svg class="ic"><use href="#i-merge"/></svg></span><span><b>Ghép prompt</b><small>Gộp nhiều prompt theo mẫu</small></span></button>
+      </section>
+      <section class="pal-group">
+        <h3>Đầu ra</h3>
+        <button class="pal-item" data-demo="Bản demo: chưa thêm được node mới."><span class="chip out"><svg class="ic"><use href="#i-spark"/></svg></span><span><b>Tạo video</b><small>Xuất video từ prompt tổng</small></span></button>
+      </section>
+    </aside>
+
+    <div class="canvas-wrap">
+      <div class="canvas" id="canvas">
+        <div class="zoomer" id="zoomer">
+          <div class="stage" id="stage">
+            <svg id="wires" aria-hidden="true"></svg>
+
+            <!-- Cột 1: đầu vào -->
+            <article class="node" id="n-avatar" data-type="img" data-filled="true" style="left:32px;top:32px">
+              <header class="node-h">
+                <span class="chip"><svg class="ic"><use href="#i-image"/></svg></span>
+                <h2>Ảnh đại diện</h2><span class="tag">Tùy chọn</span>
+                <span class="port out img" id="out-avatar"></span>
+              </header>
+              <div class="node-b">
+                <div class="drop" data-kind="image">
+                  <label class="drop-empty">
+                    <input class="sr" type="file" accept="image/*">
+                    <span class="up"><svg class="ic"><use href="#i-upload"/></svg></span>
+                    <b>Kéo thả hoặc chọn ảnh</b><small>PNG, JPG, WebP, tối đa 10 MB</small>
+                  </label>
+                  <div class="drop-preview">
+                    <div class="media">
+                      <svg viewBox="0 0 272 132" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Ảnh mẫu nhân vật">
+                        <defs><linearGradient id="ga" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#D6F1EB"/><stop offset="1" stop-color="#9ED8CC"/></linearGradient></defs>
+                        <rect width="272" height="132" fill="url(#ga)"/>
+                        <path d="M70 132c4-34 30-48 66-48s62 14 66 48z" fill="#fff"/>
+                        <rect x="126" y="68" width="20" height="20" rx="8" fill="#EBCDB6"/>
+                        <ellipse cx="136" cy="56" rx="24" ry="27" fill="#F3D9C4"/>
+                        <path d="M110 58c-6-34 20-42 27-42s37 8 28 42c-3-16-12-26-28-26s-24 10-27 26z" fill="#2B2A33"/>
+                      </svg>
+                    </div>
+                    <div class="media-bar"><span class="fname">avatar-mau.png</span><button type="button" class="clear">Xóa</button></div>
+                  </div>
+                </div>
+                <div class="ctrl"><span>Độ bám tham chiếu</span><input type="range" min="0" max="100" value="80" aria-label="Độ bám tham chiếu"><output>80%</output></div>
+              </div>
+            </article>
+
+            <article class="node" id="n-bg" data-type="img" data-filled="true" style="left:32px;top:312px">
+              <header class="node-h">
+                <span class="chip"><svg class="ic"><use href="#i-image"/></svg></span>
+                <h2>Ảnh bối cảnh</h2><span class="tag">Tùy chọn</span>
+                <span class="port out img" id="out-bg"></span>
+              </header>
+              <div class="node-b">
+                <div class="drop" data-kind="image">
+                  <label class="drop-empty">
+                    <input class="sr" type="file" accept="image/*">
+                    <span class="up"><svg class="ic"><use href="#i-upload"/></svg></span>
+                    <b>Kéo thả hoặc chọn ảnh</b><small>PNG, JPG, WebP, tối đa 10 MB</small>
+                  </label>
+                  <div class="drop-preview">
+                    <div class="media">
+                      <svg viewBox="0 0 272 132" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Ảnh mẫu bối cảnh">
+                        <defs><linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9CC7F0"/><stop offset="1" stop-color="#FCE2C4"/></linearGradient></defs>
+                        <rect width="272" height="132" fill="url(#gb)"/>
+                        <circle cx="205" cy="52" r="17" fill="#FFE8B0"/>
+                        <path d="M0 92c40-26 84-30 124-12s86 6 148-20v72H0z" fill="#86BF9F"/>
+                        <path d="M0 112c50-16 112-18 172-6s70 4 100-6v32H0z" fill="#5C9C7E"/>
+                      </svg>
+                    </div>
+                    <div class="media-bar"><span class="fname">boi-canh-mau.jpg</span><button type="button" class="clear">Xóa</button></div>
+                  </div>
+                </div>
+                <div class="ctrl"><span>Cách dùng</span>
+                  <select aria-label="Cách dùng ảnh bối cảnh"><option>Giữ nguyên bối cảnh</option><option>Lấy cảm hứng từ ảnh</option></select>
+                </div>
+              </div>
+            </article>
+
+            <article class="node" id="n-video" data-type="vid" data-filled="false" style="left:32px;top:592px">
+              <header class="node-h">
+                <span class="chip"><svg class="ic"><use href="#i-video"/></svg></span>
+                <h2>Video tham chiếu</h2><span class="tag">Tùy chọn</span>
+                <span class="port out vid" id="out-video"></span>
+              </header>
+              <div class="node-b">
+                <div class="drop" data-kind="video">
+                  <label class="drop-empty">
+                    <input class="sr" type="file" accept="video/*">
+                    <span class="up"><svg class="ic"><use href="#i-upload"/></svg></span>
+                    <b>Kéo thả hoặc chọn video</b><small>MP4, MOV, tối đa 30 giây</small>
+                  </label>
+                  <div class="drop-preview">
+                    <div class="media"></div>
+                    <div class="media-bar"><span class="fname"></span><button type="button" class="clear">Xóa</button></div>
+                  </div>
+                </div>
+                <div class="ctrl"><span>Lấy từ video</span>
+                  <select aria-label="Lấy gì từ video"><option>Chuyển động camera</option><option>Nhịp dựng</option><option>Cả hai</option></select>
+                </div>
+              </div>
+            </article>
+
+            <!-- Cột 2: prompt -->
+            <article class="node" id="n-char" data-type="txt" style="left:412px;top:32px">
+              <header class="node-h">
+                <span class="chip"><svg class="ic"><use href="#i-text"/></svg></span>
+                <h2>Prompt nhân vật</h2><span class="tag">Văn bản</span>
+                <span class="port out txt" id="out-char"></span>
+              </header>
+              <div class="node-b">
+                <div class="in-row"><span class="port in img" id="in-char"></span><span class="in-label">Ảnh đại diện</span><span class="in-status" data-for="n-avatar"></span></div>
+                <textarea id="ta-char" maxlength="500" aria-label="Prompt nhân vật" placeholder="Mô tả ngoại hình, trang phục, biểu cảm của nhân vật">Cô gái trẻ tóc đen dài, mặc áo sơ mi trắng, ánh mắt tự tin nhìn thẳng vào ống kính, nụ cười nhẹ.</textarea>
+                <div class="foot"><button class="btn-soft" data-demo="Bản demo: chưa kết nối AI phân tích ảnh."><svg class="ic"><use href="#i-spark"/></svg>Gợi ý từ ảnh</button><span class="count"></span></div>
+              </div>
+            </article>
+
+            <article class="node" id="n-scene" data-type="txt" style="left:412px;top:312px">
+              <header class="node-h">
+                <span class="chip"><svg class="ic"><use href="#i-text"/></svg></span>
+                <h2>Prompt bối cảnh</h2><span class="tag">Văn bản</span>
+                <span class="port out txt" id="out-scene"></span>
+              </header>
+              <div class="node-b">
+                <div class="in-row"><span class="port in img" id="in-scene"></span><span class="in-label">Ảnh bối cảnh</span><span class="in-status" data-for="n-bg"></span></div>
+                <textarea id="ta-scene" maxlength="500" aria-label="Prompt bối cảnh" placeholder="Mô tả địa điểm, thời gian, ánh sáng, không khí">Đồi cỏ xanh lúc hoàng hôn, ánh nắng vàng chiếu nghiêng, bầu trời trong với vài dải mây mỏng.</textarea>
+                <div class="foot"><button class="btn-soft" data-demo="Bản demo: chưa kết nối AI phân tích ảnh."><svg class="ic"><use href="#i-spark"/></svg>Gợi ý từ ảnh</button><span class="count"></span></div>
+              </div>
+            </article>
+
+            <article class="node" id="n-motion" data-type="txt" style="left:412px;top:592px">
+              <header class="node-h">
+                <span class="chip"><svg class="ic"><use href="#i-text"/></svg></span>
+                <h2>Prompt chuyển động</h2><span class="tag">Văn bản</span>
+                <span class="port out txt" id="out-motion"></span>
+              </header>
+              <div class="node-b">
+                <div class="in-row"><span class="port in vid" id="in-motion"></span><span class="in-label">Video tham chiếu</span><span class="in-status" data-for="n-video"></span></div>
+                <textarea id="ta-motion" maxlength="500" aria-label="Prompt chuyển động" placeholder="Mô tả chuyển động camera và hành động của nhân vật">Máy quay tiến chậm từ trung cảnh vào cận cảnh, nhân vật quay đầu nhẹ, gió thổi làm tóc bay.</textarea>
+                <div class="foot"><button class="btn-soft" data-demo="Bản demo: chưa kết nối AI phân tích video."><svg class="ic"><use href="#i-spark"/></svg>Gợi ý từ video</button><span class="count"></span></div>
+              </div>
+            </article>
+
+            <!-- Cột 3: ghép prompt -->
+            <article class="node" id="n-merge" data-type="txt" style="left:792px;top:236px">
+              <header class="node-h">
+                <span class="chip"><svg class="ic"><use href="#i-merge"/></svg></span>
+                <h2>Ghép prompt</h2><span class="tag">Xử lý</span>
+                <span class="port out txt" id="out-merge"></span>
+              </header>
+              <div class="node-b">
+                <div class="in-row"><span class="port in txt" id="in-m-char"></span><span class="in-label">Nhân vật</span><span class="in-status" data-len="ta-char"></span></div>
+                <div class="in-row"><span class="port in txt" id="in-m-scene"></span><span class="in-label">Bối cảnh</span><span class="in-status" data-len="ta-scene"></span></div>
+                <div class="in-row"><span class="port in txt" id="in-m-motion"></span><span class="in-label">Chuyển động</span><span class="in-status" data-len="ta-motion"></span></div>
+                <span class="lbl">Mẫu ghép</span>
+                <div class="tpl"><span class="tok">Nhân vật</span>, đứng tại <span class="tok">Bối cảnh</span>. <span class="tok">Chuyển động</span>. Phong cách điện ảnh, ánh sáng tự nhiên, độ nét cao.</div>
+                <label class="lbl" for="neg">Nội dung cần tránh</label>
+                <input class="field" id="neg" value="mờ nhòe, méo mặt, chữ lạ">
+              </div>
+            </article>
+
+            <!-- Cột 4: đầu ra -->
+            <article class="node" id="n-out" data-type="txt" style="left:1172px;top:236px">
+              <header class="node-h">
+                <span class="chip out"><svg class="ic"><use href="#i-spark"/></svg></span>
+                <h2>Tạo video</h2><span class="tag">Đầu ra</span>
+              </header>
+              <div class="node-b">
+                <div class="in-row"><span class="port in txt" id="in-out"></span><span class="in-label">Prompt tổng</span><span class="in-status ok">Sẵn sàng</span></div>
+                <div class="out-prev"><div class="frame" id="frame" style="aspect-ratio:9/16"><svg class="ic"><use href="#i-play"/></svg></div></div>
+                <div class="row2"><span>Tỉ lệ</span>
+                  <div class="seg" role="radiogroup" aria-label="Tỉ lệ khung hình">
+                    <label><input type="radio" name="ratio" value="9 / 16" checked><span>9:16</span></label>
+                    <label><input type="radio" name="ratio" value="1 / 1"><span>1:1</span></label>
+                    <label><input type="radio" name="ratio" value="16 / 9"><span>16:9</span></label>
+                  </div>
+                </div>
+                <div class="row2"><span>Thời lượng</span>
+                  <div class="seg" role="radiogroup" aria-label="Thời lượng">
+                    <label><input type="radio" name="dur"><span>5 giây</span></label>
+                    <label><input type="radio" name="dur" checked><span>10 giây</span></label>
+                    <label><input type="radio" name="dur"><span>15 giây</span></label>
+                  </div>
+                </div>
+                <button class="btn primary block run"><svg class="ic"><use href="#i-spark"/></svg><span class="run-label">Tạo video</span></button>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+
+      <div class="legend" aria-label="Chú giải">
+        <span><i style="border-color:var(--img)"></i>Ảnh</span>
+        <span><i style="border-color:var(--vid)"></i>Video</span>
+        <span><i style="border-color:var(--txt)"></i>Văn bản</span>
+        <span><i class="dash"></i>Chưa có đầu vào, bước này được bỏ qua</span>
+      </div>
+      <div class="zoom">
+        <button id="zout" aria-label="Thu nhỏ">−</button>
+        <span id="zval">100%</span>
+        <button id="zin" aria-label="Phóng to">+</button>
+        <button id="zfit" aria-label="Vừa khung nhìn" style="width:auto;padding:0 10px;font-size:12px;font-weight:500;border-left:1px solid var(--line)">Vừa khung</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var stage=$('stage'), svg=$('wires'), zoomer=$('zoomer'), canvas=$('canvas');
+  var STAGE_W=1504, STAGE_H=900, scale=1;
+  var NS='http://www.w3.org/2000/svg';
+
+  // [cổng ra, cổng vào, kiểu dữ liệu, node nguồn (nếu là đầu vào tùy chọn)]
+  var WIRES=[
+    ['out-avatar','in-char','img','n-avatar'],
+    ['out-bg','in-scene','img','n-bg'],
+    ['out-video','in-motion','vid','n-video'],
+    ['out-char','in-m-char','txt'],
+    ['out-scene','in-m-scene','txt'],
+    ['out-motion','in-m-motion','txt'],
+    ['out-merge','in-out','txt']
+  ];
+
+  function center(el){
+    var r=el.getBoundingClientRect(), s=stage.getBoundingClientRect();
+    return {x:(r.left+r.width/2-s.left)/scale, y:(r.top+r.height/2-s.top)/scale};
+  }
+  function draw(){
+    while(svg.firstChild) svg.removeChild(svg.firstChild);
+    WIRES.forEach(function(w){
+      var a=center($(w[0])), b=center($(w[1]));
+      var dx=Math.max(60,Math.abs(b.x-a.x)*0.5);
+      var p=document.createElementNS(NS,'path');
+      p.setAttribute('d','M'+a.x+' '+a.y+' C'+(a.x+dx)+' '+a.y+' '+(b.x-dx)+' '+b.y+' '+b.x+' '+b.y);
+      var empty = w[3] && $(w[3]).dataset.filled==='false';
+      p.setAttribute('class','wire '+w[2]+(empty?' off':''));
+      svg.appendChild(p);
+    });
+  }
+
+  // Trạng thái đầu vào
+  var STATUS_TEXT={true:'Đã kết nối', false:'Chưa chọn, bỏ qua'};
+  function setFilled(node, on){
+    node.dataset.filled = on ? 'true' : 'false';
+    var port=node.querySelector('.port.out'); if(port) port.classList.toggle('on', on);
+    document.querySelectorAll('.in-status[data-for="'+node.id+'"]').forEach(function(s){
+      s.textContent=STATUS_TEXT[on]; s.classList.toggle('ok', on);
+    });
+    draw();
+  }
+
+  // Tải ảnh / video
+  document.querySelectorAll('.drop').forEach(function(drop){
+    var node=drop.closest('.node'), input=drop.querySelector('input[type=file]');
+    var media=drop.querySelector('.media'), fname=drop.querySelector('.fname'), kind=drop.dataset.kind;
+    function set(file){
+      if(!file) return;
+      var url=URL.createObjectURL(file), el=document.createElement(kind==='video'?'video':'img');
+      el.src=url;
+      if(kind==='video'){ el.muted=true; el.loop=true; el.autoplay=true; el.playsInline=true; } else { el.alt=''; }
+      media.innerHTML=''; media.appendChild(el); fname.textContent=file.name; setFilled(node,true);
+    }
+    input.addEventListener('change', function(){ set(input.files[0]); });
+    ['dragenter','dragover'].forEach(function(t){ drop.addEventListener(t,function(e){ e.preventDefault(); drop.classList.add('over'); }); });
+    ['dragleave','drop'].forEach(function(t){ drop.addEventListener(t,function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
+    drop.addEventListener('drop', function(e){ var f=e.dataTransfer.files[0]; if(f && f.type.indexOf(kind)===0) set(f); });
+    drop.querySelector('.clear').addEventListener('click', function(){ input.value=''; media.innerHTML=''; setFilled(node,false); });
+  });
+  document.querySelectorAll('.node[data-filled]').forEach(function(n){ setFilled(n, n.dataset.filled==='true'); });
+
+  // Slider hiển thị giá trị
+  document.querySelectorAll('.ctrl input[type=range]').forEach(function(r){
+    var o=r.parentElement.querySelector('output');
+    r.addEventListener('input', function(){ o.textContent=r.value+'%'; });
+  });
+
+  // Đếm ký tự
+  function syncCounts(){
+    document.querySelectorAll('textarea[id^="ta-"]').forEach(function(t){
+      var c=t.parentElement.querySelector('.count'); if(c) c.textContent=t.value.length+'/500';
+      var s=document.querySelector('.in-status[data-len="'+t.id+'"]');
+      if(s){ s.textContent=t.value.length? t.value.length+' ký tự':'Đang trống'; s.classList.toggle('ok', t.value.length>0); }
+    });
+  }
+  document.querySelectorAll('textarea').forEach(function(t){ t.addEventListener('input', syncCounts); });
+  syncCounts();
+
+  // Tỉ lệ khung
+  document.querySelectorAll('input[name="ratio"]').forEach(function(r){
+    r.addEventListener('change', function(){ $('frame').style.aspectRatio=r.value; });
+  });
+
+  // Toast
+  var tt; function toast(msg){ var t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(tt); tt=setTimeout(function(){ t.classList.remove('show'); },2600); }
+  document.querySelectorAll('[data-demo]').forEach(function(b){ b.addEventListener('click', function(){ toast(b.dataset.demo); }); });
+
+  // Chạy workflow (mô phỏng)
+  var running=false;
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+  async function run(){
+    if(running) return; running=true;
+    var btns=document.querySelectorAll('.run'); btns.forEach(function(b){ b.disabled=true; b.querySelector('.run-label').textContent='Đang chạy'; });
+    var stages=[['n-avatar','n-bg','n-video'],['n-char','n-scene','n-motion'],['n-merge'],['n-out']];
+    for(var i=0;i<stages.length;i++){
+      stages[i].forEach(function(id){ $(id).classList.add('running'); });
+      await sleep(650);
+      stages[i].forEach(function(id){ $(id).classList.remove('running'); });
+    }
+    btns.forEach(function(b,i){ b.disabled=false; b.querySelector('.run-label').textContent = b.classList.contains('block') ? 'Tạo video' : 'Chạy workflow'; });
+    toast('Đây là bản demo giao diện, chưa kết nối backend tạo video.');
+    running=false;
+  }
+  document.querySelectorAll('.run').forEach(function(b){ b.addEventListener('click', run); });
+
+  // Kéo node
+  document.querySelectorAll('.node-h').forEach(function(h){
+    h.addEventListener('pointerdown', function(e){
+      if(e.target.closest('button,input,select,textarea')) return;
+      var n=h.parentElement, sx=e.clientX, sy=e.clientY, ox=n.offsetLeft, oy=n.offsetTop;
+      h.setPointerCapture(e.pointerId); h.style.cursor='grabbing'; n.style.zIndex=5;
+      function mv(ev){
+        n.style.left=Math.max(0,ox+(ev.clientX-sx)/scale)+'px';
+        n.style.top=Math.max(0,oy+(ev.clientY-sy)/scale)+'px';
+        draw();
+      }
+      function up(){ h.removeEventListener('pointermove',mv); h.removeEventListener('pointerup',up); h.style.cursor=''; n.style.zIndex=''; }
+      h.addEventListener('pointermove',mv); h.addEventListener('pointerup',up);
+    });
+  });
+
+  // Zoom
+  function applyZoom(){
+    stage.style.transform='scale('+scale+')';
+    zoomer.style.width=STAGE_W*scale+'px'; zoomer.style.height=STAGE_H*scale+'px';
+    $('zval').textContent=Math.round(scale*100)+'%';
+    draw();
+  }
+  function fit(){
+    var s=Math.min((canvas.clientWidth-48)/STAGE_W,(canvas.clientHeight-48)/STAGE_H);
+    scale=Math.max(0.55,Math.min(1,s)); applyZoom();
+  }
+  $('zin').addEventListener('click', function(){ scale=Math.min(1.25,+(scale+0.1).toFixed(2)); applyZoom(); });
+  $('zout').addEventListener('click', function(){ scale=Math.max(0.5,+(scale-0.1).toFixed(2)); applyZoom(); });
+  $('zfit').addEventListener('click', fit);
+
+  fit();
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+  if(window.ResizeObserver){ var ro=new ResizeObserver(draw); document.querySelectorAll('.node').forEach(function(n){ ro.observe(n); }); }
+  window.addEventListener('resize', draw);
+})();
+</script>
+</body>
+</html>

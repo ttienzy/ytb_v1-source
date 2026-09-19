@@ -110,7 +110,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-products',
     type: 'removable',
     animated: true,
-    style: { stroke: '#2563eb', strokeWidth: 2.5 },
+    style: { stroke: '#2563eb', strokeWidth: 2.5, strokeDasharray: '4 4' },
   },
 
   // 1b. Products to ChatGPT Script (Nạp ảnh sản phẩm trực tiếp vào GPT)
@@ -134,7 +134,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-gemini',
     type: 'removable',
     animated: true,
-    style: { stroke: '#10b981', strokeWidth: 2.5 },
+    style: { stroke: '#10b981', strokeWidth: 2.5, strokeDasharray: '4 4' },
   },
 
   // 3. Character & Scene to ChatGPT Script (Vertical Down)
@@ -182,6 +182,6 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-gpt',
     type: 'removable',
     animated: true,
-    style: { stroke: '#ec4899', strokeWidth: 2.5 },
+    style: { stroke: '#ec4899', strokeWidth: 2.5, strokeDasharray: '4 4' },
   },
 ]

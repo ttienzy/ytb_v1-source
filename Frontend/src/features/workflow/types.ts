@@ -332,3 +332,112 @@ export interface ExportTimelineNodeData {
   onDelete?: () => void
 }
 
+// -------------------------------------------------------------
+// Multi-Workflow Navigation Tabs
+// -------------------------------------------------------------
+export type WorkflowTabId = 'chaining' | 'motion' | (string & {})
+
+export interface WorkflowTabItem {
+  id: WorkflowTabId
+  title: string
+  shortTitle?: string
+  badge?: string
+  badgeType?: 'new' | 'pro' | 'beta' | 'count'
+  iconName: 'film' | 'crosshair' | 'sparkles' | 'layers'
+  description: string
+}
+
+export const DEFAULT_WORKFLOW_TABS: WorkflowTabItem[] = [
+  {
+    id: 'chaining',
+    title: 'Kịch Bản Liên Hoàn',
+    shortTitle: 'Multi-Clip',
+    badge: 'Multi-Clip',
+    badgeType: 'count',
+    iconName: 'film',
+    description: 'Quy trình tự động hóa: Phân tích ảnh, tạo kịch bản bán hàng và kết nối chuỗi phân cảnh liên hoàn với Veo AI',
+  },
+  {
+    id: 'motion',
+    title: 'Motion Control',
+    shortTitle: 'Motion',
+    badge: 'MỚI',
+    badgeType: 'new',
+    iconName: 'crosshair',
+    description: 'Video tham chiếu & điều khiển chuyển động: Chuyển giao động tác mẫu từ video sang nhân vật và góc máy mới',
+  },
+]
+
+// -------------------------------------------------------------
+// Motion Control Workflow Types (Google Flow Ingredient Model)
+// -------------------------------------------------------------
+export interface MotionReferenceAsset {
+  id: string
+  role: 'character' | 'motion' | 'scene'
+  title: string
+  required?: boolean
+  filled: boolean
+  previewUrl: string | null
+  fileName: string
+  file?: File
+  mediaId?: string
+  backendPath?: string
+  trimStartSec?: number
+  trimEndSec?: number
+}
+
+export interface MotionCreativeDirection {
+  creativeBrief: string
+  subjectAction: string
+  cameraMovement: string
+  sceneAtmosphere: string
+  styleDirection: string
+  negativePrompt: string
+}
+
+export interface MotionOutputConfig {
+  profileId?: string
+  modelDisplayName?: string
+  aspectRatio: '9:16' | '16:9'
+  durationSeconds: number
+  resolution: '360p' | '720p'
+  numOutputs: number
+  creditCost?: number
+}
+
+export type MotionRunStage =
+  | 'preflight'
+  | 'connection'
+  | 'authentication'
+  | 'project'
+  | 'reference_upload'
+  | 'image_upload'
+  | 'submission'
+  | 'captcha'
+  | 'generation'
+  | 'download'
+  | 'backend'
+  | 'unknown'
+
+export interface MotionRunError {
+  code: string
+  stage: MotionRunStage
+  stageLabel: string
+  title: string
+  message: string
+  hint: string
+  retryable: boolean
+  jobId?: string
+}
+
+export interface MotionWorkflowDraft {
+  references: {
+    character: MotionReferenceAsset
+    motion: MotionReferenceAsset
+    scene: MotionReferenceAsset
+  }
+  creative: MotionCreativeDirection
+  output: MotionOutputConfig
+  finalPrompt: string
+  isCustomPromptEdited: boolean
+}

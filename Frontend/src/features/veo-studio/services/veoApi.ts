@@ -17,6 +17,25 @@ import type {
 
 const BASE = `${API_URL}/api/veo`
 
+async function responseError(resp: Response, fallback: string): Promise<Error> {
+  const body = await resp.json().catch(() => null) as { detail?: unknown; error?: unknown } | null
+  const detail = body?.detail ?? body?.error
+  let message = ''
+  if (typeof detail === 'string') {
+    message = detail
+  } else if (Array.isArray(detail)) {
+    message = detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object' && 'msg' in item) return String(item.msg)
+        return JSON.stringify(item)
+      })
+      .filter(Boolean)
+      .join('; ')
+  }
+  return new Error(message || `${fallback} (HTTP ${resp.status})`)
+}
+
 // ─── Projects ───────────────────────────────────────────────────────────────
 
 export async function getProjects(): Promise<VeoProject[]> {
@@ -69,8 +88,7 @@ export async function submitJob(request: VeoJobRequest): Promise<VeoJobOut> {
     body: JSON.stringify(request),
   })
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    throw new Error(err.detail || 'Gửi job thất bại')
+    throw await responseError(resp, 'Gửi job thất bại')
   }
   return resp.json()
 }
@@ -155,7 +173,34 @@ export async function uploadImage(
   const body = new FormData()
   body.append('file', file)
   const resp = await fetch(`${BASE}/upload-image`, { method: 'POST', body })
-  if (!resp.ok) throw new Error('Upload ảnh thất bại')
+  if (!resp.ok) throw await responseError(resp, 'Upload ảnh thất bại')
+  return resp.json()
+}
+
+export async function uploadVideoReference(
+  file: File,
+  flowProjectId: string,
+): Promise<{ ok: boolean; media_id: string; project_id: string; filename: string }> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+
+  const resp = await fetch(`${BASE}/upload-video`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project_id: flowProjectId,
+      video_base64: btoa(binary),
+      video_mime: file.type || 'video/mp4',
+      video_filename: file.name,
+    }),
+  })
+  if (!resp.ok) {
+    throw await responseError(resp, 'Upload video tham chiếu thất bại')
+  }
   return resp.json()
 }
 

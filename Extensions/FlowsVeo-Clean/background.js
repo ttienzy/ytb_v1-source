@@ -1093,12 +1093,16 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     function resolveModelId(req) {
       const isFrames = req.input_mode === 'frames';
       const isIngredients = req.input_mode === 'ingredients';
+      const isVideoEdit = req.input_mode === 'video_edit';
       if (req.provider_model_id && (!isFrames || !req.provider_model_id.includes('_t2v_')) && (!isIngredients || !req.provider_model_id.includes('_t2v_'))) {
         return req.provider_model_id;
       }
       const modelName = (req.model_display_name || '').toLowerCase();
       const isPortrait = req.aspect_ratio === '9:16';
 
+      if (isVideoEdit) {
+        return req.resolution === '360p' ? 'abra_edit_360p' : 'abra_edit';
+      }
       if (isIngredients) {
         return `abra_r2v_${dur}s`;
       }
@@ -1377,10 +1381,22 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
 
     let startFrameMediaId = null;
     let endFrameMediaId = null;
-    const ingredientMediaIds = [];
+    const ingredientMediaIds = Array.isArray(flowRequest?.ingredient_media_ids)
+      ? flowRequest.ingredient_media_ids
+          .filter((id) => typeof id === 'string' && id.trim())
+          .map((id) => id.trim())
+      : [];
+    const referenceVideoMediaId = typeof flowRequest?.reference_video_id === 'string'
+      ? flowRequest.reference_video_id.trim()
+      : '';
 
     let isFrames = flowRequest?.input_mode === 'frames';
     let isIngredients = flowRequest?.input_mode === 'ingredients';
+    const isVideoEdit = flowRequest?.input_mode === 'video_edit';
+
+    if (isVideoEdit && !referenceVideoMediaId) {
+      throw new Error('Video edit mode requires an uploaded reference_video_id');
+    }
 
     if (isFrames) {
       if (flowRequest.image_base64) {
@@ -1405,7 +1421,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
         isFrames = false;
         modelId = modelId.replace('_i2v_', '_t2v_').replace('_first_last', '').replace('_first', '');
       }
-    } else if (isIngredients) {
+    } else if (isIngredients || isVideoEdit) {
       const ingList = Array.isArray(flowRequest?.ingredient_images) ? flowRequest.ingredient_images.slice() : [];
       if (ingList.length === 0 && flowRequest?.image_base64) {
         ingList.push({
@@ -1427,7 +1443,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
           }
         }
       }
-      if (ingredientMediaIds.length === 0) {
+      if (isIngredients && ingredientMediaIds.length === 0) {
         logActivity('warn', 'Không có ảnh tham chiếu trong request ingredients, tự động tạo video từ prompt (text_to_video)');
         isIngredients = false;
         modelId = modelId.replace('_r2v_', '_t2v_');
@@ -1435,7 +1451,9 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     }
 
     const isSingleFrame = isFrames && Boolean(startFrameMediaId) && !endFrameMediaId;
-    const rpcId = isIngredients || isSingleFrame ? 'MZZa6b' : (isFrames ? 'nprQif' : 'YhhmEf');
+    const rpcId = isVideoEdit
+      ? 'jIps6'
+      : (isIngredients || isSingleFrame ? 'MZZa6b' : (isFrames ? 'nprQif' : 'YhhmEf'));
 
     const requestUuidA = (crypto.randomUUID ? crypto.randomUUID() : 'AD722819-13F6-46E3-A074-9CA0266A4FE0').toUpperCase();
     const requestUuidB = (crypto.randomUUID ? crypto.randomUUID() : '4C8832DC-AD37-4C11-859E-DCFD4FB4903E').toUpperCase();
@@ -1446,7 +1464,37 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     let endSlot = null;
 
     let createPayload = null;
-    if (isIngredients || isSingleFrame) {
+    if (isVideoEdit) {
+      const startSeconds = Math.max(0, Number(flowRequest?.reference_video_start_seconds) || 0);
+      const requestedEnd = Number(flowRequest?.reference_video_end_seconds);
+      const endSeconds = Number.isFinite(requestedEnd) && requestedEnd > startSeconds
+        ? Math.min(requestedEnd, startSeconds + 10)
+        : startSeconds + 10;
+      const startFrame = Math.round(startSeconds * 24);
+      const endFrame = Math.max(startFrame + 1, Math.round(endSeconds * 24));
+      const sourceVideo = [null, referenceVideoMediaId, startFrame, endFrame];
+      const destination = [null, null, null, null, requestUuidA, requestUuidB];
+      const editRequest = [
+        sourceVideo,
+        [null, null, [[[flowRequest.prompt.trim()]]]],
+        modelId,
+        aspectEnum,
+        destination,
+      ];
+      if (ingredientMediaIds.length > 0) {
+        while (editRequest.length < 8) editRequest.push(null);
+        editRequest.push(ingredientMediaIds.map((id) => [null, id]));
+      }
+      if (flowRequest?.resolution === '360p') {
+        while (editRequest.length < 12) editRequest.push(null);
+        editRequest.push([4]);
+      }
+      createPayload = [
+        [editRequest],
+        [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
+        [sceneUuid, 2],
+      ];
+    } else if (isIngredients || isSingleFrame) {
       // Chuẩn Google Flow HAR flow.google_2.har: MZZa6b nhận mảng reference slots [[null, id1], [null, id2]] ở index 1
       const refSlots = isSingleFrame
         ? [[null, startFrameMediaId]]
@@ -2033,6 +2081,142 @@ async function recoverCurrentSceneVideo() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// VIDEO UPLOAD VIA FLOW RESUMABLE UPLOAD API
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Chạy trong MAIN world của tab Flow.
+ * Upload video base64 lên Flow qua endpoint resumable chính thức của web app.
+ * Luồng này được xác minh từ HAR: start -> upload, finalize -> mediaId.
+ */
+async function runVideoUploadInPage(uploadRequest) {
+  try {
+    const { video_base64, video_mime, video_filename, project_id } = uploadRequest;
+    if (!video_base64) throw new Error('video_base64 is required');
+
+    const projectId = location.pathname.match(/\/project\/([^/?#]+)/)?.[1] || null;
+    if (!projectId) throw new Error('Vui lòng mở một Project trên tab Google Flow');
+
+    const accountPath = location.pathname.match(/\/(u\/\d+)/)?.[0] || '';
+    const authUser = accountPath.match(/\d+/)?.[0] || '';
+    const targetPid = project_id || projectId;
+    if (targetPid !== projectId) {
+      throw new Error(`Tab Flow đang mở project ${projectId}, không phải project ${targetPid}`);
+    }
+
+    const rawBase64 = video_base64.includes(',') ? video_base64.split(',')[1] : video_base64;
+    const mimeType = video_mime || 'video/mp4';
+    const filename = video_filename || 'reference_video.mp4';
+    const binary = atob(rawBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    const base = location.origin || 'https://flow.google.com';
+    const startUrl = `${base}/upload/v1/flow/upload/video/${encodeURIComponent(targetPid)}${authUser ? `?authuser=${authUser}` : ''}`;
+    const startResponse = await fetch(startUrl, {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'Slug': filename,
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(bytes.byteLength),
+        'X-Goog-Upload-Protocol': 'resumable',
+        ...(authUser ? { 'X-Goog-AuthUser': authUser } : {}),
+      },
+    });
+    if (!startResponse.ok) {
+      const preview = await startResponse.text().catch(() => '');
+      throw new Error(`Flow video upload start failed HTTP ${startResponse.status}: ${preview.slice(0, 200)}`);
+    }
+
+    const uploadUrl = startResponse.headers.get('x-goog-upload-url');
+    if (!uploadUrl) throw new Error('Flow video upload start response is missing x-goog-upload-url');
+
+    const finalizeResponse = await fetch(uploadUrl, {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8',
+        'Slug': filename,
+        'X-Goog-Upload-Command': 'upload, finalize',
+        'X-Goog-Upload-Offset': '0',
+        ...(authUser ? { 'X-Goog-AuthUser': authUser } : {}),
+      },
+      body: bytes,
+    });
+    const responseText = await finalizeResponse.text();
+    if (!finalizeResponse.ok) {
+      throw new Error(`Flow video upload finalize failed HTTP ${finalizeResponse.status}: ${responseText.slice(0, 300)}`);
+    }
+
+    let uploaded;
+    try {
+      uploaded = JSON.parse(responseText);
+    } catch {
+      throw new Error(`Flow video upload returned invalid JSON: ${responseText.slice(0, 300)}`);
+    }
+    const mediaId = uploaded?.mediaId || uploaded?.media?.name || null;
+    if (!mediaId) throw new Error(`Flow video upload response has no mediaId: ${responseText.slice(0, 300)}`);
+
+    return {
+      ok: true,
+      media_id: mediaId,
+      project_id: uploaded?.media?.projectId || targetPid,
+      workflow_id: uploaded?.workflow?.name || uploaded?.media?.workflowId || null,
+      filename,
+      mime_type: mimeType,
+    };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+async function uploadVideoToFlow(request) {
+  const targetPid = request.project_id || null;
+  let tabId = await findLabsTab(targetPid);
+  if (!tabId) return { ok: false, error: 'Open a Flow project in Chrome' };
+
+  // Giải CAPTCHA (VIDEO_GENERATION action là đúng cho Omni Flash)
+  const captchaResult = await solveRecaptcha({ ...request, captcha_action: 'VIDEO_GENERATION' });
+  if (!captchaResult.token) {
+    return { ok: false, error: captchaResult.error || 'reCAPTCHA failed for video upload' };
+  }
+
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN', func: runVideoUploadInPage,
+      args: [request, captchaResult.token],
+    });
+    return injected?.[0]?.result || { ok: false, error: 'Flow page returned no result for video upload' };
+  } catch (error) {
+    return { ok: false, error: `Cannot execute video upload: ${error.message}` };
+  }
+}
+
+async function postVideoUploadResponse(requestId, result) {
+  try {
+    await fetch(`${bridgeUrl}/flow/video-upload-response`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        request_id: requestId,
+        ok: result?.ok || false,
+        media_id: result?.media_id || null,
+        project_id: result?.project_id || null,
+        error: result?.ok ? null : (result?.error || 'Unknown video upload error'),
+        logs: activityLog.slice(-5),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    logActivity('warn', `postVideoUploadResponse: ${err.message}`);
+  }
+}
+
 async function postFlowResponse(requestId, result) {
   try {
     await fetch(`${bridgeUrl}/flow/response`, {
@@ -2053,6 +2237,7 @@ async function runCreateProjectInPage() {
   const sleepInPage = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   try {
     let accountPath = location.pathname.match(/\/(u\/\d+)/)?.[0] || '';
+    const initialProjectId = location.pathname.match(/\/project\/([^/?#]+)/)?.[1] || null;
 
     // 1. Thử bấm vào nút / thẻ '+ New project' hoặc 'Start Creating' trên DOM
     let clicked = false;
@@ -2069,12 +2254,16 @@ async function runCreateProjectInPage() {
       }
     }
 
-    // 2. Chờ tối đa 5s xem URL có chuyển sang /project/<uuid> không
-    const deadline = Date.now() + 5000;
+    if (!clicked) {
+      return { ok: false, error: 'Không tìm thấy nút tạo Project mới trên Google Flow' };
+    }
+
+    // 2. Chỉ chấp nhận khi Flow thật sự chuyển sang một project ID mới.
+    const deadline = Date.now() + 10000;
     while (Date.now() < deadline) {
       await sleepInPage(400);
       const match = location.pathname.match(/\/project\/([^/?#]+)/);
-      if (match && match[1]) {
+      if (match && match[1] && match[1] !== initialProjectId) {
         let email = '';
         try {
           const profileEl = document.querySelector('[aria-label*="@"], [data-email]');
@@ -2088,16 +2277,12 @@ async function runCreateProjectInPage() {
       }
     }
 
-    // 3. Fallback: Nếu không đổi URL hoặc không thấy nút, tự sinh UUID và điều hướng sang project
-    const newUuid = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-      const r = Math.random() * 16 | 0;
-      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-    }));
-    const targetUrl = `${location.origin}${accountPath}/project/${newUuid}`;
-    location.href = targetUrl;
-    await sleepInPage(1500);
-
-    return { ok: true, flow_project_id: newUuid, account_email: '' };
+    return {
+      ok: false,
+      error: initialProjectId
+        ? `Google Flow không chuyển khỏi project hiện tại (${initialProjectId}) sau khi bấm tạo mới`
+        : 'Google Flow không mở được project mới sau khi bấm tạo',
+    };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -2113,6 +2298,19 @@ async function handleCreateProject(request) {
   }
 
   try {
+    // Project pages do not expose the "New project" control. Open the
+    // account home in a separate tab so an active render tab is never reused.
+    const currentTab = await chrome.tabs.get(tabId);
+    if (currentTab?.url && /\/project\//.test(currentTab.url)) {
+      const currentUrl = new URL(currentTab.url);
+      const accountPath = currentUrl.pathname.match(/\/(u\/\d+)/)?.[0] || '';
+      const homeUrl = `${currentUrl.origin}${accountPath}/`;
+      const homeTab = await chrome.tabs.create({ url: homeUrl, active: true });
+      tabId = homeTab.id;
+      await waitForTabComplete(tabId, 20000);
+      await sleep(1500);
+    }
+
     const injected = await chrome.scripting.executeScript({
       target: { tabId }, world: 'MAIN', func: runCreateProjectInPage,
     });
@@ -2250,6 +2448,19 @@ async function processCaptchaRequest(request) {
     logActivity('info', 'Reload tab requested by bridge');
     const tid = await findLabsTab(request.target_project_id);
     if (tid) await prepareCaptchaFresh(tid);
+    return;
+  }
+  if (request.action === 'UPLOAD_VIDEO') {
+    logActivity('info', `Upload video requested: ${request.request_id?.slice(0, 8)} project=${request.project_id}`);
+    try {
+      const videoResult = await uploadVideoToFlow(request);
+      await postVideoUploadResponse(request.request_id, videoResult);
+      logActivity(videoResult.ok ? 'info' : 'warn', videoResult.ok
+        ? `Video upload OK: mediaId=${videoResult.media_id}`
+        : `Video upload failed: ${videoResult.error}`);
+    } catch (e) {
+      await postVideoUploadResponse(request.request_id, { ok: false, error: e?.message || 'Upload error' });
+    }
     return;
   }
   if (request.flow_recovery) {

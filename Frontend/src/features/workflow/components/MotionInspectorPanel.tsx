@@ -1,0 +1,990 @@
+import React, { useRef } from 'react'
+import {
+  X,
+  Sliders,
+  Sparkles,
+  Upload,
+  Trash2,
+  Film,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Copy,
+  Check,
+  RotateCcw,
+  AlertCircle,
+} from 'lucide-react'
+import type {
+  MotionReferenceAsset,
+  MotionCreativeDirection,
+  MotionOutputConfig,
+  MotionRunError,
+} from '../types'
+import type { StructuredPromptResult } from '../services/motionPromptBuilder'
+import { MOTION_DURATION_OPTIONS } from '../services/motionProfiles'
+import type { VeoCapabilityProfile } from '../../veo-studio/types'
+
+interface MotionInspectorPanelProps {
+  isOpen: boolean
+  onClose: () => void
+  selectedNodeType: 'reference' | 'creative' | 'preview' | 'output' | null
+  activeRole: 'character' | 'motion' | 'scene'
+  setActiveRole: (role: 'character' | 'motion' | 'scene') => void
+  // Reference Assets
+  character: MotionReferenceAsset
+  motion: MotionReferenceAsset
+  scene: MotionReferenceAsset
+  onUploadFile: (role: 'character' | 'motion' | 'scene', file: File) => void
+  onClearAsset: (role: 'character' | 'motion' | 'scene') => void
+  onUpdateAssetMeta: (role: 'character' | 'motion' | 'scene', updates: Partial<MotionReferenceAsset>) => void
+  // Creative Direction
+  creative: MotionCreativeDirection
+  onUpdateCreative: (updates: Partial<MotionCreativeDirection>) => void
+  // Prompt Preview
+  structuredPrompt: StructuredPromptResult
+  isCustomPrompt: boolean
+  customPromptText: string
+  onUpdateCustomPromptText: (text: string) => void
+  onResetToAutoPrompt: () => void
+  // Output
+  outputConfig: MotionOutputConfig
+  profiles: VeoCapabilityProfile[]
+  selectedProfileId: string
+  onSelectAspectRatio: (aspectRatio: MotionOutputConfig['aspectRatio']) => void
+  onSelectResolution: (resolution: MotionOutputConfig['resolution']) => void
+  onSelectDuration: (durationSeconds: number) => void
+  profileError?: string | null
+  missingReasons: string[]
+  isReadyToRun: boolean
+  isRunning: boolean
+  runError?: MotionRunError | null
+  onRunWorkflow: () => void
+}
+
+export function MotionInspectorPanel({
+  isOpen,
+  onClose,
+  selectedNodeType,
+  activeRole,
+  setActiveRole,
+  character,
+  motion,
+  scene,
+  onUploadFile,
+  onClearAsset,
+  onUpdateAssetMeta,
+  creative,
+  onUpdateCreative,
+  structuredPrompt,
+  isCustomPrompt,
+  customPromptText,
+  onUpdateCustomPromptText,
+  onResetToAutoPrompt,
+  outputConfig,
+  profiles,
+  selectedProfileId,
+  onSelectAspectRatio,
+  onSelectResolution,
+  onSelectDuration,
+  profileError,
+  missingReasons,
+  isReadyToRun,
+  isRunning,
+  runError,
+  onRunWorkflow,
+}: MotionInspectorPanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [copied, setCopied] = React.useState(false)
+
+  if (!isOpen) return null
+
+  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) || null
+
+  const handleCopyPrompt = () => {
+    const textToCopy = isCustomPrompt ? customPromptText : (structuredPrompt?.fullPrompt || '')
+    navigator.clipboard.writeText(textToCopy)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <aside
+      className="mf-inspector-drawer"
+      style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        width: 360,
+        maxWidth: '100vw',
+        background: '#FFFFFF',
+        borderLeft: '1px solid #E2E8F0',
+        boxShadow: '-4px 0 20px rgba(0, 0, 0, 0.07)',
+        zIndex: 50,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        animation: 'slideInRight 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '14px 16px',
+          borderBottom: '1px solid #E2E8F0',
+          background: '#F8FAFC',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Sliders size={16} color="#4F46E5" />
+          <h3 style={{ margin: 0, fontSize: '13.5px', fontWeight: 700, color: '#1E293B' }}>
+            {selectedNodeType === 'reference' && 'Tùy Chỉnh Nguyên Liệu (References)'}
+            {selectedNodeType === 'creative' && 'Chỉ Dẫn Sáng Tạo (Creative Direction)'}
+            {selectedNodeType === 'preview' && 'Kiểm Tra Prompt Cấu Trúc (Preview)'}
+            {selectedNodeType === 'output' && 'Cấu Hình Xuất Video (Output)'}
+            {!selectedNodeType && 'Bảng Điều Khiển Chi Tiết'}
+          </h3>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            color: '#64748B',
+            cursor: 'pointer',
+            padding: '4px',
+            borderRadius: '4px',
+            display: 'flex',
+          }}
+          title="Đóng bảng"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      {/* Hidden File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/mp4,video/quicktime,video/webm"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) {
+            onUploadFile(activeRole, file)
+          }
+          e.target.value = ''
+        }}
+      />
+
+      {/* Content Body (Scrollable) */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* ============================================================== */}
+        {/* TAB 1: REFERENCE ASSETS INSPECTOR */}
+        {/* ============================================================== */}
+        {selectedNodeType === 'reference' && (
+          <>
+            {/* Asset Role Switcher Tabs */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: '4px',
+                background: '#F1F5F9',
+                padding: '3px',
+                borderRadius: '8px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setActiveRole('character')}
+                style={{
+                  padding: '6px 4px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: activeRole === 'character' ? '#FFFFFF' : 'transparent',
+                  color: activeRole === 'character' ? '#1E293B' : '#64748B',
+                  boxShadow: activeRole === 'character' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                }}
+              >
+                <ImageIcon size={12} />
+                <span>Nhân vật</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveRole('motion')}
+                style={{
+                  padding: '6px 4px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: activeRole === 'motion' ? '#FFFFFF' : 'transparent',
+                  color: activeRole === 'motion' ? '#1E293B' : '#64748B',
+                  boxShadow: activeRole === 'motion' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                }}
+              >
+                <VideoIcon size={12} />
+                <span>Chuyển động</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveRole('scene')}
+                style={{
+                  padding: '6px 4px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: activeRole === 'scene' ? '#FFFFFF' : 'transparent',
+                  color: activeRole === 'scene' ? '#1E293B' : '#64748B',
+                  boxShadow: activeRole === 'scene' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                }}
+              >
+                <ImageIcon size={12} />
+                <span>Bối cảnh</span>
+              </button>
+            </div>
+
+            {/* Content for ACTIVE ROLE */}
+            {activeRole === 'motion' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Video Mẫu (Bắt buộc)</span>
+                  <span style={{ fontSize: '11px', background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                    Required
+                  </span>
+                </div>
+
+                {/* Preview Box */}
+                <div
+                  style={{
+                    width: '100%',
+                    height: 180,
+                    borderRadius: '8px',
+                    background: '#0F172A',
+                    overflow: 'hidden',
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #CBD5E1',
+                  }}
+                >
+                  {motion.previewUrl ? (
+                    <video
+                      src={motion.previewUrl}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      controls
+                      loop
+                    />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#94A3B8' }}>
+                      <Film size={32} />
+                      <span style={{ fontSize: '11.5px' }}>Chưa có video tham chiếu</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      background: '#FFFFFF',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      color: '#334155',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <Upload size={13} />
+                    <span>{motion.filled ? 'Đổi video' : 'Tải video lên'}</span>
+                  </button>
+
+                  {motion.filled && (
+                    <button
+                      type="button"
+                      onClick={() => onClearAsset('motion')}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #FCA5A5',
+                        background: '#FEF2F2',
+                        color: '#DC2626',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      title="Xóa video"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Trim Settings */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '11.5px', fontWeight: 600, color: '#334155' }}>
+                    Đoạn cắt thời gian (Trim)
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <div>
+                      <span style={{ fontSize: '10.5px', color: '#64748B' }}>Bắt đầu (giây)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={50}
+                        step={1}
+                        value={motion.trimStartSec ?? 0}
+                        onChange={(e) => onUpdateAssetMeta('motion', { trimStartSec: Number(e.target.value) })}
+                        style={{
+                          width: '100%',
+                          padding: '6px',
+                          borderRadius: '6px',
+                          border: '1px solid #CBD5E1',
+                          fontSize: '12px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '10.5px', color: '#64748B' }}>Kết thúc (giây)</span>
+                      <input
+                        type="number"
+                        min={4}
+                        max={60}
+                        step={1}
+                        value={motion.trimEndSec ?? 10}
+                        onChange={(e) => onUpdateAssetMeta('motion', { trimEndSec: Number(e.target.value) })}
+                        style={{
+                          width: '100%',
+                          padding: '6px',
+                          borderRadius: '6px',
+                          border: '1px solid #CBD5E1',
+                          fontSize: '12px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <small style={{ fontSize: '10.5px', color: '#64748B' }}>
+                    Flow dùng đoạn nguồn từ 4 đến tối đa 10 giây. Thời lượng đầu ra được tính từ đoạn trim này.
+                  </small>
+                </div>
+              </div>
+            )}
+
+            {/* Character & Scene Roles */}
+            {activeRole === 'character' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Ảnh Nhân Vật (Tùy chọn)</span>
+                  <span style={{ fontSize: '11px', background: '#F1F5F9', color: '#64748B', padding: '1px 6px', borderRadius: '4px' }}>
+                    Optional
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    width: '100%',
+                    height: 180,
+                    borderRadius: '8px',
+                    background: '#F8FAFC',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #CBD5E1',
+                  }}
+                >
+                  {character.previewUrl ? (
+                    <img src={character.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#94A3B8' }}>
+                      <ImageIcon size={32} />
+                      <span style={{ fontSize: '11.5px' }}>Chưa chọn ảnh nhân vật</span>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      background: '#FFFFFF',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      color: '#334155',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <Upload size={13} />
+                    <span>{character.filled ? 'Đổi ảnh' : 'Tải ảnh nhân vật'}</span>
+                  </button>
+
+                  {character.filled && (
+                    <button
+                      type="button"
+                      onClick={() => onClearAsset('character')}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #FCA5A5',
+                        background: '#FEF2F2',
+                        color: '#DC2626',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <small style={{ fontSize: '10.5px', color: '#64748B' }}>
+                  Ảnh chân dung góc thẳng, sáng rõ khuôn mặt giúp Veo tái tạo tốt nhất.
+                </small>
+              </div>
+            )}
+
+            {activeRole === 'scene' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Ảnh Bối Cảnh (Tùy chọn)</span>
+                  <span style={{ fontSize: '11px', background: '#F1F5F9', color: '#64748B', padding: '1px 6px', borderRadius: '4px' }}>
+                    Optional
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    width: '100%',
+                    height: 180,
+                    borderRadius: '8px',
+                    background: '#F8FAFC',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #CBD5E1',
+                  }}
+                >
+                  {scene.previewUrl ? (
+                    <img src={scene.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#94A3B8' }}>
+                      <ImageIcon size={32} />
+                      <span style={{ fontSize: '11.5px' }}>Chưa chọn ảnh bối cảnh</span>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      background: '#FFFFFF',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      color: '#334155',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <Upload size={13} />
+                    <span>{scene.filled ? 'Đổi ảnh' : 'Tải ảnh bối cảnh'}</span>
+                  </button>
+
+                  {scene.filled && (
+                    <button
+                      type="button"
+                      onClick={() => onClearAsset('scene')}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #FCA5A5',
+                        background: '#FEF2F2',
+                        color: '#DC2626',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 2: CREATIVE DIRECTION INSPECTOR */}
+        {/* ============================================================== */}
+        {selectedNodeType === 'creative' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {/* 1. Creative Brief */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                  Ý tưởng chính / Creative Brief
+                </label>
+                <span style={{ fontSize: '10.5px', color: '#DC2626', fontWeight: 600 }}>* Bắt buộc</span>
+              </div>
+              <textarea
+                value={creative.creativeBrief}
+                onChange={(e) => onUpdateCreative({ creativeBrief: e.target.value })}
+                rows={3}
+                placeholder="Mô tả ý đồ phân cảnh: nhân vật biểu diễn, tương tác, năng lượng..."
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                  lineHeight: 1.4,
+                  boxSizing: 'border-box',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            {/* 2. Subject Action & Motion */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                Hành động & chuyển động chủ thể
+              </label>
+              <textarea
+                value={creative.subjectAction}
+                onChange={(e) => onUpdateCreative({ subjectAction: e.target.value })}
+                rows={2}
+                placeholder="Ví dụ: Động tác nhảy nhịp nhàng theo nhạc, tay vung dứt khoát..."
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                  lineHeight: 1.4,
+                  boxSizing: 'border-box',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            {/* 3. Camera Movement */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                Góc máy & chuyển động camera
+              </label>
+              <input
+                type="text"
+                value={creative.cameraMovement}
+                onChange={(e) => onUpdateCreative({ cameraMovement: e.target.value })}
+                placeholder="Mô tả góc máy hoặc chuyển động camera mong muốn..."
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                }}
+              />
+            </div>
+
+            {/* 4. Look & Style */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                Phong cách & Thẩm mỹ
+              </label>
+              <input
+                type="text"
+                value={creative.styleDirection}
+                onChange={(e) => onUpdateCreative({ styleDirection: e.target.value })}
+                placeholder="Mô tả phong cách hình ảnh mong muốn..."
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                }}
+              />
+            </div>
+
+            {/* 5. Negative Prompt */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                Điều cần tránh (Negative Prompt)
+              </label>
+              <input
+                type="text"
+                value={creative.negativePrompt}
+                onChange={(e) => onUpdateCreative({ negativePrompt: e.target.value })}
+                placeholder="Ví dụ: mờ nhòe, méo mặt, chữ lạ, giật hình..."
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '12px',
+                }}
+              />
+            </div>
+
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 3: PROMPT PREVIEW INSPECTOR */}
+        {/* ============================================================== */}
+        {selectedNodeType === 'preview' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                Prompt Chuẩn Bị Gửi Veo Flow
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyPrompt}
+                style={{
+                  border: 'none',
+                  background: '#F1F5F9',
+                  color: copied ? '#10B981' : '#475569',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />}
+                <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
+              </button>
+            </div>
+
+            <textarea
+              value={isCustomPrompt ? customPromptText : structuredPrompt.fullPrompt}
+              onChange={(e) => onUpdateCustomPromptText(e.target.value)}
+              rows={8}
+              style={{
+                width: '100%',
+                padding: '10px',
+                borderRadius: '6px',
+                border: '1px solid #CBD5E1',
+                fontSize: '12px',
+                lineHeight: 1.45,
+                boxSizing: 'border-box',
+                fontFamily: 'inherit',
+              }}
+            />
+
+            {isCustomPrompt && (
+              <button
+                type="button"
+                onClick={onResetToAutoPrompt}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  background: '#F8FAFC',
+                  color: '#475569',
+                  fontSize: '11.5px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px',
+                }}
+              >
+                <RotateCcw size={12} />
+                <span>Khôi phục theo mẫu tự động</span>
+              </button>
+            )}
+
+            {/* Sections Breakdown */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                Phân tích cấu trúc:
+              </span>
+              {(structuredPrompt?.sections || []).map((sec) => (
+                <div
+                  key={sec.id}
+                  style={{
+                    padding: '8px',
+                    borderRadius: '6px',
+                    background: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    fontSize: '11.5px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '2px' }}>
+                    <span style={{ fontSize: '9px', fontWeight: 700, color: sec.colorVar }}>{sec.tag}</span>
+                    <span style={{ color: '#64748B', fontSize: '10px' }}>({sec.label})</span>
+                  </div>
+                  <div style={{ color: '#1E293B' }}>{sec.content}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 4: OUTPUT CONFIG INSPECTOR */}
+        {/* ============================================================== */}
+        {selectedNodeType === 'output' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Cấu hình xuất Motion Control</div>
+              <div style={{ marginTop: '3px', fontSize: '10.5px', color: '#64748B' }}>
+                Các lựa chọn được ánh xạ sang profile video_edit do Backend công bố.
+              </div>
+            </div>
+
+            {profileError && (
+              <div style={{ padding: '8px 10px', borderRadius: '6px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: '11px' }}>
+                {profileError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+              <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Chất lượng tạo</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                {([
+                  { value: '360p', title: 'Draft 360p', detail: 'Nhanh để thử chuyển động' },
+                  { value: '720p', title: 'Standard 720p', detail: 'Chi tiết tốt hơn' },
+                ] as const).map((option) => {
+                  const active = outputConfig.resolution === option.value
+                  const supported = profiles.some(
+                    (profile) => profile.resolution === option.value && profile.aspect_ratio === outputConfig.aspectRatio
+                  )
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      disabled={!supported}
+                      onClick={() => onSelectResolution(option.value)}
+                      style={{
+                        padding: '9px',
+                        borderRadius: '7px',
+                        border: active ? '2px solid #4F46E5' : '1px solid #CBD5E1',
+                        background: active ? '#EEF2FF' : '#FFFFFF',
+                        color: active ? '#3730A3' : '#334155',
+                        textAlign: 'left',
+                        cursor: supported ? 'pointer' : 'not-allowed',
+                        opacity: supported ? 1 : 0.45,
+                      }}
+                    >
+                      <div style={{ fontSize: '11.5px', fontWeight: 700 }}>{option.title}</div>
+                      <div style={{ marginTop: '2px', fontSize: '9.5px', color: '#64748B' }}>{option.detail}</div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+              <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Tỉ lệ khung hình</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                {([
+                  { value: '9:16', label: '9:16 · Dọc' },
+                  { value: '16:9', label: '16:9 · Ngang' },
+                ] as const).map((option) => {
+                  const active = outputConfig.aspectRatio === option.value
+                  const supported = profiles.some(
+                    (profile) => profile.aspect_ratio === option.value && profile.resolution === outputConfig.resolution
+                  )
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      disabled={!supported}
+                      onClick={() => onSelectAspectRatio(option.value)}
+                      style={{
+                        padding: '8px',
+                        borderRadius: '7px',
+                        border: active ? '2px solid #4F46E5' : '1px solid #CBD5E1',
+                        background: active ? '#EEF2FF' : '#FFFFFF',
+                        color: active ? '#3730A3' : '#334155',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        cursor: supported ? 'pointer' : 'not-allowed',
+                        opacity: supported ? 1 : 0.45,
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+              <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Thời lượng đoạn chuyển động</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                {MOTION_DURATION_OPTIONS.map((duration) => {
+                  const active = outputConfig.durationSeconds === duration
+                  return (
+                    <button
+                      key={duration}
+                      type="button"
+                      onClick={() => onSelectDuration(duration)}
+                      style={{
+                        padding: '7px 4px',
+                        borderRadius: '6px',
+                        border: active ? '2px solid #4F46E5' : '1px solid #CBD5E1',
+                        background: active ? '#EEF2FF' : '#FFFFFF',
+                        color: active ? '#3730A3' : '#334155',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {duration}s
+                    </button>
+                  )
+                })}
+              </div>
+              <small style={{ fontSize: '10px', color: '#64748B' }}>
+                Chọn thời lượng sẽ cập nhật điểm kết thúc trim từ mốc bắt đầu hiện tại.
+              </small>
+            </div>
+
+            <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', color: '#64748B' }}>Chi phí dự kiến / 1 kết quả</span>
+                <strong style={{ fontSize: '14px', color: '#C2410C' }}>
+                  {outputConfig.creditCost ?? selectedProfile?.credit_cost ?? '—'} credits
+                </strong>
+              </div>
+              <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', color: '#64748B' }}>Số kết quả</span>
+                <strong style={{ fontSize: '11.5px', color: '#0F172A' }}>1 · đang khóa</strong>
+              </div>
+              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #E2E8F0', fontSize: '10px', color: selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds ? '#047857' : '#B45309' }}>
+                {selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds
+                  ? '✓ Tổ hợp này đã được kiểm thử runtime trong project.'
+                  : 'Tổ hợp này được Flow hỗ trợ nhưng chưa được kiểm thử E2E trong project.'}
+              </div>
+            </div>
+
+            <div style={{ padding: '9px 10px', borderRadius: '8px', border: '1px solid #BFDBFE', background: '#EFF6FF', color: '#1E40AF', fontSize: '10.5px', lineHeight: 1.45 }}>
+              <strong>1080p là bước upscale riêng.</strong> Bản hiện tại tạo tối đa 720p; adapter upscale sẽ được nối sau khi có trace runtime, nên UI chưa cho chọn 1080p như độ phân giải tạo.
+            </div>
+
+            {runError ? (
+              <div role="alert" style={{ padding: '11px', borderRadius: '8px', border: '1px solid #FCA5A5', background: '#FFF7F7', color: '#7F1D1D' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                  <AlertCircle size={17} color="#DC2626" style={{ marginTop: '1px', flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 800 }}>{runError.title}</div>
+                    <div style={{ marginTop: '3px', fontSize: '10px', fontWeight: 700, color: '#B91C1C' }}>
+                      Công đoạn: {runError.stageLabel}
+                    </div>
+                    <div style={{ marginTop: '7px', fontSize: '10.5px', lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+                      {runError.message}
+                    </div>
+                    <div style={{ marginTop: '8px', padding: '7px', borderRadius: '6px', background: '#FEE2E2', fontSize: '10px', lineHeight: 1.45 }}>
+                      <strong>Cách xử lý:</strong> {runError.hint}
+                    </div>
+                    <div style={{ marginTop: '6px', fontSize: '9px', color: '#B91C1C' }}>
+                      Mã lỗi: {runError.code}{runError.jobId ? ` · Job: ${runError.jobId}` : ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : !isReadyToRun && missingReasons.length > 0 ? (
+              <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #FCD34D', background: '#FFFBEB', color: '#92400E' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 800 }}>
+                  <AlertCircle size={15} /> Chưa thể tạo video
+                </div>
+                <ul style={{ margin: '6px 0 0', paddingLeft: '18px', fontSize: '10.5px', lineHeight: 1.5 }}>
+                  {missingReasons.map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
+              </div>
+            ) : null}
+
+            {/* Big Trigger Run Button */}
+            <button
+              type="button"
+              disabled={!isReadyToRun || isRunning}
+              onClick={onRunWorkflow}
+              style={{
+                marginTop: '12px',
+                padding: '11px',
+                borderRadius: '8px',
+                border: 'none',
+                background: !isReadyToRun || isRunning ? '#94A3B8' : 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
+                color: '#FFFFFF',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: !isReadyToRun || isRunning ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: !isReadyToRun || isRunning ? 'none' : '0 4px 12px rgba(79, 70, 229, 0.35)',
+              }}
+            >
+              <Sparkles size={16} />
+              <span>{isRunning ? 'Đang tạo video...' : runError ? 'Thử Lại Sau Khi Kiểm Tra' : 'Tạo Video Ngay'}</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}

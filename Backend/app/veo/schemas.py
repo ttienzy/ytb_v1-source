@@ -31,6 +31,7 @@ class InputMode(str, Enum):
     TEXT_TO_VIDEO = "text_to_video"
     FRAMES       = "frames"          # Khung hình (ảnh đầu / đầu+cuối)
     INGREDIENTS  = "ingredients"     # Thành phần (tham chiếu nội dung)
+    VIDEO_EDIT   = "video_edit"
     EXTEND       = "extend"
 
 
@@ -126,6 +127,16 @@ class VeoJobRequest(BaseModel):
         max_length=3,
         description="Danh sách ảnh thành phần tham chiếu (tối đa 3 ảnh: Subject, Scene, Style)",
     )
+    ingredient_media_ids: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Danh sách media_id ảnh/video đã upload lên cùng Flow project",
+    )
+
+    # Cho mode video_edit (Omni 1.1 Flash)
+    reference_video_id: Optional[str] = Field(default=None, description="Flow media_id cua video tham chieu da upload")
+    reference_video_start_seconds: float = Field(default=0, ge=0, description="Thoi diem bat dau clip tham chieu")
+    reference_video_end_seconds: Optional[float] = Field(default=None, gt=0, description="Thoi diem ket thuc clip tham chieu")
 
     # Cho mode extend
     source_video_id: Optional[str] = Field(default=None, description="Video ID nguồn để extend")
@@ -150,6 +161,10 @@ class VeoJobOut(BaseModel):
     # Progress
     current_step: str = ""           # Bước hiện tại đang xử lý
     error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    error_stage: Optional[str] = None
+    error_hint: Optional[str] = None
+    error_retryable: Optional[bool] = None
 
     # Output
     output_files: list[str] = Field(default_factory=list, description="Danh sách file paths")

@@ -15,7 +15,7 @@ export type JobStatus =
   | 'done'
   | 'error'
 
-export type InputMode = 'text_to_video' | 'frames' | 'ingredients' | 'extend'
+export type InputMode = 'text_to_video' | 'frames' | 'ingredients' | 'video_edit' | 'extend'
 export type AspectRatio = '16:9' | '9:16'
 
 // ─── Model Info ─────────────────────────────────────────────────────────────
@@ -75,6 +75,10 @@ export interface VeoJobRequest {
   image_path?: string | null
   end_image_path?: string | null
   ingredient_image_paths?: string[]
+  ingredient_media_ids?: string[]
+  reference_video_id?: string | null
+  reference_video_start_seconds?: number
+  reference_video_end_seconds?: number | null
   source_video_id?: string | null
   continuation_prompt?: string | null
 }
@@ -103,6 +107,10 @@ export interface VeoJobOut {
   num_outputs: number
   current_step: string
   error_message: string | null
+  error_code?: string | null
+  error_stage?: string | null
+  error_hint?: string | null
+  error_retryable?: boolean | null
   output_files: string[]
   created_at: string
   updated_at: string

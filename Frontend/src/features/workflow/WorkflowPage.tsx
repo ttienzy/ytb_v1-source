@@ -34,9 +34,11 @@ import { VeoSetupModal } from './components/VeoSetupModal'
 import { VideoLibraryModal } from './components/VideoLibraryModal'
 import { VideoPlayerModal } from './components/VideoPlayerModal'
 import { VeoVideoPickerModal } from './components/VeoVideoPickerModal'
+import { MotionControlWorkspace } from './components/MotionControlWorkspace'
+import { StudioErrorBoundary } from '../veo-studio/components/StudioErrorBoundary'
 import * as veoApi from '../veo-studio/services/veoApi'
 import type { VeoCapabilities, VeoProject } from '../veo-studio/types'
-import type { GeneratedSceneItem, GptSalesScriptItem, PromptPresetItem, VeoVideoConfig } from './types'
+import type { GeneratedSceneItem, GptSalesScriptItem, PromptPresetItem, VeoVideoConfig, WorkflowTabId } from './types'
 import type { AssetRef, ExportedVideoItem, ProductAnalysis, SalesScript, ScriptCollection } from './contracts'
 import {
   resolveProductAssetsInput,
@@ -75,6 +77,7 @@ import { buildVoiceoverPlan, selectCachedVoiceoverPath } from './services/workfl
 import { isValidWorkflowConnection } from './services/workflowGraph.ts'
 
 function WorkflowCanvas() {
+  const [activeTab, setActiveTab] = useState<WorkflowTabId>('chaining')
   const [edges, setEdges] = useState<Edge[]>(initialEdges)
   const { nodes, setNodes, nodesRef, captureRevision } = useWorkflowState(initialNodes, edges)
   const taskKeys = useRef(new Set<string>())
@@ -273,7 +276,7 @@ function WorkflowCanvas() {
             ...connection,
             type: 'removable',
             animated: true,
-            style: { stroke: '#6366f1', strokeWidth: 2.5 },
+            style: { stroke: '#6366f1', strokeWidth: 2.5, strokeDasharray: '4 4' },
             data: { onDeleteEdge: handleDeleteEdge },
           },
           eds
@@ -1871,6 +1874,8 @@ function WorkflowCanvas() {
   return (
     <div className="workflow-container">
       <WorkflowToolbar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         onResetLayout={handleResetLayout}
         onSimulateRun={handleExecuteWorkflow}
         onCleanOrphans={handleCleanOrphans}
@@ -1886,34 +1891,71 @@ function WorkflowCanvas() {
         </div>
       )}
 
-
-      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-        <ReactFlow
-          nodes={nodesWithHandlers}
-          edges={edgesWithHandlers}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.1 }}
-          minZoom={0.3}
-          maxZoom={2}
-          deleteKeyCode={['Backspace', 'Delete']}
-          defaultViewport={{ x: 0, y: 0, zoom: 0.88 }}
+      {/* TAB 1: Kịch Bản Liên Hoàn (React Flow Canvas) */}
+      {activeTab === 'chaining' && (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            position: 'relative',
+          }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#cbd5e1" />
-          <Controls position="bottom-right" />
-          <MiniMap
-            position="bottom-left"
-            nodeStrokeColor="#6366f1"
-            nodeColor="#e2e8f0"
-            maskColor="rgba(241, 245, 249, 0.8)"
-            style={{ width: 140, height: 95 }}
+          <ReactFlow
+            id="rf-chaining-flow"
+            nodes={nodesWithHandlers}
+            edges={edgesWithHandlers}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.1 }}
+            minZoom={0.3}
+            maxZoom={2}
+            deleteKeyCode={['Backspace', 'Delete']}
+            defaultViewport={{ x: 0, y: 0, zoom: 0.88 }}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#cbd5e1" />
+            <Controls position="bottom-right" />
+            <MiniMap
+              position="bottom-left"
+              nodeStrokeColor="#6366f1"
+              nodeColor="#e2e8f0"
+              maskColor="rgba(241, 245, 249, 0.8)"
+              style={{ width: 140, height: 95 }}
+            />
+          </ReactFlow>
+        </div>
+      )}
+
+      {/* TAB 2: Motion Control Studio Workspace */}
+      {activeTab === 'motion' && (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            position: 'relative',
+            display: 'flex',
+            flex: 1,
+            overflow: 'hidden',
+          }}
+        >
+          <MotionControlWorkspace
+            activeProjectId={activeVeoProject?.id ?? null}
+            activeFlowProjectId={activeVeoProject?.flow_project_id ?? null}
+            onOpenLibrary={() => setIsLibraryOpen(true)}
+            onOpenPreviewModal={(videoUrl, title, prompt) => {
+              setPreviewModalData({
+                isOpen: true,
+                videoUrl,
+                title,
+                prompt,
+              })
+            }}
           />
-        </ReactFlow>
-      </div>
+        </div>
+      )}
 
       {/* Modal Cấu Hình Google Veo & Flow Project */}
       {isVeoModalOpen && (
@@ -1972,8 +2014,10 @@ function WorkflowCanvas() {
 
 export function WorkflowPage() {
   return (
-    <ReactFlowProvider>
-      <WorkflowCanvas />
-    </ReactFlowProvider>
+    <StudioErrorBoundary fallbackTitle="Lỗi hiển thị Workflow Studio">
+      <ReactFlowProvider>
+        <WorkflowCanvas />
+      </ReactFlowProvider>
+    </StudioErrorBoundary>
   )
 }

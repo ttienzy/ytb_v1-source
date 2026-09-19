@@ -83,6 +83,7 @@ _image_results: dict[str, dict[str, Any]] = {}     # request_id → Flow image g
 _captcha_busy: bool = False
 _captcha_busy_until: float = 0
 _captcha_stats = {"total_solved": 0, "last_solved_at": None}
+_video_upload_results: dict[str, dict[str, Any]] = {}  # request_id → video upload result
 
 # Extension status
 _extension_info: dict[str, Any] = {
@@ -255,6 +256,40 @@ def wait_image_result(request_id: str, timeout: float = 60.0) -> dict[str, Any] 
             if request_id in _image_results:
                 return _image_results.pop(request_id)
         time.sleep(0.3)
+    return None
+
+
+def request_video_upload(
+    project_id: str,
+    video_base64: str,
+    video_mime: str = "video/mp4",
+    video_filename: str = "reference_video.mp4",
+) -> str | None:
+    """Yêu cầu Extension upload video lên Google Flow qua RPC maseQ."""
+    request_id = secrets.token_hex(16)
+    try:
+        _captcha_pending.put_nowait({
+            "request_id": request_id,
+            "action": "UPLOAD_VIDEO",
+            "project_id": project_id,
+            "video_base64": video_base64,
+            "video_mime": video_mime,
+            "video_filename": video_filename,
+            "created_at": time.time(),
+        })
+        return request_id
+    except Exception:
+        return None
+
+
+def wait_video_upload_result(request_id: str, timeout: float = 120.0) -> dict[str, Any] | None:
+    """Chờ Extension trả kết quả upload video (có mediaId)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with _bridge_lock:
+            if request_id in _video_upload_results:
+                return _video_upload_results.pop(request_id)
+        time.sleep(0.5)
     return None
 
 
@@ -578,6 +613,30 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "logs": data.get("logs"),
                         "received_at": time.time(),
                     }
+            self._send_json({"ok": True})
+            return
+
+        if self.path == "/flow/video-upload-response":
+            if not self._check_secret():
+                self._send_json({"error": "forbidden"}, 403)
+                return
+            data = self._read_json()
+            request_id = data.get("request_id", "")
+            if request_id:
+                if data.get("logs"):
+                    logger.info("[VideoUpload] Extension logs %s: %s", request_id[:8], data.get("logs"))
+                with _bridge_lock:
+                    _video_upload_results[request_id] = {
+                        "ok": bool(data.get("ok", False)),
+                        "media_id": data.get("media_id"),
+                        "project_id": data.get("project_id"),
+                        "error": data.get("error"),
+                        "received_at": time.time(),
+                    }
+                logger.info(
+                    "[VideoUpload] %s: ok=%s media_id=%s error=%s",
+                    request_id[:8], data.get("ok"), data.get("media_id"), data.get("error")
+                )
             self._send_json({"ok": True})
             return
 
