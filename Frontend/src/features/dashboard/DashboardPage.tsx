@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useTransition } from 'react'
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowRight,
@@ -9,7 +9,6 @@ import {
   Clapperboard,
   Film,
   FolderOpen,
-  Loader2,
   Play,
   Plus,
   RefreshCw,
@@ -19,7 +18,6 @@ import {
   Zap,
 } from 'lucide-react'
 import { fmtBytes } from '../../shared/utils/formatters'
-import { VideoPlayerModal } from '../workflow/components/VideoPlayerModal'
 import { fetchDashboardData, openExportFolder } from './services/dashboardApi'
 import type {
   DashboardStats,
@@ -31,12 +29,64 @@ import type {
 import type { PublisherDailySummary } from '../monitor/types'
 import './DashboardPage.css'
 
+const VideoPlayerModal = lazy(() => import('../workflow/components/VideoPlayerModal').then(module => ({
+  default: module.VideoPlayerModal,
+})))
+
 interface DashboardPageProps {
   setActivePage: (page: string) => void
   onOpenChannelHealth?: () => void
+  monitorSummary?: PublisherDailySummary | null
 }
 
-export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardPageProps) {
+function DeferredVideoThumbnail({ src, delayMs }: { src: string; delayMs: number }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [enabled, setEnabled] = useState(false)
+
+  useEffect(() => {
+    if (enabled || !videoRef.current) return
+    let timer: number | null = null
+    const enableLater = () => {
+      if (timer !== null) return
+      timer = window.setTimeout(() => setEnabled(true), delayMs)
+    }
+
+    if (!('IntersectionObserver' in window)) {
+      enableLater()
+      return () => {
+        if (timer !== null) window.clearTimeout(timer)
+      }
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        enableLater()
+        observer.disconnect()
+      }
+    }, { rootMargin: '80px' })
+    observer.observe(videoRef.current)
+
+    return () => {
+      observer.disconnect()
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [delayMs, enabled])
+
+  return (
+    <video
+      ref={videoRef}
+      src={enabled ? src : undefined}
+      preload={enabled ? 'metadata' : 'none'}
+      muted
+      playsInline
+      onError={(event) => {
+        event.currentTarget.style.display = 'none'
+      }}
+    />
+  )
+}
+
+export function DashboardPage({ setActivePage, onOpenChannelHealth, monitorSummary }: DashboardPageProps) {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [monitor, setMonitor] = useState<PublisherDailySummary | null>(null)
   const [recentVideos, setRecentVideos] = useState<RecentExportVideo[]>([])
@@ -50,32 +100,40 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [activePreviewVideo, setActivePreviewVideo] = useState<{ url: string; title: string } | null>(null)
-  const [, startTransition] = useTransition()
+  const requestIdRef = useRef(0)
+  const monitorHintRef = useRef(monitorSummary)
+  monitorHintRef.current = monitorSummary
 
-  const loadData = async (force = false) => {
+  const loadData = useCallback(async (force = false) => {
+    const requestId = ++requestIdRef.current
     try {
       if (force) setRefreshing(true)
-      const res = await fetchDashboardData(force)
-      startTransition(() => {
-        setStats(res.stats)
-        setMonitor(res.monitor)
-        setRecentVideos(res.recentVideos)
-        setPipeline7Days(res.pipeline7Days)
-        setVelocityExports7Days(res.velocityExports7Days)
-        setVelocityAll7Days(res.velocityAll7Days)
-        setPlatformShares(res.platformShares)
-      })
+      const res = await fetchDashboardData(force, force ? null : monitorHintRef.current)
+      if (requestId !== requestIdRef.current) return
+      setStats(res.stats)
+      setMonitor(res.monitor)
+      setRecentVideos(res.recentVideos)
+      setPipeline7Days(res.pipeline7Days)
+      setVelocityExports7Days(res.velocityExports7Days)
+      setVelocityAll7Days(res.velocityAll7Days)
+      setPlatformShares(res.platformShares)
     } catch (err) {
+      if (requestId !== requestIdRef.current) return
       console.error('[Dashboard] Lỗi khi nạp dữ liệu Studio Dashboard:', err)
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadData(false)
-  }, [])
+    void loadData(false)
+    return () => {
+      requestIdRef.current += 1
+    }
+  }, [loadData])
 
   // Average buffer days
   const avgBufferDays = useMemo(() => {
@@ -108,6 +166,14 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
   const past7DaysTotalCount = useMemo(() => {
     return activeVelocityList.reduce((acc, d) => acc + d.videoCount, 0)
   }, [activeVelocityList])
+
+  const totalExportCount = useMemo(() => {
+    return velocityExports7Days.reduce((acc, day) => acc + day.videoCount, 0)
+  }, [velocityExports7Days])
+
+  const totalAllMediaCount = useMemo(() => {
+    return velocityAll7Days.reduce((acc, day) => acc + day.videoCount, 0)
+  }, [velocityAll7Days])
 
 
   // Max velocity count for scaling chart
@@ -257,24 +323,28 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
       <section className="studio-kpi-row">
         {/* KPI 1: Cần đăng hôm nay */}
         <div
-          className={`studio-kpi-card ${stats?.unpostedChannels ? 'alert' : 'success'}`}
+          className={`studio-kpi-card ${loading ? 'is-loading' : stats?.unpostedChannels ? 'alert' : 'success'}`}
           onClick={onOpenChannelHealth}
           style={{ cursor: 'pointer' }}
           title="Bấm để xem danh sách chi tiết các kênh"
         >
           <div className="studio-kpi-header">
             <span>CẦN XUẤT BẢN HÔM NAY</span>
-            {stats?.unpostedChannels ? (
+            {loading ? (
+              <span className="dashboard-skeleton dashboard-skeleton-pill" />
+            ) : stats?.unpostedChannels ? (
               <span className="channel-status-pill unposted">Thiếu bài</span>
             ) : (
               <span className="channel-status-pill healthy">Đã đủ bài</span>
             )}
           </div>
           <div className="studio-kpi-value">
-            {stats ? `${stats.unpostedChannels} kênh` : '—'}
+            {loading ? <span className="dashboard-skeleton dashboard-skeleton-value" /> : stats ? `${stats.unpostedChannels} kênh` : '—'}
           </div>
-          <div className={`studio-kpi-meta ${stats?.unpostedChannels ? 'alert' : 'success'}`}>
-            {stats?.unpostedChannels ? (
+          <div className={`studio-kpi-meta ${loading ? '' : stats?.unpostedChannels ? 'alert' : 'success'}`}>
+            {loading ? (
+              <span className="dashboard-skeleton dashboard-skeleton-line" />
+            ) : stats?.unpostedChannels ? (
               <>
                 <AlertCircle size={13} /> Cần bổ sung video phát sóng gấp hôm nay
               </>
@@ -292,10 +362,10 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
             <span>TIẾN ĐỘ PHÁT SÓNG</span>
           </div>
           <div className="studio-kpi-value">
-            {stats ? `${stats.healthyChannels} / ${stats.totalChannels} kênh` : '—'}
+            {loading ? <span className="dashboard-skeleton dashboard-skeleton-value" /> : stats ? `${stats.healthyChannels} / ${stats.totalChannels} kênh` : '—'}
           </div>
           <div className="studio-kpi-meta">
-            <span>Kênh đã hoàn thành mục tiêu phát sóng</span>
+            {loading ? <span className="dashboard-skeleton dashboard-skeleton-line" /> : <span>Kênh đã hoàn thành mục tiêu phát sóng</span>}
           </div>
         </div>
 
@@ -310,10 +380,10 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
             <span>VIDEO HOÀN CHỈNH</span>
           </div>
           <div className="studio-kpi-value">
-            {stats ? `${stats.totalExportedVideos} video` : '—'}
+            {loading ? <span className="dashboard-skeleton dashboard-skeleton-value" /> : stats ? `${stats.totalExportedVideos} video` : '—'}
           </div>
           <div className="studio-kpi-meta">
-            <span>Thành phẩm sẵn sàng xuất bản</span>
+            {loading ? <span className="dashboard-skeleton dashboard-skeleton-line" /> : <span>Thành phẩm sẵn sàng xuất bản</span>}
           </div>
         </div>
 
@@ -323,10 +393,10 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
             <span>LỊCH DỰ TRỮ PHÁT SÓNG</span>
           </div>
           <div className="studio-kpi-value">
-            ~{avgBufferDays} ngày
+            {loading ? <span className="dashboard-skeleton dashboard-skeleton-value" /> : `~${avgBufferDays} ngày`}
           </div>
           <div className="studio-kpi-meta">
-            <span>Mức đệm lịch đăng trung bình</span>
+            {loading ? <span className="dashboard-skeleton dashboard-skeleton-line" /> : <span>Mức đệm lịch đăng trung bình</span>}
           </div>
         </div>
       </section>
@@ -344,7 +414,11 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
                 <span>Lịch Phát Sóng 7 Ngày Tới</span>
               </h3>
               <p className="studio-chart-sub">
-                {next7DaysScheduledTotal} video đã lên lịch • Phân bổ theo múi giờ GMT+7
+                {loading ? (
+                  <span className="dashboard-skeleton dashboard-skeleton-line dashboard-skeleton-line-wide" />
+                ) : (
+                  `${next7DaysScheduledTotal} video đã lên lịch • Phân bổ theo múi giờ GMT+7`
+                )}
               </p>
             </div>
             <div className="chart-header-actions">
@@ -362,7 +436,19 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
 
           {/* Weekly Editorial Horizon Strip - Clean & Minimalist */}
           <div className="weekly-horizon-strip">
-            {pipeline7Days.map((item, idx) => {
+            {loading ? Array.from({ length: 7 }, (_, idx) => (
+              <div key={`horizon-skeleton-${idx}`} className={`horizon-day-col dashboard-horizon-skeleton ${idx === 0 ? 'today' : ''}`}>
+                <div className="horizon-day-header">
+                  <span className="dashboard-skeleton dashboard-skeleton-day-name" />
+                  <span className="dashboard-skeleton dashboard-skeleton-day-date" />
+                  <span className="dashboard-skeleton dashboard-skeleton-day-badge" />
+                </div>
+                <div className="horizon-day-body">
+                  <span className="dashboard-skeleton dashboard-skeleton-slot" />
+                  <span className="dashboard-skeleton dashboard-skeleton-slot" />
+                </div>
+              </div>
+            )) : pipeline7Days.map((item, idx) => {
               const isToday = idx === 0
               const [mPart, dPart] = item.date.slice(5).split('-')
               const dateShort = `${parseInt(dPart, 10)}/${parseInt(mPart, 10)}`
@@ -450,29 +536,42 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
 
           {/* Platform Distribution Strip */}
           <div className="platform-share-container">
-            <div className="platform-share-bar">
-              {platformShares.map((p) =>
-                p.percent > 0 ? (
-                  <div
-                    key={p.platform}
-                    className="platform-segment"
-                    style={{ width: `${p.percent}%`, background: p.color }}
-                    title={`${p.label}: ${p.percent}% (${p.count} kênh)`}
-                  />
-                ) : null
-              )}
-            </div>
-
-            <div className="platform-share-labels">
-              {platformShares.map((p) => (
-                <div key={p.platform} className="platform-share-item">
-                  <span className="platform-color-chip" style={{ background: p.color }} />
-                  <span>
-                    {p.label}: <strong>{p.count} kênh</strong> ({p.percent}%)
-                  </span>
+            {loading ? (
+              <>
+                <div className="dashboard-skeleton dashboard-skeleton-share-bar" />
+                <div className="platform-share-labels">
+                  {Array.from({ length: 3 }, (_, idx) => (
+                    <span key={`share-skeleton-${idx}`} className="dashboard-skeleton dashboard-skeleton-share-label" />
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            ) : (
+              <>
+                <div className="platform-share-bar">
+                  {platformShares.map((p) =>
+                    p.percent > 0 ? (
+                      <div
+                        key={p.platform}
+                        className="platform-segment"
+                        style={{ width: `${p.percent}%`, background: p.color }}
+                        title={`${p.label}: ${p.percent}% (${p.count} kênh)`}
+                      />
+                    ) : null
+                  )}
+                </div>
+
+                <div className="platform-share-labels">
+                  {platformShares.map((p) => (
+                    <div key={p.platform} className="platform-share-item">
+                      <span className="platform-color-chip" style={{ background: p.color }} />
+                      <span>
+                        {p.label}: <strong>{p.count} kênh</strong> ({p.percent}%)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -485,7 +584,11 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
                 <span>Sản Lượng Video 7 Ngày Qua</span>
               </h3>
               <p className="studio-chart-sub">
-                {past7DaysTotalCount} video trong 7 ngày qua • Dữ liệu thực từ ổ đĩa
+                {loading ? (
+                  <span className="dashboard-skeleton dashboard-skeleton-line dashboard-skeleton-line-wide" />
+                ) : (
+                  `${past7DaysTotalCount} video trong 7 ngày qua • Dữ liệu thực từ ổ đĩa`
+                )}
               </p>
             </div>
 
@@ -497,7 +600,7 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
                 onClick={() => setVelocityMode('exports')}
                 title="Chỉ tính video ghép hoàn chỉnh trong Data/workflow_exports"
               >
-                Video Hoàn Chỉnh (12)
+                Video Hoàn Chỉnh ({loading ? '…' : totalExportCount})
               </button>
               <button
                 type="button"
@@ -505,13 +608,21 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
                 onClick={() => setVelocityMode('all')}
                 title="Tính toàn bộ video bao gồm cả phân đoạn Veo"
               >
-                Tất Cả Clip AI (80)
+                Tất Cả Clip AI ({loading ? '…' : totalAllMediaCount})
               </button>
             </div>
           </div>
 
           {/* SVG Smooth Spline Area Chart */}
           <div className="stripe-chart-wrap">
+            {loading ? (
+              <div className="dashboard-chart-skeleton" aria-hidden="true">
+                <span className="dashboard-chart-skeleton-line line-one" />
+                <span className="dashboard-chart-skeleton-line line-two" />
+                <span className="dashboard-chart-skeleton-line line-three" />
+                <span className="dashboard-chart-skeleton-area" />
+              </div>
+            ) : (
             <svg
               className="stripe-svg-chart"
               viewBox="0 0 500 150"
@@ -586,11 +697,14 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
                 )
               })}
             </svg>
+            )}
           </div>
 
           {/* Interactive Hover Tooltip Bar */}
           <div className="stripe-tooltip-info">
-            {hoveredVelocityIdx !== null && svgChartGeometry.points[hoveredVelocityIdx] ? (
+            {loading ? (
+              <span className="dashboard-skeleton dashboard-skeleton-line dashboard-skeleton-line-wide" />
+            ) : hoveredVelocityIdx !== null && svgChartGeometry.points[hoveredVelocityIdx] ? (
               <>
                 <span>
                   <strong>{svgChartGeometry.points[hoveredVelocityIdx].item.dayLabel}</strong> (
@@ -641,9 +755,16 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
 
           <div className="studio-section-body">
             {loading ? (
-              <div className="studio-empty-state">
-                <Loader2 size={20} className="spinning" style={{ margin: '0 auto 8px' }} />
-                <p>Đang đồng bộ tình trạng lịch đăng các kênh...</p>
+              <div className="channel-matrix-list" aria-label="Đang tải tình trạng các kênh">
+                {Array.from({ length: 4 }, (_, idx) => (
+                  <div key={`channel-skeleton-${idx}`} className="channel-matrix-item dashboard-channel-skeleton">
+                    <div className="channel-matrix-left">
+                      <span className="dashboard-skeleton dashboard-skeleton-avatar" />
+                      <span className="dashboard-skeleton dashboard-skeleton-channel-copy" />
+                    </div>
+                    <span className="dashboard-skeleton dashboard-skeleton-channel-action" />
+                  </div>
+                ))}
               </div>
             ) : !monitor?.channels?.length ? (
               <div className="studio-empty-state">
@@ -754,7 +875,19 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
           </div>
 
           <div className="studio-section-body">
-            {recentVideos.length === 0 ? (
+            {loading ? (
+              <div className="video-project-grid" aria-label="Đang tải video gần đây">
+                {Array.from({ length: 4 }, (_, idx) => (
+                  <div key={`video-skeleton-${idx}`} className="video-project-card dashboard-video-skeleton">
+                    <span className="dashboard-skeleton dashboard-skeleton-video-thumb" />
+                    <div className="video-card-body">
+                      <span className="dashboard-skeleton dashboard-skeleton-video-title" />
+                      <span className="dashboard-skeleton dashboard-skeleton-video-meta" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : recentVideos.length === 0 ? (
               <div className="studio-empty-state">
                 <Film size={32} style={{ margin: '0 auto 8px', opacity: 0.35 }} />
                 <p>Chưa có video nào trong thư viện thành phẩm.</p>
@@ -770,19 +903,11 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
               </div>
             ) : (
               <div className="video-project-grid">
-                {recentVideos.slice(0, 4).map((vid) => (
+                {recentVideos.slice(0, 4).map((vid, idx) => (
                   <div key={vid.filename} className="video-project-card">
                     {/* Video Visual Poster / Thumbnail */}
                     <div className="video-card-thumb">
-                      <video
-                        src={vid.downloadUrl}
-                        preload="metadata"
-                        muted
-                        playsInline
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none'
-                        }}
-                      />
+                      <DeferredVideoThumbnail src={vid.downloadUrl} delayMs={350 + idx * 140} />
                       <div className="video-card-thumb-placeholder">
                         <Film size={26} />
                       </div>
@@ -839,12 +964,14 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
 
       {/* Video Player Modal */}
       {activePreviewVideo && (
-        <VideoPlayerModal
-          isOpen={Boolean(activePreviewVideo)}
-          onClose={() => setActivePreviewVideo(null)}
-          videoUrl={activePreviewVideo.url}
-          title={activePreviewVideo.title}
-        />
+        <Suspense fallback={null}>
+          <VideoPlayerModal
+            isOpen={Boolean(activePreviewVideo)}
+            onClose={() => setActivePreviewVideo(null)}
+            videoUrl={activePreviewVideo.url}
+            title={activePreviewVideo.title}
+          />
+        </Suspense>
       )}
     </div>
   )

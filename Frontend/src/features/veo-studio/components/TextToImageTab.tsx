@@ -155,8 +155,37 @@ export function TextToImageTab({
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewImage, setPreviewImage] = useState<VeoImageItem | null>(null)
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const currentModel = MODELS.find((m) => m.key === selectedModelKey) || MODELS[0]
+
+  // Download clean image (watermark removed) via fetch + blob
+  const handleDownloadClean = async (imageId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (downloadingId) return
+    setDownloadingId(imageId)
+    setErrorMessage('')
+    setSuccessMessage('')
+    try {
+      const blob = await api.downloadCleanImage(imageId)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `veo_${imageId}_clean.jpg`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setSuccessMessage('Đã xóa watermark và tải ảnh về máy.')
+      setTimeout(() => setSuccessMessage(''), 4000)
+    } catch (err) {
+      console.error('[download clean]', err)
+      setErrorMessage(err instanceof Error ? err.message : 'Xóa watermark thất bại. Vui lòng thử lại.')
+      setTimeout(() => setErrorMessage(''), 4000)
+    } finally {
+      setDownloadingId(null)
+    }
+  }
 
   // Load images
   const loadImages = async () => {
@@ -727,15 +756,15 @@ export function TextToImageTab({
                         <Film size={14} />
                       </button>
                     )}
-                    <a
-                      href={api.getImageFileUrl(item.id)}
-                      download={`flow_image_${item.id}.jpg`}
+                    <button
+                      type="button"
                       className="veo-overlay-action-btn"
-                      title="Tải ảnh về máy"
-                      onClick={(e) => e.stopPropagation()}
+                      title="Tải ảnh về máy (không watermark)"
+                      disabled={downloadingId === item.id}
+                      onClick={(e) => handleDownloadClean(item.id, e)}
                     >
-                      <Download size={14} />
-                    </a>
+                      {downloadingId === item.id ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                    </button>
                     <button
                       type="button"
                       className="veo-overlay-action-btn danger"
@@ -854,14 +883,24 @@ export function TextToImageTab({
                   )}
                 </button>
 
-                <a
-                  href={api.getImageFileUrl(previewImage.id)}
-                  download={`flow_${previewImage.id}.jpg`}
+                <button
+                  type="button"
                   className="veo-btn-modal-secondary"
+                  disabled={downloadingId === previewImage.id}
+                  onClick={() => handleDownloadClean(previewImage.id)}
                 >
-                  <Download size={14} />
-                  <span>Tải ảnh về máy</span>
-                </a>
+                  {downloadingId === previewImage.id ? (
+                    <>
+                      <Loader2 size={14} className="spin" />
+                      <span>Đang xóa watermark…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} />
+                      <span>Tải ảnh về máy</span>
+                    </>
+                  )}
+                </button>
 
                 {onSendToVideo && (
                   <button

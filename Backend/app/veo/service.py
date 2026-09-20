@@ -1698,6 +1698,64 @@ def extract_last_frame(video_id: str) -> dict:
 # Image Generation (Nano Banana - Pinhole)
 # ─────────────────────────────────────────────────────────────────────────────
 
+_image_download_locks_guard = threading.Lock()
+_image_download_locks: dict[str, threading.Lock] = {}
+
+
+def _get_image_download_lock(image_id: str) -> threading.Lock:
+    """Return a stable per-image lock shared by background and on-demand downloads."""
+    with _image_download_locks_guard:
+        return _image_download_locks.setdefault(image_id, threading.Lock())
+
+
+def _download_image_to_local(
+    image_id: str,
+    image_url: str,
+    *,
+    timeout: float = 25.0,
+) -> Path | None:
+    """Download a generated image once and publish it atomically."""
+    parsed_url = urlparse(image_url or "")
+    if parsed_url.scheme not in {"http", "https"}:
+        return None
+
+    local_file = _VEO_IMAGES_DIR / f"{image_id}.jpg"
+    lock = _get_image_download_lock(image_id)
+    with lock:
+        if local_file.is_file() and local_file.stat().st_size > 0:
+            return local_file
+
+        temp_file = local_file.with_name(f".{local_file.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with requests.get(image_url, timeout=timeout, stream=True) as response:
+                response.raise_for_status()
+                with temp_file.open("wb") as output:
+                    for chunk in response.iter_content(chunk_size=1024 * 256):
+                        if chunk:
+                            output.write(chunk)
+
+            if not temp_file.is_file() or temp_file.stat().st_size <= 0:
+                raise RuntimeError("Google Flow trả về file ảnh rỗng")
+            os.replace(temp_file, local_file)
+            return local_file
+        except Exception as exc:
+            logger.warning("Không thể tải ảnh %s về máy: %s", image_id, exc)
+            return None
+        finally:
+            temp_file.unlink(missing_ok=True)
+
+
+def ensure_image_file_path(image_id: str) -> Path | None:
+    """Return a local image path, downloading the CDN asset when still pending."""
+    existing = get_image_file_path(image_id)
+    if existing:
+        return existing
+
+    image = get_image_by_id(image_id)
+    if not image or not image.image_url:
+        return None
+    return _download_image_to_local(image_id, image.image_url)
+
 def _model_to_image_item(img: VeoImage) -> VeoImageItem:
     return VeoImageItem(
         id=img.id,
@@ -1804,15 +1862,12 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
             local_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
             local_rel_path = str(local_file.relative_to(_BASE_DIR)).replace("\\", "/")
 
-            # Tải ảnh về ổ cứng ngầm (không chặn response trả về UI)
+            # Tải ảnh về ổ cứng ngầm (không chặn response trả về UI).
+            # Helper dùng lock + atomic replace để an toàn khi endpoint download
+            # đồng thời yêu cầu file ngay sau lúc ảnh vừa được tạo.
             if cdn_url:
-                def _download_task(target_url=cdn_url, out_file=local_file, target_id=img_id):
-                    try:
-                        r = requests.get(target_url, timeout=25.0)
-                        if r.status_code == 200 and len(r.content) > 0:
-                            out_file.write_bytes(r.content)
-                    except Exception as ex:
-                        logger.warning("Không thể tải ngầm ảnh %s về máy: %s", target_id, ex)
+                def _download_task(target_url=cdn_url, target_id=img_id):
+                    _download_image_to_local(target_id, target_url)
 
                 Thread(target=_download_task, daemon=True).start()
 

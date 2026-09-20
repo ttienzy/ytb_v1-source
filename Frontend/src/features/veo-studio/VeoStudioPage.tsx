@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, Video, Sparkles, Film, Activity, Download, X, Send, ImageDown } from 'lucide-react'
+import { Clapperboard, Video, Sparkles, Film, Activity, Download, X, Send, ImageDown, Loader2 } from 'lucide-react'
 import type {
   StudioTask,
   VeoBridgeStatus,
@@ -50,7 +50,32 @@ export function VeoStudioPage({ setActivePage }: Props) {
   const [studioTasks, setStudioTasks] = useState<StudioTask[]>([])
   const [previewImage, setPreviewImage] = useState<VeoImageItem | null>(null)
   const [previewVideo, setPreviewVideo] = useState<VeoJobOut | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Download clean image (watermark removed) via fetch + blob
+  const handleDownloadClean = async (imageId: string) => {
+    if (downloadingId) return
+    setDownloadingId(imageId)
+    setMessage('Đang xóa watermark khỏi ảnh...')
+    try {
+      const blob = await api.downloadCleanImage(imageId)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `veo_${imageId}_clean.jpg`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setMessage('Đã xóa watermark và tải ảnh về máy.')
+    } catch (err) {
+      console.error('[download clean]', err)
+      setMessage(err instanceof Error ? err.message : 'Xóa watermark thất bại. Vui lòng thử lại.')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
 
   const handlePreviewJob = useCallback((job: VeoJobOut) => {
     setActiveJob(job)
@@ -482,14 +507,24 @@ export function VeoStudioPage({ setActivePage }: Props) {
               </div>
               <p className="veo-lightbox-prompt">{previewImage.prompt}</p>
               <div className="veo-lightbox-actions">
-                <a
-                  href={api.getImageFileUrl(previewImage.id)}
-                  download={`flow_${previewImage.id}.jpg`}
+                <button
+                  type="button"
                   className="veo-btn-modal-secondary"
+                  disabled={downloadingId === previewImage.id}
+                  onClick={() => handleDownloadClean(previewImage.id)}
                 >
-                  <Download size={14} />
-                  <span>Tải ảnh về máy</span>
-                </a>
+                  {downloadingId === previewImage.id ? (
+                    <>
+                      <Loader2 size={14} className="spin" />
+                      <span>Đang xóa watermark…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} />
+                      <span>Tải ảnh về máy</span>
+                    </>
+                  )}
+                </button>
                 <button
                   type="button"
                   className="veo-btn-modal-primary"

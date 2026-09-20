@@ -37,6 +37,7 @@ let mainWindow: BrowserWindow | null = null
 let routerDashboardWindow: BrowserWindow | null = null
 let routerProcess: ChildProcess | null = null
 const backendProcesses: ChildProcess[] = []
+let voiceProcessStarted = false
 
 const configuredBackendPort = Number.parseInt(process.env.BACKEND_PORT || process.env.PORT || '8000', 10)
 const backendPort = Number.isFinite(configuredBackendPort) && configuredBackendPort > 0 ? configuredBackendPort : 8000
@@ -170,8 +171,15 @@ async function startProductionBackend() {
 
   if (!await waitForBackend()) console.error(`[Electron] Backend did not become ready at ${backendReadyUrl}`)
 
+}
+
+function startPackagedVoiceService() {
+  if (!app.isPackaged || voiceProcessStarted) return
+  const userDataDir = app.getPath('userData')
+  const binDir = join(process.resourcesPath, 'bin')
   const voiceExe = join(binDir, 'voice_server.exe')
   if (existsSync(voiceExe)) {
+    voiceProcessStarted = true
     try {
       const ffmpegExe = join(binDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
       const voicePath = [binDir, process.env.PATH].filter(Boolean).join(delimiter)
@@ -192,6 +200,7 @@ async function startProductionBackend() {
       backendProcesses.push(voiceProc)
       console.log(`[Electron] Started voice process (PID: ${voiceProc.pid})`)
     } catch (err) {
+      voiceProcessStarted = false
       console.error('[Electron] Failed to start voice_server.exe:', err)
     }
   }
@@ -206,6 +215,7 @@ function createWindow() {
     height: 800,
     minWidth: 960,
     minHeight: 640,
+    show: false,
     ...(appIcon ? { icon: appIcon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.mjs'),
@@ -221,6 +231,17 @@ function createWindow() {
       /* ignore */
     }
   }
+
+  // Avoid exposing Chromium's first incomplete paint. The renderer can prepare
+  // the stable Dashboard shell/skeleton before the window becomes visible.
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show()
+    // Loading the ONNX voice model is disk/CPU intensive. Give Chromium's
+    // first Dashboard paint a short uncontested window, then start TTS.
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) startPackagedVoiceService()
+    }, 750)
+  })
 
   // Mở các liên kết ngoài (Telegram, GitHub, Google Drive...) bằng trình duyệt mặc định
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

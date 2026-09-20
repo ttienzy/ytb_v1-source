@@ -39,6 +39,10 @@ class GwrRuntime:
     video_available: bool
 
 
+class WatermarkRuntimeUnavailableError(RuntimeError):
+    """Raised when the bundled/system GWR runtime cannot be resolved."""
+
+
 def _generate_job_id() -> str:
     """Generate unique job ID."""
     return secrets.token_hex(6)
@@ -169,6 +173,73 @@ def _gwr_environment(runtime: GwrRuntime) -> dict[str, str]:
     env = os.environ.copy()
     env.update(runtime.env_overrides)
     return env
+
+
+def remove_image_watermark_sync(input_path: Path, output_path: Path) -> Path:
+    """Remove an image watermark and atomically publish the cleaned file.
+
+    The CLI writes to a unique temporary file first. This prevents a failed or
+    interrupted process from leaving a partial file that could later be served
+    as a valid cache entry.
+    """
+    source = Path(input_path)
+    destination = Path(output_path)
+    if not source.is_file() or source.stat().st_size <= 0:
+        raise FileNotFoundError(f"Image file not found: {source}")
+    if source.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise ValueError(f"Unsupported image format: {source.suffix or 'unknown'}")
+
+    runtime = _resolve_gwr_runtime()
+    if runtime is None:
+        raise WatermarkRuntimeUnavailableError(
+            "Watermark runtime (gwr) không khả dụng. Hãy cài lại ứng dụng."
+        )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = destination.with_name(
+        f".{destination.stem}.{secrets.token_hex(6)}{destination.suffix}"
+    )
+    cmd = [
+        *_gwr_command(runtime),
+        "remove",
+        str(source),
+        "--output",
+        str(temp_output),
+        "--overwrite",
+    ]
+    logger.info("[watermark.image] Running (%s): %s", runtime.source, " ".join(cmd))
+
+    stderr_tail: list[str] = []
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=_gwr_environment(runtime),
+        )
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            line = line.strip()
+            if line:
+                logger.debug("[watermark.image] %s", line)
+                stderr_tail.append(line)
+                del stderr_tail[:-8]
+
+        proc.wait()
+        if proc.returncode != 0 or not temp_output.is_file() or temp_output.stat().st_size <= 0:
+            detail = stderr_tail[-1] if stderr_tail else f"exit code {proc.returncode}"
+            if proc.returncode == 0:
+                detail = "lệnh hoàn tất nhưng không tạo file đầu ra"
+            raise RuntimeError(f"gwr image error: {detail}")
+
+        os.replace(temp_output, destination)
+        logger.info("[watermark.image] Done: %s", destination.name)
+        return destination
+    finally:
+        temp_output.unlink(missing_ok=True)
 
 
 

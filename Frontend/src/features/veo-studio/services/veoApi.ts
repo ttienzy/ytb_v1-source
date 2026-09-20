@@ -239,3 +239,15 @@ export function getImageFileUrl(imageId: string): string {
   return `${BASE}/images/${imageId}/file`
 }
 
+export function getImageCleanUrl(imageId: string): string {
+  return `${BASE}/images/${imageId}/clean`
+}
+
+export async function downloadCleanImage(imageId: string): Promise<Blob> {
+  const resp = await fetch(getImageCleanUrl(imageId))
+  if (!resp.ok) {
+    throw await responseError(resp, 'Xóa watermark và tải ảnh thất bại')
+  }
+  return resp.blob()
+}
+

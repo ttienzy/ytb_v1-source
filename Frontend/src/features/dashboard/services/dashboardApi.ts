@@ -11,15 +11,9 @@ import type {
 } from '../types'
 
 const WEEKDAY_NAMES = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy']
+const DASHBOARD_CACHE_MS = 1500
 
-function formatLocalDateString(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-export async function fetchDashboardData(forceSync = false): Promise<{
+type DashboardData = {
   stats: DashboardStats
   monitor: PublisherDailySummary | null
   recentVideos: RecentExportVideo[]
@@ -28,91 +22,123 @@ export async function fetchDashboardData(forceSync = false): Promise<{
   velocityExports7Days: DayVelocityItem[]
   velocityAll7Days: DayVelocityItem[]
   platformShares: PlatformShare[]
-}> {
-  // 1. Health Ping
-  let serverStatus: 'online' | 'offline' = 'offline'
-  let dbStatus: 'connected' | 'disconnected' = 'disconnected'
-  let pingLatency = 0
+}
 
-  try {
-    const pingStart = Date.now()
-    const res = await fetch(`${API_URL}/api/ping`, { signal: AbortSignal.timeout(4000) })
-    pingLatency = Date.now() - pingStart
-    if (res.ok) {
-      const data = await res.json()
-      serverStatus = 'online'
-      dbStatus = data.database === 'connected' ? 'connected' : 'disconnected'
+let dashboardCache: { value: DashboardData; timestamp: number } | null = null
+let dashboardInFlight: Promise<DashboardData> | null = null
+
+function formatLocalDateString(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+async function loadDashboardData(
+  forceSync = false,
+  monitorHint: PublisherDailySummary | null = null,
+): Promise<DashboardData> {
+  // These groups are independent. Start all of them together so startup time is
+  // bounded by the slowest endpoint instead of the sum of every endpoint.
+  const healthTask = (async () => {
+    let serverStatus: 'online' | 'offline' = 'offline'
+    let dbStatus: 'connected' | 'disconnected' = 'disconnected'
+    let pingLatency = 0
+    try {
+      const pingStart = Date.now()
+      const res = await fetch(`${API_URL}/api/ping`, { signal: AbortSignal.timeout(4000) })
+      pingLatency = Date.now() - pingStart
+      if (res.ok) {
+        const data = await res.json()
+        serverStatus = 'online'
+        dbStatus = data.database === 'connected' ? 'connected' : 'disconnected'
+      }
+    } catch {
+      serverStatus = 'offline'
     }
-  } catch {
-    serverStatus = 'offline'
-  }
+    return { serverStatus, dbStatus, pingLatency }
+  })()
 
-  // 2. Monitor Daily Summary & Calendar Events
-  let monitor: PublisherDailySummary | null = null
-  let calendarEventsList: any[] = []
-  try {
+  const monitorTask = (async () => {
+    let monitor: PublisherDailySummary | null = monitorHint
+    let calendarEventsList: any[] = []
+    const summaryTask = monitorHint && !forceSync
+      ? Promise.resolve(monitorHint)
+      : getDailyPublishingSummary(forceSync)
     const [summaryRes, calRes] = await Promise.allSettled([
-      getDailyPublishingSummary(forceSync),
+      summaryTask,
       fetchCalendarEvents('all', forceSync),
     ])
     if (summaryRes.status === 'fulfilled') monitor = summaryRes.value
     if (calRes.status === 'fulfilled') calendarEventsList = calRes.value.events || []
-  } catch (err) {
-    console.warn('[Dashboard] Lỗi khi tải dữ liệu publisher monitor:', err)
-  }
+    return { monitor, calendarEventsList }
+  })()
 
-  // 3. Workflow Exports (Recent Videos)
-  let recentVideos: RecentExportVideo[] = []
-  let allExportItems: any[] = []
-  let totalFinalExports = 0
-
-  try {
-    const res = await fetch(`${API_URL}/api/workflow/exports`, { signal: AbortSignal.timeout(5000) })
-    if (res.ok) {
-      const data = await res.json()
-      allExportItems = Array.isArray(data?.items) ? data.items : []
-
-      // Lọc các video hoàn chỉnh (source_type == 'export')
-      const finalExports = allExportItems.filter((i: any) => i.source_type === 'export')
-      totalFinalExports = finalExports.length
-
-      // Ưu tiên hiển thị video hoàn chỉnh trước, nếu thiếu thì lấy thêm các clip gần nhất
-      const displayPool = finalExports.length > 0 ? finalExports : allExportItems
-
-      recentVideos = displayPool.slice(0, 6).map((item: any) => ({
-        filename: item.filename || '',
-        sizeBytes: item.size_bytes || 0,
-        createdAt: item.created_at || '',
-        downloadUrl: item.download_url
-          ? `${API_URL}${item.download_url}`
-          : `${API_URL}/api/workflow/exports/${encodeURIComponent(item.filename)}`,
-        localPath: item.file_path || item.local_path || '',
-        sourceType: item.source_type || 'export',
-      }))
+  const exportsTask = (async () => {
+    let recentVideos: RecentExportVideo[] = []
+    let allExportItems: any[] = []
+    let totalFinalExports = 0
+    try {
+      const res = await fetch(`${API_URL}/api/workflow/exports`, { signal: AbortSignal.timeout(5000) })
+      if (res.ok) {
+        const data = await res.json()
+        allExportItems = Array.isArray(data?.items) ? data.items : []
+        const finalExports = allExportItems.filter((item: any) => item.source_type === 'export')
+        totalFinalExports = finalExports.length
+        const displayPool = finalExports.length > 0 ? finalExports : allExportItems
+        recentVideos = displayPool.slice(0, 6).map((item: any) => ({
+          filename: item.filename || '',
+          sizeBytes: item.size_bytes || 0,
+          createdAt: item.created_at || '',
+          downloadUrl: item.download_url
+            ? `${API_URL}${item.download_url}`
+            : `${API_URL}/api/workflow/exports/${encodeURIComponent(item.filename)}`,
+          localPath: item.file_path || item.local_path || '',
+          sourceType: item.source_type || 'export',
+        }))
+      }
+    } catch (err) {
+      console.warn('[Dashboard] Không thể tải danh sách workflow exports:', err)
     }
-  } catch (err) {
-    console.warn('[Dashboard] Không thể tải danh sách workflow exports:', err)
-  }
+    return { recentVideos, allExportItems, totalFinalExports }
+  })()
 
-  // 4. Veo Assets Count
-  let totalVeoVideos = 0
-  let totalVeoImages = 0
-  try {
+  const veoTask = (async () => {
+    let totalVeoVideos = 0
+    let totalVeoImages = 0
     const [vidRes, imgRes] = await Promise.allSettled([
-      fetch(`${API_URL}/api/veo/videos`, { signal: AbortSignal.timeout(4000) }),
+      fetch(`${API_URL}/api/veo/history`, { signal: AbortSignal.timeout(4000) }),
       fetch(`${API_URL}/api/veo/images`, { signal: AbortSignal.timeout(4000) }),
     ])
     if (vidRes.status === 'fulfilled' && vidRes.value.ok) {
-      const vids = await vidRes.value.json()
-      totalVeoVideos = Array.isArray(vids) ? vids.length : 0
+      try {
+        const videos = await vidRes.value.json()
+        totalVeoVideos = Array.isArray(videos) ? videos.length : 0
+      } catch {
+        totalVeoVideos = 0
+      }
     }
     if (imgRes.status === 'fulfilled' && imgRes.value.ok) {
-      const imgs = await imgRes.value.json()
-      totalVeoImages = Array.isArray(imgs) ? imgs.length : 0
+      try {
+        const images = await imgRes.value.json()
+        totalVeoImages = Array.isArray(images) ? images.length : 0
+      } catch {
+        totalVeoImages = 0
+      }
     }
-  } catch (err) {
-    console.warn('[Dashboard] Không thể tải số liệu Veo:', err)
-  }
+    return { totalVeoVideos, totalVeoImages }
+  })()
+
+  const [health, monitorData, exportData, veoData] = await Promise.all([
+    healthTask,
+    monitorTask,
+    exportsTask,
+    veoTask,
+  ])
+  const { serverStatus, dbStatus, pingLatency } = health
+  const { monitor, calendarEventsList } = monitorData
+  const { recentVideos, allExportItems, totalFinalExports } = exportData
+  const { totalVeoVideos, totalVeoImages } = veoData
 
   // 5. Compute 7-Day Upcoming Broadcast Pipeline (Today -> +6 days)
   const today = new Date()
@@ -260,6 +286,30 @@ export async function fetchDashboardData(forceSync = false): Promise<{
     velocityExports7Days,
     velocityAll7Days,
     platformShares,
+  }
+}
+
+export async function fetchDashboardData(
+  forceSync = false,
+  monitorHint: PublisherDailySummary | null = null,
+): Promise<DashboardData> {
+  if (!forceSync && dashboardCache && Date.now() - dashboardCache.timestamp < DASHBOARD_CACHE_MS) {
+    return dashboardCache.value
+  }
+  if (!forceSync && dashboardInFlight) {
+    return dashboardInFlight
+  }
+
+  const request = loadDashboardData(forceSync, monitorHint)
+  dashboardInFlight = request
+  try {
+    const value = await request
+    dashboardCache = { value, timestamp: Date.now() }
+    return value
+  } finally {
+    if (dashboardInFlight === request) {
+      dashboardInFlight = null
+    }
   }
 }
 

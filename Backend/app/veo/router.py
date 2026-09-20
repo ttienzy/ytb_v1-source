@@ -18,10 +18,15 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, RedirectResponse
+
+from app.watermark import service as watermark_service
 
 from app.veo import service
 from app.veo.schemas import (
@@ -327,12 +332,78 @@ def get_image_file(image_id: str):
     raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tìm thấy trên đĩa")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Image clean (watermark removal) cache directory
+# ─────────────────────────────────────────────────────────────────────────────
+_BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Backend/
+_VEO_IMAGES_CLEAN_DIR = _BASE_DIR / "Data" / "media" / "veo_images_clean"
+_VEO_IMAGES_CLEAN_DIR.mkdir(parents=True, exist_ok=True)
+_image_clean_locks_guard = threading.Lock()
+_image_clean_locks: dict[str, threading.Lock] = {}
+
+
+def _get_image_clean_lock(image_id: str) -> threading.Lock:
+    with _image_clean_locks_guard:
+        return _image_clean_locks.setdefault(image_id, threading.Lock())
+
+
+def _clean_cache_is_fresh(source_path: Path, clean_path: Path) -> bool:
+    return (
+        clean_path.is_file()
+        and clean_path.stat().st_size > 0
+        and clean_path.stat().st_mtime >= source_path.stat().st_mtime
+    )
+
+
+def _prepare_clean_image_sync(image_id: str, source_path: Path) -> Path:
+    """Create/reuse one clean cache file without duplicate concurrent GWR runs."""
+    clean_path = _VEO_IMAGES_CLEAN_DIR / f"{image_id}_clean.jpg"
+    with _get_image_clean_lock(image_id):
+        if _clean_cache_is_fresh(source_path, clean_path):
+            return clean_path
+        return watermark_service.remove_image_watermark_sync(source_path, clean_path)
+
+
+@router.get("/images/{image_id}/clean")
+async def get_image_file_clean(image_id: str):
+    """Trả file ảnh đã xóa watermark. Kết quả được cache trong veo_images_clean/."""
+    image = service.get_image_by_id(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tồn tại")
+
+    # Ảnh vừa tạo có thể mới chỉ có CDN URL. Chờ/tải file local trong thread
+    # pool để thao tác tải về không bị lỗi do background download chưa xong.
+    path = await run_in_threadpool(service.ensure_image_file_path, image_id)
+    if not path:
+        raise HTTPException(
+            status_code=502,
+            detail="Không thể tải ảnh gốc từ Google Flow. URL ảnh có thể đã hết hạn.",
+        )
+
+    try:
+        clean_path = await run_in_threadpool(_prepare_clean_image_sync, image_id, path)
+    except watermark_service.WatermarkRuntimeUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return FileResponse(clean_path, media_type="image/jpeg", filename=f"{image_id}_clean.jpg")
+
+
 @router.delete("/images/{image_id}")
 def delete_image(image_id: str):
     """Xóa ảnh khỏi thư viện."""
     ok = service.delete_image(image_id)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Ảnh '{image_id}' không tìm thấy")
+    # Xóa luôn file clean cache nếu có
+    clean_cache = _VEO_IMAGES_CLEAN_DIR / f"{image_id}_clean.jpg"
+    if clean_cache.exists():
+        clean_cache.unlink(missing_ok=True)
     return {"ok": True}
 
 

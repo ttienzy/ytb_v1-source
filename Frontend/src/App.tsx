@@ -1,24 +1,27 @@
-import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, AlertTriangle, CheckCircle2, Search } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { AlertCircle, AlertTriangle, CheckCircle2, Loader2, Search } from 'lucide-react'
 import { Sidebar } from './components/layout/Sidebar'
-import { BgmPage } from './features/bgm/BgmPage'
-import { DiscoverPage } from './features/discover/DiscoverPage'
-import { HistoryPage } from './features/history/HistoryPage'
-import { ChannelHealthModal } from './features/monitor/components/ChannelHealthModal'
 import { getDailyPublishingSummary } from './features/monitor/services/monitorApi'
 import type { PublisherDailySummary } from './features/monitor/types'
-import { PublisherPage } from './features/publisher/PublisherPage'
-import { SettingsPage } from './features/settings/SettingsPage'
-import { StoriesPage } from './features/stories/StoriesPage'
-import { StudioPage } from './features/studio/StudioPage'
-import { VoicesPage } from './features/voices/VoicesPage'
-import { WatermarkPage } from './features/watermark/WatermarkPage'
-import { VideoPage } from './features/video/VideoPage'
-import { VeoStudioPage } from './features/veo-studio/VeoStudioPage'
-import { YouTubePublisherPage } from './features/youtube-publisher/YouTubePublisherPage'
-import { WorkflowPage } from './features/workflow/WorkflowPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
-import { HelpDrawer } from './features/help/components/HelpDrawer'
+
+const BgmPage = lazy(() => import('./features/bgm/BgmPage').then(module => ({ default: module.BgmPage })))
+const DiscoverPage = lazy(() => import('./features/discover/DiscoverPage').then(module => ({ default: module.DiscoverPage })))
+const HistoryPage = lazy(() => import('./features/history/HistoryPage').then(module => ({ default: module.HistoryPage })))
+const ChannelHealthModal = lazy(() => import('./features/monitor/components/ChannelHealthModal').then(module => ({ default: module.ChannelHealthModal })))
+const PublisherPage = lazy(() => import('./features/publisher/PublisherPage').then(module => ({ default: module.PublisherPage })))
+const SettingsPage = lazy(() => import('./features/settings/SettingsPage').then(module => ({ default: module.SettingsPage })))
+const StoriesPage = lazy(() => import('./features/stories/StoriesPage').then(module => ({ default: module.StoriesPage })))
+const StudioPage = lazy(() => import('./features/studio/StudioPage').then(module => ({ default: module.StudioPage })))
+const VoicesPage = lazy(() => import('./features/voices/VoicesPage').then(module => ({ default: module.VoicesPage })))
+const WatermarkPage = lazy(() => import('./features/watermark/WatermarkPage').then(module => ({ default: module.WatermarkPage })))
+const VideoPage = lazy(() => import('./features/video/VideoPage').then(module => ({ default: module.VideoPage })))
+const VeoStudioPage = lazy(() => import('./features/veo-studio/VeoStudioPage').then(module => ({ default: module.VeoStudioPage })))
+const YouTubePublisherPage = lazy(() => import('./features/youtube-publisher/YouTubePublisherPage').then(module => ({ default: module.YouTubePublisherPage })))
+const WorkflowPage = lazy(() => import('./features/workflow/WorkflowPage').then(module => ({ default: module.WorkflowPage })))
+const HelpDrawer = lazy(() => import('./features/help/components/HelpDrawer').then(module => ({ default: module.HelpDrawer })))
+
+const PUBLISHER_PAGES = new Set(['Lên lịch Pippit', 'Lên lịch Youtube'])
 
 export function App() {
   const [activePage, setActivePage] = useState('Dashboard')
@@ -28,6 +31,7 @@ export function App() {
   const [isRefreshingMonitor, setIsRefreshingMonitor] = useState(false)
   const [showHealthModal, setShowHealthModal] = useState(false)
   const [showHelpDrawer, setShowHelpDrawer] = useState(false)
+  const previousPageRef = useRef(activePage)
 
   const loadMonitorSummary = useCallback(async (forceSync = false) => {
     if (forceSync) {
@@ -51,9 +55,14 @@ export function App() {
     return () => clearInterval(interval)
   }, [loadMonitorSummary])
 
-  // Re-fetch monitor summary when switching to/from publisher pages
+  // Refresh after entering/leaving a publisher page, but do not duplicate the initial request.
   useEffect(() => {
-    loadMonitorSummary(false)
+    const previousPage = previousPageRef.current
+    previousPageRef.current = activePage
+    if (previousPage === activePage) return
+    if (PUBLISHER_PAGES.has(previousPage) || PUBLISHER_PAGES.has(activePage)) {
+      loadMonitorSummary(false)
+    }
   }, [activePage, loadMonitorSummary])
 
   // Global F1 shortcut to open Help Drawer
@@ -157,6 +166,19 @@ export function App() {
           </div>
         </header>
 
+        <Suspense
+          fallback={(
+            <div className="content-wrap">
+              <section className="empty-state" aria-live="polite">
+                <div className="empty-illustration">
+                  <Loader2 size={28} className="spinning" />
+                </div>
+                <h2>Đang mở công cụ</h2>
+                <p>Đang tải mô-đun cần thiết…</p>
+              </section>
+            </div>
+          )}
+        >
         <div className="content-wrap">
           {activePage === 'Khám Phá Kênh' ? (
             <DiscoverPage
@@ -194,6 +216,7 @@ export function App() {
             <DashboardPage
               setActivePage={setActivePage}
               onOpenChannelHealth={() => setShowHealthModal(true)}
+              monitorSummary={monitorSummary}
             />
           ) : (
             <section className="empty-state">
@@ -205,25 +228,34 @@ export function App() {
             </section>
           )}
         </div>
+        </Suspense>
       </main>
 
       {/* Channel Health & Daily Status Modal */}
-      <ChannelHealthModal
-        isOpen={showHealthModal}
-        onClose={() => setShowHealthModal(false)}
-        summary={monitorSummary}
-        isRefreshing={isRefreshingMonitor}
-        onRefresh={() => loadMonitorSummary(true)}
-        onNavigate={page => setActivePage(page)}
-      />
+      {showHealthModal && (
+        <Suspense fallback={null}>
+          <ChannelHealthModal
+            isOpen
+            onClose={() => setShowHealthModal(false)}
+            summary={monitorSummary}
+            isRefreshing={isRefreshingMonitor}
+            onRefresh={() => loadMonitorSummary(true)}
+            onNavigate={page => setActivePage(page)}
+          />
+        </Suspense>
+      )}
 
       {/* In-App Help & Docs Drawer */}
-      <HelpDrawer
-        isOpen={showHelpDrawer}
-        onClose={() => setShowHelpDrawer(false)}
-        currentSidebar={activePage}
-        onNavigate={page => setActivePage(page)}
-      />
+      {showHelpDrawer && (
+        <Suspense fallback={null}>
+          <HelpDrawer
+            isOpen
+            onClose={() => setShowHelpDrawer(false)}
+            currentSidebar={activePage}
+            onNavigate={page => setActivePage(page)}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }
