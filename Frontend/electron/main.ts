@@ -222,6 +222,12 @@ function createWindow() {
     }
   }
 
+  // Mở các liên kết ngoài (Telegram, GitHub, Google Drive...) bằng trình duyệt mặc định
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
