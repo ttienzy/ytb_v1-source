@@ -57,7 +57,7 @@ function saveAudioConfig(cfg: SavedAudioConfig) {
   } catch {}
 }
 
-function YoutubeIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
+function YoutubeIcon({ size = 16, style, className }: { size?: number; style?: React.CSSProperties; className?: string }) {
   return (
     <svg
       width={size}
@@ -65,6 +65,7 @@ function YoutubeIcon({ size = 16, style }: { size?: number; style?: React.CSSPro
       viewBox="0 0 24 24"
       fill="currentColor"
       style={style}
+      className={className}
     >
       <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
     </svg>
@@ -508,13 +509,8 @@ export function StudioPage({
           className={`workflow-tab-btn ${selectedWorkflow === 'youtube' ? 'active' : ''}`}
           onClick={() => setSelectedWorkflow('youtube')}
         >
-          <span className="workflow-tab-icon youtube">
-            <YoutubeIcon size={17} />
-          </span>
-          <div className="workflow-tab-info">
-            <span className="workflow-tab-title">Workflow YouTube</span>
-            <span className="workflow-tab-desc">Recap video, lồng tiếng và ghép tự động</span>
-          </div>
+          <YoutubeIcon size={14} className="workflow-tab-icon" />
+          <span>Workflow YouTube</span>
         </button>
         <button
           type="button"
@@ -523,13 +519,8 @@ export function StudioPage({
           className={`workflow-tab-btn ${selectedWorkflow === 'audio' ? 'active' : ''}`}
           onClick={() => setSelectedWorkflow('audio')}
         >
-          <span className="workflow-tab-icon audio">
-            <Headphones size={17} />
-          </span>
-          <div className="workflow-tab-info">
-            <span className="workflow-tab-title">Workflow Audio</span>
-            <span className="workflow-tab-desc">Không gian xử lý và tạo nội dung âm thanh</span>
-          </div>
+          <Headphones size={14} className="workflow-tab-icon" />
+          <span>Workflow Audio</span>
         </button>
       </div>
 

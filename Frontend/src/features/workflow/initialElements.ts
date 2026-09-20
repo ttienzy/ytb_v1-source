@@ -110,7 +110,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-products',
     type: 'removable',
     animated: true,
-    style: { stroke: '#2563eb', strokeWidth: 2.5, strokeDasharray: '4 4' },
+    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
   // 1b. Products to ChatGPT Script (Nạp ảnh sản phẩm trực tiếp vào GPT)
@@ -122,7 +122,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-products',
     type: 'removable',
     animated: true,
-    style: { stroke: '#8b5cf6', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
   // 2. Gemini Vision to ChatGPT Script (Horizontal Right)
@@ -134,7 +134,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-gemini',
     type: 'removable',
     animated: true,
-    style: { stroke: '#10b981', strokeWidth: 2.5, strokeDasharray: '4 4' },
+    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
   // 3. Character & Scene to ChatGPT Script (Vertical Down)
@@ -146,7 +146,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-charscene',
     type: 'removable',
     animated: true,
-    style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
   // 4. Products to Flow Studio (Across Top to Flow)
@@ -158,7 +158,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-assets',
     type: 'removable',
     animated: false,
-    style: { stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
   // 5. Character & Scene to Flow Studio (Across Top to Flow)
@@ -170,7 +170,7 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-assets',
     type: 'removable',
     animated: false,
-    style: { stroke: '#8b5cf6', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
   // 6. ChatGPT Script to Flow Studio (Script Stream)
@@ -182,6 +182,6 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-gpt',
     type: 'removable',
     animated: true,
-    style: { stroke: '#ec4899', strokeWidth: 2.5, strokeDasharray: '4 4' },
+    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 ]

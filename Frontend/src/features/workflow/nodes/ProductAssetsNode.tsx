@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { ShoppingBag, Upload, X, CheckCircle2, Trash2, Plus, Sparkles, ImageDown } from 'lucide-react'
+import { ShoppingBag, Upload, X, CheckCircle2, Trash2, Plus, Sparkles, ImageDown, Star } from 'lucide-react'
 import type { ProductAssetsNodeData } from '../types'
 import type { AssetRef } from '../contracts'
 import { uploadWorkflowAsset } from '../services/workflowApi'
@@ -45,10 +45,10 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
     setVeoPickerOpen(true)
   }
 
+
   const handleSelectVeoImage = (dataUrl: string, assetRef: AssetRef) => {
     uploads.current?.replace(activePickerSlot, dataUrl, assetRef)
   }
-
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -91,7 +91,9 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
         <div className="wf-start-banner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="wf-start-dot" />
-            <span>⭐ NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Star size={11} fill="#ffffff" color="#ffffff" /> NODE CHÍNH (ĐIỂM KHỞI ĐẦU)
+            </span>
           </div>
           <span style={{ fontSize: 9, opacity: 0.9 }}>Root Trigger</span>
         </div>
@@ -101,23 +103,16 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
       <Handle type="target" position={Position.Left} className="wf-handle wf-handle-target" />
 
       {/* Header */}
-      <div className="wf-node-header" style={{ background: '#eff6ff', borderBottom: '1px solid #dbeafe' }}>
+      <div className="wf-node-header">
         <div className="wf-node-title-group">
-          <div
-            className="wf-node-icon"
-            style={{
-              background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
-              color: '#ffffff',
-              boxShadow: '0 2px 6px rgba(37, 99, 235, 0.3)',
-            }}
-          >
+          <div className="wf-node-icon">
             <ShoppingBag size={15} />
           </div>
           <div>
-            <div className="wf-node-title" style={{ color: '#1e3a8a' }}>
+            <div className="wf-node-title">
               {data.title || 'Ảnh Sản Phẩm (Products)'}
             </div>
-            <div style={{ fontSize: 10, color: '#2563eb', fontWeight: 600 }}>
+            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>
               Đầu vào hình ảnh gốc (Tối đa 3 ảnh)
             </div>
           </div>
@@ -139,15 +134,19 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
             }}
             title={isStartNode ? 'Node chính bắt đầu quy trình' : 'Nhấp để đặt làm Node chính'}
           >
-            <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
+            <Star
+              size={12}
+              fill={isStartNode ? '#d97706' : 'none'}
+              color={isStartNode ? '#d97706' : '#94a3b8'}
+            />
           </button>
 
           <span
             className="wf-node-badge"
             style={{
-              background: imageCount > 0 ? '#ecfdf5' : '#f8fafc',
-              color: imageCount > 0 ? '#059669' : '#64748b',
-              border: imageCount > 0 ? '1px solid #a7f3d0' : '1px solid #e2e8f0',
+              background: imageCount > 0 ? '#ecfdf5' : '#f1f5f9',
+              color: imageCount > 0 ? '#065f46' : '#64748b',
+              border: imageCount > 0 ? '1px solid #d1fae5' : '1px solid #e2e8f0',
             }}
           >
             {imageCount}/3 Ảnh
@@ -166,7 +165,6 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
           </button>
         </div>
       </div>
-
 
       {/* Body */}
       <div className="wf-node-body">

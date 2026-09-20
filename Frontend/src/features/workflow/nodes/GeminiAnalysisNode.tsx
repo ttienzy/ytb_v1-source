@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Key,
   Bot,
+  Star,
 } from 'lucide-react'
 import type { GeminiAnalysisNodeData } from '../types'
 
@@ -51,7 +52,9 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
         <div className="wf-start-banner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="wf-start-dot" />
-            <span>⭐ NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Star size={11} fill="#ffffff" color="#ffffff" /> NODE CHÍNH (ĐIỂM KHỞI ĐẦU)
+            </span>
           </div>
           <span style={{ fontSize: 9, opacity: 0.9 }}>Root Trigger</span>
         </div>
@@ -77,29 +80,16 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
       />
 
       {/* Header */}
-      <div
-        className="wf-node-header"
-        style={{
-          background: isStartNode ? '#ecfdf5' : '#f0fdf4',
-          borderBottom: '1px solid #dcfce7',
-        }}
-      >
+      <div className="wf-node-header">
         <div className="wf-node-title-group">
-          <div
-            className="wf-node-icon"
-            style={{
-              background: 'linear-gradient(135deg, #10b981, #059669)',
-              color: '#ffffff',
-              boxShadow: '0 2px 6px rgba(16, 185, 129, 0.3)',
-            }}
-          >
+          <div className="wf-node-icon">
             <Sparkles size={15} />
           </div>
           <div>
-            <div className="wf-node-title" style={{ color: '#064e3b', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="wf-node-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               {data.title || 'Gemini • Phân Tích'}
             </div>
-            <div style={{ fontSize: 10, color: '#059669', fontWeight: 600 }}>
+            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>
               {data.provider || 'Trích xuất chi tiết & bao bì'}
             </div>
           </div>
@@ -121,18 +111,22 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
             }}
             title={isStartNode ? 'Node chính bắt đầu quy trình' : 'Nhấp để đặt làm Node chính'}
           >
-            <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
+            <Star
+              size={12}
+              fill={isStartNode ? '#d97706' : 'none'}
+              color={isStartNode ? '#d97706' : '#94a3b8'}
+            />
           </button>
 
           <span
             className="wf-node-badge"
             style={{
-              background: data.providerUsed === '9router' ? '#f0fdf4' : res ? '#ecfdf5' : isConnected ? '#eff6ff' : '#f8fafc',
-              color: data.providerUsed === '9router' ? '#166534' : res ? '#059669' : isConnected ? '#2563eb' : '#64748b',
-              border: data.providerUsed === '9router' ? '1px solid #bbf7d0' : res ? '1px solid #a7f3d0' : isConnected ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+              background: data.providerUsed === '9router' ? '#f1f5f9' : res ? '#ecfdf5' : '#f1f5f9',
+              color: data.providerUsed === '9router' ? '#334155' : res ? '#065f46' : '#64748b',
+              border: data.providerUsed === '9router' ? '1px solid #e2e8f0' : res ? '1px solid #d1fae5' : '1px solid #e2e8f0',
             }}
           >
-            {data.providerUsed === '9router' ? '🤖 GPT-5.5' : res ? '✨ Gemini' : isConnected ? 'Đã nối dây' : 'Vision AI'}
+            {data.providerUsed === '9router' ? 'GPT-5.5' : res ? 'Gemini' : isConnected ? 'Đã nối dây' : 'Vision AI'}
           </span>
           <button
             type="button"
@@ -437,9 +431,6 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                 width: '100%',
                 justifyContent: 'center',
                 padding: '7px 12px',
-                background: isStartNode
-                  ? 'linear-gradient(135deg, #059669, #10b981)'
-                  : undefined,
               }}
               onClick={() => data.onAnalyze?.()}
               disabled={isAnalyzing}
@@ -448,7 +439,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
               {isAnalyzing
                 ? 'Đang soi ảnh & tra cứu theo prompt...'
                 : isStartNode
-                  ? '⚡ Bắt Đầu Phân Tích (Node Chính)'
+                  ? 'Bắt Đầu Phân Tích (Node Chính)'
                   : 'Phân Tích Với Gemini'}
             </button>
           </>
@@ -474,13 +465,14 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                 width: 32,
                 height: 32,
                 borderRadius: '50%',
-                background: '#fee2e2',
+                background: '#f1f5f9',
+                border: '1px solid #e2e8f0',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Link2Off size={16} color="#ef4444" />
+              <Link2Off size={16} color="#64748b" />
             </div>
             <div>
               <strong style={{ color: '#0f172a' }}>Chưa có dây nối nạp ảnh</strong>

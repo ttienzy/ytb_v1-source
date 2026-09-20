@@ -26,6 +26,9 @@ import {
   Music,
   Loader2,
   FolderOpen,
+  Star,
+  Zap,
+  Link2,
 } from 'lucide-react'
 import type { VeoFlowStudioNodeData } from '../types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
@@ -82,7 +85,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
   const sceneImage = data.refImages?.sceneUrl
 
   const primaryRefImage = validProductImages[0] || modelImage || sceneImage || null
-  const primaryRefLabel = validProductImages[0] ? '📦 Sản phẩm' : modelImage ? '👤 Người mẫu' : sceneImage ? '🌄 Bối cảnh' : null
+  const primaryRefLabel = validProductImages[0] ? 'Sản phẩm' : modelImage ? 'Người mẫu' : sceneImage ? 'Bối cảnh' : null
   const totalRefImagesCount = validProductImages.length + (modelImage ? 1 : 0) + (sceneImage ? 1 : 0)
   const hasAnyRefImages = totalRefImagesCount > 0
 
@@ -96,10 +99,10 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
   const canExport = completedCount >= 2
   const firstPendingIdx = scenes.findIndex((s) => !s.videoUrl && !s.outputFilePath)
   const chainButtonLabel = allClipsCompleted
-    ? `⚡ Render Lại Toàn Bộ (${scenes.length})`
+    ? `Render Lại Toàn Bộ (${scenes.length})`
     : completedCount > 0
-    ? `⚡ Tiếp tục Chuỗi (Clip #${firstPendingIdx + 1} → #${scenes.length})`
-    : `⚡ Render Chuỗi Liên Hoàn (${scenes.length})`
+    ? `Tiếp tục Chuỗi (Clip #${firstPendingIdx + 1} → #${scenes.length})`
+    : `Render Chuỗi Liên Hoàn (${scenes.length})`
   const chainButtonTitle = allClipsCompleted
     ? 'Tất cả clip đã hoàn thành. Bấm để render lại toàn bộ từ đầu.'
     : completedCount > 0
@@ -116,7 +119,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
         <div className="wf-start-banner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="wf-start-dot" />
-            <span>⭐ NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
+            <span>NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
           </div>
           <span style={{ fontSize: 9, opacity: 0.9 }}>Root Trigger</span>
         </div>
@@ -143,23 +146,16 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
       />
 
       {/* ─── 1. HEADER SECTION ──────────────────────────────────────────────── */}
-      <div className="wf-node-header" style={{ background: '#fdf2f8', borderBottom: '1px solid #fce7f3' }}>
+      <div className="wf-node-header">
         <div className="wf-node-title-group">
-          <div
-            className="wf-node-icon"
-            style={{
-              background: 'linear-gradient(135deg, #f43f5e, #e11d48)',
-              color: '#ffffff',
-              boxShadow: '0 2px 6px rgba(244, 63, 94, 0.3)',
-            }}
-          >
+          <div className="wf-node-icon">
             <Film size={16} />
           </div>
           <div>
-            <div className="wf-node-title" style={{ color: '#881337', fontSize: 13.5 }}>
+            <div className="wf-node-title" style={{ color: '#0f172a', fontSize: 13.5 }}>
               {data.title || 'Veo AI • Đạo Diễn Video'}
             </div>
-            <div style={{ fontSize: 10, color: '#e11d48', fontWeight: 600 }}>
+            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>
               Chuỗi kịch bản & phân cảnh liên hoàn (Multi-Clip Chaining)
             </div>
           </div>
@@ -181,7 +177,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             }}
             title={isStartNode ? 'Node chính bắt đầu quy trình' : 'Nhấp để đặt làm Node chính'}
           >
-            <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
+            <Star size={13} fill={isStartNode ? '#f59e0b' : 'none'} color={isStartNode ? '#f59e0b' : '#94a3b8'} />
           </button>
 
           {/* Project setup button */}
@@ -193,9 +189,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               padding: '3px 9px',
               fontSize: 10.5,
               fontWeight: 600,
-              color: data.activeProject ? '#065f46' : '#b45309',
-              background: data.activeProject ? '#ecfdf5' : '#fffbeb',
-              border: data.activeProject ? '1px solid #a7f3d0' : '1px solid #fde68a',
+              color: data.activeProject ? '#0f172a' : '#64748b',
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
             }}
             title="Mở cấu hình Dự án Google Flow"
           >
@@ -208,7 +204,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             type="button"
             className="wf-btn"
             onClick={() => data.onOpenLibrary?.()}
-            style={{ padding: '3px 8px', fontSize: 10.5, fontWeight: 600, color: '#4338ca' }}
+            style={{ padding: '3px 8px', fontSize: 10.5, fontWeight: 600, color: '#475569' }}
             title="Thư viện video đã xuất"
           >
             <Layers size={11} />
@@ -218,10 +214,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           <span
             className="wf-node-badge"
             style={{
-              background: '#ffffff',
-              color: '#e11d48',
-              border: '1px solid #fbcfe8',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              background: '#f1f5f9',
+              color: '#475569',
+              border: '1px solid #e2e8f0',
             }}
           >
             {scenes.length} Clip • {durationLabel}
@@ -231,10 +226,10 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             <span
               className="wf-node-badge"
               style={{
-                background: '#faf5ff',
-                color: '#7c3aed',
-                border: '1px solid #ddd6fe',
-                fontWeight: 700,
+                background: '#f1f5f9',
+                color: '#475569',
+                border: '1px solid #e2e8f0',
+                fontWeight: 600,
                 fontSize: 10,
                 display: 'flex',
                 alignItems: 'center',
@@ -265,7 +260,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
       <div className="wf-asset-ribbon">
         <div className="wf-asset-ribbon-left">
           <span style={{ fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Package size={12} color="#6366f1" />
+            <Package size={12} color="#64748b" />
             Nguyên liệu đầu vào:
           </span>
 
@@ -310,7 +305,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       position: 'absolute',
                       bottom: -2,
                       right: -2,
-                      background: '#7c3aed',
+                      background: '#334155',
                       color: '#ffffff',
                       fontSize: 8,
                       fontWeight: 700,
@@ -336,7 +331,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       position: 'absolute',
                       bottom: -2,
                       right: -2,
-                      background: '#059669',
+                      background: '#475569',
                       color: '#ffffff',
                       fontSize: 8,
                       fontWeight: 700,
@@ -349,7 +344,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 </div>
               )}
 
-              <span style={{ fontSize: 9.5, color: '#059669', fontWeight: 600, marginLeft: 2 }}>
+              <span style={{ fontSize: 9.5, color: '#64748b', fontWeight: 600, marginLeft: 2 }}>
                 ({totalRefImagesCount} ảnh tham chiếu)
               </span>
             </div>
@@ -362,8 +357,8 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
 
         {/* ChatGPT Angle & Sync Status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: '#6b21a8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Sparkles size={12} color="#9333ea" />
+          <span style={{ color: '#334155', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Sparkles size={12} color="#64748b" />
             {data.isSourceScriptStale
               ? 'Kịch bản cũ (cần sinh lại)'
               : data.selectedGptScriptAngle || 'Kịch bản ChatGPT'}
@@ -378,9 +373,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 fontWeight: 700,
                 padding: '2px 7px',
                 borderRadius: 4,
-                border: '1px solid #c084fc',
-                background: '#f3e8ff',
-                color: '#6b21a8',
+                border: '1px solid #cbd5e1',
+                background: '#f8fafc',
+                color: '#334155',
                 cursor: data.isSourceScriptStale ? 'not-allowed' : 'pointer',
                 opacity: data.isSourceScriptStale ? 0.55 : 1,
               }}
@@ -396,18 +391,19 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
       <div className="wf-storyboard-container">
         <div className="wf-storyboard-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Film size={12} color="#475569" />
             <span style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>
-              🎬 TRỤC PHÂN CẢNH LIÊN HOÀN
+              TRỤC PHÂN CẢNH LIÊN HOÀN
             </span>
             <span
               style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: '#059669',
-                background: '#ecfdf5',
+                color: '#0f172a',
+                background: '#f1f5f9',
                 padding: '1px 6px',
                 borderRadius: 4,
-                border: '1px solid #a7f3d0',
+                border: '1px solid #e2e8f0',
               }}
             >
               {completedCount}/{scenes.length} Hoàn thành
@@ -431,20 +427,22 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               }}
               disabled={isRendering}
               style={{
-                padding: '3px 9px',
+                padding: '3px 10px',
                 fontSize: 10.5,
-                fontWeight: 700,
-                background: '#fdf2f8',
-                border: '1px solid #fbcfe8',
-                color: '#db2777',
+                fontWeight: 600,
+                background: '#4f46e5',
+                border: '1px solid #4338ca',
+                color: '#ffffff',
                 cursor: isRendering ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
+                borderRadius: 5,
+                boxShadow: '0 1px 2px rgba(79, 70, 229, 0.2)',
               }}
               title={chainButtonTitle}
             >
-              <Sparkles size={11} color="#db2777" />
+              <Sparkles size={11} color="#ffffff" />
               {chainButtonLabel}
             </button>
           )}
@@ -468,7 +466,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 >
                   {/* Card Header */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: isSelected ? '#be123c' : '#334155' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: isSelected ? '#0f172a' : '#334155' }}>
                       #{idx + 1} ({scene.durationSec || 10}s)
                     </span>
                     {isDone ? (
@@ -655,13 +653,16 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                               left: 4,
                               fontSize: 8.5,
                               fontWeight: 700,
-                              background: 'rgba(124, 58, 237, 0.85)',
+                              background: 'rgba(15, 23, 42, 0.85)',
                               color: '#ffffff',
                               padding: '1px 5px',
                               borderRadius: 3,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 3,
                             }}
                           >
-                            🔗 Start Frame
+                            <Link2 size={9} /> Start Frame
                           </span>
                         </div>
                       ) : (
@@ -757,10 +758,10 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                             data.onOpenVideoPicker?.(idx)
                           }}
                           style={{
-                            background: '#ecfdf5',
-                            border: '1px solid #a7f3d0',
+                            background: '#f8fafc',
+                            border: '1px solid #cbd5e1',
                             borderRadius: 4,
-                            color: '#059669',
+                            color: '#334155',
                             fontSize: 9.5,
                             fontWeight: 600,
                             cursor: 'pointer',
@@ -782,16 +783,27 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                           }}
                           disabled={isClipRendering || (isChained && !prevClipReady)}
                           style={{
-                            background: 'none',
-                            border: 'none',
-                            color: isChained && !prevClipReady ? '#94a3b8' : '#be123c',
-                            fontSize: 10,
-                            fontWeight: 700,
+                            background: isChained && !prevClipReady ? 'transparent' : '#4f46e5',
+                            border: isChained && !prevClipReady ? 'none' : '1px solid #4338ca',
+                            color: isChained && !prevClipReady ? '#94a3b8' : '#ffffff',
+                            borderRadius: 4,
+                            fontSize: 9.5,
+                            fontWeight: 600,
                             cursor: isChained && !prevClipReady ? 'not-allowed' : 'pointer',
-                            padding: 0,
+                            padding: isChained && !prevClipReady ? '1px 3px' : '1px 6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
                           }}
                         >
-                          {isChained && !prevClipReady ? 'Chờ clip trước' : '▶️ Tạo'}
+                          {isChained && !prevClipReady ? (
+                            'Chờ clip trước'
+                          ) : (
+                            <>
+                              <Play size={8} fill="currentColor" />
+                              <span>Tạo</span>
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
@@ -801,9 +813,8 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 {/* Handover Arrow Connector between Clips */}
                 {idx < scenes.length - 1 && (
                   <div className="wf-storyboard-connector" title="Frame cuối của clip này sẽ nối sang làm Start Frame của clip tiếp theo">
-                    <span style={{ color: '#7c3aed', fontSize: 11 }}>🔗</span>
-                    <span style={{ fontSize: 8, color: '#7c3aed' }}>End Frame</span>
-                    <ArrowRight size={14} color="#a855f7" />
+                    <span style={{ fontSize: 8, color: '#64748b', fontWeight: 600 }}>End Frame</span>
+                    <ArrowRight size={13} color="#94a3b8" />
                   </div>
                 )}
               </React.Fragment>
@@ -825,7 +836,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           }}
         >
           <div style={{ fontSize: 11.5, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#e11d48' }}>●</span>
+            <span style={{ color: '#0f172a' }}>●</span>
             <span>ĐANG ĐẠO DIỄN: CLIP #{safeTab + 1} — {currentScene.title || 'Phân cảnh'}</span>
           </div>
 
@@ -968,15 +979,19 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       position: 'absolute',
                       top: 8,
                       left: 8,
-                      background: 'rgba(124, 58, 237, 0.85)',
+                      background: 'rgba(15, 23, 42, 0.85)',
                       color: '#ffffff',
                       fontSize: 9.5,
                       fontWeight: 700,
                       padding: '2px 6px',
                       borderRadius: 4,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
                     }}
                   >
-                    🔗 Start Frame (từ Clip #{safeTab})
+                    <Link2 size={10} />
+                    <span>Start Frame (từ Clip #{safeTab})</span>
                   </div>
                 </div>
               ) : safeTab === 0 && primaryRefImage ? (
@@ -1036,7 +1051,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, color: '#0f172a' }}>
-                    <span>🎬 Clip Khởi Đầu (#1)</span>
+                    <span>Clip Khởi Đầu (#1)</span>
                     <span style={{ fontSize: 9.5, fontWeight: 500, color: '#64748b' }}>
                       (Render từ Prompt & Ảnh tham chiếu, End Frame ➔ Start Clip #2)
                     </span>
@@ -1088,16 +1103,16 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                           alignItems: 'center',
                           gap: 4,
                           padding: '2px 5px',
-                          background: '#fff7ed',
-                          border: '1px solid #fed7aa',
+                          background: '#ffffff',
+                          border: '1px solid #cbd5e1',
                           borderRadius: 4,
                           fontSize: 9,
-                          color: '#9a3412',
+                          color: '#334155',
                           fontWeight: 600,
                         }}
                       >
                         <img src={modelImage} alt="Model" style={{ width: 16, height: 16, borderRadius: 2, objectFit: 'cover' }} />
-                        <span>👤 Người mẫu</span>
+                        <span>Người mẫu</span>
                       </div>
                     )}
                     {sceneImage && (
@@ -1108,16 +1123,16 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                           alignItems: 'center',
                           gap: 4,
                           padding: '2px 5px',
-                          background: '#f0fdf4',
-                          border: '1px solid #bbf7d0',
+                          background: '#ffffff',
+                          border: '1px solid #cbd5e1',
                           borderRadius: 4,
                           fontSize: 9,
-                          color: '#166534',
+                          color: '#334155',
                           fontWeight: 600,
                         }}
                       >
                         <img src={sceneImage} alt="Scene" style={{ width: 16, height: 16, borderRadius: 2, objectFit: 'cover' }} />
-                        <span>🌄 Bối cảnh</span>
+                        <span>Bối cảnh</span>
                       </div>
                     )}
                   </div>
@@ -1127,8 +1142,8 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               <div
                 style={{
                   padding: '7px 10px',
-                  background: currentScene.chainFromPrevious !== false ? '#f5f3ff' : '#f8fafc',
-                  border: currentScene.chainFromPrevious !== false ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+                  background: currentScene.chainFromPrevious !== false ? '#f8fafc' : '#ffffff',
+                  border: currentScene.chainFromPrevious !== false ? '1px solid #cbd5e1' : '1px solid #e2e8f0',
                   borderRadius: 6,
                 }}
               >
@@ -1140,7 +1155,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       gap: 6,
                       fontSize: 11,
                       fontWeight: 700,
-                      color: currentScene.chainFromPrevious !== false ? '#6b21a8' : '#64748b',
+                      color: currentScene.chainFromPrevious !== false ? '#0f172a' : '#64748b',
                       cursor: 'pointer',
                     }}
                   >
@@ -1148,9 +1163,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       type="checkbox"
                       checked={currentScene.chainFromPrevious !== false}
                       onChange={(e) => data.onToggleChainFrames?.(safeTab, e.target.checked)}
-                      style={{ width: 14, height: 14, accentColor: '#7c3aed', cursor: 'pointer' }}
+                      style={{ width: 14, height: 14, accentColor: '#0f172a', cursor: 'pointer' }}
                     />
-                    <span>🔗 Nối tiếp từ End Frame Clip #{safeTab}</span>
+                    <span>Nối tiếp từ End Frame Clip #{safeTab}</span>
                   </label>
 
                   {currentScene.chainFromPrevious !== false && prevScene?.videoUrl && (
@@ -1160,12 +1175,12 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       disabled={currentScene.isExtractingFrame}
                       style={{
                         background: '#ffffff',
-                        border: '1px solid #c084fc',
+                        border: '1px solid #cbd5e1',
                         borderRadius: 4,
                         padding: '2px 7px',
                         fontSize: 10,
                         fontWeight: 700,
-                        color: '#7e22ce',
+                        color: '#0f172a',
                         cursor: currentScene.isExtractingFrame ? 'wait' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
@@ -1235,9 +1250,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                         fontSize: 10.5,
                         fontWeight: 700,
                         borderRadius: 4,
-                        border: currentScene.durationSec === sec ? '1px solid #f43f5e' : '1px solid #e2e8f0',
-                        background: currentScene.durationSec === sec ? '#fff1f2' : '#ffffff',
-                        color: currentScene.durationSec === sec ? '#e11d48' : '#64748b',
+                        border: currentScene.durationSec === sec ? '1px solid #4f46e5' : '1px solid #e2e8f0',
+                        background: currentScene.durationSec === sec ? '#4f46e5' : '#ffffff',
+                        color: currentScene.durationSec === sec ? '#ffffff' : '#64748b',
                         cursor: 'pointer',
                       }}
                     >
@@ -1338,18 +1353,18 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '6px 10px',
-                background: '#faf5ff',
+                background: '#f8fafc',
                 borderRadius: 8,
-                border: '1px solid #e9d5ff',
+                border: '1px solid #e2e8f0',
                 fontSize: 11,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Mic size={13} color="#7c3aed" />
-                <span style={{ fontWeight: 700, color: '#6b21a8' }}>
+                <Mic size={13} color="#64748b" />
+                <span style={{ fontWeight: 700, color: '#0f172a' }}>
                   Lồng tiếng VieNeu-TTS:
                 </span>
-                <span style={{ color: '#7e22ce', fontWeight: 600 }}>
+                <span style={{ color: '#475569', fontWeight: 600 }}>
                   {data.voiceId}
                 </span>
                 {data.voiceoverUrl && (
@@ -1363,8 +1378,8 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 {data.voiceoverUrl ? (
                   <>
                     <audio src={data.voiceoverUrl} controls style={{ height: 26, maxWidth: 170 }} />
-                    <span style={{ fontSize: 10, color: '#6d28d9', background: '#ede9fe', border: '1px solid #ddd6fe', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>
-                      ⚡ Đồng bộ chuẩn theo clip
+                    <span style={{ fontSize: 10, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>
+                      Đồng bộ chuẩn theo clip
                     </span>
                   </>
                 ) : (
@@ -1377,9 +1392,9 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                       padding: '3px 10px',
                       fontSize: 10.5,
                       fontWeight: 700,
-                      background: '#7c3aed',
+                      background: '#4f46e5',
                       color: '#ffffff',
-                      border: 'none',
+                      border: '1px solid #4338ca',
                       borderRadius: 5,
                       display: 'flex',
                       alignItems: 'center',
@@ -1397,7 +1412,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
           {/* Stitch Concat Export Row */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Layers size={14} color="#6366f1" />
+              <Layers size={14} color="#64748b" />
               <span style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>
                 {completedCount >= 2 && completedCount < scenes.length
                   ? `Ghép ${completedCount}/${scenes.length} clip (${completedDuration}s)`

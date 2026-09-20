@@ -6,6 +6,7 @@ import {
   Zap,
   Trash2,
   Video,
+  Star,
 } from 'lucide-react'
 import { WorkflowTabs } from './WorkflowTabs'
 import type { WorkflowTabId } from '../types'
@@ -51,7 +52,7 @@ export function WorkflowToolbar({
           onClick={onOpenLibrary}
           title="Mở Thư Viện quản lý video đã xuất"
         >
-          <Film size={14} color="#4f46e5" />
+          <Film size={14} color="#64748b" />
           <span>Thư Viện Video</span>
           {typeof exportedCount === 'number' && exportedCount > 0 && (
             <span className="wf-library-count-pill">
@@ -70,7 +71,7 @@ export function WorkflowToolbar({
               className="wf-start-node-badge"
               title="Node chính là điểm bắt đầu khi bấm chạy toàn bộ quy trình"
             >
-              <span style={{ fontSize: 12 }}>⭐</span>
+              <Star size={12} color="#64748b" />
               <span>Node chính: <strong>{startNodeTitle}</strong></span>
             </div>
 
@@ -103,11 +104,10 @@ export function WorkflowToolbar({
               onClick={onSimulateRun}
               title={`Chạy quy trình bắt đầu từ Node chính (${startNodeTitle})`}
               style={{
-                boxShadow: '0 2px 10px rgba(16, 185, 129, 0.35)',
-                background: isRunning
-                  ? 'linear-gradient(135deg, #ec4899, #e11d48)'
-                  : 'linear-gradient(135deg, #059669, #10b981)',
-                borderColor: isRunning ? '#e11d48' : '#059669',
+                background: isRunning ? '#e11d48' : '#4f46e5',
+                borderColor: isRunning ? '#be123c' : '#4338ca',
+                color: '#ffffff',
+                boxShadow: '0 1px 3px rgba(79, 70, 229, 0.25)',
               }}
             >
               {isRunning ? (
@@ -118,7 +118,7 @@ export function WorkflowToolbar({
               ) : (
                 <>
                   <Zap size={14} />
-                  <span>⚡ Chạy Từ Node Chính ({startNodeTitle})</span>
+                  <span>Chạy Từ Node Chính ({startNodeTitle})</span>
                 </>
               )}
             </button>

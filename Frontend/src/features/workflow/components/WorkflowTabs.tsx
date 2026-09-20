@@ -17,8 +17,8 @@ export function WorkflowTabs({
   className = '',
 }: WorkflowTabsProps) {
   const renderIcon = (iconName: WorkflowTabItem['iconName'], isActive: boolean) => {
-    const size = 14
-    const color = isActive ? '#4338ca' : '#64748b'
+    const size = 13
+    const color = isActive ? '#0f172a' : '#64748b'
 
     switch (iconName) {
       case 'film':

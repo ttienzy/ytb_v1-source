@@ -16,6 +16,8 @@ import {
   Save,
   Bookmark,
   X,
+  Star,
+  Mic,
 } from 'lucide-react'
 import type { GptScriptNodeData, PromptPresetItem } from '../types'
 import { estimateVoiceoverWordRange, normalizeClipDuration } from '../services/buildScenePlan'
@@ -171,7 +173,9 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
         <div className="wf-start-banner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="wf-start-dot" />
-            <span>⭐ NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Star size={11} fill="#ffffff" color="#ffffff" /> NODE CHÍNH (ĐIỂM KHỞI ĐẦU)
+            </span>
           </div>
           <span style={{ fontSize: 9, opacity: 0.9 }}>Root Trigger</span>
         </div>
@@ -208,23 +212,16 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
       />
 
       {/* Header */}
-      <div className="wf-node-header" style={{ background: '#f5f3ff', borderBottom: '1px solid #ede9fe' }}>
+      <div className="wf-node-header">
         <div className="wf-node-title-group">
-          <div
-            className="wf-node-icon"
-            style={{
-              background: 'linear-gradient(135deg, #a855f7, #9333ea)',
-              color: '#ffffff',
-              boxShadow: '0 2px 6px rgba(168, 85, 247, 0.3)',
-            }}
-          >
+          <div className="wf-node-icon">
             <Bot size={15} />
           </div>
           <div>
-            <div className="wf-node-title" style={{ color: '#581c87' }}>
+            <div className="wf-node-title">
               {data.title || 'ChatGPT • Kịch Bản'}
             </div>
-            <div style={{ fontSize: 10, color: '#9333ea', fontWeight: 600 }}>
+            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>
               {data.provider || 'Viết phân cảnh & lời thoại'}
             </div>
           </div>
@@ -246,15 +243,19 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             }}
             title={isStartNode ? 'Node chính bắt đầu quy trình' : 'Nhấp để đặt làm Node chính'}
           >
-            <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
+            <Star
+              size={12}
+              fill={isStartNode ? '#d97706' : 'none'}
+              color={isStartNode ? '#d97706' : '#94a3b8'}
+            />
           </button>
 
           <span
             className="wf-node-badge"
             style={{
-              background: salesScripts.length > 0 ? '#f5f3ff' : '#f8fafc',
-              color: salesScripts.length > 0 ? '#7c3aed' : '#64748b',
-              border: salesScripts.length > 0 ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+              background: salesScripts.length > 0 ? '#ecfdf5' : '#f1f5f9',
+              color: salesScripts.length > 0 ? '#065f46' : '#64748b',
+              border: salesScripts.length > 0 ? '1px solid #d1fae5' : '1px solid #e2e8f0',
             }}
           >
             {salesScripts.length > 0 ? `${salesScripts.length} Kịch bản` : 'Chưa có'}
@@ -724,8 +725,6 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             disabled={isGenerating}
             style={{
               padding: '6px 14px',
-              background: '#7c3aed',
-              borderColor: '#6d28d9',
               fontWeight: 600,
               fontSize: 11,
             }}
@@ -737,7 +736,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
         {/* 5. Output Scripts: Dynamic Tabs & Cards */}
         {salesScripts.length > 0 ? (
-          <div style={{ marginTop: 10, borderTop: '1px solid #ede9fe', paddingTop: 8 }}>
+          <div style={{ marginTop: 10, borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: '#475569' }}>
                 Đã tạo ({salesScripts.length}/{requestedCount} kịch bản):
@@ -763,9 +762,9 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                       fontWeight: 700,
                       padding: '4px 8px',
                       borderRadius: 5,
-                      border: safeTab === idx ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-                      background: safeTab === idx ? '#f5f3ff' : '#f8fafc',
-                      color: safeTab === idx ? '#7c3aed' : '#64748b',
+                      border: safeTab === idx ? '1px solid #4f46e5' : '1px solid #e2e8f0',
+                      background: safeTab === idx ? '#4f46e5' : '#ffffff',
+                      color: safeTab === idx ? '#ffffff' : '#64748b',
                       cursor: 'pointer',
                       whiteSpace: 'nowrap',
                       transition: 'all 0.15s ease',
@@ -800,15 +799,15 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             {currentScript && (
               <div
                 style={{
-                  background: '#faf5ff',
-                  border: '1px solid #e9d5ff',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
                   borderRadius: 6,
                   padding: '9px',
                   fontSize: 11,
                   color: '#334155',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, borderBottom: '1px dashed #d8b4fe', paddingBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {currentScript.phase && (
                       <span
@@ -826,12 +825,12 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                         {currentScript.phase}
                       </span>
                     )}
-                    <span style={{ fontWeight: 700, color: '#6b21a8' }}>
+                    <span style={{ fontWeight: 700, color: '#0f172a' }}>
                       {currentScript.angle || `Kịch bản #${safeTab + 1}`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 9, background: '#f3e8ff', color: '#7e22ce', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>
+                    <span style={{ fontSize: 9, background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>
                       ~{currentScript.wordCount || currentScript.word_count || 0} từ
                     </span>
                     <button
@@ -841,7 +840,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                         background: 'transparent',
                         border: 'none',
                         cursor: 'pointer',
-                        color: copiedIndex === safeTab ? '#16a34a' : '#7c3aed',
+                        color: copiedIndex === safeTab ? '#16a34a' : '#64748b',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 2,
@@ -858,12 +857,12 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
                 {/* Visual Direction for Veo (English Cinematic Format) */}
                 {(currentScript.visualDirection || currentScript.visual_direction) && (
-                  <div style={{ marginBottom: 6, padding: '6px 8px', background: '#eff6ff', borderRadius: 5, border: '1px solid #bfdbfe' }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                  <div style={{ marginBottom: 6, padding: '6px 8px', background: '#ffffff', borderRadius: 5, border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
                       <Camera size={11} />
                       <span>Chỉ dẫn hình ảnh • English Veo Prompt (Cinematic):</span>
                     </div>
-                    <div style={{ fontSize: 10.5, color: '#1e3a8a', lineHeight: 1.45 }}>
+                    <div style={{ fontSize: 10.5, color: '#1e293b', lineHeight: 1.45 }}>
                       {currentScript.visualDirection || currentScript.visual_direction}
                     </div>
                   </div>
@@ -871,21 +870,21 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
                 {/* Voiceover / Script Content (Vietnamese 100%) */}
                 <div style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 9.5, fontWeight: 700, color: '#6b21a8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       <FileText size={11} />
                       <span>Lời thoại • Voiceover (Tiếng Việt 100%):</span>
                     </div>
                     {data.voiceId && (
-                      <span style={{ fontSize: 9, color: '#9333ea', background: '#f5f3ff', border: '1px solid #e9d5ff', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>
-                        🎙️ {data.voiceId}
+                      <span style={{ fontSize: 9, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0', padding: '1px 5px', borderRadius: 3, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Mic size={10} color="#64748b" /> {data.voiceId}
                       </span>
                     )}
                   </div>
                   <div
                     style={{
                       background: '#ffffff',
-                      border: '1px solid #f3e8ff',
+                      border: '1px solid #e2e8f0',
                       borderRadius: 4,
                       padding: '7px 8px',
                       fontSize: 11,
@@ -903,12 +902,12 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                 {/* On-screen text & CTA if parsed */}
                 {(currentScript.onScreenText || currentScript.on_screen_text) && (
                   <div style={{ marginBottom: 3, fontSize: 10, color: '#475569' }}>
-                    <strong style={{ color: '#7e22ce' }}>Chữ màn hình:</strong> {currentScript.onScreenText || currentScript.on_screen_text}
+                    <strong style={{ color: '#334155' }}>Chữ màn hình:</strong> {currentScript.onScreenText || currentScript.on_screen_text}
                   </div>
                 )}
                 {currentScript.cta && (
                   <div style={{ marginBottom: 6, fontSize: 10, color: '#475569' }}>
-                    <strong style={{ color: '#7e22ce' }}>CTA:</strong> {currentScript.cta}
+                    <strong style={{ color: '#334155' }}>CTA:</strong> {currentScript.cta}
                   </div>
                 )}
 
@@ -928,8 +927,8 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                     width: '100%',
                     padding: '7px 12px',
                     borderRadius: 6,
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #f43f5e, #e11d48)',
+                    border: '1px solid #4338ca',
+                    background: '#4f46e5',
                     color: '#ffffff',
                     fontSize: 11,
                     fontWeight: 700,
@@ -939,13 +938,12 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                     gap: 6,
                     cursor: isScriptOutputStale ? 'not-allowed' : 'pointer',
                     opacity: isScriptOutputStale ? 0.55 : 1,
-                    boxShadow: '0 2px 6px rgba(244, 63, 94, 0.25)',
                     transition: 'all 0.15s ease',
                   }}
                   title={`Đẩy ${salesScripts.length} kịch bản vào ${salesScripts.length} clip Google Flow độc lập`}
                 >
                   <Sparkles size={13} />
-                  🚀 Đồng bộ {salesScripts.length} Kịch Bản → {salesScripts.length} Clip Flow
+                  Đồng bộ {salesScripts.length} Kịch Bản → {salesScripts.length} Clip Flow
                 </button>
 
                 {/* Nạp thủ công kịch bản đang chọn vào clip đang mở */}
@@ -973,7 +971,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                     }}
                     title="Đẩy toàn bộ kịch bản đang chọn vào clip đang mở trong Google Flow"
                   >
-                    📌 Nạp riêng vào Clip đang mở
+                    Nạp riêng vào Clip đang mở
                   </button>
                 </div>
               </div>

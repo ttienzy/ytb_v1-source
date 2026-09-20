@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2, ImageDown, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
+import { User, Image as ImageIcon, Upload, X, CheckCircle2, Trash2, ImageDown, Sparkles, ChevronDown, ChevronUp, Star } from 'lucide-react'
 import type { CharacterSceneNodeData } from '../types'
 import type { AssetRef } from '../contracts'
 import { uploadWorkflowAsset } from '../services/workflowApi'
@@ -107,30 +107,25 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
         <div className="wf-start-banner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="wf-start-dot" />
-            <span>⭐ NODE CHÍNH (ĐIỂM KHỞI ĐẦU)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Star size={11} fill="#ffffff" color="#ffffff" /> NODE CHÍNH (ĐIỂM KHỞI ĐẦU)
+            </span>
           </div>
           <span style={{ fontSize: 9, opacity: 0.9 }}>Root Trigger</span>
         </div>
       )}
 
       {/* Header */}
-      <div className="wf-node-header" style={{ background: '#f5f3ff', borderBottom: '1px solid #ede9fe' }}>
+      <div className="wf-node-header">
         <div className="wf-node-title-group">
-          <div
-            className="wf-node-icon"
-            style={{
-              background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
-              color: '#ffffff',
-              boxShadow: '0 2px 6px rgba(124, 58, 237, 0.3)',
-            }}
-          >
+          <div className="wf-node-icon">
             <User size={15} />
           </div>
           <div>
-            <div className="wf-node-title" style={{ color: '#4c1d95' }}>
+            <div className="wf-node-title">
               {data.title || 'Nhân Vật & Bối Cảnh'}
             </div>
-            <div style={{ fontSize: 10, color: '#7c3aed', fontWeight: 600 }}>
+            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 500 }}>
               Người mẫu / MC & Không gian quay
             </div>
           </div>
@@ -152,15 +147,19 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
             }}
             title={isStartNode ? 'Node chính bắt đầu quy trình' : 'Nhấp để đặt làm Node chính'}
           >
-            <span style={{ fontSize: 13 }}>{isStartNode ? '⭐' : '☆'}</span>
+            <Star
+              size={12}
+              fill={isStartNode ? '#d97706' : 'none'}
+              color={isStartNode ? '#d97706' : '#94a3b8'}
+            />
           </button>
 
           <span
             className="wf-node-badge"
             style={{
-              background: count > 0 ? '#f5f3ff' : '#f8fafc',
-              color: count > 0 ? '#7c3aed' : '#64748b',
-              border: count > 0 ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+              background: count > 0 ? '#ecfdf5' : '#f1f5f9',
+              color: count > 0 ? '#065f46' : '#64748b',
+              border: count > 0 ? '1px solid #d1fae5' : '1px solid #e2e8f0',
             }}
           >
             {count}/2 Ảnh
@@ -416,8 +415,8 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
           style={{
             marginTop: 10,
             padding: '8px 10px',
-            background: '#faf5ff',
-            border: '1px solid #e9d5ff',
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
             borderRadius: 7,
           }}
         >
@@ -431,8 +430,8 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
             }}
             onClick={() => setIsProfilesOpen((prev) => !prev)}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#6b21a8' }}>
-              <Sparkles size={12} color="#7c3aed" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#0f172a' }}>
+              <Sparkles size={12} color="#64748b" />
               <span>AI Canonical Profiles (Veo EN)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -448,7 +447,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                   padding: '2px 7px',
                   fontSize: 10,
                   fontWeight: 600,
-                  background: '#7c3aed',
+                  background: '#0f172a',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: 4,
@@ -467,7 +466,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                 <Sparkles size={10} className={data.isExtractingProfile ? 'animate-spin' : ''} />
                 {data.isExtractingProfile ? 'Đang trích xuất...' : 'Trích xuất AI'}
               </button>
-              {isProfilesOpen ? <ChevronUp size={12} color="#7c3aed" /> : <ChevronDown size={12} color="#7c3aed" />}
+              {isProfilesOpen ? <ChevronUp size={12} color="#64748b" /> : <ChevronDown size={12} color="#64748b" />}
             </div>
           </div>
 
@@ -475,7 +474,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
             <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {/* Character Profile */}
               <div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#4c1d95', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#334155', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <span>👤 Nhân vật (Character Profile - EN):</span>
                   {data.characterProfile && (
                     <span style={{ fontSize: 9, color: '#059669', fontWeight: 700 }}>✓ Sẵn sàng</span>
@@ -493,7 +492,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                     fontFamily: 'inherit',
                     padding: '4px 6px',
                     borderRadius: 4,
-                    border: '1px solid #d8b4fe',
+                    border: '1px solid #cbd5e1',
                     background: '#ffffff',
                     color: '#1e293b',
                     resize: 'vertical',
@@ -505,7 +504,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
 
               {/* Scene Profile */}
               <div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#4c1d95', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#334155', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <span>🌄 Bối cảnh & Ánh sáng (Scene Profile - EN):</span>
                   {data.sceneProfile && (
                     <span style={{ fontSize: 9, color: '#059669', fontWeight: 700 }}>✓ Sẵn sàng</span>
@@ -523,7 +522,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                     fontFamily: 'inherit',
                     padding: '4px 6px',
                     borderRadius: 4,
-                    border: '1px solid #d8b4fe',
+                    border: '1px solid #cbd5e1',
                     background: '#ffffff',
                     color: '#1e293b',
                     resize: 'vertical',
@@ -533,7 +532,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                 />
               </div>
 
-              <div style={{ fontSize: 9.5, color: '#7c3aed', opacity: 0.85, fontStyle: 'italic' }}>
+              <div style={{ fontSize: 9.5, color: '#64748b', opacity: 0.85, fontStyle: 'italic' }}>
                 💡 Tự động gắn vào visual_direction tiếng Anh của mỗi clip Veo để giữ tính nhất quán.
               </div>
             </div>

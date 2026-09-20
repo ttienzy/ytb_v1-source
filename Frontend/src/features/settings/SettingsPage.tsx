@@ -127,53 +127,6 @@ export function SettingsPage() {
             )
           })}
         </nav>
-
-        {/* Quick Author & Telegram Card at Sidebar Footer */}
-        <div
-          style={{
-            marginTop: 'auto',
-            paddingTop: 12,
-            borderTop: '1px solid #f1f5f9',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setActiveTab('contact')}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 9,
-              padding: '8px 10px',
-              borderRadius: 10,
-              border: activeTab === 'contact' ? '1px solid #24A1DE' : '1px solid #e2e8f0',
-              background: activeTab === 'contact' ? 'rgba(36, 161, 222, 0.08)' : '#f8fafc',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'all 0.15s ease',
-            }}
-            title="Xem thông tin liên hệ & mã QR Telegram tác giả"
-          >
-            <img
-              src="/forever.png"
-              alt="Tien"
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: '50%',
-                flexShrink: 0,
-                border: '1.5px solid #24A1DE',
-              }}
-            />
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>Tác giả: Tien</span>
-              <span style={{ fontSize: 10.5, color: '#24A1DE', display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Send size={10} /> Telegram: @ttienzy
-              </span>
-            </div>
-            <ChevronRight size={13} style={{ color: activeTab === 'contact' ? '#24A1DE' : '#94a3b8' }} />
-          </button>
-        </div>
       </aside>
 
       {/* ── Right Content Area ── */}
