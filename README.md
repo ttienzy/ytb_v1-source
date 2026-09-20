@@ -1,181 +1,231 @@
-# YouTube Studio Recap & Video Tools (`ytb_v1`)
+# Google Search Studio - Video & Automation Tools (ytb_v1)
 
-[![Build and Release Desktop App](https://github.com/ttienzy/ytb_v1/actions/workflows/release.yml/badge.svg)](https://github.com/ttienzy/ytb_v1/actions/workflows/release.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/ttienzy/ytb_v1?color=blue&logo=github)](https://github.com/ttienzy/ytb_v1/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue.svg)](https://github.com/ttienzy/ytb_v1/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![Giao diện ứng dụng](./assets/ui.png)
 
-A powerful, all-in-one desktop application designed for automated **YouTube Video Recap Creation**, **Vietnamese AI Voiceover Dubbing**, and **Batch Watermark Inpainting**. Built with Electron, React, FastAPI, and VieNeu-TTS.
+Google Search Studio là ứng dụng desktop tích hợp toàn diện cho việc tự động hóa sáng tạo video, bao gồm AI Workflow (sản xuất video sản phẩm từ ảnh và kịch bản), Motion Control Studio (điều khiển chuyển động video AI theo video tham chiếu), Veo Studio, Pipeline Video Recap tự động từ YouTube (R1-R4), Lồng tiếng tiếng Việt VieNeu-TTS và Công cụ xóa Watermark AI (Google SynthID).
 
 ---
 
-## 🌟 Key Features
+## 1. Yêu cầu hệ thống (Prerequisites)
 
-- 🎬 **Automated 4-Stage Recap Pipeline (R1–R4):**
-  - **R1 (AI Script Generation):** Dynamic 10+ minute transcript chunking with context chaining using Gemini Web API. Generates high-retention, witty, storytelling Vietnamese reviewer scripts with mandatory Intro Hook and Outro CTA.
-  - **R2 (Lossless Video Stream-Cut):** Downloads source video via `yt-dlp` (with multi-tiered anti-bot fallbacks) and performs frame-accurate segment extraction using `FFmpeg`.
-  - **R3 (Voiceover Synthesis & Pacing Sync):** High-speed batch Vietnamese TTS generation (VieNeu-TTS ONNX engine) with automated `atempo` time-stretching to match exact clip duration.
-  - **R4 (Muxing & Seamless Concatenation):** Muxes synthesized voiceover with video clips, normalizes audio levels, and produces the final merged MP4 recap.
-- 🧹 **AI Watermark & SynthID Remover:** Batch video inpainting to remove watermarks and platform stamps with zero quality loss.
-- 🎙️ **Voice Studio & Music Library:** Comprehensive voice previewing, audio adjustments, and background audio ducking.
-- 🔄 **Fault-Tolerant Job State & Rehydration:** Automatic job state persistence (`recap.json` + SQLite) allowing instant resume and replay across app restarts.
-- 📦 **Standalone Windows Installer:** Self-contained executable (`.exe`) packaged with PyInstaller and Electron-Builder. No Docker or local Python setup required for end users.
+Trước khi bắt đầu cài đặt, máy tính cần cài đặt sẵn các công cụ sau:
+
+- Node.js: Phiên bản 20.x trở lên (khuyến nghị 22.x LTS).
+- Python: Phiên bản 3.11 trở lên (bản 64-bit).
+- FFmpeg: Đã cài đặt và thêm vào biến môi trường PATH của hệ thống (kiểm tra bằng lệnh `ffmpeg -version`).
+- Trình duyệt Google Chrome: Dùng để đăng nhập Google Flow / Veo và nạp tiện ích mở rộng (Extension).
+- Git: Dùng để tải và đồng bộ mã nguồn.
 
 ---
 
-## 🏗️ Architecture Overview
+## 2. Hướng dẫn cài đặt dự án (Core Setup)
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Desktop Application (Electron)                  │
-│  React UI + Vite + Tailwind CSS (Port 5173 / Main Process)             │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │ IPC / HTTP
-                ┌──────────────────┴──────────────────┐
-                ▼                                     ▼
-┌───────────────────────────────┐     ┌──────────────────────────────────┐
-│   Backend Service (FastAPI)   │     │   Voice Service (VieNeu-TTS)     │
-│   Port: 8000                  │     │   Port: 8001                     │
-│   - R1-R4 Recap Engine        │────▶│   - CPU-Optimized ONNX Engine    │
-│   - Gemini Web API Client     │     │   - Batch TTS Synthesis          │
-│   - yt-dlp & FFmpeg Handler   │     │   - 20+ Vietnamese Voice Models  │
-│   - Watermark Inpainting      │     └──────────────────────────────────┘
-└───────────────────────────────┘
-```
+Dự án gồm 3 phần chính: Backend (FastAPI), Voice Service (VieNeu-TTS), và Frontend (Electron + React).
 
----
-
-## ⚡ Recap Pipeline Workflow
-
-```
-1. YouTube URL ──▶ [Transcript Fetcher (Mức 0-3)] ──▶ Clean Subtitles (.vtt)
-2. Subtitles ──▶ [Dynamic Chunker (10min+)] ──▶ Gemini LLM ──▶ recap.json
-3. recap.json ──▶ [yt-dlp + FFmpeg Stream-Cut] ──▶ Segment Clips (clip_0.mp4 ... clip_n.mp4)
-4. Segments ──▶ [VieNeu-TTS Batch + atempo Sync] ──▶ Voice Tracks (voice_0.wav ... voice_n.wav)
-5. Clips + Voice ──▶ [FFmpeg Mux & Lossless Concat] ──▶ final_recap.mp4
-```
-
----
-
-## 🚀 Getting Started
-
-### Option 1: Download Prebuilt Desktop App (Recommended for Users)
-
-1. Go to the [Releases Page](https://github.com/ttienzy/ytb_v1/releases).
-2. Download the latest `Google Search App Setup <version>.exe`.
-3. Run the installer and launch the app directly from your Desktop shortcut.
-
----
-
-### Option 2: Development Environment Setup (For Developers)
-
-#### Prerequisites
-- **Node.js:** $\ge 22.12.0$ (LTS recommended)
-- **Python:** $\ge 3.11$
-- **FFmpeg:** Installed and added to system `PATH`
-- **uv (Optional):** Recommended for managing Python environments ([Install uv](https://github.com/astral-sh/uv))
-
-#### 1. Clone the Repository
+### Bước 2.1: Tải mã nguồn
 ```bash
 git clone https://github.com/ttienzy/ytb_v1.git
 cd ytb_v1
 ```
 
-#### 2. Install Dependencies
+### Bước 2.2: Cài đặt Backend (Python)
 ```bash
-# Install Frontend dependencies
-cd Frontend
-npm install
-cd ..
-
-# Install Backend dependencies
 cd Backend
 python -m venv .venv
-.\.venv\Scripts\activate      # On Windows
+.\.venv\Scripts\activate
 pip install -r requirements.txt
 cd ..
+```
 
-# Install Voice Service dependencies
+### Bước 2.3: Cài đặt Voice Service (VieNeu-TTS)
+```bash
 cd services/voice-service
-uv sync                       # or pip install -r requirements.txt
+pip install -r requirements.txt
 cd ../..
 ```
 
-#### 3. Configure Credentials (Gemini Web API)
-Create your local configuration file:
+### Bước 2.4: Cài đặt Frontend (Electron & React)
 ```bash
-cp Backend/Data/config.example.json Backend/Data/config.json
+cd Frontend
+npm install
+cd ..
 ```
-Edit `Backend/Data/config.json` and provide your Gemini cookies or use the built-in Chrome profile login in the Settings tab.
 
-#### 4. Launch All Services Simultaneously
+### Bước 2.5: Khởi chạy ứng dụng
+Có 2 cách để khởi chạy ứng dụng:
+
+- Cách 1 (Khuyên dùng - Chạy tất cả dịch vụ cùng lúc):
 ```bash
-# Starts Backend (:8000), Voice Service (:8001), and Electron Frontend
 npm start --prefix Desktop
 ```
+Lệnh trên sẽ tự động khởi động Backend (cổng 8000), Voice Service (cổng 8001) và giao diện Desktop Electron.
+
+- Cách 2 (Khởi chạy thủ công trên từng cửa sổ dòng lệnh):
+  - Cửa sổ 1 (Backend):
+    ```bash
+    cd Backend
+    .\.venv\Scripts\activate
+    python run_server.py
+    ```
+  - Cửa sổ 2 (Voice Service):
+    ```bash
+    cd services/voice-service
+    python run_server.py
+    ```
+  - Cửa sổ 3 (Frontend Electron):
+    ```bash
+    cd Frontend
+    npm run dev
+    ```
 
 ---
 
-## 📡 REST API Reference
+## 3. Hướng dẫn thiết lập chi tiết theo từng mục Sidebar
 
-The backend exposes a full suite of endpoints at `http://127.0.0.1:8000`:
+Thanh điều hướng Sidebar tổ chức các tính năng theo từng module độc lập. Dưới đây là thứ tự các mục người dùng cần cấu hình để khai thác đầy đủ các tính năng:
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/recap/generate` | Initiates R1: Transcript fetch & AI script generation |
-| `POST` | `/api/recap/cut` | Initiates R2: Video stream-cutting via FFmpeg |
-| `POST` | `/api/recap/voice` | Initiates R3: Batch TTS voice synthesis & atempo synchronization |
-| `POST` | `/api/recap/merge` | Initiates R4: Final audio-video muxing and concatenation |
-| `GET` | `/api/recap/jobs/{id}` | Retrieves job status and execution progress |
-| `GET` | `/api/recap/jobs/{id}/voice/{i}` | Streams audio preview for segment `i` |
-| `GET` | `/api/recap/jobs/{id}/final` | Streams the final completed recap video (`.mp4`) |
-| `POST` | `/api/watermark/clean` | Submits batch video watermark removal job |
-| `GET` | `/api/health` | Service health check and database connectivity status |
+### Mục 1: Cài đặt (Settings) - Thiết lập nền tảng bắt buộc
+Trước khi bắt đầu sáng tạo video, truy cập mục Cài đặt để kết nối các tài nguyên:
+- Tab Gemini & YouTube:
+  - Nhập Cookie tài khoản Google Gemini Web hoặc bấm đăng nhập qua Chrome để tự động lưu cookie.
+  - Phục vụ cho: Sinh kịch bản recap R1 và phân tích sản phẩm trong AI Workflow.
+- Tab LLM Agent (9router):
+  - Nhập API Key 9router hoặc OpenAI (tùy chọn thay thế cho Gemini Web).
+  - Phục vụ cho: Phân tích thị giác hình ảnh sản phẩm và sinh kịch bản bán hàng góc độ tiếp thị.
+- Tab Google Veo:
+  - Cung cấp trạng thái kết nối và hướng dẫn cài đặt tiện ích mở rộng tạo video.
+- Tab Google Drive (Tùy chọn):
+  - Nhập thông tin OAuth để tự động sao lưu video sau khi hoàn thành hoặc sau khi xóa watermark lên Google Drive cá nhân.
+- Tab Pippit & YouTube (Nếu sử dụng tính năng đăng bài tự động):
+  - Cung cấp token kết nối Fanpage Facebook / TikTok qua Pippit hoặc Google API Key xuất bản YouTube.
+
+### Mục 2: Cài đặt Extension Chrome (FlowsVeo-Clean)
+Tiện ích mở rộng đóng vai trò cầu nối trung gian giữa ứng dụng Desktop và giao diện web Google Flow / Veo (tự động điền prompt, upload media tham chiếu, lấy link video kết quả):
+1. Mở trình duyệt Google Chrome, truy cập: `chrome://extensions/`
+2. Bật công tắc "Developer mode" (Chế độ dành cho nhà phát triển) ở góc trên bên phải.
+3. Bấm nút "Load unpacked" (Tải tiện ích đã giải nén) và chọn thư mục:
+   `Extensions/FlowsVeo-Clean`
+4. Mở tab Google Flow trên trình duyệt Chrome và đăng nhập sẵn tài khoản Google có quyền sử dụng Veo / Flow.
+
+### Mục 3: AI Workflow
+Quy trình canvas trực quan tạo video quảng cáo, review sản phẩm từ ảnh và kịch bản:
+- Thiết lập cần có:
+  - Đã có Cookie Gemini hoặc 9router API Key (cấu hình trong mục Cài đặt).
+  - Đã nạp tiện ích Chrome FlowsVeo-Clean (nếu chọn render video qua Veo).
+  - Voice Service đang chạy trên cổng 8001 (nếu sử dụng lồng tiếng Brand Voice).
+- Cách sử dụng:
+  - Kéo thả ảnh sản phẩm, nhân vật, bối cảnh vào node Product Assets.
+  - Bấm phân tích sản phẩm bằng AI -> Sinh danh sách kịch bản -> Gửi render phân cảnh Veo -> Lồng tiếng VieNeu-TTS -> Trộn nhạc nền BGM -> Xuất video hoàn chỉnh vào Thư viện.
+
+### Mục 4: Workflow (Motion Control Studio)
+Không gian làm việc chuyên sâu về điều khiển chuyển động video AI theo video tham chiếu:
+- Thiết lập cần có:
+  - Đã nạp tiện ích Chrome FlowsVeo-Clean và mở sẵn trang Google Flow.
+- Tính năng:
+  - Tải lên video mẫu chuyển động và ảnh nhân vật / bối cảnh.
+  - Trích xuất khung hình đầu và khung hình cuối làm điểm neo.
+  - Tự động đồng bộ mô tả chuyển động với các preset phong cách (Camera, Lighting, Motion).
+  - Hỗ trợ tạo từ 1 đến 4 biến thể song song với cơ chế cô lập lỗi độc lập theo từng slot và tính năng Thử lại riêng từng biến thể (Retry Single Variant) mà không phải upload lại file mẫu.
+
+### Mục 5: Veo Studio
+Không gian sáng tạo video Veo AI độc lập:
+- Thiết lập cần có:
+  - Đã nạp tiện ích Chrome FlowsVeo-Clean trên trình duyệt.
+- Tính năng:
+  - Hỗ trợ tạo video từ văn bản (Text-to-Video) và tạo video từ ảnh (Image-to-Video).
+  - Xem và quản lý thư viện clip Veo đã kết xuất.
+
+### Mục 6: Video (Recap Studio R1-R4)
+Quy trình tự động hóa 4 bước tạo video recap đánh giá phim, truyện từ URL YouTube:
+- Thiết lập cần có:
+  - FFmpeg đã có trong PATH hệ thống.
+  - Cookie Gemini đã nhập trong Cài đặt hoặc file `Backend/Data/config.json`.
+  - Voice Service đang chạy ở cổng 8001.
+- Quy trình:
+  - R1: Lấy phụ đề transcript YouTube và sinh kịch bản tóm tắt hấp dẫn.
+  - R2: Tải video và cắt clip chính xác từng phân đoạn bằng yt-dlp và FFmpeg.
+  - R3: Lồng tiếng tiếng Việt VieNeu-TTS tự động co giãn nhịp điệu (atempo) khớp từng phân cảnh.
+  - R4: Muxing âm thanh, chuẩn hóa âm lượng và ghép thành video hoàn chỉnh.
+
+### Mục 7: Xóa Watermark (AI Inpainting)
+Công cụ loại bỏ logo watermark và SynthID mờ trên video và ảnh bằng AI:
+- Yêu cầu cài đặt môi trường runtime (thực hiện một lần duy nhất):
+  ```bash
+  cd Frontend/watermark-runtime
+  npm install
+  npx playwright install chromium
+  cd ../..
+  ```
+- Kiểm tra: Mở mục Xóa Watermark trên thanh Sidebar, kiểm tra thông báo "Công cụ watermark tích hợp đã sẵn sàng cho ảnh và video".
+- Tính năng:
+  - Xóa watermark hàng loạt cho danh sách file video và ảnh.
+  - Hỗ trợ tùy chọn tải video sạch trực tiếp trong modal Thư Viện Video Đã Xuất (kèm thanh tiến trình đếm số khung hình real-time, hỗ trợ cả bản có tiếng và bản tắt tiếng Mute).
+
+### Mục 8: Voices (Quản lý giọng đọc)
+- Thiết lập cần có: Voice Service đang chạy trên cổng 8001.
+- Sử dụng: Nghe thử hơn 20 giọng đọc tiếng Việt VieNeu-TTS (Nam/Nữ, Bắc/Trung/Nam), tùy chỉnh tốc độ và cao độ. Không cần cấu hình gì thêm.
+
+### Mục 9: Thư viện nhạc (BGM Library)
+- Sử dụng: Tải trực tiếp các bản nhạc nền (.mp3, .wav) lên thư viện để dùng cho AI Workflow và Video Recap. Không yêu cầu cấu hình thêm.
+
+### Mục 10: Khám Phá Kênh (Channel Discovery)
+- Sử dụng: Tìm kiếm kênh, theo dõi số liệu và phân tích danh sách video YouTube qua yt-dlp. Chạy trực tiếp, không cần cấu hình thêm.
+
+### Mục 11: Crawl truyện (Stories Crawler)
+- Sử dụng: Thu thập nội dung truyện chữ từ các nguồn web để chuyển thể thành kịch bản video. Chạy trực tiếp, không cần cấu hình thêm.
+
+### Mục 12: Lên lịch Pippit & Lên lịch Youtube
+- Thiết lập cần có: Đăng nhập tài khoản và cấu hình token/kênh trong mục Cài đặt (tab Pippit hoặc tab YouTube).
+- Sử dụng: Quản lý hàng đợi và lên lịch phát hành video tự động lên TikTok, Facebook và YouTube.
+
+### Mục 13: Dashboard & Lịch sử
+- Sử dụng: Theo dõi tổng quan tiến độ đăng video trong ngày, tình trạng sức khỏe các kênh, tra cứu lịch sử render video. Tự động cập nhật theo dữ liệu thực tế, không cần cấu hình thêm.
 
 ---
 
-## 🏷️ Automated Releases (CI/CD)
+## 4. Kiểm thử hệ thống (Testing & Verification)
 
-This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`) that automatically builds and publishes Windows standalone installers.
+Để đảm bảo toàn bộ hệ thống hoạt động ổn định và không phát sinh lỗi, chạy các lệnh kiểm thử sau:
 
-To publish a new version:
 ```bash
-# 1. Update version in Frontend/package.json
-# 2. Commit changes
-git commit -am "chore(release): bump version to 1.0.0"
+# Kiểm thử Frontend build và unit tests
+cd Frontend
+npm run build
+npm test -- --run
 
-# 3. Create and push tag
-git tag v1.0.0
-git push origin v1.0.0
+# Kiểm thử Backend unit tests
+cd ../Backend
+python -m unittest tests/test_watermark_runtime.py tests/workflow/test_motion_config.py tests/workflow/test_workflow_clean.py
 ```
-GitHub Actions will automatically compile the Python backend into a standalone binary (`backend_server.exe`), package the Electron frontend via `electron-builder`, and publish the installer on the GitHub Releases tab.
 
 ---
 
-## 📁 Repository Structure
+## 5. Cấu trúc thư mục mã nguồn
 
 ```
 .
-├── .github/workflows/         # CI/CD Release Workflows
-├── Backend/                   # FastAPI Backend (Python)
+├── Backend/                   # Máy chủ FastAPI (Python 3.11+)
 │   ├── app/
-│   │   ├── ai/gemini/         # Gemini Web API Client & Recap Script Engine
-│   │   ├── recap/             # Chunker, Merger, Subtitle Downloader, FFmpeg
-│   │   ├── watermark/         # AI Inpainting Watermark Cleaner
-│   │   └── core/              # Configuration, Database & Storage
-│   ├── prompts/recap/         # Production Prompt Templates
-│   ├── backend.spec           # PyInstaller Executable Specification
-│   └── run_server.py          # Standalone Server Entrypoint
-├── Frontend/                  # Electron + React + Vite + Tailwind CSS
-│   ├── electron/              # Electron Main Process & Process Lifecycle Manager
-│   └── src/                   # React Components (Studio, Watermark, Settings)
-├── services/voice-service/    # Independent VieNeu-TTS Engine (ONNX Runtime)
-├── Desktop/                   # Multi-process Development Runner (dev.js)
-└── docs/                      # Architecture & Implementation Notes
+│   │   ├── ai/                # Gemini Web client, 9router vision
+│   │   ├── recap/             # Engine Video Recap R1-R4, yt-dlp, FFmpeg
+│   │   ├── veo/               # API Veo AI, Media Registry, Bridge kết nối Extension
+│   │   ├── watermark/         # Engine inpainting xóa watermark (GWR)
+│   │   └── workflow/          # API & Service cho AI Workflow Canvas & Motion Control
+│   ├── prompts/               # Prompt mẫu sản phẩm, kịch bản, chuyển động
+│   └── run_server.py          # Điểm khởi chạy máy chủ Backend độc lập
+├── Frontend/                  # Giao diện ứng dụng Desktop (Electron + React + Vite)
+│   ├── src/
+│   │   ├── features/          # Các màn hình theo Sidebar (workflow, veo-studio, settings...)
+│   │   └── components/        # Layout, Sidebar, Modal chung
+│   └── watermark-runtime/     # Runtime cài đặt Playwright & gemini-watermark-remover
+├── services/voice-service/    # Máy chủ TTS tiếng Việt độc lập (VieNeu-TTS ONNX, cổng 8001)
+├── Extensions/FlowsVeo-Clean/ # Tiện ích Chrome mở rộng kết nối Google Flow / Veo
+├── Desktop/                   # Trình khởi chạy đa tiến trình cho toàn bộ ứng dụng (npm start)
+└── assets/                    # Thư mục chứa hình ảnh tài nguyên (ui.png)
 ```
 
 ---
 
-## 📄 License
+## 6. Giấy phép (License)
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+Dự án được phát hành theo giấy phép MIT License. Xem file [LICENSE](LICENSE) để biết thêm chi tiết.
