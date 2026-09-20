@@ -64,6 +64,7 @@ export interface VeoProject {
 
 export interface VeoJobRequest {
   project_id?: string | null
+  idempotency_key?: string | null
   prompt: string
   model_display_name: string
   input_mode: InputMode
@@ -79,6 +80,7 @@ export interface VeoJobRequest {
   reference_video_id?: string | null
   reference_video_start_seconds?: number
   reference_video_end_seconds?: number | null
+  force_fresh_assets?: boolean
   source_video_id?: string | null
   continuation_prompt?: string | null
 }
@@ -105,6 +107,7 @@ export interface VeoJobOut {
   duration_seconds: number
   resolution: string
   num_outputs: number
+  deduplicated?: boolean
   current_step: string
   error_message: string | null
   error_code?: string | null

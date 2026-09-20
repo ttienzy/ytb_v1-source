@@ -1,6 +1,14 @@
 import React, { useRef } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Image as ImageIcon, Video as VideoIcon, Upload, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react'
+import {
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
+  FolderOpen,
+} from 'lucide-react'
 import type { MotionReferenceAsset } from '../../types'
 
 export interface MotionReferenceGroupNodeData {
@@ -11,6 +19,7 @@ export interface MotionReferenceGroupNodeData {
   isRunning?: boolean
   onSelectRole?: (role: 'character' | 'motion' | 'scene') => void
   onUploadFile?: (role: 'character' | 'motion' | 'scene', file: File) => void
+  onOpenLibrary?: (role: 'character' | 'motion' | 'scene') => void
 }
 
 export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
@@ -63,7 +72,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
   return (
     <div
       className={`mf-node mf-group-node ${selected ? 'selected' : ''} ${nodeData.isRunning ? 'running' : ''}`}
-      style={{ width: 330, padding: 0 }}
+      style={{ width: 340, padding: 0 }}
     >
       {/* Header */}
       <header className="mf-node-h" style={{ borderBottom: '1px solid #E2E8F0' }}>
@@ -96,7 +105,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
 
       {/* Items List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px' }}>
-        {items.map((item, index) => {
+        {items.map((item) => {
           const isSelected = nodeData.selectedRole === item.role
           const isFilled = item.asset?.filled
 
@@ -108,7 +117,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                 position: 'relative',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '10px',
+                gap: '8px',
                 padding: '8px 10px',
                 borderRadius: '8px',
                 border: isSelected ? '1.5px solid #4F46E5' : '1px solid #E2E8F0',
@@ -183,28 +192,75 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                 </span>
               </div>
 
-              {/* Status Indicator / Quick Action */}
+              {/* Status Indicator / Quick Action Buttons */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                {isFilled ? (
-                  <CheckCircle2 size={16} color="#10B981" />
-                ) : (
+                {/* Nút Chọn từ Thư Viện Veo */}
+                {nodeData.onOpenLibrary && (
                   <button
                     type="button"
-                    onClick={(e) => handleTriggerUpload(item.role, e)}
-                    title={`Chọn file ${item.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      nodeData.onOpenLibrary?.(item.role)
+                    }}
+                    title={`Chọn ${item.role === 'motion' ? 'video' : 'ảnh'} từ Thư viện Veo`}
                     style={{
-                      border: 'none',
-                      background: '#F1F5F9',
-                      color: '#475569',
-                      padding: '5px',
+                      border: '1px solid #C7D2FE',
+                      background: '#EEF2FF',
+                      color: '#4F46E5',
+                      padding: '5px 7px',
                       borderRadius: '5px',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
+                      gap: '3px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#4F46E5'
+                      e.currentTarget.style.color = '#FFFFFF'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#EEF2FF'
+                      e.currentTarget.style.color = '#4F46E5'
                     }}
                   >
-                    <Upload size={13} />
+                    <FolderOpen size={12} />
                   </button>
+                )}
+
+                {/* Nút Upload từ máy tính */}
+                <button
+                  type="button"
+                  onClick={(e) => handleTriggerUpload(item.role, e)}
+                  title={`Tải file ${item.title} từ máy tính`}
+                  style={{
+                    border: '1px solid #E2E8F0',
+                    background: '#F8FAFC',
+                    color: '#475569',
+                    padding: '5px 7px',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#E2E8F0'
+                    e.currentTarget.style.color = '#1E293B'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#F8FAFC'
+                    e.currentTarget.style.color = '#475569'
+                  }}
+                >
+                  <Upload size={12} />
+                </button>
+
+                {/* Biểu tượng Check nếu đã nạp */}
+                {isFilled && (
+                  <CheckCircle2 size={16} color="#10B981" style={{ marginLeft: 2 }} />
                 )}
               </div>
 

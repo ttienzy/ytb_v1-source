@@ -24,7 +24,7 @@ function asset(status, videoUrl = null) {
   return item;
 }
 
-function harness() {
+function harness(options = {}) {
   const calls = [];
   const replies = {
     maseQ: [['uploaded-frame-media-id', 'project-test']],
@@ -33,7 +33,7 @@ function harness() {
     MZZa6b: [asset(2)],
     jIps6: [asset(2)],
     jwpduf: [asset(3)],
-    as29s: [asset(3, 'https://flow-content.google/result.mp4?Signature=test')],
+    as29s: [asset(3, options.finalUrl || 'https://flow-content.google/result.mp4?Signature=test')],
   };
   const context = vm.createContext({
     window: { WIZ_global_data: { SNlM0e: 'csrf-test', FdrFJe: 'session-test', cfb2h: 'build-test' } },
@@ -247,6 +247,13 @@ test('adapter uploads ingredient images and dispatches MZZa6b with reference ass
   assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép hóa rồng');
 });
 
+test('adapter accepts Flow result CDN URLs without the legacy signature/path shape', async () => {
+  const h = harness({ finalUrl: 'https://flow-content.google/media/generated-result?download=1' });
+  const result = await h.run(verifiedRequest());
+  assert.equal(result.ok, true);
+  assert.equal(result.video_url, 'https://flow-content.google/media/generated-result?download=1');
+});
+
 test('adapter dispatches uploaded video references through jIps6 video edit', async () => {
   const h = harness();
   const result = await h.run({
@@ -300,6 +307,33 @@ test('adapter combines a video motion source with an uploaded image reference', 
   assert.deepEqual(editRequest[0], [null, 'uploaded-video-media-id', 0, 240]);
   assert.deepEqual(editRequest[8], [[null, 'uploaded-frame-media-id']]);
   assert.deepEqual(editRequest[12], [4]);
+});
+
+test('force_fresh_assets uploads the same image again for a repeated video edit', async () => {
+  const h = harness();
+  const request = {
+    ...verifiedRequest(),
+    input_mode: 'video_edit',
+    prompt: 'Transfer motion to the referenced subject.',
+    resolution: '360p',
+    provider_model_id: 'abra_edit_360p',
+    reference_video_id: 'uploaded-video-media-id',
+    ingredient_images: [{
+      base64: Buffer.from('SAME_REFERENCE_IMAGE').toString('base64'),
+      mime: 'image/jpeg',
+      filename: 'subject.jpg',
+    }],
+  };
+
+  await h.run(request);
+  h.calls.length = 0;
+  await h.run(request);
+  assert.equal(h.calls[0].rpcId, 'jIps6');
+
+  h.calls.length = 0;
+  await h.run({ ...request, force_fresh_assets: true });
+  assert.equal(h.calls[0].rpcId, 'maseQ');
+  assert.equal(h.calls[1].rpcId, 'jIps6');
 });
 
 

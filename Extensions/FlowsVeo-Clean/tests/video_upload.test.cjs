@@ -12,6 +12,7 @@ const uploadSource = source.slice(start, end);
 
 function harness() {
   const calls = [];
+  let uploadCount = 0;
   const context = vm.createContext({
     location: {
       origin: 'https://flow.google.com',
@@ -20,9 +21,10 @@ function harness() {
     atob,
     Uint8Array,
     encodeURIComponent,
+    setTimeout: (callback) => { callback(); return 1; },
     fetch: async (url, options) => {
       calls.push({ url, options });
-      if (calls.length === 1) {
+      if (url.includes('/upload/v1/flow/upload/video/')) {
         return {
           ok: true,
           status: 200,
@@ -32,12 +34,14 @@ function harness() {
           text: async () => '',
         };
       }
+      uploadCount += 1;
+      const mediaId = uploadCount === 1 ? 'video-media-id' : `video-media-id-${uploadCount}`;
       return {
         ok: true,
         status: 200,
         text: async () => JSON.stringify({
-          mediaId: 'video-media-id',
-          media: { name: 'video-media-id', projectId: 'project-test', workflowId: 'workflow-test' },
+          mediaId,
+          media: { name: mediaId, projectId: 'project-test', workflowId: 'workflow-test' },
         }),
       };
     },
@@ -82,4 +86,25 @@ test('video upload rejects a request for a different open project', async () => 
   assert.equal(result.ok, false);
   assert.match(result.error, /không phải project/);
   assert.equal(h.calls.length, 0);
+});
+
+test('force_fresh bypasses the in-page video media cache on repeated runs', async () => {
+  const h = harness();
+  const request = {
+    project_id: 'project-test',
+    video_base64: Buffer.from('SAME_VIDEO_BYTES').toString('base64'),
+    video_mime: 'video/mp4',
+    video_filename: 'reference.mp4',
+  };
+
+  const first = await h.run(request);
+  const cached = await h.run(request);
+  const fresh = await h.run({ ...request, force_fresh: true });
+
+  assert.equal(first.media_id, 'video-media-id');
+  assert.equal(cached.media_id, 'video-media-id');
+  assert.equal(cached.cached, true);
+  assert.equal(fresh.media_id, 'video-media-id-2');
+  assert.equal(fresh.cached, undefined);
+  assert.equal(h.calls.length, 4);
 });

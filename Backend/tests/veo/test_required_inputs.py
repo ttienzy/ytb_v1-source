@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.veo import service
+from app.veo import media_registry, service
 from app.veo.schemas import VeoJobRequest
 
 
@@ -101,17 +101,23 @@ def test_video_edit_rejects_multiple_outputs_until_adapter_supports_them():
         })
 
 
-def test_video_edit_encodes_optional_image_reference(image_path):
+def test_video_edit_encodes_optional_image_reference_fresh(monkeypatch, image_path):
+    registry_lookup = Mock(return_value="stale-image-media-id")
+    monkeypatch.setattr(media_registry, "get_cached_media_id", registry_lookup)
     request = service._build_verified_flow_request({
         "prompt": "Transfer the motion to the person in the image.",
         "input_mode": "video_edit",
         "resolution": "360p",
         "reference_video_id": "uploaded-video-media-id",
         "ingredient_image_paths": [image_path],
+        "force_fresh_assets": True,
     })
     assert request["input_mode"] == "video_edit"
     assert len(request["ingredient_images"]) == 1
+    assert request["ingredient_media_ids"] == []
     assert request["ingredient_images"][0]["mime"] == "image/png"
+    assert request["force_fresh_assets"] is True
+    registry_lookup.assert_not_called()
 
 
 @pytest.mark.parametrize("mode,fields", [
@@ -130,6 +136,49 @@ def test_invalid_submission_does_not_persist_or_start_worker(monkeypatch, mode, 
     assert service._jobs == {}
     save.assert_not_called()
     worker.assert_not_called()
+
+
+def test_duplicate_idempotency_key_returns_existing_job_without_starting_worker(monkeypatch):
+    monkeypatch.setattr(service, "get_active_project", lambda: SimpleNamespace(id="test", flow_project_id="flow"))
+    monkeypatch.setattr(service, "_jobs", {})
+    monkeypatch.setattr(service, "_save_jobs", Mock())
+    worker = Mock()
+    monkeypatch.setattr(service, "Thread", worker)
+    request = VeoJobRequest(
+        prompt="same motion request",
+        input_mode="video_edit",
+        resolution="360p",
+        reference_video_id="uploaded-video-media-id",
+        idempotency_key="motion-click-1",
+    )
+
+    first = service.submit_job(request)
+    second = service.submit_job(request)
+
+    assert first.job_id == second.job_id
+    assert second.deduplicated is True
+    worker.assert_called_once()
+
+
+def test_same_active_payload_without_key_is_deduplicated(monkeypatch):
+    monkeypatch.setattr(service, "get_active_project", lambda: SimpleNamespace(id="test", flow_project_id="flow"))
+    monkeypatch.setattr(service, "_jobs", {})
+    monkeypatch.setattr(service, "_save_jobs", Mock())
+    worker = Mock()
+    monkeypatch.setattr(service, "Thread", worker)
+    request = VeoJobRequest(
+        prompt="same active request",
+        input_mode="video_edit",
+        resolution="360p",
+        reference_video_id="uploaded-video-media-id",
+    )
+
+    first = service.submit_job(request)
+    second = service.submit_job(request)
+
+    assert first.job_id == second.job_id
+    assert second.deduplicated is True
+    worker.assert_called_once()
 
 
 def test_worker_revalidates_before_provider_dispatch(monkeypatch):

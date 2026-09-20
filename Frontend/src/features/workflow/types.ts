@@ -381,6 +381,7 @@ export interface MotionReferenceAsset {
   fileName: string
   file?: File
   mediaId?: string
+  mediaProjectId?: string
   backendPath?: string
   trimStartSec?: number
   trimEndSec?: number
@@ -403,6 +404,10 @@ export interface MotionOutputConfig {
   resolution: '360p' | '720p'
   numOutputs: number
   creditCost?: number
+  projectMode?: 'new_per_run' | 'selected'
+  projectNamePrefix?: string
+  freshAssets?: boolean
+  showReferenceComparison?: boolean
 }
 
 export type MotionRunStage =

@@ -10,6 +10,9 @@
 (function () {
   'use strict';
 
+  // Chỉ chạy ở frame cao nhất (top window), tuyệt đối không inject vào iframe
+  if (typeof window !== 'undefined' && window !== window.top) return;
+
   // Ngăn inject nhiều lần
   if (document.getElementById('veoflow-fab')) return;
 
@@ -178,16 +181,20 @@
           const err = chrome.runtime.lastError.message || '';
           if (err.includes('Extension context') || err.includes('Receiving end')) {
             portDead = true;
-            // Hiển thị ký tự reload
             badge.textContent = '↻';
             fab.className     = 'disconnected';
             fab.title         = 'Extension was reloaded — please refresh the page';
+            // Cho phép tự động thử kết nối lại sau 4s
+            setTimeout(() => { portDead = false; }, 4000);
             return;
           }
         }
         if (cb) cb(resp);
       });
-    } catch { portDead = true; }
+    } catch {
+      portDead = true;
+      setTimeout(() => { portDead = false; }, 4000);
+    }
   }
 
   function refreshFab() {
@@ -232,9 +239,14 @@
 
       // 1. Quét document.body innerText
       const bodyText = (document.body && document.body.innerText) || '';
-      const credMatch = bodyText.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
-      if (credMatch) {
-        foundCredits = parseInt(credMatch[1].replace(/[,.]/g, ''), 10);
+      const flowMatch = bodyText.match(/(\d+[\d,.]*)\s+Google\s+Flow\s+credits/i);
+      if (flowMatch) {
+        foundCredits = parseInt(flowMatch[1].replace(/[,.]/g, ''), 10);
+      } else {
+        const matches = [...bodyText.matchAll(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/gi)]
+          .map(m => parseInt(m[1].replace(/[,.]/g, ''), 10))
+          .filter(n => !isNaN(n) && n > 0 && ![4, 5, 6, 7, 10, 12, 15, 20, 40, 100].includes(n));
+        if (matches.length > 0) foundCredits = Math.max(...matches);
       }
 
       // 2. Quét sâu TreeWalker nếu chưa thấy
@@ -297,18 +309,36 @@
   }
 
   // Tự động mở nhẹ menu avatar để lấy credits nếu trang chưa render
-  async function probeAvatarCredits() {
-    if (isProbing || lastKnownCredits !== null) return;
+  async function probeAvatarCredits(force = false) {
+    if (isProbing || (!force && lastKnownCredits !== null && lastKnownCredits > 20)) return;
     isProbing = true;
     try {
       const avatarBtn = document.querySelector(
-        'button[aria-label*="Google Account"], [aria-label*="@gmail.com"], header button:has(img), [aria-haspopup="dialog"], [data-ogsr-up]'
-      );
+        'button[aria-label*="Google Account" i], button[aria-label*="Tài khoản Google" i], ' +
+        'a[aria-label*="Google Account" i], a[aria-label*="Tài khoản Google" i], ' +
+        'button[aria-label*="@gmail.com" i], a[aria-label*="@gmail.com" i], ' +
+        '[data-ogsr-up], [data-g-id="account-button"], [aria-haspopup="dialog"], ' +
+        'header button:has(img), nav button:has(img), [role="banner"] button:has(img), ' +
+        'header [role="button"]:has(img), nav [role="button"]:has(img)'
+      ) || Array.from(document.querySelectorAll('button, a, [role="button"]')).find(el => {
+        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+        const rect = el.getBoundingClientRect();
+        return (aria.includes('account') || aria.includes('tài khoản') || aria.includes('@') || el.querySelector('img')) &&
+               rect.top < 100 && rect.right > (window.innerWidth - 200);
+      });
+
       if (avatarBtn) {
         avatarBtn.click();
-        await new Promise((r) => setTimeout(r, 350));
+        await new Promise((r) => setTimeout(r, 450));
         scanCreditsAndAccount();
-        // Đóng lại menu bằng click lại hoặc Escape
+        const closeBtn = document.querySelector(
+          'button[aria-label="Close" i], button[aria-label="Đóng" i], button[aria-label*="close" i], [aria-label*="Close dialog" i]'
+        );
+        if (closeBtn) {
+          closeBtn.click();
+        } else {
+          avatarBtn.click();
+        }
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
       }
     } catch {}
@@ -341,9 +371,11 @@
   chrome.runtime.onMessage.addListener((req, _sender, sendResp) => {
     if (req?.type === 'PROBE_CREDITS') {
       const res = scanCreditsAndAccount();
-      if (res.credits === null) {
-        probeAvatarCredits().then(() => {
+      if (res.credits === null || req.force) {
+        probeAvatarCredits(true).then(() => {
           sendResp(scanCreditsAndAccount());
+        }).catch(() => {
+          try { sendResp({ credits: null, email: null }); } catch { }
         });
         return true;
       }

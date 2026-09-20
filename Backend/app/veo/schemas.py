@@ -116,6 +116,11 @@ class VeoJobRequest(BaseModel):
 
     # Project
     project_id: Optional[str] = Field(default=None, description="ID của VeoProject đã chọn")
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="Khóa chống tạo trùng khi client retry cùng một yêu cầu",
+    )
 
     # Cho mode frames
     image_path: Optional[str] = Field(default=None, description="Đường dẫn ảnh input / Frame đầu (local)")
@@ -137,6 +142,10 @@ class VeoJobRequest(BaseModel):
     reference_video_id: Optional[str] = Field(default=None, description="Flow media_id cua video tham chieu da upload")
     reference_video_start_seconds: float = Field(default=0, ge=0, description="Thoi diem bat dau clip tham chieu")
     reference_video_end_seconds: Optional[float] = Field(default=None, gt=0, description="Thoi diem ket thuc clip tham chieu")
+    force_fresh_assets: bool = Field(
+        default=False,
+        description="Bỏ qua cache media và upload lại reference cho lần render này",
+    )
 
     # Cho mode extend
     source_video_id: Optional[str] = Field(default=None, description="Video ID nguồn để extend")
@@ -157,6 +166,7 @@ class VeoJobOut(BaseModel):
     duration_seconds: int = 8
     resolution: str = "720p"
     num_outputs: int = 1
+    deduplicated: bool = False
 
     # Progress
     current_step: str = ""           # Bước hiện tại đang xử lý
@@ -248,6 +258,13 @@ class ManualCredentialRequest(BaseModel):
     email: str
     cookie: str
     access_token: str = ""
+    credits: Optional[int] = None
+
+
+class ManualCreditsRequest(BaseModel):
+    """Yêu cầu cập nhật trực tiếp số dư credits cho một tài khoản."""
+    email: str
+    credits: int
 
 
 

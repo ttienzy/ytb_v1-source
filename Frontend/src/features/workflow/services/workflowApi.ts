@@ -114,6 +114,20 @@ export async function fetchGptDefaultPrompt(): Promise<string> {
 }
 
 /**
+ * Lấy prompt Motion Control mặc định từ backend
+ */
+export async function fetchMotionDefaultPrompt(): Promise<string> {
+  try {
+    const res = await fetch(`${API_URL}/api/workflow/prompts/motion`)
+    if (!res.ok) return ''
+    const data = await res.json()
+    return data.prompt || ''
+  } catch {
+    return ''
+  }
+}
+
+/**
  * Gọi Gemini Web hoặc 9Router Vision phân tích sản phẩm từ danh sách ảnh và prompt
  */
 export async function callGeminiAnalysis(

@@ -7,15 +7,20 @@ import {
   RotateCcw,
   Play,
   CheckCircle2,
+  Sparkles,
+  FolderOpen,
 } from 'lucide-react'
 import type { ExportedVideoItem } from '../contracts'
 import { fetchExportedVideos } from '../services/workflowApi'
+import * as veoApi from '../../veo-studio/services/veoApi'
 
 interface Props {
   isOpen: boolean
   onClose: () => void
   onSelectClip: (clip: ExportedVideoItem) => void
-  targetSceneIndex: number
+  targetSceneIndex?: number
+  title?: string
+  subtitle?: string
 }
 
 function formatFileSize(bytes: number): string {
@@ -29,7 +34,11 @@ function formatDate(isoString: string): string {
   if (!isoString) return ''
   try {
     const d = new Date(isoString)
-    return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+    return (
+      d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) +
+      ' ' +
+      d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+    )
   } catch {
     return isoString
   }
@@ -40,20 +49,61 @@ export function VeoVideoPickerModal({
   onClose,
   onSelectClip,
   targetSceneIndex,
+  title,
+  subtitle,
 }: Props) {
   const [clips, setClips] = useState<ExportedVideoItem[]>([])
   const [loading, setLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [filterSource, setFilterSource] = useState<'all' | 'veo_history' | 'veo_scene' | 'export'>('all')
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null)
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
 
   const loadClips = async () => {
     setLoading(true)
     try {
-      const all = await fetchExportedVideos()
-      // Lọc các clip Veo phân cảnh (veo_scene)
-      const veoClips = all.filter((v) => v.sourceType === 'veo_scene')
-      setClips(veoClips)
+      const [allExported, veoHistory] = await Promise.allSettled([
+        fetchExportedVideos(),
+        veoApi.getHistory(),
+      ])
+
+      const combined: ExportedVideoItem[] = []
+
+      // 1. Veo Studio History videos
+      if (veoHistory.status === 'fulfilled' && Array.isArray(veoHistory.value)) {
+        for (const item of veoHistory.value) {
+          combined.push({
+            id: `veo-hist-${item.video_id}`,
+            filename: item.file_name,
+            videoUrl: veoApi.getVideoStreamUrl(item.video_id),
+            filePath: item.file_path,
+            sizeBytes: item.file_size_bytes || 0,
+            durationSec: item.duration_seconds || 10,
+            createdAt: item.created_at || '',
+            aspectRatio: item.aspect_ratio || '16:9',
+            title: item.prompt
+              ? item.prompt.length > 50
+                ? item.prompt.slice(0, 50) + '...'
+                : item.prompt
+              : item.file_name,
+            sourceType: 'veo_history' as any,
+            prompt: item.prompt || '',
+            modelDisplayName: item.model_display_name || '',
+          })
+        }
+      }
+
+      // 2. Exported videos & Scene clips
+      if (allExported.status === 'fulfilled' && Array.isArray(allExported.value)) {
+        for (const item of allExported.value) {
+          // Tránh trùng lặp nếu cùng filename
+          if (!combined.some((c) => c.filename === item.filename)) {
+            combined.push(item)
+          }
+        }
+      }
+
+      setClips(combined)
     } catch (err) {
       console.error('Lỗi khi tải thư viện clip Veo:', err)
       setClips([])
@@ -67,6 +117,7 @@ export function VeoVideoPickerModal({
       loadClips()
       setSearchQuery('')
       setSelectedClipId(null)
+      setFilterSource('all')
     }
   }, [isOpen])
 
@@ -81,17 +132,37 @@ export function VeoVideoPickerModal({
   }, [isOpen, onClose])
 
   const filteredClips = useMemo(() => {
-    if (!searchQuery.trim()) return clips
-    const q = searchQuery.toLowerCase().trim()
-    return clips.filter(
-      (c) =>
-        c.filename.toLowerCase().includes(q) ||
-        (c.prompt && c.prompt.toLowerCase().includes(q)) ||
-        (c.title && c.title.toLowerCase().includes(q))
-    )
-  }, [clips, searchQuery])
+    return clips.filter((c) => {
+      if (filterSource !== 'all') {
+        if (filterSource === 'veo_history' && c.sourceType !== 'veo_history') return false
+        if (filterSource === 'veo_scene' && c.sourceType !== 'veo_scene') return false
+        if (filterSource === 'export' && c.sourceType !== 'export') return false
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim()
+        return (
+          c.filename.toLowerCase().includes(q) ||
+          (c.prompt && c.prompt.toLowerCase().includes(q)) ||
+          (c.title && c.title.toLowerCase().includes(q))
+        )
+      }
+      return true
+    })
+  }, [clips, filterSource, searchQuery])
 
   if (!isOpen) return null
+
+  const modalTitle =
+    title ||
+    (targetSceneIndex !== undefined
+      ? `Chọn Clip Veo Cho Cảnh #${targetSceneIndex + 1}`
+      : 'Thư Viện Video Veo Studio')
+
+  const modalSubtitle =
+    subtitle ||
+    (targetSceneIndex !== undefined
+      ? 'Chọn 1 clip đã render sẵn từ Google Veo để gán vào cảnh (tiết kiệm 100% credit & thời gian)'
+      : 'Chọn video từ thư viện Veo Studio hoặc workflow để làm nguyên liệu chuyển động tham chiếu')
 
   return createPortal(
     <div
@@ -111,9 +182,9 @@ export function VeoVideoPickerModal({
       <div
         style={{
           width: '100%',
-          maxWidth: 960,
+          maxWidth: 980,
           height: '85vh',
-          maxHeight: 740,
+          maxHeight: 760,
           background: '#ffffff',
           borderRadius: 14,
           boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)',
@@ -156,7 +227,7 @@ export function VeoVideoPickerModal({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 14.5, fontWeight: 700, color: '#0f172a' }}>
-                  Chọn Clip Veo Cho Cảnh #{targetSceneIndex + 1}
+                  {modalTitle}
                 </span>
                 <span
                   style={{
@@ -169,11 +240,11 @@ export function VeoVideoPickerModal({
                     borderRadius: 99,
                   }}
                 >
-                  {clips.length} clip sẵn có
+                  {clips.length} video sẵn có
                 </span>
               </div>
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
-                Chọn 1 clip đã render sẵn từ Google Veo để gán vào cảnh (tiết kiệm 100% credit & thời gian)
+                {modalSubtitle}
               </div>
             </div>
           </div>
@@ -225,7 +296,7 @@ export function VeoVideoPickerModal({
           </div>
         </div>
 
-        {/* Search Toolbar */}
+        {/* Search & Filter Toolbar */}
         <div
           style={{
             padding: '10px 20px',
@@ -233,12 +304,14 @@ export function VeoVideoPickerModal({
             borderBottom: '1px solid #f1f5f9',
             display: 'flex',
             alignItems: 'center',
+            flexWrap: 'wrap',
             gap: 12,
           }}
         >
           <div
             style={{
               flex: 1,
+              minWidth: 260,
               display: 'flex',
               alignItems: 'center',
               gap: 8,
@@ -251,7 +324,7 @@ export function VeoVideoPickerModal({
             <Search size={14} color="#94a3b8" />
             <input
               type="text"
-              placeholder="Tìm kiếm theo từ khóa prompt (vd: nước hoa, bathroom, luxury, macro...)"
+              placeholder="Tìm kiếm theo tên file, từ khóa prompt..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{
@@ -267,12 +340,91 @@ export function VeoVideoPickerModal({
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                style={{ border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: 0 }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
               >
                 <X size={13} />
               </button>
             )}
           </div>
+
+          {/* Source Tabs */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <button
+              type="button"
+              onClick={() => setFilterSource('all')}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: 'none',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: filterSource === 'all' ? '#4f46e5' : '#f1f5f9',
+                color: filterSource === 'all' ? '#ffffff' : '#475569',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Tất cả ({clips.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterSource('veo_history')}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: 'none',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: filterSource === 'veo_history' ? '#4f46e5' : '#f1f5f9',
+                color: filterSource === 'veo_history' ? '#ffffff' : '#475569',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Veo Studio ({clips.filter((c) => c.sourceType === 'veo_history').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterSource('veo_scene')}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: 'none',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: filterSource === 'veo_scene' ? '#4f46e5' : '#f1f5f9',
+                color: filterSource === 'veo_scene' ? '#ffffff' : '#475569',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Phân cảnh ({clips.filter((c) => c.sourceType === 'veo_scene').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterSource('export')}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: 'none',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: filterSource === 'export' ? '#4f46e5' : '#f1f5f9',
+                color: filterSource === 'export' ? '#ffffff' : '#475569',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Đã xuất ({clips.filter((c) => c.sourceType === 'export').length})
+            </button>
+          </div>
+
           <span style={{ fontSize: 11.5, color: '#64748b', whiteSpace: 'nowrap' }}>
             Hiển thị <b>{filteredClips.length}</b> / {clips.length} clip
           </span>
@@ -288,25 +440,49 @@ export function VeoVideoPickerModal({
           }}
         >
           {loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10, color: '#6d28d9' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                gap: 10,
+                color: '#6d28d9',
+              }}
+            >
               <RotateCcw size={26} className="animate-spin" />
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Đang quét thư viện clip Veo AI...</span>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+                Đang quét thư viện video Veo Studio...
+              </span>
             </div>
           ) : filteredClips.length === 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8, color: '#94a3b8' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                gap: 8,
+                color: '#94a3b8',
+              }}
+            >
               <Film size={36} strokeWidth={1.5} />
               <div style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                {searchQuery ? 'Không tìm thấy clip nào phù hợp với từ khóa.' : 'Chưa có clip Veo nào trong thư viện.'}
+                {searchQuery
+                  ? 'Không tìm thấy video nào phù hợp với từ khóa.'
+                  : 'Chưa có video nào trong thư viện.'}
               </div>
               <div style={{ fontSize: 11 }}>
-                Hãy render clip đầu tiên từ node Veo Studio để lưu vào thư viện tái sử dụng.
+                Hãy render video từ Veo Studio hoặc workflow để lưu vào thư viện.
               </div>
             </div>
           ) : (
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
                 gap: 14,
               }}
             >
@@ -360,7 +536,7 @@ export function VeoVideoPickerModal({
                         muted
                         loop
                         playsInline
-                        autoPlay={isHovered}
+                        preload="metadata"
                         style={{
                           width: '100%',
                           height: '100%',
@@ -375,8 +551,7 @@ export function VeoVideoPickerModal({
                             width: 32,
                             height: 32,
                             borderRadius: '50%',
-                            background: 'rgba(0,0,0,0.5)',
-                            backdropFilter: 'blur(2px)',
+                            background: 'rgba(0, 0, 0, 0.55)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -384,46 +559,120 @@ export function VeoVideoPickerModal({
                             pointerEvents: 'none',
                           }}
                         >
-                          <Play size={14} fill="#ffffff" style={{ marginLeft: 2 }} />
+                          <Play size={13} fill="#ffffff" style={{ marginLeft: 2 }} />
                         </div>
                       )}
 
-                      {/* Duration Tag */}
+                      {/* Badges: Aspect Ratio, Duration & Source */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 8,
+                          left: 8,
+                          display: 'flex',
+                          gap: 4,
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        <span
+                          style={{
+                            background: 'rgba(15, 23, 42, 0.75)',
+                            color: '#e2e8f0',
+                            fontSize: 9.5,
+                            fontWeight: 700,
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                            backdropFilter: 'blur(4px)',
+                          }}
+                        >
+                          {clip.aspectRatio || '16:9'}
+                        </span>
+                        <span
+                          style={{
+                            background:
+                              clip.sourceType === 'veo_history'
+                                ? 'rgba(124, 58, 237, 0.85)'
+                                : clip.sourceType === 'veo_scene'
+                                ? 'rgba(79, 70, 229, 0.85)'
+                                : 'rgba(16, 185, 129, 0.85)',
+                            color: '#ffffff',
+                            fontSize: 9.5,
+                            fontWeight: 700,
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                            backdropFilter: 'blur(4px)',
+                          }}
+                        >
+                          {clip.sourceType === 'veo_history'
+                            ? 'Veo'
+                            : clip.sourceType === 'veo_scene'
+                            ? 'Cảnh'
+                            : 'Xuất'}
+                        </span>
+                      </div>
+
                       <span
                         style={{
                           position: 'absolute',
-                          bottom: 6,
-                          right: 6,
-                          background: 'rgba(15, 23, 42, 0.75)',
-                          color: '#ffffff',
-                          fontSize: 9.5,
+                          bottom: 8,
+                          right: 8,
+                          background: 'rgba(0, 0, 0, 0.7)',
+                          color: '#f8fafc',
+                          fontSize: 10,
                           fontWeight: 700,
-                          padding: '1px 5px',
+                          padding: '1px 6px',
                           borderRadius: 4,
-                          backdropFilter: 'blur(2px)',
+                          backdropFilter: 'blur(4px)',
+                          pointerEvents: 'none',
                         }}
                       >
-                        {Math.round(clip.durationSec || 10)}s
+                        {clip.durationSec}s
                       </span>
                     </div>
 
-                    {/* Meta Body */}
-                    <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: '#1e293b',
-                          lineHeight: 1.35,
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                          height: 30,
-                        }}
-                        title={clip.prompt || clip.filename}
-                      >
-                        {clip.prompt ? clip.prompt.slice(0, 90) : clip.filename}
+                    {/* Metadata & Select Action */}
+                    <div
+                      style={{
+                        padding: '10px 12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                        flex: 1,
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: '#0f172a',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={clip.title || clip.filename}
+                        >
+                          {clip.title || clip.filename}
+                        </div>
+
+                        {clip.prompt && (
+                          <div
+                            style={{
+                              fontSize: 10.5,
+                              color: '#64748b',
+                              marginTop: 2,
+                              lineHeight: 1.35,
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                            title={clip.prompt}
+                          >
+                            {clip.prompt}
+                          </div>
+                        )}
                       </div>
 
                       <div
@@ -432,8 +681,9 @@ export function VeoVideoPickerModal({
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           fontSize: 10,
-                          color: '#64748b',
-                          marginTop: 2,
+                          color: '#94a3b8',
+                          paddingTop: 4,
+                          borderTop: '1px solid #f1f5f9',
                         }}
                       >
                         <span>{formatDate(clip.createdAt)}</span>
@@ -446,6 +696,7 @@ export function VeoVideoPickerModal({
                         onClick={(e) => {
                           e.stopPropagation()
                           onSelectClip(clip)
+                          onClose()
                         }}
                         style={{
                           marginTop: 4,
@@ -466,10 +717,16 @@ export function VeoVideoPickerModal({
                           transition: 'background 0.15s ease',
                         }}
                         onMouseEnter={(e) => (e.currentTarget.style.background = '#6d28d9')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = isSelected ? '#7c3aed' : '#4f46e5')}
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.background = isSelected ? '#7c3aed' : '#4f46e5')
+                        }
                       >
                         <CheckCircle2 size={12} />
-                        <span>Gán vào Cảnh #{targetSceneIndex + 1}</span>
+                        <span>
+                          {targetSceneIndex !== undefined
+                            ? `Gán vào Cảnh #${targetSceneIndex + 1}`
+                            : 'Chọn Video Này'}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -492,7 +749,7 @@ export function VeoVideoPickerModal({
           }}
         >
           <div style={{ fontSize: 11, color: '#64748b' }}>
-            💡 <b>Mẹo tái sử dụng:</b> Bạn có thể chọn bất kỳ clip 10s nào trong thư viện để thử nghiệm kịch bản bán hàng khác mà không tốn credit!
+            💡 <b>Mẹo tái sử dụng:</b> Bạn có thể chọn bất kỳ clip nào trong thư viện Veo để làm mẫu chuyển động hoặc ghép phân cảnh mà không tốn credit!
           </div>
 
           <button

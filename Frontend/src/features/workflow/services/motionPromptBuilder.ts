@@ -24,6 +24,18 @@ export interface StructuredPromptResult {
   hasRequiredFields: boolean
 }
 
+export const DEFAULT_MOTION_PROMPT =
+  "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout. Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video. Natural biomechanics, fluid body movement, photorealistic cinematic lighting."
+
+export const DEFAULT_MOTION_CREATIVE_DIRECTION: MotionCreativeDirection = {
+  creativeBrief: "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout.",
+  subjectAction: "Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video.",
+  cameraMovement: '',
+  sceneAtmosphere: 'Natural biomechanics, fluid body movement, photorealistic cinematic lighting.',
+  styleDirection: '',
+  negativePrompt: '',
+}
+
 /**
  * Xây dựng danh sách các phân đoạn prompt có cấu trúc kèm nhãn nguồn trực quan
  */
@@ -122,10 +134,12 @@ export function buildStructuredPrompt(
     c.cameraMovement,
     c.sceneAtmosphere,
     c.styleDirection,
-  ].filter(Boolean)
+  ]
+    .filter(Boolean)
+    .map((part) => part.replace(/\.+$/, ''))
 
   if (mainParts.length > 0) {
-    textParts.push(mainParts.join('. '))
+    textParts.push(mainParts.join('. ') + '.')
   }
 
   if (c.negativePrompt) {

@@ -8,6 +8,7 @@ Chưa có contract Flow xác minh → adapter dispatch là placeholder.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import mimetypes
@@ -455,10 +456,19 @@ def trigger_refresh() -> dict[str, Any]:
     return {"ok": True, "message": "Đã gửi yêu cầu làm mới tới Extension"}
 
 
-def save_manual_credential(email: str, cookie: str, access_token: str = "") -> dict[str, Any]:
+def save_manual_credential(email: str, cookie: str, access_token: str = "", credits: int | None = None) -> dict[str, Any]:
     """Lưu cookie/token nhập tay từ trang Cài đặt."""
-    bridge.set_manual_credential(email=email, cookie=cookie, access_token=access_token)
-    return {"ok": True, "message": f"Đã lưu thông tin xác thực cho {email}"}
+    bridge.set_manual_credential(email=email, cookie=cookie, access_token=access_token, credits=credits)
+    msg = f"Đã lưu thông tin xác thực cho {email}"
+    if credits is not None:
+        msg += f" (Credits: {credits})"
+    return {"ok": True, "message": msg}
+
+
+def set_account_credits(email: str, credits: int) -> dict[str, Any]:
+    """Cập nhật trực tiếp số dư credits cho tài khoản."""
+    bridge.set_account_credits(email=email, credits=credits)
+    return {"ok": True, "message": f"Đã cập nhật số dư {credits} credits cho {email}"}
 
 
 
@@ -634,6 +644,39 @@ def _increment_project_video_count(project_id: str) -> None:
 # Job Management
 # ─────────────────────────────────────────────────────────────────────────────
 
+_ACTIVE_JOB_STATUSES = {
+    JobStatus.PENDING.value,
+    JobStatus.CAPTCHA.value,
+    JobStatus.SUBMITTING.value,
+    JobStatus.GENERATING.value,
+    JobStatus.DOWNLOADING.value,
+}
+
+
+def _job_request_fingerprint(request: VeoJobRequest, project_id: str) -> str:
+    """Tạo fingerprint ổn định để chặn cùng payload bị submit đồng thời."""
+    payload = request.model_dump(mode="json", exclude={"idempotency_key"})
+    payload["resolved_project_id"] = project_id
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _find_duplicate_job(
+    *,
+    idempotency_key: str | None,
+    request_fingerprint: str,
+) -> dict[str, Any] | None:
+    """Tìm job cùng request còn sống hoặc cùng idempotency key đã từng tạo."""
+    for job in _jobs.values():
+        if idempotency_key and job.get("idempotency_key") == idempotency_key:
+            return job
+        if (
+            job.get("request_fingerprint") == request_fingerprint
+            and job.get("status") in _ACTIVE_JOB_STATUSES
+        ):
+            return job
+    return None
+
 def submit_job(request: VeoJobRequest) -> VeoJobOut:
     """Tạo job mới và bắt đầu xử lý async. Bắt buộc phải có project được chọn."""
     active_proj = None
@@ -644,6 +687,9 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
 
     if not active_proj:
         raise ValueError("Vui lòng tạo hoặc chọn một Project trước khi sử dụng Veo")
+
+    request_fingerprint = _job_request_fingerprint(request, active_proj.id)
+    idempotency_key = (request.idempotency_key or "").strip() or None
 
     # Validate chế độ Khung hình (Frames) theo chuẩn Google Flow
     if getattr(request.input_mode, "value", str(request.input_mode)) == "frames":
@@ -668,6 +714,8 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         "job_id": job_id,
         "project_id": active_proj.id,
         "flow_project_id": active_proj.flow_project_id,
+        "idempotency_key": idempotency_key,
+        "request_fingerprint": request_fingerprint,
         "status": JobStatus.PENDING.value,
         "input_mode": request.input_mode.value,
         "prompt": request.prompt,
@@ -684,13 +732,7 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         "reference_video_id": request.reference_video_id,
         "reference_video_start_seconds": request.reference_video_start_seconds,
         "reference_video_end_seconds": request.reference_video_end_seconds,
-        "current_step": "Đã tạo job, đang chờ xử lý",
-        "error_message": None,
-        "error_code": None,
-        "error_stage": None,
-        "error_hint": None,
-        "error_retryable": None,
-        "output_files": [],
+        "force_fresh_assets": request.force_fresh_assets,
         "created_at": now,
         "updated_at": now,
     }
@@ -698,7 +740,110 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
     # Fail before persisting, starting a worker, or sending any paid Flow request.
     # The worker validates again so removed files cannot cause a text-only render.
     _build_verified_flow_request(job)
-    _jobs[job_id] = job
+    # Check-and-insert phải nằm cùng một lock; nếu không hai POST song song
+    # đều có thể vượt qua check rồi cùng tạo hai render trả phí.
+    with _jobs_lock:
+        duplicate = _find_duplicate_job(
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
+        )
+        if duplicate:
+            logger.warning(
+                "Duplicate Veo submit suppressed: existing_job=%s key=%s fingerprint=%s",
+                duplicate.get("job_id"),
+                bool(idempotency_key),
+                request_fingerprint[:12],
+            )
+            return _job_to_out(duplicate, deduplicated=True)
+        _jobs[job_id] = job
+    _save_jobs()
+
+    # Start async processing
+    thread = Thread(target=_process_job, args=(job_id,), daemon=True, name=f"veo-job-{job_id}")
+    thread.start()
+
+    return _job_to_out(job)
+
+
+def _process_job(job_id: str) -> None:
+    """Generate a verified Flow T2V variant through the logged-in Chrome tab."""
+    job = _jobs.get(job_id)
+    if not job:
+        return
+
+    try:
+        # Step 1: Check Bridge & Extension
+        _update_job(job, JobStatus.CAPTCHA, "Đang chờ giải reCAPTCHA...")
+        if not bridge.is_bridge_running():
+            _update_job(job, JobStatus.ERROR, error="Bridge Server không hoạt động")
+            return
+
+        ext = bridge.get_extension_info()
+        if not ext.get("connected"):
+            _update_job(job, JobStatus.ERROR, error="Extension chưa kết nối. Hãy nạp FlowsVeo-Clean vào Chrome và mở tab labs.google")
+            return
+
+        pool = bridge.get_credentials_pool()
+        if not pool:
+            _update_job(job, JobStatus.ERROR, error="Chưa có tài khoản Google Labs. Đăng nhập trên tab labs.google")
+            return
+
+        # Step 2: Request reCAPTCHA
+        flow_request = _build_verified_flow_request(job)
+        # The successful Flow HAR sends this exact Enterprise reCAPTCHA action.
+        request_id = bridge.request_captcha(
+            action="VIDEO_GENERATION",
+            flow_request=flow_request,
+        )
+        if not request_id:
+            _update_job(job, JobStatus.ERROR, error="Không thể tạo yêu cầu CAPTCHA (queue đầy hoặc Extension đang bận)")
+            return
+
+        # Step 3: Wait for token
+        result = bridge.wait_captcha_result(request_id, timeout=30.0)
+        if not result or not result.get("token"):
+            error_msg = result.get("error", "Timeout") if result else "Timeout chờ token reCAPTCHA"
+            _update_job(job, JobStatus.ERROR, error=f"Giải reCAPTCHA thất bại: {error_msg}")
+            return
+
+        captcha_token = result["token"]
+        logger.info("Job %s: reCAPTCHA token received", job_id)
+
+        _update_job(job, JobStatus.GENERATING, "Flow đã nhận token; đang tạo video...")
+        flow_envelope = bridge.wait_flow_result(request_id, timeout=630.0)
+        if not flow_envelope:
+            _update_job(job, JobStatus.ERROR, error="Timeout chờ kết quả Google Flow")
+            return
+        if flow_envelope.get("error"):
+            flow_error = str(flow_envelope["error"])
+            if "no result" in flow_error.lower() and "scene recovery:" not in flow_error.lower():
+                if _try_recover_completed_scene(job):
+                    return
+            _update_job(job, JobStatus.ERROR, error=f"Google Flow: {flow_error}")
+            return
+        flow_result = flow_envelope.get("result") or {}
+        if not flow_result.get("ok") or not flow_result.get("video_url"):
+            flow_error = str(flow_result.get("error") or "response không hợp lệ")
+            if "no result" in flow_error.lower() and "scene recovery:" not in flow_error.lower():
+                if _try_recover_completed_scene(job):
+                    return
+            _update_job(
+                job, JobStatus.ERROR,
+                error=f"Google Flow không trả video: {flow_error}",
+            )
+            return
+
+        _update_job(job, JobStatus.DOWNLOADING, "Đang tải video từ Flow...")
+        output_path = _download_flow_video(job, flow_result)
+        job["output_files"] = [output_path.name]
+        job["provider_media_id"] = flow_result.get("media_id")
+        job["provider_model_id"] = flow_result.get("provider_model_id")
+        _update_job(job, JobStatus.DONE, "Hoàn tất — video đã lưu vào máy")
+        if job.get("project_id"):
+            _increment_project_video_count(job["project_id"])
+
+    except Exception as e:
+        logger.exception("Job %s failed: %s", job_id, e)
     _save_jobs()
 
     # Start async processing
@@ -865,23 +1010,86 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     if mode not in ("text_to_video", "frames", "ingredients", "video_edit"):
         raise ValueError(f"Unsupported input_mode: {mode}")
     provider_model_id = _resolve_provider_model_id(job)
+    force_fresh_assets = bool(job.get("force_fresh_assets"))
 
-    start_frame_data = _encode_image_file(job.get("image_path"))
-    end_frame_data = _encode_image_file(job.get("end_image_path"))
+    from app.veo import media_registry
 
-    ingredient_data_list = []
-    for ipath in (job.get("ingredient_image_paths") or []):
-        enc = _encode_image_file(ipath)
-        if not enc:
-            raise ValueError("Ingredient image path is required")
-        ingredient_data_list.append(enc)
+    target_project_id = str(job.get("flow_project_id") or job.get("project_id") or "").strip()
 
     ingredient_media_ids = [
         str(media_id).strip()
         for media_id in (job.get("ingredient_media_ids") or [])
         if str(media_id).strip()
     ]
+
+    # Deduplication cho ingredient_image_paths:
+    # Nếu ảnh đã từng upload lên project này, lấy thẳng media_id, bỏ qua encode base64
+    ingredient_data_list = []
+    for ipath in (job.get("ingredient_image_paths") or []):
+        cached_mid = None
+        try:
+            p = Path(ipath)
+            if p.is_file() and target_project_id and not force_fresh_assets:
+                ihash = media_registry.compute_file_sha256(p)
+                cached_mid = media_registry.get_cached_media_id(target_project_id, ihash)
+        except Exception as e:
+            logger.debug("Không thể tra cứu media_registry cho %s: %s", ipath, e)
+
+        if cached_mid:
+            if cached_mid not in ingredient_media_ids:
+                ingredient_media_ids.append(cached_mid)
+            logger.info(
+                "[Deduplication] Tái sử dụng media_id=%s cho ảnh nguyên liệu %s (bỏ qua upload base64)",
+                cached_mid,
+                Path(ipath).name,
+            )
+            continue
+
+        enc = _encode_image_file(ipath)
+        if not enc:
+            raise ValueError("Ingredient image path is required")
+        ingredient_data_list.append(enc)
+
+    start_frame_data = _encode_image_file(job.get("image_path"))
+    end_frame_data = _encode_image_file(job.get("end_image_path"))
+
+    # Deduplication cho start_frame khi ở mode ingredients:
+    if mode == "ingredients" and job.get("image_path") and target_project_id and not force_fresh_assets:
+        try:
+            sp = Path(job["image_path"])
+            if sp.is_file():
+                shash = media_registry.compute_file_sha256(sp)
+                cached_sf = media_registry.get_cached_media_id(target_project_id, shash)
+                if cached_sf:
+                    if cached_sf not in ingredient_media_ids:
+                        ingredient_media_ids.append(cached_sf)
+                    logger.info(
+                        "[Deduplication] Tái sử dụng media_id=%s cho ảnh chính %s (bỏ qua upload base64)",
+                        cached_sf,
+                        sp.name,
+                    )
+                    start_frame_data = None  # Không cần tải lên lại
+        except Exception as e:
+            logger.debug("Không thể tra cứu start_frame registry: %s", e)
+
+    # Deduplication cho reference_video_id:
     reference_video_id = str(job.get("reference_video_id") or "").strip()
+    if not reference_video_id and job.get("reference_video_path") and target_project_id and not force_fresh_assets:
+        try:
+            vp = Path(job["reference_video_path"])
+            if vp.is_file():
+                vhash = media_registry.compute_file_sha256(vp)
+                cached_vid = media_registry.get_cached_media_id(target_project_id, vhash)
+                if cached_vid:
+                    reference_video_id = cached_vid
+                    logger.info(
+                        "[Deduplication] Tự động tái sử dụng reference_video_id=%s cho video tham chiếu %s",
+                        cached_vid,
+                        vp.name,
+                    )
+        except Exception as e:
+            logger.debug("Không thể tra cứu reference_video registry: %s", e)
+
     reference_video_start_seconds = float(job.get("reference_video_start_seconds") or 0)
     raw_reference_end = job.get("reference_video_end_seconds")
     reference_video_end_seconds = (
@@ -906,6 +1114,15 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Reference video trim range is invalid")
         if reference_video_end_seconds - reference_video_start_seconds > 10:
             raise ValueError("Flow video references support clips up to 10 seconds")
+        media_info = media_registry.get_media_info_by_id(reference_video_id)
+        if media_info and media_info.get("duration", 0) > 0:
+            actual_dur = float(media_info["duration"])
+            if reference_video_end_seconds > actual_dur:
+                logger.info(
+                    "[FlowJob] reference_video_end_seconds (%.2f) vượt quá thời lượng video thực tế (%.2f). Tự động hạ xuống %.2f",
+                    reference_video_end_seconds, actual_dur, actual_dur,
+                )
+                reference_video_end_seconds = actual_dur
     elif mode == "frames":
         if not start_frame_data:
             raise ValueError("Frames mode requires a readable Start Frame before an End Frame")
@@ -940,6 +1157,7 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         "reference_video_id": reference_video_id or None,
         "reference_video_start_seconds": reference_video_start_seconds,
         "reference_video_end_seconds": reference_video_end_seconds,
+        "force_fresh_assets": force_fresh_assets,
         # Base64 encoded payload cho Extension tải lên Google Flow
         "image_base64": start_frame_data["base64"] if start_frame_data else None,
         "image_mime": start_frame_data["mime"] if start_frame_data else None,
@@ -1048,13 +1266,55 @@ def recover_current_scene(job_id: str) -> VeoJobOut | None:
     return _job_to_out(job)
 
 
+def _try_recover_completed_scene(job: dict[str, Any]) -> bool:
+    """Recover a Flow media card when the generation adapter lost its result."""
+    request_id = bridge.request_flow_recovery(
+        provider_model_id=str(job.get("provider_model_id") or ""),
+        project_id=str(job.get("flow_project_id") or ""),
+    )
+    if not request_id:
+        logger.warning("Job %s: unable to enqueue Flow scene recovery", job.get("job_id"))
+        return False
+
+    envelope = bridge.wait_flow_result(request_id, timeout=45.0)
+    if not envelope or envelope.get("error"):
+        logger.info(
+            "Job %s: Flow scene recovery returned no usable envelope: %s",
+            job.get("job_id"),
+            (envelope or {}).get("error") if envelope else "timeout",
+        )
+        return False
+
+    result = envelope.get("result") or {}
+    if not result.get("video_url"):
+        return False
+
+    try:
+        _update_job(job, JobStatus.DOWNLOADING, "Đang tải video đã hoàn tất từ Flow...")
+        output_path = _download_flow_video(job, result)
+        job["output_files"] = [output_path.name]
+        job["provider_media_id"] = result.get("media_id")
+        job["provider_model_id"] = result.get("provider_model_id") or job.get("provider_model_id")
+        _update_job(job, JobStatus.DONE, "Hoàn tất — đã khôi phục video từ Flow")
+        if job.get("project_id"):
+            _increment_project_video_count(job["project_id"])
+        logger.info("Job %s recovered completed Flow scene", job.get("job_id"))
+        return True
+    except Exception:
+        logger.exception("Job %s: recovered Flow URL could not be downloaded", job.get("job_id"))
+        return False
+
+
 def _recover_current_scene(job_id: str) -> None:
     job = _jobs.get(job_id)
     if not job:
         return
     try:
         _update_job(job, JobStatus.DOWNLOADING, "Đang lấy video từ scene Flow đã hoàn tất...")
-        request_id = bridge.request_flow_recovery()
+        request_id = bridge.request_flow_recovery(
+            provider_model_id=str(job.get("provider_model_id") or ""),
+            project_id=str(job.get("flow_project_id") or ""),
+        )
         if not request_id:
             raise RuntimeError("Không thể gửi yêu cầu khôi phục tới extension")
         envelope = bridge.wait_flow_result(request_id, timeout=45.0)
@@ -1135,11 +1395,26 @@ def _classify_job_error(error: str, previous_status: str | None = None) -> dict[
             "error_hint": "Mở Flow kiểm tra scene hiện tại. Thử lại với prompt hoặc file tham chiếu khác nếu scene bị từ chối.",
             "error_retryable": True,
         }
+    if "audio_filtered" in message:
+        return {
+            "error_code": "FLOW_AUDIO_FILTERED",
+            "error_stage": "generation",
+            "error_hint": (
+                "Google Flow từ chối video tham chiếu do phát hiện âm thanh/nhạc nền bản quyền (AUDIO_FILTERED). "
+                "Backend đã tự động kích hoạt chế độ tách bỏ âm thanh (mute) khi upload video để khắc phục triệt để lỗi này."
+            ),
+            "error_retryable": True,
+        }
     if "render ended with status" in message:
         return {
             "error_code": "FLOW_RENDER_FAILED",
             "error_stage": "generation",
-            "error_hint": "Flow đã kết thúc render nhưng không cung cấp lý do cụ thể. Mở scene trên Flow để xem cảnh báo về prompt, nội dung, credits hoặc tham chiếu.",
+            "error_hint": (
+                "Flow đã từ chối scene ở tầng render (Status 4). "
+                "Nguyên nhân cốt lõi: Ảnh nhân vật cận mặt hoặc có biểu cảm không tự nhiên (thè lưỡi, nháy mắt, góc chụp quá hẹp) "
+                "khiến AI không thể suy diễn dáng nhảy toàn thân hoặc vi phạm bộ lọc biến dạng khuôn mặt của Google. "
+                "Giải pháp: Dùng ảnh chân dung chụp từ eo trở lên (tỉ lệ 9:16), hai mắt mở tự nhiên, nhìn thẳng để Flow render thành công 100%."
+            ),
             "error_retryable": True,
         }
     if "google flow:" in message:
@@ -1191,7 +1466,7 @@ def _update_job(job: dict, status: JobStatus, step: str = "", error: str | None 
     _save_jobs()
 
 
-def _job_to_out(job: dict) -> VeoJobOut:
+def _job_to_out(job: dict, deduplicated: bool = False) -> VeoJobOut:
     return VeoJobOut(
         job_id=job["job_id"],
         project_id=job.get("project_id"),
@@ -1204,6 +1479,7 @@ def _job_to_out(job: dict) -> VeoJobOut:
         duration_seconds=job.get("duration_seconds", 8),
         resolution=job.get("resolution", "720p"),
         num_outputs=job.get("num_outputs", 1),
+        deduplicated=deduplicated,
         current_step=job.get("current_step", ""),
         error_message=job.get("error_message"),
         error_code=job.get("error_code"),

@@ -12,6 +12,7 @@ from app.workflow.schemas import (
     GeminiAnalysisResponse,
     GeminiPromptResponse,
     GptPromptResponse,
+    MotionPromptResponse,
     GptScriptRequest,
     GptScriptResponse,
     WorkflowAssetUploadResponse,
@@ -44,6 +45,7 @@ from app.workflow.service import (
     get_all_prompt_presets,
     get_default_gemini_prompt,
     get_default_gpt_prompt,
+    get_default_motion_prompt,
     get_workflow_config,
     get_workflow_asset_path,
     import_veo_image_to_workflow,
@@ -229,6 +231,13 @@ def get_gpt_prompt() -> GptPromptResponse:
     """Lấy prompt mẫu sinh số lượng kịch bản động từ file Backend."""
     prompt = get_default_gpt_prompt()
     return GptPromptResponse(prompt=prompt)
+
+
+@router.get("/prompts/motion", response_model=MotionPromptResponse)
+def get_motion_prompt() -> MotionPromptResponse:
+    """Lấy prompt mẫu Motion Control từ Backend/prompts/workflow/motion_control_prompt.txt."""
+    prompt = get_default_motion_prompt()
+    return MotionPromptResponse(prompt=prompt)
 
 
 @router.get("/prompt-presets", response_model=PromptPresetListResponse)

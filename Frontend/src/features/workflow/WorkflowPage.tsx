@@ -141,6 +141,7 @@ function WorkflowCanvas() {
   const [previewModalData, setPreviewModalData] = useState<{
     isOpen: boolean
     videoUrl: string
+    referenceVideoUrl?: string | null
     title?: string
     prompt?: string
   } | null>(null)
@@ -193,8 +194,8 @@ function WorkflowCanvas() {
       .catch(() => {})
   }, [])
 
-  const handleOpenPreviewModal = useCallback((videoUrl: string, title?: string, prompt?: string) => {
-    setPreviewModalData({ isOpen: true, videoUrl, title, prompt })
+  const handleOpenPreviewModal = useCallback((videoUrl: string, title?: string, prompt?: string, referenceVideoUrl?: string | null) => {
+    setPreviewModalData({ isOpen: true, videoUrl, referenceVideoUrl, title, prompt })
   }, [])
 
   const handleClosePreviewModal = useCallback(() => {
@@ -515,9 +516,20 @@ function WorkflowCanvas() {
       setActiveVeoProject(created)
       const list = await veoApi.getProjects()
       setVeoProjects(list)
+      return created
     } catch (err) {
       console.error('Error creating Veo project:', err)
       throw err
+    }
+  }, [])
+
+  const handleMotionProjectCreated = useCallback(async (created: VeoProject) => {
+    setActiveVeoProject(created)
+    try {
+      const list = await veoApi.getProjects()
+      setVeoProjects(list)
+    } catch (err) {
+      console.error('Project Motion Control đã tạo nhưng chưa tải lại được danh sách:', err)
     }
   }, [])
 
@@ -1942,13 +1954,16 @@ function WorkflowCanvas() {
           }}
         >
           <MotionControlWorkspace
-            activeProjectId={activeVeoProject?.id ?? null}
-            activeFlowProjectId={activeVeoProject?.flow_project_id ?? null}
+            projects={veoProjects}
+            activeProject={activeVeoProject}
+            onSelectProject={handleSelectVeoProject}
+            onProjectCreated={handleMotionProjectCreated}
             onOpenLibrary={() => setIsLibraryOpen(true)}
-            onOpenPreviewModal={(videoUrl, title, prompt) => {
+            onOpenPreviewModal={(videoUrl, title, prompt, referenceVideoUrl) => {
               setPreviewModalData({
                 isOpen: true,
                 videoUrl,
+                referenceVideoUrl,
                 title,
                 prompt,
               })
@@ -2004,6 +2019,7 @@ function WorkflowCanvas() {
           isOpen={Boolean(previewModalData?.isOpen)}
           onClose={handleClosePreviewModal}
           videoUrl={previewModalData?.videoUrl || ''}
+          referenceVideoUrl={previewModalData?.referenceVideoUrl}
           title={previewModalData?.title}
           prompt={previewModalData?.prompt}
         />

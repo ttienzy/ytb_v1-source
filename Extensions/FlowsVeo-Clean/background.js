@@ -307,20 +307,21 @@ function ensureHarvestCfg() {
 
 async function findAllLabsTabs() {
   ensureHarvestCfg();
+  const isGoodTab = (t) => t.url && !t.url.includes('/404');
   try {
     const patterns = Array.isArray(harvestCfg?.t?.p)
       ? harvestCfg.t.p
       : [harvestCfg?.t?.p || 'https://labs.google/*', 'https://flow.google.com/*'];
     const found = await chrome.tabs.query({ url: patterns });
-    if (found && found.length > 0) return found;
+    if (found && found.length > 0) return found.filter(isGoodTab);
 
     // Fallback: lọc toàn bộ tabs đang mở
     const all = await chrome.tabs.query({});
-    return all.filter((t) => t.url && (t.url.includes('flow.google.com') || t.url.includes('labs.google')));
+    return all.filter((t) => t.url && (t.url.includes('flow.google.com') || t.url.includes('labs.google')) && isGoodTab(t));
   } catch {
     try {
       const all = await chrome.tabs.query({});
-      return all.filter((t) => t.url && (t.url.includes('flow.google.com') || t.url.includes('labs.google')));
+      return all.filter((t) => t.url && (t.url.includes('flow.google.com') || t.url.includes('labs.google')) && isGoodTab(t));
     } catch {
       return [];
     }
@@ -419,7 +420,7 @@ async function ensureProjectTab(targetProjectId) {
     } catch { }
   }
 
-  const destinationUrl = `${targetOrigin}${accountPrefix}/project/${targetProjectId}`;
+  const destinationUrl = `${targetOrigin}/project/${targetProjectId}`;
 
   // ĐẶC BIỆT: Để TRÁNH XUNG ĐỘT với video đang chạy trên tab khác:
   // Nếu chosenTab đang mở một project khác (/project/...), KHÔNG ghi đè URL của tab đó
@@ -1257,15 +1258,25 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     function findVideoUrl(node) {
       if (!node) return null;
       if (typeof node === 'string') {
-        if (node.startsWith('https://flow-content.google/') && (
-          node.includes('/video/') ||
-          node.includes('.mp4') ||
-          node.includes('Signature=') ||
-          node.includes('Expires=') ||
-          node.includes('expire=') ||
-          node.includes('token=')
-        )) {
-          return node;
+        if (node.startsWith('https://flow-content.google/')) {
+          const lower = node.toLowerCase();
+          if (
+            lower.includes('/video') ||
+            lower.includes('/media') ||
+            lower.includes('/download') ||
+            lower.includes('.mp4') ||
+            lower.includes('signature=') ||
+            lower.includes('expires=') ||
+            lower.includes('expire=') ||
+            lower.includes('token=') ||
+            lower.includes('download=')
+          ) {
+            return node;
+          }
+          try {
+            const u = new URL(node);
+            if (u.pathname.split('/').filter(Boolean).length >= 2) return node;
+          } catch { }
         }
         return null;
       }
@@ -1314,10 +1325,18 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
       return null;
     }
 
+    const forceFresh = Boolean(flowRequest?.force_fresh_assets);
+    const mediaCache = (typeof window !== 'undefined' ? window : globalThis).__FLOW_MEDIA_CACHE__ ||
+      ((typeof window !== 'undefined' ? window : globalThis).__FLOW_MEDIA_CACHE__ = new Map());
+
     async function uploadImageToFlow(base64Data, mimeType, filename) {
       if (!base64Data) return null;
+      const rawBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+      const cacheKey = `img:${projectId}:${rawBase64.slice(0, 64)}:${rawBase64.length}:${filename || ''}`;
+      if (!forceFresh && mediaCache.has(cacheKey)) {
+        return mediaCache.get(cacheKey);
+      }
       try {
-        const rawBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
         const headerProto = [
           null, 22, null, null, null, projectId, null, null, null, null,
           captchaToken ? [captchaToken, 1] : null,
@@ -1373,6 +1392,7 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
         if (!uploadedMediaId) {
           throw new Error('maseQ response did not contain a valid mediaId: ' + JSON.stringify(resp).slice(0, 200));
         }
+        mediaCache.set(cacheKey, uploadedMediaId);
         return uploadedMediaId;
       } catch (err) {
         throw new Error(`Lỗi tải ảnh lên Google Flow (maseQ): ${err.message}`);
@@ -1629,6 +1649,17 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
     const mediaId = created?.[0];
     if (!mediaId) throw new Error('Flow create response did not contain a media id');
 
+    // Lưu vết tiến trình sinh video vào tab để cơ chế recovery có thể tái sử dụng ngay cả khi executeScript bị ngắt
+    try {
+      (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = {
+        mediaId,
+        projectId,
+        modelId,
+        startTime: Date.now(),
+        prompt: flowRequest?.prompt || '',
+      };
+    } catch { }
+
     let videoUrl = null;
     let imageUrl = null;
     const deadline = Date.now() + 600_000;
@@ -1666,7 +1697,30 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
           if (videoUrl) break;
         }
         if (status !== 2 && status !== 1 && status !== 3 && status !== undefined && status !== null) {
-          throw new Error(`Flow render ended with status ${status}`);
+          let extraReason = '';
+          try {
+            const findStrings = (node) => {
+              if (typeof node === 'string' && node.length > 4 && node.length < 250) {
+                const l = node.toLowerCase();
+                if (l.includes('policy') || l.includes('safety') || l.includes('filter') ||
+                    l.includes('block') || l.includes('reject') || l.includes('fail') ||
+                    l.includes('violate') || l.includes('quality') || l.includes('person') ||
+                    l.includes('moderation') || l.includes('pose') || l.includes('unsupported')) {
+                  return node;
+                }
+              }
+              if (Array.isArray(node)) {
+                for (const c of node) {
+                  const s = findStrings(c);
+                  if (s) return s;
+                }
+              }
+              return '';
+            };
+            extraReason = findStrings(pollResp);
+          } catch { }
+          const reasonSuffix = extraReason ? ` (lý do: ${extraReason})` : '';
+          throw new Error(`Flow render ended with status ${status}${reasonSuffix}`);
         }
       } catch (err) {
         if (err.message && err.message.includes('Flow render ended')) throw err;
@@ -1688,6 +1742,13 @@ async function runFlowGenerationInPage(flowRequest, captchaToken) {
 
     if (!videoUrl) throw new Error('Timed out waiting for Flow render');
 
+    try {
+      const active = (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__;
+      if (active && active.mediaId === mediaId) {
+        (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+      }
+    } catch { }
+
     return {
       ok: true, video_url: videoUrl, image_url: imageUrl, media_id: mediaId,
       provider_model_id: modelId, project_id: projectId,
@@ -1708,14 +1769,66 @@ async function generateFlowVideo(flowRequest, captchaToken) {
   }
   const tabId = await findLabsTab(flowRequest?.project_id);
   if (!tabId) return { ok: false, error: 'Open a Flow project in Chrome' };
+
+  const recoverLostResult = async (originalError) => {
+    // Khi executeScript bị ngắt (do Flow đổi router / DOM repaint / context reset),
+    // video vẫn đang render trên Cloud. Kiên trì thăm dò tối đa 5 phút thay vì báo lỗi sớm.
+    logActivity('info', `Lost direct result (${originalError}). Starting patient scene recovery...`);
+    const recoveryDeadline = Date.now() + 300_000;
+    let attempt = 0;
+    let lastError = '';
+
+    while (Date.now() < recoveryDeadline) {
+      attempt++;
+      await sleep(3_000);
+      try {
+        if (chrome.runtime?.getPlatformInfo) await chrome.runtime.getPlatformInfo();
+      } catch { }
+
+      const recovered = await recoverCurrentSceneVideo(
+        flowRequest?.project_id || null,
+        tabId,
+        flowRequest?.provider_model_id || '',
+      );
+
+      if (recovered?.ok) {
+        logActivity('info', `Scene recovery succeeded on attempt ${attempt}`);
+        return {
+          ...recovered,
+          recovered_after_lost_result: true,
+        };
+      }
+
+      if (recovered?.terminal_error) {
+        logActivity('warn', `Scene recovery terminal error: ${recovered.error}`);
+        return { ok: false, error: `${originalError}; scene recovery rejected: ${recovered.error}` };
+      }
+
+      lastError = recovered?.error || 'no video found';
+      if (attempt % 5 === 0) {
+        logActivity('info', `Scene recovery attempt ${attempt} (${Math.max(0, Math.round((recoveryDeadline - Date.now()) / 1000))}s remaining)...`);
+      }
+    }
+    return { ok: false, error: `${originalError}; scene recovery timed out (sau 5 phút): ${lastError}` };
+  };
+
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId }, world: 'MAIN', func: runFlowGenerationInPage,
       args: [flowRequest, captchaToken],
     });
-    return injected?.[0]?.result || { ok: false, error: 'Flow page returned no result' };
+    const result = injected?.[0]?.result;
+    if (result) {
+      if (result.ok || !/Flow page returned no result/i.test(result.error || '')) return result;
+      return recoverLostResult(result.error);
+    }
+    return recoverLostResult('Flow page returned no result');
   } catch (error) {
-    return { ok: false, error: `Cannot execute Flow adapter: ${error.message}` };
+    const message = error?.message || String(error);
+    if (/context invalidated|frame was removed|execution context|no result/i.test(message)) {
+      return recoverLostResult(`Cannot execute Flow adapter: ${message}`);
+    }
+    return { ok: false, error: `Cannot execute Flow adapter: ${message}` };
   }
 }
 
@@ -2028,52 +2141,274 @@ async function postImageResponse(requestId, result) {
 }
 
 /** Recover the trusted media URL used by the scene currently open in Flow. */
-async function recoverCurrentSceneInPage() {
+async function recoverCurrentSceneInPage(providerModelId = '') {
+  const sleepInPage = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function isVideoCandidate(value) {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    let url;
+    try { url = new URL(value, location.href); } catch { return false; }
+    if (url.protocol !== 'https:' || url.hostname !== 'flow-content.google') return false;
+    const pathname = url.pathname.toLowerCase();
+    if (/\.(?:jpg|jpeg|png|webp|gif|avif)(?:$|[?#])/.test(pathname)) return false;
+    if (/(?:preview|thumbnail|poster|sprite)/.test(pathname)) return false;
+    return true;
+  }
+
+  function isLikelyFlowVideoUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    let parsed;
+    try { parsed = new URL(value, location.href); } catch { return false; }
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'flow-content.google') return false;
+    const pathname = parsed.pathname.toLowerCase();
+    if (/\.(?:jpg|jpeg|png|webp|gif|avif)(?:$|[?#])/.test(pathname)) return false;
+    if (/(?:preview|thumbnail|poster|sprite)/.test(pathname)) return false;
+    return pathname.includes('/video') ||
+      pathname.includes('/media') ||
+      pathname.includes('/download') ||
+      /(?:\.mp4$|signature=|expires=|expire=|token=)/i.test(value) ||
+      pathname.split('/').filter(Boolean).length >= 2;
+  }
+
+  function findVideoUrl(node) {
+    if (!node) return null;
+    if (typeof node === 'string') {
+      return isLikelyFlowVideoUrl(node) ? node : null;
+    }
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const u = findVideoUrl(child);
+        if (u) return u;
+      }
+    } else if (typeof node === 'object') {
+      for (const v of Object.values(node)) {
+        const u = findVideoUrl(v);
+        if (u) return u;
+      }
+    }
+    return null;
+  }
+
+  function findMediaAsset(node) {
+    if (!Array.isArray(node)) return null;
+    if (typeof node[0] === 'string' && (node[3] === 'CAE' || node[3] === 'CAM' || node[3] === 'CAI')) return node;
+    for (const child of node) {
+      const found = findMediaAsset(child);
+      if (found) return found;
+    }
+    return null;
+  }
+
   try {
+    const activeGen = (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__;
+    const activeMediaId = activeGen?.mediaId || null;
+    const activeModelId = activeGen?.modelId || providerModelId || 'abra_t2v_6s';
+
+    let route = location.pathname.match(/^\/(u\/\d+)\/project\/([^/?#]+)/);
+    let accountPath = route ? `/${route[1]}` : '';
+    let projectId = route ? route[2] : null;
+    if (!projectId) {
+      const match2 = location.pathname.match(/\/project\/([^/?#]+)/);
+      if (match2) {
+        projectId = match2[1];
+        const uMatch = location.pathname.match(/\/(u\/\d+)/);
+        accountPath = uMatch ? `/${uMatch[1]}` : '';
+      }
+    }
+
+    const wiz = window.WIZ_global_data || {};
+    const csrfToken = wiz.SNlM0e;
+    const sessionId = wiz.FdrFJe;
+    const buildLabel = wiz.cfb2h;
+
+    async function callRpcInPage(rpcId, payload) {
+      if (!csrfToken || !sessionId || !buildLabel || !projectId) return null;
+      try {
+        const sourcePath = `${accountPath}/project/${projectId}`;
+        const query = new URLSearchParams({
+          rpcids: rpcId,
+          'source-path': sourcePath,
+          bl: String(buildLabel),
+          'f.sid': String(sessionId),
+          hl: String(document.documentElement?.lang || 'en').split('-')[0],
+          _reqid: String(Math.floor(100000 + Math.random() * 900000)),
+          rt: 'c',
+        });
+        const body = new URLSearchParams({
+          'f.req': JSON.stringify([[[rpcId, JSON.stringify(payload), null, 'generic']]]),
+          at: String(csrfToken),
+        });
+        const base = location.origin || 'https://flow.google.com';
+        const endpoint = `${base}${accountPath}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`;
+        const response = await fetch(endpoint, {
+          method: 'POST', credentials: 'include', cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'X-Same-Domain': '1',
+          },
+          body: body.toString(),
+        });
+        if (!response.ok) return null;
+        const text = await response.text();
+        for (const line of text.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('[')) continue;
+          try {
+            const parsed = JSON.parse(trimmed);
+            const findEnv = (node) => {
+              if (!Array.isArray(node)) return null;
+              if (node[0] === 'wrb.fr' && node[1] === rpcId && typeof node[2] === 'string') return node[2];
+              for (const c of node) {
+                const f = findEnv(c);
+                if (f !== null) return f;
+              }
+              return null;
+            };
+            const p = findEnv(parsed);
+            if (p !== null) return JSON.parse(p);
+          } catch { }
+        }
+      } catch { }
+      return null;
+    }
+
+    // 1. Nếu có activeMediaId, hỏi trực tiếp RPC as29s / jwpduf xem video đã tạo xong chưa
+    if (activeMediaId) {
+      try {
+        const finalAsset = await callRpcInPage('as29s', [activeMediaId]);
+        const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
+        if (asUrl) {
+          try { (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null; } catch { }
+          return {
+            ok: true,
+            video_url: asUrl,
+            image_url: finalAsset?.[5]?.[10] || finalAsset?.[5]?.[0]?.[10] || null,
+            media_id: activeMediaId,
+            provider_model_id: activeModelId,
+            project_id: projectId,
+          };
+        }
+      } catch { }
+
+      try {
+        const pollResp = await callRpcInPage('jwpduf', [null, null, [[activeMediaId]]]);
+        const pollUrl = findVideoUrl(pollResp);
+        if (pollUrl) {
+          try { (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null; } catch { }
+          return {
+            ok: true,
+            video_url: pollUrl,
+            media_id: activeMediaId,
+            provider_model_id: activeModelId,
+            project_id: projectId,
+          };
+        }
+        const asset = findMediaAsset(pollResp);
+        const status = asset?.[5]?.[8]?.[0] ?? asset?.[5]?.[0]?.[8]?.[0];
+        if (status === 3) {
+          const finalAsset = await callRpcInPage('as29s', [activeMediaId]);
+          const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
+          if (asUrl) {
+            try { (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null; } catch { }
+            return {
+              ok: true,
+              video_url: asUrl,
+              image_url: finalAsset?.[5]?.[10] || finalAsset?.[5]?.[0]?.[10] || null,
+              media_id: activeMediaId,
+              provider_model_id: activeModelId,
+              project_id: projectId,
+            };
+          }
+        }
+        if (status !== 1 && status !== 2 && status !== 3 && status !== undefined && status !== null) {
+          return {
+            ok: false,
+            terminal_error: true,
+            error: `Flow render ended with status ${status} (media_id=${activeMediaId})`,
+          };
+        }
+      } catch { }
+    }
+
+    // 2. Quét các thẻ video và resource entries trên DOM
     const candidates = [];
-    for (const video of document.querySelectorAll('video')) {
+    const videos = Array.from(document.querySelectorAll('video')).reverse();
+    for (const video of videos) {
       if (video.currentSrc) candidates.push(video.currentSrc);
       if (video.src) candidates.push(video.src);
       for (const source of video.querySelectorAll('source')) {
         if (source.src) candidates.push(source.src);
       }
     }
-    const resources = performance.getEntriesByType('resource').slice().reverse();
-    for (const entry of resources) {
-      if (entry.initiatorType === 'video' || entry.initiatorType === 'fetch') candidates.push(entry.name);
+
+    for (const element of document.querySelectorAll('a[href], [src], [data-src], [data-video-url], [data-url]')) {
+      for (const attr of ['href', 'src', 'data-src', 'data-video-url', 'data-url']) {
+        const value = element.getAttribute?.(attr);
+        if (value) candidates.push(value);
+      }
     }
 
-    const unique = [...new Set(candidates)];
-    for (const candidate of unique) {
+    try {
+      const resources = performance.getEntriesByType('resource').slice().reverse();
+      for (const entry of resources) if (entry.name) candidates.push(entry.name);
+    } catch { }
+
+    const uniqueCandidates = [...new Set(candidates)];
+    if (activeMediaId) {
+      uniqueCandidates.sort((a, b) => {
+        const aMatch = a.includes(activeMediaId) ? -1 : 0;
+        const bMatch = b.includes(activeMediaId) ? -1 : 0;
+        return aMatch - bMatch;
+      });
+    }
+
+    for (const candidate of uniqueCandidates) {
+      if (!isVideoCandidate(candidate)) continue;
       let url;
       try { url = new URL(candidate, location.href); } catch { continue; }
-      if (url.protocol !== 'https:' || url.hostname !== 'flow-content.google') continue;
       try {
         const probe = await fetch(url.href, {
           method: 'GET', credentials: 'omit', cache: 'no-store',
           headers: { Range: 'bytes=0-1023' },
-          signal: AbortSignal.timeout(10_000),
+          signal: AbortSignal.timeout(6_000),
         });
         const contentType = (probe.headers.get('Content-Type') || '').toLowerCase();
         if (probe.ok && (contentType.startsWith('video/') || contentType === 'application/octet-stream')) {
           try { await probe.body?.cancel(); } catch { }
-          return { ok: true, video_url: url.href, media_id: null, provider_model_id: 'abra_t2v_6s' };
+          try { (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null; } catch { }
+          return {
+            ok: true,
+            video_url: url.href,
+            media_id: activeMediaId || null,
+            provider_model_id: activeModelId,
+            project_id: projectId,
+          };
         }
         try { await probe.body?.cancel(); } catch { }
       } catch { }
     }
-    return { ok: false, error: 'No completed Flow video URL found in the open scene' };
+
+    const isGenerating = Boolean(
+      document.querySelector('[role="progressbar"], [aria-label*="generating" i], [aria-label*="creating" i], .generating, [data-is-generating="true"]') ||
+      activeMediaId
+    );
+    return {
+      ok: false,
+      is_generating: isGenerating,
+      error: isGenerating ? 'Flow is still rendering video in scene' : 'No completed Flow video URL found in the open scene',
+    };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
 }
 
-async function recoverCurrentSceneVideo() {
-  const tabId = await findLabsTab();
+async function recoverCurrentSceneVideo(projectId = null, fallbackTabId = null, providerModelId = '') {
+  const tabId = fallbackTabId || await findLabsTab(projectId);
   if (!tabId) return { ok: false, error: 'Open the completed Flow scene in Chrome' };
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId }, world: 'MAIN', func: recoverCurrentSceneInPage,
+      args: [providerModelId],
     });
     return injected?.[0]?.result || { ok: false, error: 'Flow scene returned no result' };
   } catch (error) {
@@ -2092,7 +2427,7 @@ async function recoverCurrentSceneVideo() {
  */
 async function runVideoUploadInPage(uploadRequest) {
   try {
-    const { video_base64, video_mime, video_filename, project_id } = uploadRequest;
+    const { video_base64, video_mime, video_filename, project_id, force_fresh } = uploadRequest;
     if (!video_base64) throw new Error('video_base64 is required');
 
     const projectId = location.pathname.match(/\/project\/([^/?#]+)/)?.[1] || null;
@@ -2108,6 +2443,20 @@ async function runVideoUploadInPage(uploadRequest) {
     const rawBase64 = video_base64.includes(',') ? video_base64.split(',')[1] : video_base64;
     const mimeType = video_mime || 'video/mp4';
     const filename = video_filename || 'reference_video.mp4';
+
+    const cache = (typeof window !== 'undefined' ? window : globalThis).__FLOW_MEDIA_CACHE__ ||
+      ((typeof window !== 'undefined' ? window : globalThis).__FLOW_MEDIA_CACHE__ = new Map());
+    const cacheKey = `vid:${targetPid}:${rawBase64.slice(0, 64)}:${rawBase64.length}:${filename}`;
+
+    if (!force_fresh && cache.has(cacheKey)) {
+      const cached = cache.get(cacheKey);
+      return {
+        ...cached,
+        ok: true,
+        cached: true,
+      };
+    }
+
     const binary = atob(rawBase64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -2162,7 +2511,7 @@ async function runVideoUploadInPage(uploadRequest) {
     const mediaId = uploaded?.mediaId || uploaded?.media?.name || null;
     if (!mediaId) throw new Error(`Flow video upload response has no mediaId: ${responseText.slice(0, 300)}`);
 
-    return {
+    const result = {
       ok: true,
       media_id: mediaId,
       project_id: uploaded?.media?.projectId || targetPid,
@@ -2170,6 +2519,16 @@ async function runVideoUploadInPage(uploadRequest) {
       filename,
       mime_type: mimeType,
     };
+
+    cache.set(cacheKey, {
+      media_id: mediaId,
+      project_id: result.project_id,
+      workflow_id: result.workflow_id,
+      filename,
+      mime_type: mimeType,
+    });
+
+    return result;
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }
@@ -2464,7 +2823,11 @@ async function processCaptchaRequest(request) {
     return;
   }
   if (request.flow_recovery) {
-    const recovered = await recoverCurrentSceneVideo();
+    const recovered = await recoverCurrentSceneVideo(
+      request.project_id || null,
+      null,
+      request.provider_model_id || '',
+    );
     await postFlowResponse(request.request_id, recovered);
     return;
   }

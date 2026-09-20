@@ -12,6 +12,9 @@ import {
   Check,
   RotateCcw,
   AlertCircle,
+  FolderPlus,
+  FolderOpen,
+  Columns2,
 } from 'lucide-react'
 import type {
   MotionReferenceAsset,
@@ -21,7 +24,7 @@ import type {
 } from '../types'
 import type { StructuredPromptResult } from '../services/motionPromptBuilder'
 import { MOTION_DURATION_OPTIONS } from '../services/motionProfiles'
-import type { VeoCapabilityProfile } from '../../veo-studio/types'
+import type { VeoCapabilityProfile, VeoProject } from '../../veo-studio/types'
 
 interface MotionInspectorPanelProps {
   isOpen: boolean
@@ -36,9 +39,11 @@ interface MotionInspectorPanelProps {
   onUploadFile: (role: 'character' | 'motion' | 'scene', file: File) => void
   onClearAsset: (role: 'character' | 'motion' | 'scene') => void
   onUpdateAssetMeta: (role: 'character' | 'motion' | 'scene', updates: Partial<MotionReferenceAsset>) => void
+  onOpenLibrary?: (role: 'character' | 'motion' | 'scene') => void
   // Creative Direction
   creative: MotionCreativeDirection
   onUpdateCreative: (updates: Partial<MotionCreativeDirection>) => void
+  onResetDefaultPrompt?: () => void
   // Prompt Preview
   structuredPrompt: StructuredPromptResult
   isCustomPrompt: boolean
@@ -47,6 +52,13 @@ interface MotionInspectorPanelProps {
   onResetToAutoPrompt: () => void
   // Output
   outputConfig: MotionOutputConfig
+  projects: VeoProject[]
+  activeProject: VeoProject | null
+  lastRunProject?: VeoProject | null
+  isCreatingProject: boolean
+  onUpdateProjectConfig: (updates: Partial<MotionOutputConfig>) => void
+  onSelectProject?: (projectId: string) => Promise<void> | void
+  onCreateProject: (name: string) => Promise<VeoProject>
   profiles: VeoCapabilityProfile[]
   selectedProfileId: string
   onSelectAspectRatio: (aspectRatio: MotionOutputConfig['aspectRatio']) => void
@@ -72,14 +84,23 @@ export function MotionInspectorPanel({
   onUploadFile,
   onClearAsset,
   onUpdateAssetMeta,
+  onOpenLibrary,
   creative,
   onUpdateCreative,
+  onResetDefaultPrompt,
   structuredPrompt,
   isCustomPrompt,
   customPromptText,
   onUpdateCustomPromptText,
   onResetToAutoPrompt,
   outputConfig,
+  projects,
+  activeProject,
+  lastRunProject,
+  isCreatingProject,
+  onUpdateProjectConfig,
+  onSelectProject,
+  onCreateProject,
   profiles,
   selectedProfileId,
   onSelectAspectRatio,
@@ -94,6 +115,8 @@ export function MotionInspectorPanel({
 }: MotionInspectorPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [copied, setCopied] = React.useState(false)
+  const [newProjectName, setNewProjectName] = React.useState('Motion Control')
+  const [projectActionError, setProjectActionError] = React.useState<string | null>(null)
 
   if (!isOpen) return null
 
@@ -104,6 +127,15 @@ export function MotionInspectorPanel({
     navigator.clipboard.writeText(textToCopy)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleCreateProject = async () => {
+    setProjectActionError(null)
+    try {
+      await onCreateProject(newProjectName)
+    } catch (error) {
+      setProjectActionError(error instanceof Error ? error.message : 'Không thể tạo Flow project.')
+    }
   }
 
   return (
@@ -309,50 +341,79 @@ export function MotionInspectorPanel({
                 </div>
 
                 {/* Actions */}
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      flex: 1,
-                      padding: '8px',
-                      borderRadius: '6px',
-                      border: '1px solid #CBD5E1',
-                      background: '#FFFFFF',
-                      fontSize: '11.5px',
-                      fontWeight: 600,
-                      color: '#334155',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '5px',
-                    }}
-                  >
-                    <Upload size={13} />
-                    <span>{motion.filled ? 'Đổi video' : 'Tải video lên'}</span>
-                  </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {onOpenLibrary && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenLibrary('motion')}
+                        style={{
+                          flex: 1,
+                          padding: '8px 10px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #4F46E5, #7C3AED)',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 4px rgba(79, 70, 229, 0.25)',
+                        }}
+                      >
+                        <FolderOpen size={14} />
+                        <span>Chọn từ Thư viện Veo</span>
+                      </button>
+                    )}
 
-                  {motion.filled && (
                     <button
                       type="button"
-                      onClick={() => onClearAsset('motion')}
+                      onClick={() => fileInputRef.current?.click()}
                       style={{
+                        flex: onOpenLibrary ? '0 0 auto' : 1,
                         padding: '8px 12px',
                         borderRadius: '6px',
-                        border: '1px solid #FCA5A5',
-                        background: '#FEF2F2',
-                        color: '#DC2626',
+                        border: '1px solid #CBD5E1',
+                        background: '#FFFFFF',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        color: '#334155',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        gap: '5px',
                       }}
-                      title="Xóa video"
+                      title="Tải video từ máy tính"
                     >
-                      <Trash2 size={14} />
+                      <Upload size={13} />
+                      <span>{motion.filled ? 'Đổi tệp máy' : 'Tải từ máy'}</span>
                     </button>
-                  )}
+
+                    {motion.filled && (
+                      <button
+                        type="button"
+                        onClick={() => onClearAsset('motion')}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid #FCA5A5',
+                          background: '#FEF2F2',
+                          color: '#DC2626',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                        title="Xóa video"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Trim Settings */}
@@ -440,49 +501,78 @@ export function MotionInspectorPanel({
                   )}
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      flex: 1,
-                      padding: '8px',
-                      borderRadius: '6px',
-                      border: '1px solid #CBD5E1',
-                      background: '#FFFFFF',
-                      fontSize: '11.5px',
-                      fontWeight: 600,
-                      color: '#334155',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '5px',
-                    }}
-                  >
-                    <Upload size={13} />
-                    <span>{character.filled ? 'Đổi ảnh' : 'Tải ảnh nhân vật'}</span>
-                  </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {onOpenLibrary && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenLibrary('character')}
+                        style={{
+                          flex: 1,
+                          padding: '8px 10px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #4F46E5, #6366F1)',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 4px rgba(79, 70, 229, 0.2)',
+                        }}
+                      >
+                        <FolderOpen size={14} />
+                        <span>Chọn từ Thư viện Veo</span>
+                      </button>
+                    )}
 
-                  {character.filled && (
                     <button
                       type="button"
-                      onClick={() => onClearAsset('character')}
+                      onClick={() => fileInputRef.current?.click()}
                       style={{
+                        flex: onOpenLibrary ? '0 0 auto' : 1,
                         padding: '8px 12px',
                         borderRadius: '6px',
-                        border: '1px solid #FCA5A5',
-                        background: '#FEF2F2',
-                        color: '#DC2626',
+                        border: '1px solid #CBD5E1',
+                        background: '#FFFFFF',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        color: '#334155',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        gap: '5px',
                       }}
+                      title="Tải ảnh từ máy tính"
                     >
-                      <Trash2 size={14} />
+                      <Upload size={13} />
+                      <span>{character.filled ? 'Đổi ảnh' : 'Tải từ máy'}</span>
                     </button>
-                  )}
+
+                    {character.filled && (
+                      <button
+                        type="button"
+                        onClick={() => onClearAsset('character')}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid #FCA5A5',
+                          background: '#FEF2F2',
+                          color: '#DC2626',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <small style={{ fontSize: '10.5px', color: '#64748B' }}>
@@ -523,49 +613,78 @@ export function MotionInspectorPanel({
                   )}
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      flex: 1,
-                      padding: '8px',
-                      borderRadius: '6px',
-                      border: '1px solid #CBD5E1',
-                      background: '#FFFFFF',
-                      fontSize: '11.5px',
-                      fontWeight: 600,
-                      color: '#334155',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '5px',
-                    }}
-                  >
-                    <Upload size={13} />
-                    <span>{scene.filled ? 'Đổi ảnh' : 'Tải ảnh bối cảnh'}</span>
-                  </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {onOpenLibrary && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenLibrary('scene')}
+                        style={{
+                          flex: 1,
+                          padding: '8px 10px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #4F46E5, #6366F1)',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 4px rgba(79, 70, 229, 0.2)',
+                        }}
+                      >
+                        <FolderOpen size={14} />
+                        <span>Chọn từ Thư viện Veo</span>
+                      </button>
+                    )}
 
-                  {scene.filled && (
                     <button
                       type="button"
-                      onClick={() => onClearAsset('scene')}
+                      onClick={() => fileInputRef.current?.click()}
                       style={{
+                        flex: onOpenLibrary ? '0 0 auto' : 1,
                         padding: '8px 12px',
                         borderRadius: '6px',
-                        border: '1px solid #FCA5A5',
-                        background: '#FEF2F2',
-                        color: '#DC2626',
+                        border: '1px solid #CBD5E1',
+                        background: '#FFFFFF',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        color: '#334155',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        gap: '5px',
                       }}
+                      title="Tải ảnh từ máy tính"
                     >
-                      <Trash2 size={14} />
+                      <Upload size={13} />
+                      <span>{scene.filled ? 'Đổi ảnh' : 'Tải từ máy'}</span>
                     </button>
-                  )}
+
+                    {scene.filled && (
+                      <button
+                        type="button"
+                        onClick={() => onClearAsset('scene')}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid #FCA5A5',
+                          background: '#FEF2F2',
+                          color: '#DC2626',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -577,6 +696,46 @@ export function MotionInspectorPanel({
         {/* ============================================================== */}
         {selectedNodeType === 'creative' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {/* Quick Action: Reset to Default Safe Prompt */}
+            {onResetDefaultPrompt && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 10px',
+                  background: '#F0FDF4',
+                  border: '1px solid #BBF7D0',
+                  borderRadius: '6px',
+                }}
+              >
+                <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>
+                  Prompt chuẩn an toàn từ file
+                </span>
+                <button
+                  type="button"
+                  onClick={onResetDefaultPrompt}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid #86EFAC',
+                    background: '#FFFFFF',
+                    color: '#15803D',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                  title="Khôi phục toàn bộ nội dung prompt mẫu chuẩn"
+                >
+                  <RotateCcw size={12} />
+                  <span>Khôi phục mẫu</span>
+                </button>
+              </div>
+            )}
+
             {/* 1. Creative Brief */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -794,6 +953,116 @@ export function MotionInspectorPanel({
               </div>
             </div>
 
+            <div style={{ padding: '11px', borderRadius: '9px', border: '1px solid #C7D2FE', background: '#F8FAFF', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#312E81' }}>Flow project cho lượt tạo</div>
+                <div style={{ marginTop: '3px', fontSize: '10px', lineHeight: 1.4, color: '#64748B' }}>
+                  Project mới giúp cô lập media ID và tránh lỗi khi bấm tạo lại cùng nguyên liệu.
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px' }}>
+                {([
+                  { value: 'new_per_run', title: 'Project mới / lượt', icon: <FolderPlus size={14} /> },
+                  { value: 'selected', title: 'Project đã chọn', icon: <FolderOpen size={14} /> },
+                ] as const).map((option) => {
+                  const active = (outputConfig.projectMode || 'new_per_run') === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      disabled={isRunning}
+                      onClick={() => onUpdateProjectConfig({ projectMode: option.value })}
+                      style={{
+                        padding: '8px 6px',
+                        borderRadius: '7px',
+                        border: active ? '2px solid #4F46E5' : '1px solid #CBD5E1',
+                        background: active ? '#EEF2FF' : '#FFFFFF',
+                        color: active ? '#3730A3' : '#475569',
+                        cursor: isRunning ? 'not-allowed' : 'pointer',
+                        fontSize: '10.5px',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '5px',
+                      }}
+                    >
+                      {option.icon}{option.title}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {(outputConfig.projectMode || 'new_per_run') === 'new_per_run' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#475569' }}>Tiền tố tên project</label>
+                  <input
+                    type="text"
+                    value={outputConfig.projectNamePrefix || ''}
+                    disabled={isRunning}
+                    onChange={(event) => onUpdateProjectConfig({ projectNamePrefix: event.target.value })}
+                    placeholder="Motion Control"
+                    maxLength={180}
+                    style={{ padding: '7px 9px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '11px' }}
+                  />
+                  {lastRunProject && (
+                    <small style={{ fontSize: '9.5px', color: '#047857' }}>Project gần nhất: {lastRunProject.name}</small>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                  <select
+                    value={activeProject?.id || ''}
+                    disabled={isRunning || projects.length === 0}
+                    onChange={(event) => void onSelectProject?.(event.target.value)}
+                    style={{ padding: '7px 8px', borderRadius: '6px', border: '1px solid #CBD5E1', background: '#FFFFFF', fontSize: '11px' }}
+                  >
+                    <option value="">{projects.length ? 'Chọn Flow project' : 'Chưa có Flow project'}</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>{project.name}</option>
+                    ))}
+                  </select>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      value={newProjectName}
+                      disabled={isCreatingProject || isRunning}
+                      onChange={(event) => setNewProjectName(event.target.value)}
+                      placeholder="Tên project mới"
+                      maxLength={255}
+                      style={{ minWidth: 0, flex: 1, padding: '7px 8px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '11px' }}
+                    />
+                    <button
+                      type="button"
+                      disabled={isCreatingProject || isRunning || !newProjectName.trim()}
+                      onClick={() => void handleCreateProject()}
+                      style={{ border: 'none', borderRadius: '6px', padding: '7px 9px', background: '#4F46E5', color: '#FFFFFF', fontSize: '10.5px', fontWeight: 700, cursor: isCreatingProject ? 'wait' : 'pointer' }}
+                    >
+                      {isCreatingProject ? 'Đang tạo...' : 'Tạo mới'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: isRunning ? 'not-allowed' : 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={outputConfig.freshAssets !== false}
+                  disabled={isRunning}
+                  onChange={(event) => onUpdateProjectConfig({ freshAssets: event.target.checked })}
+                  style={{ marginTop: '2px' }}
+                />
+                <span style={{ fontSize: '10px', lineHeight: 1.4, color: '#475569' }}>
+                  <strong>Upload mới nguyên liệu mỗi lượt</strong><br />Không tái sử dụng media ID của lần render trước.
+                </span>
+              </label>
+
+              {projectActionError && (
+                <div role="alert" style={{ fontSize: '10px', lineHeight: 1.4, color: '#B91C1C' }}>{projectActionError}</div>
+              )}
+            </div>
+
             {profileError && (
               <div style={{ padding: '8px 10px', borderRadius: '6px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: '11px' }}>
                 {profileError}
@@ -919,6 +1188,45 @@ export function MotionInspectorPanel({
                   ? '✓ Tổ hợp này đã được kiểm thử runtime trong project.'
                   : 'Tổ hợp này được Flow hỗ trợ nhưng chưa được kiểm thử E2E trong project.'}
               </div>
+            </div>
+
+            <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #C7D2FE', background: '#F8FAFF' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', minWidth: 0 }}>
+                  <Columns2 size={16} color="#4F46E5" style={{ marginTop: '1px', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#312E81' }}>Đối chiếu video</div>
+                    <div style={{ marginTop: '3px', fontSize: '10px', lineHeight: 1.4, color: '#64748B' }}>
+                      Hiển thị kết quả và video tham chiếu cạnh nhau sau khi render xong.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={outputConfig.showReferenceComparison !== false}
+                  disabled={isRunning || !motion.previewUrl}
+                  onClick={() => onUpdateProjectConfig({ showReferenceComparison: outputConfig.showReferenceComparison === false })}
+                  style={{
+                    flexShrink: 0,
+                    minWidth: 92,
+                    padding: '7px 9px',
+                    borderRadius: '7px',
+                    border: outputConfig.showReferenceComparison !== false ? '1px solid #4F46E5' : '1px solid #CBD5E1',
+                    background: outputConfig.showReferenceComparison !== false ? '#4F46E5' : '#FFFFFF',
+                    color: outputConfig.showReferenceComparison !== false ? '#FFFFFF' : '#64748B',
+                    fontSize: '10.5px',
+                    fontWeight: 800,
+                    cursor: isRunning || !motion.previewUrl ? 'not-allowed' : 'pointer',
+                    opacity: motion.previewUrl ? 1 : 0.55,
+                  }}
+                >
+                  {outputConfig.showReferenceComparison !== false ? 'Đang bật' : 'Đang tắt'}
+                </button>
+              </div>
+              {!motion.previewUrl && (
+                <div style={{ marginTop: '7px', fontSize: '9.5px', color: '#B45309' }}>Nạp video tham chiếu để bật chế độ đối chiếu.</div>
+              )}
             </div>
 
             <div style={{ padding: '9px 10px', borderRadius: '8px', border: '1px solid #BFDBFE', background: '#EFF6FF', color: '#1E40AF', fontSize: '10.5px', lineHeight: 1.45 }}>

@@ -27,6 +27,7 @@ const ERROR_TITLES: Record<string, string> = {
   REFERENCE_INVALID: 'File tham chiếu không hợp lệ',
   FLOW_TIMEOUT: 'Google Flow phản hồi quá lâu',
   FLOW_REJECTED: 'Google Flow từ chối yêu cầu',
+  FLOW_AUDIO_FILTERED: 'Video bị dính bản quyền âm thanh',
   FLOW_RENDER_FAILED: 'Google Flow không tạo được video',
   FLOW_EMPTY_RESULT: 'Flow không trả về video',
   DOWNLOAD_FAILED: 'Không tải được video kết quả',
@@ -76,6 +77,7 @@ function codeFromMessage(message: string, stage: MotionRunStage): string {
   if (stage === 'image_upload' || normalized.includes('upload ảnh')) return 'IMAGE_UPLOAD_FAILED'
   if (normalized.includes('timeout') || normalized.includes('quá 5 phút')) return 'FLOW_TIMEOUT'
   if (normalized.includes('no result') || normalized.includes('không trả video') || normalized.includes('không trả về file')) return 'FLOW_EMPTY_RESULT'
+  if (normalized.includes('audio_filtered')) return 'FLOW_AUDIO_FILTERED'
   if (normalized.includes('render ended with status')) return 'FLOW_RENDER_FAILED'
   if (normalized.includes('google flow')) return 'FLOW_REJECTED'
   if (stage === 'download') return 'DOWNLOAD_FAILED'

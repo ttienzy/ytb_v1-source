@@ -1,16 +1,19 @@
 import React from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Sparkles, Play, RotateCw, CheckCircle2, AlertCircle, Eye, Settings2 } from 'lucide-react'
+import { Sparkles, RotateCw, CheckCircle2, AlertCircle, Eye, Settings2, Columns2 } from 'lucide-react'
 import type { MotionOutputConfig, MotionRunError } from '../../types'
 
 export interface MotionOutputNodeData {
   config: MotionOutputConfig
+  projectLabel?: string
   isReady: boolean
   missingReasons?: string[]
   isRunning?: boolean
   runningStageText?: string
   runError?: MotionRunError | null
   resultVideoUrl?: string | null
+  referenceVideoUrl?: string | null
+  showReferenceComparison?: boolean
   onRun?: () => void
   onOpenPreviewModal?: (videoUrl: string) => void
   onOpenInspector?: () => void
@@ -81,6 +84,19 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
             style={{
               padding: '4px 8px',
               borderRadius: '5px',
+              background: '#ECFDF5',
+              fontSize: '11px',
+              fontWeight: 600,
+              color: '#047857',
+            }}
+            title="Flow project dùng cho lượt tạo"
+          >
+            📁 {nodeData.projectLabel || 'Project mới / lượt'}
+          </span>
+          <span
+            style={{
+              padding: '4px 8px',
+              borderRadius: '5px',
               background: '#EEF2FF',
               fontSize: '11px',
               fontWeight: 600,
@@ -144,6 +160,52 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
         {/* Status / Output Preview Area */}
         {nodeData.resultVideoUrl ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {nodeData.showReferenceComparison && nodeData.referenceVideoUrl ? (
+              <div style={{ padding: '7px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #DBEAFE' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px', color: '#3730A3', fontSize: '10.5px', fontWeight: 800 }}>
+                  <Columns2 size={13} />
+                  <span>Đối chiếu chuyển động</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ position: 'relative', height: 112, borderRadius: '6px', overflow: 'hidden', background: '#0F172A' }}>
+                      <video
+                        src={nodeData.resultVideoUrl}
+                        aria-label="Video kết quả"
+                        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                      />
+                      <button
+                        type="button"
+                        onClick={() => nodeData.onOpenPreviewModal?.(nodeData.resultVideoUrl!)}
+                        title="Xem video kết quả lớn hơn"
+                        style={{ position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.62)', color: '#FFFFFF', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', display: 'flex' }}
+                      >
+                        <Eye size={12} />
+                      </button>
+                    </div>
+                    <div style={{ marginTop: '4px', color: '#4338CA', fontSize: '9.5px', fontWeight: 800 }}>Kết quả Flow</div>
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ height: 112, borderRadius: '6px', overflow: 'hidden', background: '#0F172A' }}>
+                      <video
+                        src={nodeData.referenceVideoUrl}
+                        aria-label="Video tham chiếu"
+                        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                      />
+                    </div>
+                    <div style={{ marginTop: '4px', color: '#64748B', fontSize: '9.5px', fontWeight: 800 }}>Video tham chiếu</div>
+                  </div>
+                </div>
+              </div>
+            ) : (
             <div
               style={{
                 position: 'relative',
@@ -185,6 +247,7 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
                 <span>Xem lớn</span>
               </button>
             </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: '#10B981' }}>
               <CheckCircle2 size={14} />
               <span>Video render hoàn tất thành công!</span>

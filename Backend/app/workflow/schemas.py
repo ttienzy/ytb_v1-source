@@ -63,6 +63,10 @@ class GptPromptResponse(BaseModel):
     prompt: str = Field(description="Prompt mẫu tạo kịch bản bán hàng")
 
 
+class MotionPromptResponse(BaseModel):
+    prompt: str = Field(description="Prompt mẫu Motion Control")
+
+
 class GptScriptItem(BaseModel):
     phase: Optional[str] = Field(default=None, description="Giai đoạn phễu: Hook | Reveal | Demo | CTA")
     angle: str = Field(description="Tên góc tiếp cận (Góc 1 / Góc 2 / Review chân thực...)")

@@ -16,6 +16,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 
 from app.veo import service
 from app.veo.schemas import (
+    ManualCreditsRequest,
     ManualCredentialRequest,
     VeoBridgeStatus,
     VeoCapabilities,
@@ -37,6 +39,8 @@ from app.veo.schemas import (
     VeoProjectOut,
     VeoProjectSelect,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/veo", tags=["Veo Studio"])
 
@@ -166,6 +170,13 @@ def reload_tab(project_id: str = ""):
     return {"ok": True, "message": "Đã gửi tín hiệu reload tab"}
 
 
+@router.get("/prompts/motion")
+def get_motion_prompt():
+    """Lấy prompt mẫu Motion Control mặc định."""
+    from app.workflow.service import get_default_motion_prompt
+    return {"prompt": get_default_motion_prompt()}
+
+
 @router.post("/manual-credentials")
 def save_manual_credentials(req: ManualCredentialRequest):
     """Lưu session cookie/token thủ công từ giao diện Cài đặt."""
@@ -173,6 +184,16 @@ def save_manual_credentials(req: ManualCredentialRequest):
         email=req.email,
         cookie=req.cookie,
         access_token=req.access_token,
+        credits=req.credits,
+    )
+
+
+@router.post("/manual-credits")
+def set_manual_credits(req: ManualCreditsRequest):
+    """Cập nhật trực tiếp số dư credits cho tài khoản (ghi đè ngay lập tức)."""
+    return service.set_account_credits(
+        email=req.email,
+        credits=req.credits,
     )
 
 
@@ -327,6 +348,61 @@ class VideoUploadRequest(BaseModel):
     video_base64: str
     video_mime: str = "video/mp4"
     video_filename: str = "reference_video.mp4"
+    force_fresh: bool = False
+
+
+def _strip_audio_and_probe_duration(video_bytes: bytes, filename: str) -> tuple[bytes, float | None]:
+    """Tách bỏ audio track bằng ffmpeg (chống lỗi PUBLIC_ERROR_AUDIO_FILTERED từ Google Flow) và đo thời lượng."""
+    import tempfile
+    import subprocess
+    import json
+
+    duration: float | None = None
+    clean_bytes = video_bytes
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            in_file = Path(tmpdir) / "input_raw.mp4"
+            out_file = Path(tmpdir) / "input_clean.mp4"
+            in_file.write_bytes(video_bytes)
+
+            try:
+                probe_cmd = [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "json",
+                    str(in_file),
+                ]
+                probe_res = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+                if probe_res.returncode == 0 and probe_res.stdout.strip():
+                    probe_data = json.loads(probe_res.stdout)
+                    dur_val = probe_data.get("format", {}).get("duration")
+                    if dur_val:
+                        duration = round(float(dur_val), 2)
+                        logger.info("[UploadVideo] Probed video %s duration: %.2fs", filename, duration)
+            except Exception as pe:
+                logger.warning("Could not probe video duration: %s", pe)
+
+            clean_cmd = [
+                "ffmpeg", "-y",
+                "-i", str(in_file),
+                "-c:v", "copy",
+                "-an",
+                str(out_file),
+            ]
+            clean_res = subprocess.run(clean_cmd, capture_output=True, timeout=15)
+            if clean_res.returncode == 0 and out_file.exists() and out_file.stat().st_size > 0:
+                clean_bytes = out_file.read_bytes()
+                logger.info(
+                    "[UploadVideo] Successfully stripped audio track from %s to eliminate AUDIO_FILTERED. Size: %d -> %d bytes",
+                    filename, len(video_bytes), len(clean_bytes),
+                )
+            else:
+                logger.warning("[UploadVideo] ffmpeg strip audio non-zero exit (%d); using original bytes", clean_res.returncode)
+    except Exception as e:
+        logger.warning("[UploadVideo] Error processing video with ffmpeg: %s", e)
+
+    return clean_bytes, duration
 
 
 @router.post("/upload-video")
@@ -335,8 +411,41 @@ def upload_video_reference(req: VideoUploadRequest):
 
     Chỉ hoạt động với Omni Flash 1.1 (video-to-video).
     Trả về media_id để dùng trong job submission.
+    Mặc định tái sử dụng media_id nếu cùng video và project_id. Motion Control có
+    thể đặt force_fresh=true để tránh tái sử dụng asset của lần render trước.
     """
-    from app.veo import bridge
+    import base64
+    from app.veo import bridge, media_registry
+
+    # 1. Giải mã base64 và tách bỏ audio track để chống lỗi PUBLIC_ERROR_AUDIO_FILTERED
+    clean_base64 = req.video_base64
+    video_duration: float | None = None
+    try:
+        raw_bytes = base64.b64decode(req.video_base64)
+        clean_bytes, video_duration = _strip_audio_and_probe_duration(raw_bytes, req.video_filename)
+        if len(clean_bytes) != len(raw_bytes):
+            clean_base64 = base64.b64encode(clean_bytes).decode("ascii")
+    except Exception as exc:
+        logger.warning("[UploadVideo] Could not decode/clean base64 video: %s", exc)
+
+    # 2. Kiểm tra cache deduplication trước khi gọi Extension
+    video_hash = media_registry.compute_bytes_sha256(clean_base64.encode("utf-8"))
+    cached_id = media_registry.get_cached_media_id(req.project_id, video_hash)
+    if cached_id and not req.force_fresh:
+        logger.info(
+            "[Deduplication] Video %s đã tồn tại trên project %s với media_id=%s. Tái sử dụng, bỏ qua upload!",
+            req.video_filename,
+            req.project_id,
+            cached_id,
+        )
+        return {
+            "ok": True,
+            "media_id": cached_id,
+            "project_id": req.project_id,
+            "filename": req.video_filename,
+            "duration": video_duration,
+            "cached": True,
+        }
 
     ext = bridge.get_extension_info()
     if not ext.get("connected"):
@@ -344,9 +453,10 @@ def upload_video_reference(req: VideoUploadRequest):
 
     req_id = bridge.request_video_upload(
         project_id=req.project_id,
-        video_base64=req.video_base64,
+        video_base64=clean_base64,
         video_mime=req.video_mime,
         video_filename=req.video_filename,
+        force_fresh=req.force_fresh,
     )
     if not req_id:
         raise HTTPException(status_code=503, detail="Bridge queue đầy hoặc Extension chưa sẵn sàng.")
@@ -358,9 +468,23 @@ def upload_video_reference(req: VideoUploadRequest):
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error") or "Upload video thất bại.")
 
+    media_id = result["media_id"]
+    # 3. Đăng ký media_id mới vào Registry kèm thời lượng
+    media_registry.register_media(
+        project_id=req.project_id,
+        file_hash=video_hash,
+        media_id=media_id,
+        filename=req.video_filename,
+        mime_type=req.video_mime,
+        kind="video",
+        duration=video_duration or 0.0,
+    )
+
     return {
         "ok": True,
-        "media_id": result["media_id"],
+        "media_id": media_id,
         "project_id": result.get("project_id", req.project_id),
         "filename": req.video_filename,
+        "duration": video_duration,
+        "cached": False,
     }

@@ -164,7 +164,7 @@ def request_captcha(
         return None
 
 
-def request_flow_recovery(provider_model_id: str = "") -> str | None:
+def request_flow_recovery(provider_model_id: str = "", project_id: str = "") -> str | None:
     """Ask the extension to recover the video URL from the open Flow scene."""
     request_id = secrets.token_hex(16)
     try:
@@ -172,6 +172,7 @@ def request_flow_recovery(provider_model_id: str = "") -> str | None:
             "request_id": request_id,
             "flow_recovery": True,
             "provider_model_id": provider_model_id,
+            "project_id": project_id,
             "created_at": time.time(),
         })
         return request_id
@@ -264,6 +265,7 @@ def request_video_upload(
     video_base64: str,
     video_mime: str = "video/mp4",
     video_filename: str = "reference_video.mp4",
+    force_fresh: bool = False,
 ) -> str | None:
     """Yêu cầu Extension upload video lên Google Flow qua RPC maseQ."""
     request_id = secrets.token_hex(16)
@@ -275,6 +277,7 @@ def request_video_upload(
             "video_base64": video_base64,
             "video_mime": video_mime,
             "video_filename": video_filename,
+            "force_fresh": force_fresh,
             "created_at": time.time(),
         })
         return request_id
@@ -325,11 +328,12 @@ def get_uptime() -> float:
     return 0
 
 
-def request_refresh(reason: str = "user_refresh") -> None:
+def request_refresh(reason: str = "user_refresh", clear_cache: bool = True) -> None:
     """Gửi yêu cầu Extension quét và cập nhật lại cookie/credits từ tab Google Flow."""
     with _bridge_lock:
         _refresh_pending.append({
             "reason": reason,
+            "clear_cache": clear_cache,
             "requested_at": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -355,18 +359,36 @@ def request_tab_reload(target_project_id: str = "") -> None:
         pass
 
 
-def set_manual_credential(email: str, cookie: str, access_token: str = "") -> None:
+def set_manual_credential(email: str, cookie: str, access_token: str = "", credits: int | None = None) -> None:
     """Lưu credential nhập tay từ người dùng trên giao diện Cài đặt."""
     with _bridge_lock:
+        existing = _credentials_pool.get(email, {})
         _credentials_pool[email] = {
             "email": email,
-            "cookie": cookie,
-            "access_token": access_token,
-            "tier": "MANUAL",
-            "credit": None,
+            "cookie": cookie or existing.get("cookie", ""),
+            "access_token": access_token or existing.get("access_token", ""),
+            "tier": existing.get("tier", "MANUAL"),
+            "credit": credits if credits is not None else existing.get("credit"),
             "pushed_at": datetime.now(timezone.utc).isoformat(),
             "manual": True,
         }
+
+
+def set_account_credits(email: str, credits: int) -> None:
+    """Cập nhật số dư credits trực tiếp cho tài khoản."""
+    with _bridge_lock:
+        if email in _credentials_pool:
+            _credentials_pool[email]["credit"] = credits
+            _credentials_pool[email]["last_updated"] = datetime.now(timezone.utc).isoformat()
+        else:
+            _credentials_pool[email] = {
+                "email": email,
+                "cookie": "",
+                "access_token": "",
+                "tier": "PRO",
+                "credit": credits,
+                "pushed_at": datetime.now(timezone.utc).isoformat(),
+            }
 
 
 

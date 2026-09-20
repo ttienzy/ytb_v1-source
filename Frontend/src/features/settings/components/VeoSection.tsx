@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Edit3,
   Clapperboard,
   Coins,
   ExternalLink,
@@ -35,6 +36,7 @@ export function VeoSection() {
   const [manualEmail, setManualEmail] = useState('')
   const [manualCookie, setManualCookie] = useState('')
   const [manualToken, setManualToken] = useState('')
+  const [manualCredits, setManualCredits] = useState('')
   const [manualSaving, setManualSaving] = useState(false)
 
   const loadStatus = useCallback(async () => {
@@ -79,32 +81,52 @@ export function VeoSection() {
   // Lưu credentials thủ công
   async function handleSaveManual(e: React.FormEvent) {
     e.preventDefault()
-    if (!manualEmail.trim() || !manualCookie.trim()) {
-      setError('Vui lòng nhập Email và Cookie.')
+    if (!manualEmail.trim()) {
+      setError('Vui lòng nhập Email tài khoản Google.')
+      return
+    }
+    if (!manualCookie.trim() && !manualCredits.trim()) {
+      setError('Vui lòng nhập Cookie hoặc Số dư Credits cần đồng bộ.')
       return
     }
     setManualSaving(true)
     setMessage('')
     setError('')
     try {
-      const res = await fetch(`${API_URL}/api/veo/manual-credentials`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: manualEmail.trim(),
-          cookie: manualCookie.trim(),
-          access_token: manualToken.trim(),
-        }),
-      })
-      if (!res.ok) throw new Error('Lưu thất bại')
-      const data = await res.json()
-      setMessage(data.message || 'Đã lưu thông tin xác thực.')
+      if (manualCredits.trim() && !manualCookie.trim()) {
+        const res = await fetch(`${API_URL}/api/veo/manual-credits`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: manualEmail.trim(),
+            credits: parseInt(manualCredits.trim(), 10),
+          }),
+        })
+        if (!res.ok) throw new Error('Cập nhật số dư thất bại')
+        const data = await res.json()
+        setMessage(data.message || 'Đã cập nhật số dư credits thành công.')
+      } else {
+        const res = await fetch(`${API_URL}/api/veo/manual-credentials`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: manualEmail.trim(),
+            cookie: manualCookie.trim(),
+            access_token: manualToken.trim(),
+            credits: manualCredits.trim() ? parseInt(manualCredits.trim(), 10) : undefined,
+          }),
+        })
+        if (!res.ok) throw new Error('Lưu thất bại')
+        const data = await res.json()
+        setMessage(data.message || 'Đã lưu thông tin xác thực.')
+      }
       setManualCookie('')
       setManualToken('')
+      setManualCredits('')
       setShowManualForm(false)
       await loadStatus()
     } catch (err: any) {
-      setError(err?.message || 'Không thể lưu credentials.')
+      setError(err?.message || 'Không thể lưu thông tin.')
     } finally {
       setManualSaving(false)
     }
@@ -365,8 +387,30 @@ export function VeoSection() {
                         border: '1px solid #fef08a',
                       }}
                     >
-                      <div style={{ fontSize: 9.5, color: '#854d0e', textTransform: 'uppercase', fontWeight: 600 }}>
-                        Credits khả dụng
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                        <div style={{ fontSize: 9.5, color: '#854d0e', textTransform: 'uppercase', fontWeight: 600 }}>
+                          Credits khả dụng
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManualEmail(acc.email)
+                            setManualCredits(String(acc.credits || ''))
+                            setShowManualForm(true)
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#0284c7',
+                            cursor: 'pointer',
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                          title="Sửa số dư credits thủ công"
+                        >
+                          <Edit3 size={10} />
+                        </button>
                       </div>
                       <div style={{ fontSize: 15, fontWeight: 700, color: '#a16207', lineHeight: 1.2 }}>
                         {acc.credits != null ? acc.credits : '—'}
@@ -511,6 +555,20 @@ export function VeoSection() {
                       fontFamily: 'monospace',
                       resize: 'vertical',
                     }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 4 }}>
+                    Số dư Credits thực tế (Tùy chọn — ví dụ 730)
+                  </label>
+                  <input
+                    type="number"
+                    className="mailtm-input"
+                    value={manualCredits}
+                    onChange={(e) => setManualCredits(e.target.value)}
+                    placeholder="730"
+                    style={{ width: '100%', height: 32, fontSize: 12 }}
                   />
                 </div>
 

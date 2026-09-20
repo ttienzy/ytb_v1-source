@@ -180,7 +180,8 @@ export async function uploadImage(
 export async function uploadVideoReference(
   file: File,
   flowProjectId: string,
-): Promise<{ ok: boolean; media_id: string; project_id: string; filename: string }> {
+  options?: { forceFresh?: boolean },
+): Promise<{ ok: boolean; media_id: string; project_id: string; filename: string; cached?: boolean }> {
   const bytes = new Uint8Array(await file.arrayBuffer())
   let binary = ''
   const chunkSize = 0x8000
@@ -196,6 +197,7 @@ export async function uploadVideoReference(
       video_base64: btoa(binary),
       video_mime: file.type || 'video/mp4',
       video_filename: file.name,
+      force_fresh: options?.forceFresh === true,
     }),
   })
   if (!resp.ok) {

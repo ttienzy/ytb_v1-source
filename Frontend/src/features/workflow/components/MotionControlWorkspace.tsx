@@ -36,7 +36,8 @@ import { MotionPromptPreviewNode } from '../nodes/motion/MotionPromptPreviewNode
 import { MotionOutputNode } from '../nodes/motion/MotionOutputNode'
 
 // Services & Types
-import { buildStructuredPrompt } from '../services/motionPromptBuilder'
+import { buildStructuredPrompt, DEFAULT_MOTION_CREATIVE_DIRECTION } from '../services/motionPromptBuilder'
+import { fetchMotionDefaultPrompt } from '../services/workflowApi'
 import { findMotionProfile, getMotionTrimDuration, getVideoEditProfiles } from '../services/motionProfiles'
 import { motionRunErrorFromJob, motionRunErrorFromUnknown } from '../services/motionRunError'
 import type {
@@ -50,20 +51,27 @@ import {
   getBridgeStatus,
   getActiveProject,
   getCapabilities,
+  createProject,
   uploadImage,
   uploadVideoReference,
   submitJob,
   getJobStatus,
   getVideoStreamUrl,
 } from '../../veo-studio/services/veoApi'
-import type { VeoCapabilityProfile } from '../../veo-studio/types'
+import type { VeoCapabilityProfile, VeoProject, VeoImageItem } from '../../veo-studio/types'
+import { API_URL } from '../../../shared/constants'
+import type { ExportedVideoItem, AssetRef } from '../contracts'
 import { MotionInspectorPanel } from './MotionInspectorPanel'
+import { VeoImagePickerModal } from './VeoImagePickerModal'
+import { VeoVideoPickerModal } from './VeoVideoPickerModal'
 
 interface MotionControlWorkspaceProps {
-  activeProjectId?: string | null
-  activeFlowProjectId?: string | null
+  projects?: VeoProject[]
+  activeProject?: VeoProject | null
+  onSelectProject?: (projectId: string) => Promise<void> | void
+  onProjectCreated?: (project: VeoProject) => Promise<void> | void
   onOpenLibrary?: () => void
-  onOpenPreviewModal?: (videoUrl: string, title?: string, prompt?: string) => void
+  onOpenPreviewModal?: (videoUrl: string, title?: string, prompt?: string, referenceVideoUrl?: string | null) => void
 }
 
 // Node types mapping for React Flow
@@ -79,8 +87,10 @@ const edgeTypes = {
 }
 
 export function MotionControlWorkspace({
-  activeProjectId,
-  activeFlowProjectId,
+  projects = [],
+  activeProject: selectedProject,
+  onSelectProject,
+  onProjectCreated,
   onOpenLibrary,
   onOpenPreviewModal,
 }: MotionControlWorkspaceProps) {
@@ -92,6 +102,8 @@ export function MotionControlWorkspace({
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null)
   const [runError, setRunError] = useState<MotionRunError | null>(null)
+  // State update không đồng bộ; ref này chặn double-click ngay trong cùng tick.
+  const runLockRef = useRef(false)
 
   const showToast = useCallback((msg: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -137,14 +149,7 @@ export function MotionControlWorkspace({
   // -------------------------------------------------------------
   // 2. Creative Direction State (Director's Brief)
   // -------------------------------------------------------------
-  const [creativeDirection, setCreativeDirection] = useState<MotionCreativeDirection>({
-    creativeBrief: '',
-    subjectAction: '',
-    cameraMovement: '',
-    sceneAtmosphere: '',
-    styleDirection: '',
-    negativePrompt: '',
-  })
+  const [creativeDirection, setCreativeDirection] = useState<MotionCreativeDirection>(DEFAULT_MOTION_CREATIVE_DIRECTION)
 
   // -------------------------------------------------------------
   // 3. Output Format Config
@@ -154,15 +159,22 @@ export function MotionControlWorkspace({
     durationSeconds: 10,
     resolution: '360p',
     numOutputs: 1,
+    projectMode: 'new_per_run',
+    projectNamePrefix: 'Motion Control',
+    freshAssets: true,
+    showReferenceComparison: true,
   })
   const [videoEditProfiles, setVideoEditProfiles] = useState<VeoCapabilityProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [profileError, setProfileError] = useState<string | null>(null)
   const [bridgeConnected, setBridgeConnected] = useState<boolean | null>(null)
+  const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [lastRunProject, setLastRunProject] = useState<VeoProject | null>(null)
 
   const applyProfile = useCallback((profile: VeoCapabilityProfile) => {
     setSelectedProfileId(profile.id)
     setOutputConfig((previous) => ({
+      ...previous,
       profileId: profile.id,
       modelDisplayName: profile.model_display_name,
       aspectRatio: profile.aspect_ratio,
@@ -172,6 +184,20 @@ export function MotionControlWorkspace({
       creditCost: profile.credit_cost,
     }))
   }, [])
+
+  const handleCreateMotionProject = useCallback(async (name: string) => {
+    const cleanName = name.trim()
+    if (!cleanName) throw new Error('Tên Flow project không được để trống.')
+    setIsCreatingProject(true)
+    try {
+      const created = await createProject(cleanName)
+      setLastRunProject(created)
+      await onProjectCreated?.(created)
+      return created
+    } finally {
+      setIsCreatingProject(false)
+    }
+  }, [onProjectCreated])
 
   useEffect(() => {
     let cancelled = false
@@ -202,6 +228,24 @@ export function MotionControlWorkspace({
       } else {
         setBridgeConnected(false)
       }
+
+      // Tự động đồng bộ prompt mặc định từ file Backend nếu có
+      try {
+        const defaultPrompt = await fetchMotionDefaultPrompt()
+        if (!cancelled && defaultPrompt && defaultPrompt.trim()) {
+          setCreativeDirection((prev) => {
+            if (!prev.creativeBrief || prev.creativeBrief === DEFAULT_MOTION_CREATIVE_DIRECTION.creativeBrief) {
+              return {
+                ...prev,
+                creativeBrief: defaultPrompt.trim(),
+              }
+            }
+            return prev
+          })
+        }
+      } catch (err) {
+        console.debug('Không thể nạp prompt mặc định từ backend:', err)
+      }
     }
 
     void loadBackendState()
@@ -209,6 +253,25 @@ export function MotionControlWorkspace({
       cancelled = true
     }
   }, [applyProfile])
+
+  const handleResetDefaultPrompt = useCallback(async () => {
+    try {
+      const backendPrompt = await fetchMotionDefaultPrompt()
+      if (backendPrompt && backendPrompt.trim()) {
+        setCreativeDirection({
+          ...DEFAULT_MOTION_CREATIVE_DIRECTION,
+          creativeBrief: backendPrompt.trim(),
+        })
+      } else {
+        setCreativeDirection(DEFAULT_MOTION_CREATIVE_DIRECTION)
+      }
+    } catch {
+      setCreativeDirection(DEFAULT_MOTION_CREATIVE_DIRECTION)
+    }
+    setIsCustomPrompt(false)
+    setCustomPromptText('')
+    showToast('Đã khôi phục prompt Motion Control mặc định an toàn.')
+  }, [showToast])
 
   const selectedProfile = useMemo(
     () => videoEditProfiles.find((profile) => profile.id === selectedProfileId) || null,
@@ -262,6 +325,18 @@ export function MotionControlWorkspace({
 
   const activePrompt = isCustomPrompt ? customPromptText : structuredPrompt.fullPrompt
 
+  const referencePromptConflict = useMemo(() => {
+    if (!characterAsset.filled || !activePrompt.trim()) return null
+    const fileHint = characterAsset.fileName.toLowerCase()
+    const promptText = activePrompt.toLowerCase()
+    const animalHint = /(^|[-_ .])(cat|pig|dog|horse|bird|rabbit|m[eè]o|heo|l[oợ]n|ch[oó]|ng[uườ]i?o)([-_ .]|$)/i.test(fileHint)
+    const humanPrompt = /\b(woman|man|girl|boy|person|human|people|ph[uụ] n[uữ]|ng[uườ]i)\b/i.test(promptText)
+    if (animalHint && humanPrompt) {
+      return `Tên ảnh tham chiếu "${characterAsset.fileName}" có dấu hiệu là động vật nhưng prompt lại mô tả người. Flow có thể trả status 4; hãy chọn đúng ảnh hoặc sửa prompt.`
+    }
+    return null
+  }, [activePrompt, characterAsset.fileName, characterAsset.filled])
+
   // Readiness evaluation
   const missingReasons = useMemo(() => {
     const reasons: string[] = []
@@ -271,8 +346,12 @@ export function MotionControlWorkspace({
     if (!activePrompt.trim()) {
       reasons.push('Thiếu ý tưởng chính (Creative Brief)')
     }
+    if (referencePromptConflict) reasons.push(referencePromptConflict)
     if (!selectedProfile) {
       reasons.push(profileError || 'Chưa có profile video_edit từ Backend')
+    }
+    if ((outputConfig.projectMode || 'new_per_run') === 'selected' && !selectedProject) {
+      reasons.push('Chưa chọn Flow project cho chế độ dùng project hiện có')
     }
     const trimStart = motionAsset.trimStartSec ?? 0
     const trimEnd = motionAsset.trimEndSec ?? outputConfig.durationSeconds
@@ -280,7 +359,7 @@ export function MotionControlWorkspace({
       reasons.push('Đoạn video tham chiếu phải dài 4–10 giây và dùng mốc giây nguyên')
     }
     return reasons
-  }, [activePrompt, motionAsset, outputConfig.durationSeconds, profileError, selectedProfile])
+  }, [activePrompt, motionAsset, outputConfig.durationSeconds, outputConfig.projectMode, profileError, referencePromptConflict, selectedProfile, selectedProject])
 
   const isReadyToRun = missingReasons.length === 0
 
@@ -313,9 +392,30 @@ export function MotionControlWorkspace({
       })
       showToast(`Đã nạp ảnh nhân vật: ${file.name}`)
     } else if (role === 'motion') {
+      const tempVideo = document.createElement('video')
+      tempVideo.preload = 'metadata'
+      tempVideo.src = previewUrl
+      tempVideo.onloadedmetadata = () => {
+        const dur = tempVideo.duration
+        if (Number.isFinite(dur) && dur > 0) {
+          if (dur < 4) {
+            showToast(`Cảnh báo: Video chỉ dài ${dur.toFixed(1)}s (yêu cầu tối thiểu 4s).`)
+          }
+          const safeEnd = Math.min(10, Math.max(4, Math.floor(dur)))
+          setMotionAsset((prev) => ({
+            ...prev,
+            trimStartSec: 0,
+            trimEndSec: safeEnd,
+          }))
+          setOutputConfig((prev) => ({
+            ...prev,
+            durationSeconds: safeEnd,
+          }))
+        }
+      }
       setMotionAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
-        return { ...prev, filled: true, previewUrl, fileName: file.name, file, mediaId: undefined }
+        return { ...prev, filled: true, previewUrl, fileName: file.name, file, mediaId: undefined, mediaProjectId: undefined }
       })
       showToast(`Đã nạp video tham chiếu: ${file.name}`)
     } else if (role === 'scene') {
@@ -336,7 +436,7 @@ export function MotionControlWorkspace({
     } else if (role === 'motion') {
       setMotionAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
-        return { ...prev, filled: false, previewUrl: null, fileName: '', file: undefined, mediaId: undefined }
+        return { ...prev, filled: false, previewUrl: null, fileName: '', file: undefined, mediaId: undefined, mediaProjectId: undefined }
       })
     } else if (role === 'scene') {
       setSceneAsset((prev) => {
@@ -361,6 +461,118 @@ export function MotionControlWorkspace({
     }
     else if (role === 'scene') setSceneAsset((prev) => ({ ...prev, ...updates }))
   }, [])
+
+  // -------------------------------------------------------------
+  // Library Pickers State & Handlers
+  // -------------------------------------------------------------
+  const [imagePickerRole, setImagePickerRole] = useState<'character' | 'scene' | null>(null)
+  const [isVideoPickerOpen, setIsVideoPickerOpen] = useState(false)
+
+  const handleOpenLibrary = useCallback((role: 'character' | 'motion' | 'scene') => {
+    if (role === 'character' || role === 'scene') {
+      setImagePickerRole(role)
+    } else if (role === 'motion') {
+      setIsVideoPickerOpen(true)
+    }
+  }, [])
+
+  const handleSelectImageFromLibrary = useCallback(async (
+    dataUrl: string,
+    assetRef: AssetRef,
+    item: VeoImageItem
+  ) => {
+    const role = imagePickerRole
+    if (!role) return
+    const rawUrl = dataUrl || assetRef.previewUrl || assetRef.dataUrl || ''
+    const previewUrl = rawUrl.startsWith('http') || rawUrl.startsWith('data:')
+      ? rawUrl
+      : `${API_URL}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`
+
+    let file: File | undefined = undefined
+    try {
+      const res = await fetch(previewUrl)
+      if (res.ok) {
+        const blob = await res.blob()
+        const ext = blob.type.includes('png') ? '.png' : '.jpg'
+        const filename = assetRef.fileName || `${item.id}${ext}`
+        file = new File([blob], filename, { type: blob.type || 'image/jpeg' })
+      }
+    } catch (err) {
+      console.warn('Không thể tạo File từ ảnh thư viện:', err)
+    }
+
+    if (role === 'character') {
+      setCharacterAsset((prev) => {
+        if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
+        return {
+          ...prev,
+          filled: true,
+          previewUrl,
+          fileName: assetRef.fileName || `${item.id}.jpg`,
+          backendPath: assetRef.backendPath,
+          file,
+        }
+      })
+      showToast(`Đã nạp ảnh nhân vật từ Thư viện Veo`)
+    } else if (role === 'scene') {
+      setSceneAsset((prev) => {
+        if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
+        return {
+          ...prev,
+          filled: true,
+          previewUrl,
+          fileName: assetRef.fileName || `${item.id}.jpg`,
+          backendPath: assetRef.backendPath,
+          file,
+        }
+      })
+      showToast(`Đã nạp ảnh bối cảnh từ Thư viện Veo`)
+    }
+  }, [imagePickerRole, showToast])
+
+  const handleSelectVideoFromLibrary = useCallback(async (clip: ExportedVideoItem) => {
+    showToast(`Đang nạp video tham chiếu: ${clip.title || clip.filename}...`)
+    let file: File | undefined = undefined
+    try {
+      const rawUrl = clip.videoUrl || ''
+      const streamUrl = rawUrl.startsWith('http') || rawUrl.startsWith('data:')
+        ? rawUrl
+        : `${API_URL}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`
+      const res = await fetch(streamUrl)
+      if (res.ok) {
+        const blob = await res.blob()
+        file = new File([blob], clip.filename, { type: blob.type || 'video/mp4' })
+      }
+    } catch (err) {
+      console.warn('Không thể tạo File từ video thư viện:', err)
+    }
+
+    const duration = clip.durationSec || 10
+    const trimEnd = Math.min(10, Math.max(4, Math.round(duration)))
+
+    setMotionAsset((prev) => {
+      if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
+      return {
+        ...prev,
+        filled: true,
+        previewUrl: clip.videoUrl,
+        fileName: clip.filename,
+        file,
+        mediaId: undefined,
+        mediaProjectId: undefined,
+        trimStartSec: 0,
+        trimEndSec: trimEnd,
+      }
+    })
+
+    setOutputConfig((config) => ({
+      ...config,
+      durationSeconds: trimEnd,
+      aspectRatio: clip.aspectRatio === '16:9' ? '16:9' : '9:16',
+    }))
+
+    showToast(`Đã nạp video chuyển động từ Thư viện: ${clip.filename}`)
+  }, [showToast])
 
   // -------------------------------------------------------------
   // -------------------------------------------------------------
@@ -464,6 +676,7 @@ export function MotionControlWorkspace({
               setIsInspectorOpen(true)
             },
             onUploadFile: handleUploadFile,
+            onOpenLibrary: handleOpenLibrary,
           },
         }
       }
@@ -504,14 +717,24 @@ export function MotionControlWorkspace({
           ...node,
           data: {
             config: outputConfig,
+            projectLabel: (outputConfig.projectMode || 'new_per_run') === 'new_per_run'
+              ? 'Project mới / lượt'
+              : (selectedProject?.name || 'Chưa chọn project'),
             isReady: isReadyToRun,
             missingReasons,
             isRunning,
             runningStageText,
             runError,
             resultVideoUrl,
+            referenceVideoUrl: motionAsset.previewUrl,
+            showReferenceComparison: outputConfig.showReferenceComparison !== false,
             onRun: () => handleRunWorkflow(),
-            onOpenPreviewModal: (url: string) => onOpenPreviewModal?.(url, workflowName, activePrompt),
+            onOpenPreviewModal: (url: string) => onOpenPreviewModal?.(
+              url,
+              workflowName,
+              activePrompt,
+              outputConfig.showReferenceComparison !== false ? motionAsset.previewUrl : null,
+            ),
             onOpenInspector: () => {
               setSelectedNodeType('output')
               setIsInspectorOpen(true)
@@ -529,6 +752,7 @@ export function MotionControlWorkspace({
     activeRole,
     isRunning,
     handleUploadFile,
+    handleOpenLibrary,
     creativeDirection,
     activePrompt,
     structuredPrompt,
@@ -539,6 +763,7 @@ export function MotionControlWorkspace({
     runError,
     resultVideoUrl,
     workflowName,
+    selectedProject,
     onOpenPreviewModal,
   ])
 
@@ -607,12 +832,16 @@ export function MotionControlWorkspace({
   // 10. Real Veo Pipeline Runner (No setTimeout Mock!)
   // -------------------------------------------------------------
   const handleRunWorkflow = async () => {
-    if (isRunning) return
+    if (isRunning || runLockRef.current) return
     if (!isReadyToRun) {
       showToast(`Chưa thể chạy: ${missingReasons[0]}`)
       return
     }
 
+    runLockRef.current = true
+    const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setIsRunning(true)
     setRunningStageText('Đang kiểm tra kết nối Veo Flow Studio...')
     setResultVideoUrl(null)
@@ -630,11 +859,20 @@ export function MotionControlWorkspace({
       }
 
       currentStage = 'project'
-      const activeProject = activeProjectId && activeFlowProjectId ? null : await getActiveProject()
-      const projectId = activeProjectId || activeProject?.id
-      const flowProjectId = activeFlowProjectId || activeProject?.flow_project_id
+      let runtimeProject: VeoProject | null = null
+      if ((outputConfig.projectMode || 'new_per_run') === 'new_per_run') {
+        setRunningStageText('Đang tạo Flow project mới, độc lập cho lượt render này...')
+        const prefix = outputConfig.projectNamePrefix?.trim() || workflowName.trim() || 'Motion Control'
+        const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19)
+        runtimeProject = await handleCreateMotionProject(`${prefix} · ${timestamp}`)
+      } else {
+        runtimeProject = selectedProject || await getActiveProject()
+      }
+
+      const projectId = runtimeProject?.id
+      const flowProjectId = runtimeProject?.flow_project_id
       if (!projectId) {
-        throw new Error('Chưa có Flow project đang hoạt động. Hãy chọn hoặc tạo project trong Veo Studio.')
+        throw new Error('Chưa có Flow project đang hoạt động. Hãy chọn project hoặc dùng chế độ tạo project mới mỗi lượt.')
       }
       if (!flowProjectId) {
         throw new Error('Project đang chọn chưa có Google Flow project id để upload video.')
@@ -643,16 +881,18 @@ export function MotionControlWorkspace({
         throw new Error(profileError || 'Backend chưa có profile video_edit phù hợp.')
       }
 
-      let motionMediaId = motionAsset.mediaId
-      if (!motionMediaId && motionAsset.file) {
+      const forceFreshAssets = outputConfig.freshAssets !== false
+      const mediaBelongsToProject = motionAsset.mediaProjectId === flowProjectId
+      let motionMediaId = mediaBelongsToProject ? motionAsset.mediaId : undefined
+      if (motionAsset.file && (forceFreshAssets || !motionMediaId)) {
         currentStage = 'reference_upload'
-        setRunningStageText(`Đang tải video mẫu (${motionAsset.fileName}) lên Veo Studio...`)
-        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId)
+        setRunningStageText(`Đang tải mới video mẫu (${motionAsset.fileName}) vào project của lượt này...`)
+        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: forceFreshAssets })
         motionMediaId = uploadRes.media_id
-        setMotionAsset((prev) => ({ ...prev, mediaId: uploadRes.media_id }))
+        setMotionAsset((prev) => ({ ...prev, mediaId: uploadRes.media_id, mediaProjectId: flowProjectId }))
       }
       if (!motionMediaId) {
-        throw new Error('Video tham chiếu chưa được upload thành công.')
+        throw new Error('Video tham chiếu chưa có file gốc để upload vào Flow project mới. Hãy chọn lại video local.')
       }
 
       const ingredientImagePaths: string[] = []
@@ -691,8 +931,13 @@ export function MotionControlWorkspace({
         reference_video_id: motionMediaId,
         reference_video_start_seconds: motionAsset.trimStartSec ?? 0,
         reference_video_end_seconds: motionAsset.trimEndSec ?? (motionAsset.trimStartSec ?? 0) + outputConfig.durationSeconds,
+        force_fresh_assets: forceFreshAssets,
+        idempotency_key: idempotencyKey,
       })
       submittedJobId = jobRes.job_id
+      if (jobRes.deduplicated) {
+        showToast(`Đã dùng lại job ${jobRes.job_id}; không tạo render trùng.`)
+      }
 
       currentStage = 'generation'
       setRunningStageText('Google Flow đang xử lý video Motion Control...')
@@ -725,7 +970,12 @@ export function MotionControlWorkspace({
 
       const streamUrl = getVideoStreamUrl(outputFile)
       setResultVideoUrl(streamUrl)
-      onOpenPreviewModal?.(streamUrl, workflowName, activePrompt)
+      onOpenPreviewModal?.(
+        streamUrl,
+        workflowName,
+        activePrompt,
+        outputConfig.showReferenceComparison !== false ? motionAsset.previewUrl : null,
+      )
       showToast('Video Motion Control đã render thành công từ Google Flow.')
     } catch (err: unknown) {
       console.error('Error in handleRunWorkflow:', err)
@@ -735,6 +985,7 @@ export function MotionControlWorkspace({
     } finally {
       setIsRunning(false)
       setRunningStageText('')
+      runLockRef.current = false
     }
   }
 
@@ -991,8 +1242,10 @@ export function MotionControlWorkspace({
             onUploadFile={handleUploadFile}
             onClearAsset={handleClearAsset}
             onUpdateAssetMeta={handleUpdateAssetMeta}
+            onOpenLibrary={handleOpenLibrary}
             creative={creativeDirection}
             onUpdateCreative={(updates) => setCreativeDirection((prev) => ({ ...prev, ...updates }))}
+            onResetDefaultPrompt={handleResetDefaultPrompt}
             structuredPrompt={structuredPrompt}
             isCustomPrompt={isCustomPrompt}
             customPromptText={customPromptText}
@@ -1005,6 +1258,17 @@ export function MotionControlWorkspace({
               setCustomPromptText('')
             }}
             outputConfig={outputConfig}
+            projects={projects}
+            activeProject={selectedProject || null}
+            lastRunProject={lastRunProject}
+            isCreatingProject={isCreatingProject}
+            onUpdateProjectConfig={(updates) => setOutputConfig((previous) => ({ ...previous, ...updates }))}
+            onSelectProject={onSelectProject}
+            onCreateProject={async (name) => {
+              const created = await handleCreateMotionProject(name)
+              setOutputConfig((previous) => ({ ...previous, projectMode: 'selected' }))
+              return created
+            }}
             profiles={videoEditProfiles}
             selectedProfileId={selectedProfileId}
             onSelectAspectRatio={handleSelectAspectRatio}
@@ -1017,6 +1281,30 @@ export function MotionControlWorkspace({
             runError={runError}
             onRunWorkflow={handleRunWorkflow}
           />
+
+          {/* Modal Chọn Ảnh từ Thư Viện Veo Studio (Nhân vật / Bối cảnh) */}
+          {Boolean(imagePickerRole) && (
+            <VeoImagePickerModal
+              isOpen={Boolean(imagePickerRole)}
+              onClose={() => setImagePickerRole(null)}
+              targetLabel={imagePickerRole === 'character' ? 'Ảnh Nhân Vật' : 'Ảnh Bối Cảnh'}
+              kind={imagePickerRole === 'character' ? 'model' : 'scene'}
+              onSelect={(dataUrl, assetRef, item) => {
+                handleSelectImageFromLibrary(dataUrl, assetRef, item)
+              }}
+            />
+          )}
+
+          {/* Modal Chọn Video từ Thư Viện Veo Studio / Exports */}
+          {isVideoPickerOpen && (
+            <VeoVideoPickerModal
+              isOpen={isVideoPickerOpen}
+              onClose={() => setIsVideoPickerOpen(false)}
+              title="Chọn Video Tham Chiếu (Motion Reference)"
+              subtitle="Chọn 1 video từ thư viện Veo Studio hoặc workflow để làm mẫu động tác và nhịp máy"
+              onSelectClip={handleSelectVideoFromLibrary}
+            />
+          )}
         </div>
       </div>
 

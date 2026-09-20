@@ -467,6 +467,24 @@ def get_default_gpt_prompt() -> str:
     )
 
 
+MOTION_PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "motion_control_prompt.txt"
+
+
+def get_default_motion_prompt() -> str:
+    """Đọc prompt mẫu Motion Control từ Backend/prompts/workflow/motion_control_prompt.txt."""
+    if MOTION_PROMPT_FILE.exists():
+        try:
+            return MOTION_PROMPT_FILE.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            logger.error(f"Không thể đọc file prompt {MOTION_PROMPT_FILE}: {e}")
+    return (
+        "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. "
+        "Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout. "
+        "Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video. "
+        "Natural biomechanics, fluid body movement, photorealistic cinematic lighting."
+    )
+
+
 PROMPT_PRESETS_FILE = DATA_DIR / "workflow_prompt_presets.json"
 
 
