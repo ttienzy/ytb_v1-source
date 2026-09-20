@@ -37,8 +37,19 @@ import { MotionOutputNode } from '../nodes/motion/MotionOutputNode'
 
 // Services & Types
 import { buildStructuredPrompt, DEFAULT_MOTION_CREATIVE_DIRECTION } from '../services/motionPromptBuilder'
-import { fetchMotionDefaultPrompt } from '../services/workflowApi'
-import { findMotionProfile, getMotionTrimDuration, getVideoEditProfiles } from '../services/motionProfiles'
+import { fetchMotionDefaultPrompt, fetchMotionPresets } from '../services/workflowApi'
+import {
+  findMotionProfile,
+  getMotionTrimDuration,
+  getVideoEditProfiles,
+  resolveBestProfile,
+} from '../services/motionProfiles'
+import {
+  loadStoredMotionConfig,
+  saveStoredMotionConfig,
+  loadStoredCreativeDirection,
+  saveStoredCreativeDirection,
+} from '../services/motionStorage'
 import { motionRunErrorFromJob, motionRunErrorFromUnknown } from '../services/motionRunError'
 import type {
   MotionReferenceAsset,
@@ -46,6 +57,8 @@ import type {
   MotionOutputConfig,
   MotionRunError,
   MotionRunStage,
+  MotionPresetItem,
+  MotionVariantSlot,
 } from '../types'
 import {
   getBridgeStatus,
@@ -101,6 +114,9 @@ export function MotionControlWorkspace({
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null)
+  const [resultVideoUrls, setResultVideoUrls] = useState<string[]>([])
+  const [activeVariantIndex, setActiveVariantIndex] = useState<number>(0)
+  const [variantSlots, setVariantSlots] = useState<MotionVariantSlot[]>([])
   const [runError, setRunError] = useState<MotionRunError | null>(null)
   // State update không đồng bộ; ref này chặn double-click ngay trong cùng tick.
   const runLockRef = useRef(false)
@@ -149,21 +165,13 @@ export function MotionControlWorkspace({
   // -------------------------------------------------------------
   // 2. Creative Direction State (Director's Brief)
   // -------------------------------------------------------------
-  const [creativeDirection, setCreativeDirection] = useState<MotionCreativeDirection>(DEFAULT_MOTION_CREATIVE_DIRECTION)
+  const [creativeDirection, setCreativeDirection] = useState<MotionCreativeDirection>(() => loadStoredCreativeDirection())
 
   // -------------------------------------------------------------
   // 3. Output Format Config
   // -------------------------------------------------------------
-  const [outputConfig, setOutputConfig] = useState<MotionOutputConfig>({
-    aspectRatio: '9:16',
-    durationSeconds: 10,
-    resolution: '360p',
-    numOutputs: 1,
-    projectMode: 'new_per_run',
-    projectNamePrefix: 'Motion Control',
-    freshAssets: true,
-    showReferenceComparison: true,
-  })
+  const [outputConfig, setOutputConfig] = useState<MotionOutputConfig>(() => loadStoredMotionConfig())
+  const [motionPresets, setMotionPresets] = useState<MotionPresetItem[]>([])
   const [videoEditProfiles, setVideoEditProfiles] = useState<VeoCapabilityProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [profileError, setProfileError] = useState<string | null>(null)
@@ -173,17 +181,21 @@ export function MotionControlWorkspace({
 
   const applyProfile = useCallback((profile: VeoCapabilityProfile) => {
     setSelectedProfileId(profile.id)
-    setOutputConfig((previous) => ({
-      ...previous,
-      profileId: profile.id,
-      modelDisplayName: profile.model_display_name,
-      aspectRatio: profile.aspect_ratio,
-      durationSeconds: previous.durationSeconds,
-      resolution: profile.resolution as MotionOutputConfig['resolution'],
-      numOutputs: profile.num_outputs,
-      creditCost: profile.credit_cost,
-    }))
-  }, [])
+    setOutputConfig((previous) => {
+      const next = {
+        ...previous,
+        profileId: profile.id,
+        modelDisplayName: profile.model_display_name,
+        aspectRatio: profile.aspect_ratio,
+        durationSeconds: previous.durationSeconds,
+        resolution: profile.resolution as MotionOutputConfig['resolution'],
+        numOutputs: profile.num_outputs,
+        creditCost: profile.credit_cost,
+      }
+      saveStoredMotionConfig(next, creativeDirection)
+      return next
+    })
+  }, [creativeDirection])
 
   const handleCreateMotionProject = useCallback(async (name: string) => {
     const cleanName = name.trim()
@@ -212,7 +224,8 @@ export function MotionControlWorkspace({
       if (capabilitiesResult.status === 'fulfilled') {
         const profiles = getVideoEditProfiles(capabilitiesResult.value.profiles)
         setVideoEditProfiles(profiles)
-        const preferredProfile = profiles.find((profile) => profile.runtime_verified) || profiles[0]
+        const saved = loadStoredMotionConfig()
+        const preferredProfile = resolveBestProfile(profiles, saved.aspectRatio, saved.resolution)
         if (preferredProfile) {
           applyProfile(preferredProfile)
           setProfileError(null)
@@ -228,6 +241,15 @@ export function MotionControlWorkspace({
       } else {
         setBridgeConnected(false)
       }
+
+      // Tải danh mục mẫu phong cách chuyển động từ Backend
+      fetchMotionPresets()
+        .then((presets) => {
+          if (!cancelled && presets && presets.length > 0) {
+            setMotionPresets(presets)
+          }
+        })
+        .catch((err) => console.debug('Cannot load motion presets:', err))
 
       // Tự động đồng bộ prompt mặc định từ file Backend nếu có
       try {
@@ -299,12 +321,58 @@ export function MotionControlWorkspace({
   }, [outputConfig.aspectRatio, selectProfileForSettings])
 
   const handleSelectDuration = useCallback((durationSeconds: number) => {
-    setOutputConfig((previous) => ({ ...previous, durationSeconds }))
+    setOutputConfig((previous) => {
+      const next = { ...previous, durationSeconds }
+      saveStoredMotionConfig(next, creativeDirection)
+      return next
+    })
     setMotionAsset((previous) => ({
       ...previous,
       trimEndSec: (previous.trimStartSec ?? 0) + durationSeconds,
     }))
-  }, [])
+  }, [creativeDirection])
+
+  const handleUpdateCreative = useCallback((updates: Partial<MotionCreativeDirection>) => {
+    setCreativeDirection((prev) => {
+      const next = { ...prev, ...updates }
+      saveStoredCreativeDirection(next, outputConfig)
+      return next
+    })
+  }, [outputConfig])
+
+  const handleUpdateProjectConfig = useCallback((updates: Partial<MotionOutputConfig>) => {
+    setOutputConfig((prev) => {
+      const next = { ...prev, ...updates }
+      saveStoredMotionConfig(next, creativeDirection)
+      return next
+    })
+  }, [creativeDirection])
+
+  const handleSelectPreset = useCallback((presetId: string) => {
+    const p = motionPresets.find((item) => item.id === presetId)
+    if (!p) return
+    setOutputConfig((prev) => {
+      const next = { ...prev, activePresetId: presetId }
+      saveStoredMotionConfig(next, creativeDirection)
+      return next
+    })
+    setCreativeDirection((prev) => {
+      const next = {
+        ...prev,
+        creativeBrief: p.creative_brief,
+        subjectAction: p.subject_action,
+        cameraMovement: p.camera_movement,
+        sceneAtmosphere: p.scene_atmosphere,
+        styleDirection: p.style_direction,
+        negativePrompt: p.negative_prompt,
+      }
+      saveStoredCreativeDirection(next, outputConfig)
+      return next
+    })
+    setIsCustomPrompt(false)
+    setCustomPromptText('')
+    showToast(`Đã áp dụng mẫu: ${p.name}`)
+  }, [motionPresets, outputConfig, creativeDirection, showToast])
 
   // -------------------------------------------------------------
   // 4. Inspector Drawer State
@@ -589,25 +657,25 @@ export function MotionControlWorkspace({
     {
       id: 'n-refs',
       type: 'motionRefGroup',
-      position: { x: 40, y: 100 },
+      position: { x: 40, y: 80 },
       data: {},
     },
     {
       id: 'n-creative',
       type: 'motionCreative',
-      position: { x: 420, y: 100 },
+      position: { x: 480, y: 80 },
       data: {},
     },
     {
       id: 'n-preview',
       type: 'motionPreview',
-      position: { x: 800, y: 100 },
+      position: { x: 860, y: 80 },
       data: {},
     },
     {
       id: 'n-output',
       type: 'motionOutput',
-      position: { x: 1190, y: 100 },
+      position: { x: 1250, y: 80 },
       data: {},
     },
   ])
@@ -677,6 +745,12 @@ export function MotionControlWorkspace({
             },
             onUploadFile: handleUploadFile,
             onOpenLibrary: handleOpenLibrary,
+            onRemoveAsset: handleClearAsset,
+            onPreviewMedia: (url: string, title?: string, isVideo?: boolean) => {
+              if (isVideo && onOpenPreviewModal) {
+                onOpenPreviewModal(url, title || 'Video Tham Chiếu')
+              }
+            },
           },
         }
       }
@@ -725,7 +799,12 @@ export function MotionControlWorkspace({
             isRunning,
             runningStageText,
             runError,
-            resultVideoUrl,
+            resultVideoUrl: resultVideoUrls[activeVariantIndex] || resultVideoUrl,
+            resultVideoUrls,
+            activeVariantIndex,
+            onSelectVariantIndex: (idx: number) => setActiveVariantIndex(idx),
+            variants: variantSlots,
+            onRetryVariant: (vIdx: number) => handleRetryVariant(vIdx),
             referenceVideoUrl: motionAsset.previewUrl,
             showReferenceComparison: outputConfig.showReferenceComparison !== false,
             onRun: () => handleRunWorkflow(),
@@ -762,6 +841,9 @@ export function MotionControlWorkspace({
     runningStageText,
     runError,
     resultVideoUrl,
+    resultVideoUrls,
+    activeVariantIndex,
+    variantSlots,
     workflowName,
     selectedProject,
     onOpenPreviewModal,
@@ -839,13 +921,24 @@ export function MotionControlWorkspace({
     }
 
     runLockRef.current = true
+    const requestedVariants = Math.min(4, Math.max(1, outputConfig.numOutputs || 1))
     const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setIsRunning(true)
     setRunningStageText('Đang kiểm tra kết nối Veo Flow Studio...')
     setResultVideoUrl(null)
+    setResultVideoUrls([])
+    setActiveVariantIndex(0)
     setRunError(null)
+
+    const initialSlots: MotionVariantSlot[] = Array.from({ length: requestedVariants }, (_, i) => ({
+      index: i + 1,
+      status: 'idle',
+      videoUrl: null,
+      error: null,
+    }))
+    setVariantSlots(initialSlots)
 
     let currentStage: MotionRunStage = 'connection'
     let submittedJobId: string | undefined
@@ -916,67 +1009,199 @@ export function MotionControlWorkspace({
       }
       if (scenePath) ingredientImagePaths.push(scenePath)
 
-      currentStage = 'submission'
-      setRunningStageText('Đang gửi job Motion Control thật tới Google Flow...')
-      const jobRes = await submitJob({
-        project_id: projectId,
-        prompt: activePrompt.trim(),
-        model_display_name: selectedProfile.model_display_name,
-        input_mode: 'video_edit',
-        aspect_ratio: selectedProfile.aspect_ratio,
-        duration_seconds: outputConfig.durationSeconds,
-        resolution: selectedProfile.resolution,
-        num_outputs: selectedProfile.num_outputs,
-        ingredient_image_paths: ingredientImagePaths,
-        reference_video_id: motionMediaId,
-        reference_video_start_seconds: motionAsset.trimStartSec ?? 0,
-        reference_video_end_seconds: motionAsset.trimEndSec ?? (motionAsset.trimStartSec ?? 0) + outputConfig.durationSeconds,
-        force_fresh_assets: forceFreshAssets,
-        idempotency_key: idempotencyKey,
-      })
-      submittedJobId = jobRes.job_id
-      if (jobRes.deduplicated) {
-        showToast(`Đã dùng lại job ${jobRes.job_id}; không tạo render trùng.`)
-      }
+      const finishedUrls: string[] = []
 
-      currentStage = 'generation'
-      setRunningStageText('Google Flow đang xử lý video Motion Control...')
-      let outputFile: string | null = null
-      for (let pollCount = 1; pollCount <= 120; pollCount += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 2500))
-        const status = await getJobStatus(jobRes.job_id)
-        if (!status) continue
+      for (let variantIdx = 1; variantIdx <= requestedVariants; variantIdx++) {
+        const currentSlotIndex = variantIdx - 1
+        currentStage = 'submission'
+        const stagePrefix = requestedVariants > 1 ? `[Biến thể ${variantIdx}/${requestedVariants}] ` : ''
+        setRunningStageText(`${stagePrefix}Đang gửi job Motion Control tới Google Flow...`)
 
-        setRunningStageText(status.current_step || `Google Flow: ${status.status} (${pollCount}/120)`)
-        if (status.status === 'captcha') currentStage = 'captcha'
-        else if (status.status === 'submitting') currentStage = 'submission'
-        else if (status.status === 'generating') currentStage = 'generation'
-        else if (status.status === 'downloading') currentStage = 'download'
-        if (status.status === 'error') {
-          const detailedError = motionRunErrorFromJob(status, currentStage)
-          setRunError(detailedError)
-          showToast(`${detailedError.title}: ${detailedError.message}`)
-          return
+        setVariantSlots((prev) => {
+          const next = [...prev]
+          if (next[currentSlotIndex]) {
+            next[currentSlotIndex] = {
+              ...next[currentSlotIndex],
+              status: 'submitting',
+              progressText: `${stagePrefix}Đang gửi job...`,
+            }
+          }
+          return next
+        })
+
+        const variantKey = requestedVariants > 1 ? `${idempotencyKey}-v${variantIdx}` : idempotencyKey
+        let jobRes
+        try {
+          jobRes = await submitJob({
+            project_id: projectId,
+            prompt: activePrompt.trim(),
+            model_display_name: selectedProfile.model_display_name,
+            input_mode: 'video_edit',
+            aspect_ratio: selectedProfile.aspect_ratio,
+            duration_seconds: outputConfig.durationSeconds,
+            resolution: selectedProfile.resolution,
+            num_outputs: 1,
+            ingredient_image_paths: ingredientImagePaths,
+            reference_video_id: motionMediaId,
+            reference_video_start_seconds: motionAsset.trimStartSec ?? 0,
+            reference_video_end_seconds: motionAsset.trimEndSec ?? (motionAsset.trimStartSec ?? 0) + outputConfig.durationSeconds,
+            force_fresh_assets: forceFreshAssets,
+            idempotency_key: variantKey,
+          })
+        } catch (submitErr) {
+          const detailedError = motionRunErrorFromUnknown(submitErr, 'submission')
+          setVariantSlots((prev) => {
+            const next = [...prev]
+            if (next[currentSlotIndex]) {
+              next[currentSlotIndex] = {
+                ...next[currentSlotIndex],
+                status: 'error',
+                error: detailedError,
+              }
+            }
+            return next
+          })
+          showToast(`Biến thể #${variantIdx} không thể gửi job: ${detailedError.title}`)
+          continue
         }
-        if (status.status === 'done') {
-          outputFile = status.output_files[0] || null
-          break
+
+        submittedJobId = jobRes.job_id
+        if (jobRes.deduplicated) {
+          showToast(`Đã dùng lại job ${jobRes.job_id}; không tạo render trùng.`)
+        }
+
+        setVariantSlots((prev) => {
+          const next = [...prev]
+          if (next[currentSlotIndex]) {
+            next[currentSlotIndex] = {
+              ...next[currentSlotIndex],
+              jobId: jobRes.job_id,
+              status: 'generating',
+              progressText: `${stagePrefix}Flow đang xử lý video...`,
+            }
+          }
+          return next
+        })
+
+        currentStage = 'generation'
+        let outputFile: string | null = null
+        let variantError: MotionRunError | null = null
+
+        for (let pollCount = 1; pollCount <= 120; pollCount += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2500))
+          const status = await getJobStatus(jobRes.job_id)
+          if (!status) continue
+
+          const stepDetail = status.current_step || `Google Flow: ${status.status} (${pollCount}/120)`
+          setRunningStageText(`${stagePrefix}${stepDetail}`)
+          setVariantSlots((prev) => {
+            const next = [...prev]
+            if (next[currentSlotIndex]) {
+              next[currentSlotIndex] = {
+                ...next[currentSlotIndex],
+                progressText: stepDetail,
+              }
+            }
+            return next
+          })
+
+          if (status.status === 'captcha') currentStage = 'captcha'
+          else if (status.status === 'submitting') currentStage = 'submission'
+          else if (status.status === 'generating') currentStage = 'generation'
+          else if (status.status === 'downloading') currentStage = 'download'
+
+          if (status.status === 'error') {
+            variantError = motionRunErrorFromJob(status, currentStage)
+            setVariantSlots((prev) => {
+              const next = [...prev]
+              if (next[currentSlotIndex]) {
+                next[currentSlotIndex] = {
+                  ...next[currentSlotIndex],
+                  status: 'error',
+                  error: variantError,
+                }
+              }
+              return next
+            })
+            showToast(`Biến thể #${variantIdx} gặp lỗi: ${variantError.title}`)
+            break
+          }
+          if (status.status === 'done') {
+            outputFile = status.output_files[0] || null
+            break
+          }
+        }
+
+        if (outputFile) {
+          const streamUrl = getVideoStreamUrl(outputFile)
+          finishedUrls.push(streamUrl)
+          setVariantSlots((prev) => {
+            const next = [...prev]
+            if (next[currentSlotIndex]) {
+              next[currentSlotIndex] = {
+                ...next[currentSlotIndex],
+                status: 'done',
+                videoUrl: streamUrl,
+                error: null,
+              }
+            }
+            return next
+          })
+          setResultVideoUrls([...finishedUrls])
+          setResultVideoUrl(streamUrl)
+          setActiveVariantIndex(currentSlotIndex)
+          showToast(
+            requestedVariants > 1
+              ? `✓ Đã tạo xong biến thể ${variantIdx}/${requestedVariants}!`
+              : 'Video Motion Control đã render thành công từ Google Flow.'
+          )
+        } else if (!variantError) {
+          const timeoutErr: MotionRunError = {
+            code: 'FLOW_TIMEOUT',
+            title: 'Quá thời gian chờ phản hồi',
+            stage: 'generation',
+            stageLabel: 'Tạo Video Flow',
+            message: `Biến thể #${variantIdx} không hoàn thành trong thời gian quy định.`,
+            hint: 'Hãy kiểm tra tab Google Flow hoặc bấm thử lại riêng biến thể này.',
+            jobId: jobRes.job_id,
+            retryable: true,
+          }
+          setVariantSlots((prev) => {
+            const next = [...prev]
+            if (next[currentSlotIndex]) {
+              next[currentSlotIndex] = {
+                ...next[currentSlotIndex],
+                status: 'error',
+                error: timeoutErr,
+              }
+            }
+            return next
+          })
         }
       }
 
-      if (!outputFile) {
-        throw new Error('Job chưa hoàn tất sau 5 phút hoặc không trả về file video.')
+      if (finishedUrls.length > 0) {
+        onOpenPreviewModal?.(
+          finishedUrls[0],
+          workflowName,
+          activePrompt,
+          outputConfig.showReferenceComparison !== false ? motionAsset.previewUrl : null,
+        )
+        if (finishedUrls.length < requestedVariants) {
+          showToast(`Đã hoàn tất ${finishedUrls.length}/${requestedVariants} biến thể. Biến thể bị lỗi có thể bấm Thử lại.`)
+        }
+      } else {
+        const failureErr: MotionRunError = {
+          code: 'ALL_VARIANTS_FAILED',
+          title: 'Tất cả biến thể đều gặp sự cố',
+          stage: 'generation',
+          stageLabel: 'Tạo Video Flow',
+          message: 'Không có biến thể nào hoàn tất thành công từ Google Flow.',
+          hint: 'Hãy xem chi tiết lỗi của từng biến thể trên tab và bấm Thử lại.',
+          retryable: true,
+        }
+        setRunError(failureErr)
       }
-
-      const streamUrl = getVideoStreamUrl(outputFile)
-      setResultVideoUrl(streamUrl)
-      onOpenPreviewModal?.(
-        streamUrl,
-        workflowName,
-        activePrompt,
-        outputConfig.showReferenceComparison !== false ? motionAsset.previewUrl : null,
-      )
-      showToast('Video Motion Control đã render thành công từ Google Flow.')
     } catch (err: unknown) {
       console.error('Error in handleRunWorkflow:', err)
       const detailedError = motionRunErrorFromUnknown(err, currentStage, submittedJobId)
@@ -988,6 +1213,207 @@ export function MotionControlWorkspace({
       runLockRef.current = false
     }
   }
+
+  // -------------------------------------------------------------
+  // 10b. Thử lại riêng một biến thể lỗi (Retry Single Variant)
+  // -------------------------------------------------------------
+  const handleRetryVariant = useCallback(async (variantIndex: number) => {
+    if (isRunning || runLockRef.current) return
+    const slotIdx = variantIndex - 1
+    runLockRef.current = true
+    setIsRunning(true)
+    setActiveVariantIndex(slotIdx)
+
+    const retryIdempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `${crypto.randomUUID()}-retry-v${variantIndex}`
+      : `motion-retry-${Date.now()}-v${variantIndex}`
+
+    setRunningStageText(`Đang thử lại riêng biến thể #${variantIndex}...`)
+    setVariantSlots((prev) => {
+      const next = [...prev]
+      if (next[slotIdx]) {
+        next[slotIdx] = {
+          ...next[slotIdx],
+          status: 'submitting',
+          error: null,
+          progressText: 'Đang gửi lại job tới Google Flow...',
+        }
+      }
+      return next
+    })
+
+    let currentStage: MotionRunStage = 'submission'
+    let submittedJobId: string | undefined
+
+    try {
+      const bridgeStatus = await getBridgeStatus()
+      if (!bridgeStatus.bridge_running || !bridgeStatus.extension.connected) {
+        throw new Error('Extension Flow chưa kết nối với Backend. Hãy mở Flow và kiểm tra extension.')
+      }
+
+      const runtimeProject = selectedProject || await getActiveProject()
+      const projectId = runtimeProject?.id
+      const flowProjectId = runtimeProject?.flow_project_id
+      if (!projectId || !flowProjectId) {
+        throw new Error('Chưa có thông tin Flow project. Hãy chạy lại toàn bộ lượt tạo.')
+      }
+      if (!selectedProfile) {
+        throw new Error('Chưa có profile video_edit phù hợp.')
+      }
+
+      let motionMediaId = motionAsset.mediaId
+      if (!motionMediaId && motionAsset.file) {
+        currentStage = 'reference_upload'
+        setRunningStageText(`Đang tải video mẫu (${motionAsset.fileName}) vào project...`)
+        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: false })
+        motionMediaId = uploadRes.media_id
+        setMotionAsset((prev) => ({ ...prev, mediaId: uploadRes.media_id, mediaProjectId: flowProjectId }))
+      }
+      if (!motionMediaId) {
+        throw new Error('Không tìm thấy video tham chiếu để thử lại. Hãy chọn lại video local.')
+      }
+
+      const ingredientImagePaths: string[] = []
+      if (characterAsset.backendPath) ingredientImagePaths.push(characterAsset.backendPath)
+      if (sceneAsset.backendPath) ingredientImagePaths.push(sceneAsset.backendPath)
+
+      const jobRes = await submitJob({
+        project_id: projectId,
+        prompt: activePrompt.trim(),
+        model_display_name: selectedProfile.model_display_name,
+        input_mode: 'video_edit',
+        aspect_ratio: selectedProfile.aspect_ratio,
+        duration_seconds: outputConfig.durationSeconds,
+        resolution: selectedProfile.resolution,
+        num_outputs: 1,
+        ingredient_image_paths: ingredientImagePaths,
+        reference_video_id: motionMediaId,
+        reference_video_start_seconds: motionAsset.trimStartSec ?? 0,
+        reference_video_end_seconds: motionAsset.trimEndSec ?? (motionAsset.trimStartSec ?? 0) + outputConfig.durationSeconds,
+        force_fresh_assets: false,
+        idempotency_key: retryIdempotencyKey,
+      })
+
+      submittedJobId = jobRes.job_id
+      setVariantSlots((prev) => {
+        const next = [...prev]
+        if (next[slotIdx]) {
+          next[slotIdx] = {
+            ...next[slotIdx],
+            jobId: jobRes.job_id,
+            status: 'generating',
+            progressText: 'Flow đang xử lý video...',
+          }
+        }
+        return next
+      })
+
+      currentStage = 'generation'
+      let outputFile: string | null = null
+
+      for (let pollCount = 1; pollCount <= 120; pollCount += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2500))
+        const status = await getJobStatus(jobRes.job_id)
+        if (!status) continue
+
+        const stepDetail = status.current_step || `Google Flow: ${status.status} (${pollCount}/120)`
+        setRunningStageText(`[Thử lại #${variantIndex}] ${stepDetail}`)
+        setVariantSlots((prev) => {
+          const next = [...prev]
+          if (next[slotIdx]) {
+            next[slotIdx] = {
+              ...next[slotIdx],
+              progressText: stepDetail,
+            }
+          }
+          return next
+        })
+
+        if (status.status === 'captcha') currentStage = 'captcha'
+        else if (status.status === 'submitting') currentStage = 'submission'
+        else if (status.status === 'generating') currentStage = 'generation'
+        else if (status.status === 'downloading') currentStage = 'download'
+
+        if (status.status === 'error') {
+          const detailedError = motionRunErrorFromJob(status, currentStage)
+          setVariantSlots((prev) => {
+            const next = [...prev]
+            if (next[slotIdx]) {
+              next[slotIdx] = {
+                ...next[slotIdx],
+                status: 'error',
+                error: detailedError,
+              }
+            }
+            return next
+          })
+          showToast(`Thử lại biến thể #${variantIndex} thất bại: ${detailedError.title}`)
+          return
+        }
+
+        if (status.status === 'done') {
+          outputFile = status.output_files[0] || null
+          break
+        }
+      }
+
+      if (outputFile) {
+        const streamUrl = getVideoStreamUrl(outputFile)
+        setVariantSlots((prev) => {
+          const next = [...prev]
+          if (next[slotIdx]) {
+            next[slotIdx] = {
+              ...next[slotIdx],
+              status: 'done',
+              videoUrl: streamUrl,
+              error: null,
+            }
+          }
+          return next
+        })
+        setResultVideoUrls((prev) => {
+          const updated = [...prev]
+          while (updated.length < variantIndex) updated.push('')
+          updated[slotIdx] = streamUrl
+          return updated
+        })
+        setResultVideoUrl(streamUrl)
+        setRunError(null)
+        showToast(`✓ Đã tạo thành công biến thể #${variantIndex}!`)
+      }
+    } catch (err: unknown) {
+      const detailedError = motionRunErrorFromUnknown(err, currentStage, submittedJobId)
+      setVariantSlots((prev) => {
+        const next = [...prev]
+        if (next[slotIdx]) {
+          next[slotIdx] = {
+            ...next[slotIdx],
+            status: 'error',
+            error: detailedError,
+          }
+        }
+        return next
+      })
+      showToast(`Thử lại biến thể #${variantIndex} thất bại: ${detailedError.title}`)
+    } finally {
+      setIsRunning(false)
+      setRunningStageText('')
+      runLockRef.current = false
+    }
+  }, [
+    activePrompt,
+    characterAsset.backendPath,
+    isRunning,
+    motionAsset.file,
+    motionAsset.fileName,
+    motionAsset.mediaId,
+    motionAsset.trimEndSec,
+    motionAsset.trimStartSec,
+    outputConfig.durationSeconds,
+    sceneAsset.backendPath,
+    selectedProfile,
+    selectedProject,
+  ])
 
   // -------------------------------------------------------------
   // 11. Left Palette Categories
@@ -1236,6 +1662,9 @@ export function MotionControlWorkspace({
             selectedNodeType={selectedNodeType}
             activeRole={activeRole}
             setActiveRole={setActiveRole}
+            presets={motionPresets}
+            activePresetId={outputConfig.activePresetId || 'choreography'}
+            onSelectPreset={handleSelectPreset}
             character={characterAsset}
             motion={motionAsset}
             scene={sceneAsset}
@@ -1244,7 +1673,7 @@ export function MotionControlWorkspace({
             onUpdateAssetMeta={handleUpdateAssetMeta}
             onOpenLibrary={handleOpenLibrary}
             creative={creativeDirection}
-            onUpdateCreative={(updates) => setCreativeDirection((prev) => ({ ...prev, ...updates }))}
+            onUpdateCreative={handleUpdateCreative}
             onResetDefaultPrompt={handleResetDefaultPrompt}
             structuredPrompt={structuredPrompt}
             isCustomPrompt={isCustomPrompt}
@@ -1262,11 +1691,11 @@ export function MotionControlWorkspace({
             activeProject={selectedProject || null}
             lastRunProject={lastRunProject}
             isCreatingProject={isCreatingProject}
-            onUpdateProjectConfig={(updates) => setOutputConfig((previous) => ({ ...previous, ...updates }))}
+            onUpdateProjectConfig={handleUpdateProjectConfig}
             onSelectProject={onSelectProject}
             onCreateProject={async (name) => {
               const created = await handleCreateMotionProject(name)
-              setOutputConfig((previous) => ({ ...previous, projectMode: 'selected' }))
+              handleUpdateProjectConfig({ projectMode: 'selected' })
               return created
             }}
             profiles={videoEditProfiles}
@@ -1279,6 +1708,10 @@ export function MotionControlWorkspace({
             isReadyToRun={isReadyToRun}
             isRunning={isRunning}
             runError={runError}
+            variants={variantSlots}
+            activeVariantIndex={activeVariantIndex}
+            onSelectVariantIndex={setActiveVariantIndex}
+            onRetryVariant={handleRetryVariant}
             onRunWorkflow={handleRunWorkflow}
           />
 

@@ -1,7 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
+import logging
+import subprocess
+import time
 import httpx
+from app.watermark.service import (
+    _resolve_gwr_runtime,
+    _gwr_command,
+    _gwr_environment,
+    _parse_frame_progress,
+)
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -29,6 +41,9 @@ from app.workflow.schemas import (
     PromptPresetUpdateRequest,
     PromptPresetListResponse,
     WorkflowConfigResponse,
+    MotionWorkflowConfig,
+    MotionPresetItem,
+    MotionPresetListResponse,
 )
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
@@ -46,6 +61,9 @@ from app.workflow.service import (
     get_default_gemini_prompt,
     get_default_gpt_prompt,
     get_default_motion_prompt,
+    get_motion_workflow_config,
+    save_motion_workflow_config,
+    get_motion_presets,
     get_workflow_config,
     get_workflow_asset_path,
     import_veo_image_to_workflow,
@@ -240,6 +258,25 @@ def get_motion_prompt() -> MotionPromptResponse:
     return MotionPromptResponse(prompt=prompt)
 
 
+@router.get("/motion/config", response_model=MotionWorkflowConfig)
+def get_motion_config() -> MotionWorkflowConfig:
+    """Lấy cấu hình lưu trữ bền vững của Motion Control."""
+    return get_motion_workflow_config()
+
+
+@router.put("/motion/config", response_model=MotionWorkflowConfig)
+def update_motion_config(req: MotionWorkflowConfig) -> MotionWorkflowConfig:
+    """Cập nhật và lưu cấu hình bền vững cho Motion Control vào config.json."""
+    return save_motion_workflow_config(req)
+
+
+@router.get("/motion/presets", response_model=MotionPresetListResponse)
+def list_motion_presets() -> MotionPresetListResponse:
+    """Lấy danh sách các mẫu phong cách chuyển động cho Motion Control."""
+    presets = get_motion_presets()
+    return MotionPresetListResponse(presets=[MotionPresetItem(**p) for p in presets])
+
+
 @router.get("/prompt-presets", response_model=PromptPresetListResponse)
 def list_prompt_presets() -> PromptPresetListResponse:
     """Lấy danh sách các mẫu thể loại kịch bản kèm prompt chuyên biệt."""
@@ -390,15 +427,254 @@ async def open_export_in_explorer(filename: str):
         raise HTTPException(status_code=500, detail=f"Lỗi khi mở thư mục: {exc}") from exc
 
 
-@router.get("/exports/{filename}")
-async def get_exported_video(filename: str):
-    """Stream hoặc tải về file video hoàn chỉnh hoặc clip phân cảnh Veo."""
+WORKFLOW_CLEAN_DIR = WORKFLOW_EXPORTS_DIR / "clean_cache"
+WORKFLOW_CLEAN_DIR.mkdir(parents=True, exist_ok=True)
+
+clean_export_jobs: dict[str, dict] = {}
+
+
+def _clean_single_video_sync(input_path: Path, output_path: Path, job_key: str) -> bool:
+    """Xóa watermark khỏi file video bằng GWR runtime (Playwright Headless)."""
+    runtime = _resolve_gwr_runtime()
+    if runtime is None:
+        raise FileNotFoundError("Watermark runtime is unavailable")
+    if not runtime.video_available:
+        raise RuntimeError("Trình duyệt xử lý video không có trong watermark runtime.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [*_gwr_command(runtime), "remove", str(input_path), "--output", str(output_path), "--overwrite"]
+    logger.info("[workflow.clean] Running gwr remove: %s", " ".join(cmd))
+
+    stderr_tail: list[str] = []
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=_gwr_environment(runtime),
+    )
+
+    assert proc.stderr is not None
+    for line in proc.stderr:
+        line = line.strip()
+        if line:
+            logger.debug("[gwr] %s", line)
+            stderr_tail.append(line)
+            del stderr_tail[:-8]
+        processed, total = _parse_frame_progress(line)
+        if processed is not None and job_key in clean_export_jobs:
+            clean_export_jobs[job_key]["processed_frames"] = processed
+            if total is not None:
+                clean_export_jobs[job_key]["frame_estimate"] = total
+            clean_export_jobs[job_key]["updated_at"] = time.time()
+
+    proc.wait()
+    if proc.returncode == 0 and output_path.is_file() and output_path.stat().st_size > 0:
+        logger.info("[workflow.clean] Xóa watermark hoàn tất: %s", output_path.name)
+        return True
+
+    detail = stderr_tail[-1] if stderr_tail else f"exit code {proc.returncode}"
+    if proc.returncode == 0:
+        detail = "Lệnh gwr hoàn tất nhưng không tạo file đầu ra hợp lệ"
+    raise RuntimeError(f"gwr error: {detail}")
+
+
+async def _run_clean_export_job(orig_path: Path, base_name: str, mute: bool, job_key: str):
+    stem = orig_path.stem
+    base_clean_file = WORKFLOW_CLEAN_DIR / f"{stem}_clean.mp4"
+    muted_clean_file = WORKFLOW_CLEAN_DIR / f"{stem}_clean_no_audio.mp4"
+
+    job = clean_export_jobs.get(job_key)
+    if not job:
+        return
+    job["status"] = "running"
+
+    try:
+        # Bước 1: Xóa watermark bằng GWR nếu chưa có hoặc cũ hơn file gốc
+        if not base_clean_file.exists() or base_clean_file.stat().st_mtime < orig_path.stat().st_mtime:
+            await asyncio.to_thread(
+                _clean_single_video_sync,
+                input_path=orig_path,
+                output_path=base_clean_file,
+                job_key=job_key,
+            )
+
+        # Bước 2: Nếu yêu cầu mute, tách audio bằng FFmpeg lossless copy
+        target_file = base_clean_file
+        if mute:
+            if not muted_clean_file.exists() or muted_clean_file.stat().st_mtime < base_clean_file.stat().st_mtime:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(base_clean_file),
+                    "-c:v", "copy",
+                    "-an",
+                    str(muted_clean_file),
+                ]
+                proc = await run_in_threadpool(subprocess.run, cmd, capture_output=True, timeout=30)
+                if proc.returncode != 0 or not muted_clean_file.exists() or muted_clean_file.stat().st_size == 0:
+                    raise RuntimeError("Lỗi khi tách tiếng từ video đã xóa watermark")
+            target_file = muted_clean_file
+
+        job["status"] = "done"
+        job["output_file"] = str(target_file)
+        job["download_url"] = f"/api/workflow/exports/{base_name}?clean=true&mute={'true' if mute else 'false'}"
+        job["updated_at"] = time.time()
+    except Exception as exc:
+        logger.exception("Lỗi trong quá trình xóa watermark video export %s: %s", base_name, exc)
+        job["status"] = "error"
+        job["error"] = str(exc)
+        job["updated_at"] = time.time()
+
+
+@router.get("/exports/{filename}/clean-status")
+async def get_export_clean_status(filename: str, mute: bool = False):
+    """Kiểm tra trạng thái xóa watermark và tiến trình real-time của video export."""
     base_name = Path(filename).name
+    stem = Path(base_name).stem
+
+    orig_path = WORKFLOW_EXPORTS_DIR / base_name
+    if not orig_path.exists() or not orig_path.is_file():
+        orig_path = VEO_DATA_DIR / base_name
+    if not orig_path.exists() or not orig_path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy file video.")
+
+    target_file = WORKFLOW_CLEAN_DIR / (f"{stem}_clean_no_audio.mp4" if mute else f"{stem}_clean.mp4")
+    cached = target_file.exists() and target_file.stat().st_size > 0 and target_file.stat().st_mtime >= orig_path.stat().st_mtime
+
+    job_key = f"{base_name}_{'mute' if mute else 'audio'}"
+    job = clean_export_jobs.get(job_key)
+
+    is_processing = job is not None and job.get("status") in ("pending", "running")
+    status = job.get("status") if job else ("done" if cached else "idle")
+
+    return {
+        "filename": base_name,
+        "mute": mute,
+        "cached": cached,
+        "is_processing": is_processing,
+        "status": status,
+        "download_url": f"/api/workflow/exports/{base_name}?clean=true&mute={'true' if mute else 'false'}" if cached else None,
+        "processed_frames": job.get("processed_frames", 0) if job else 0,
+        "frame_estimate": job.get("frame_estimate", 0) if job else 0,
+        "error": job.get("error") if job else None,
+    }
+
+
+@router.post("/exports/{filename}/clean")
+async def trigger_export_clean(filename: str, mute: bool = False):
+    """Kích hoạt tác vụ xóa watermark bằng AI trong nền cho video export."""
+    base_name = Path(filename).name
+    stem = Path(base_name).stem
+
+    orig_path = WORKFLOW_EXPORTS_DIR / base_name
+    if not orig_path.exists() or not orig_path.is_file():
+        orig_path = VEO_DATA_DIR / base_name
+    if not orig_path.exists() or not orig_path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy file video.")
+
+    target_file = WORKFLOW_CLEAN_DIR / (f"{stem}_clean_no_audio.mp4" if mute else f"{stem}_clean.mp4")
+    if target_file.exists() and target_file.stat().st_size > 0 and target_file.stat().st_mtime >= orig_path.stat().st_mtime:
+        return {
+            "cached": True,
+            "status": "done",
+            "download_url": f"/api/workflow/exports/{base_name}?clean=true&mute={'true' if mute else 'false'}",
+        }
+
+    job_key = f"{base_name}_{'mute' if mute else 'audio'}"
+    current = clean_export_jobs.get(job_key)
+    if current and current.get("status") in ("pending", "running"):
+        return {
+            "cached": False,
+            "status": current["status"],
+            "processed_frames": current.get("processed_frames", 0),
+            "frame_estimate": current.get("frame_estimate", 0),
+        }
+
+    clean_export_jobs[job_key] = {
+        "status": "pending",
+        "processed_frames": 0,
+        "frame_estimate": 0,
+        "error": None,
+        "output_file": None,
+        "download_url": None,
+        "updated_at": time.time(),
+    }
+
+    asyncio.create_task(_run_clean_export_job(orig_path, base_name, mute, job_key))
+    return {
+        "cached": False,
+        "status": "pending",
+        "job_key": job_key,
+    }
+
+
+@router.get("/exports/{filename}")
+async def get_exported_video(filename: str, mute: bool = False, clean: bool = False):
+    """Stream hoặc tải về file video (hỗ trợ ?mute=true và ?clean=true)."""
+    base_name = Path(filename).name
+    stem = Path(base_name).stem
     p = WORKFLOW_EXPORTS_DIR / base_name
     if not p.exists() or not p.is_file():
         p = VEO_DATA_DIR / base_name
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="Không tìm thấy file video.")
+
+    if clean:
+        clean_file = WORKFLOW_CLEAN_DIR / (f"{stem}_clean_no_audio.mp4" if mute else f"{stem}_clean.mp4")
+        if clean_file.exists() and clean_file.stat().st_size > 0:
+            dl_name = f"{stem}_clean_no_audio.mp4" if mute else f"{stem}_clean.mp4"
+            return FileResponse(
+                clean_file,
+                media_type="video/mp4",
+                filename=dl_name,
+                headers={"Content-Disposition": f'attachment; filename="{dl_name}"'},
+            )
+        base_clean = WORKFLOW_CLEAN_DIR / f"{stem}_clean.mp4"
+        if mute and base_clean.exists() and base_clean.stat().st_size > 0:
+            cmd = ["ffmpeg", "-y", "-i", str(base_clean), "-c:v", "copy", "-an", str(clean_file)]
+            await run_in_threadpool(subprocess.run, cmd, capture_output=True, timeout=30)
+            if clean_file.exists() and clean_file.stat().st_size > 0:
+                dl_name = f"{stem}_clean_no_audio.mp4"
+                return FileResponse(
+                    clean_file,
+                    media_type="video/mp4",
+                    filename=dl_name,
+                    headers={"Content-Disposition": f'attachment; filename="{dl_name}"'},
+                )
+        raise HTTPException(
+            status_code=404,
+            detail="Video chưa được xóa watermark. Vui lòng kích hoạt xóa watermark qua POST /api/workflow/exports/{filename}/clean trước.",
+        )
+
+    if mute:
+        muted_dir = WORKFLOW_EXPORTS_DIR / "muted_cache"
+        muted_dir.mkdir(parents=True, exist_ok=True)
+        muted_file = muted_dir / f"{stem}_noaudio.mp4"
+
+        # Nếu file muted chưa tồn tại hoặc file gốc mới hơn, tạo file không tiếng bằng FFmpeg stream copy (-c:v copy -an)
+        if not muted_file.exists() or muted_file.stat().st_mtime < p.stat().st_mtime:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(p),
+                "-c:v", "copy",
+                "-an",
+                str(muted_file),
+            ]
+            proc = await run_in_threadpool(subprocess.run, cmd, capture_output=True, timeout=30)
+            if proc.returncode != 0 or not muted_file.exists() or muted_file.stat().st_size == 0:
+                logger.warning("Lỗi khi tách âm thanh bằng FFmpeg: %s", proc.stderr.decode(errors="ignore") if proc.stderr else "")
+                return FileResponse(p, media_type="video/mp4")
+
+        download_name = f"{stem}_no_audio.mp4"
+        return FileResponse(
+            muted_file,
+            media_type="video/mp4",
+            filename=download_name,
+            headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+        )
+
     return FileResponse(p, media_type="video/mp4")
 
 

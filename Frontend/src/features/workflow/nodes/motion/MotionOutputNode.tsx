@@ -1,7 +1,7 @@
 import React from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Sparkles, RotateCw, CheckCircle2, AlertCircle, Eye, Settings2, Columns2 } from 'lucide-react'
-import type { MotionOutputConfig, MotionRunError } from '../../types'
+import type { MotionOutputConfig, MotionRunError, MotionVariantSlot } from '../../types'
 
 export interface MotionOutputNodeData {
   config: MotionOutputConfig
@@ -12,6 +12,11 @@ export interface MotionOutputNodeData {
   runningStageText?: string
   runError?: MotionRunError | null
   resultVideoUrl?: string | null
+  resultVideoUrls?: string[]
+  activeVariantIndex?: number
+  onSelectVariantIndex?: (idx: number) => void
+  variants?: MotionVariantSlot[]
+  onRetryVariant?: (variantIndex: number) => void
   referenceVideoUrl?: string | null
   showReferenceComparison?: boolean
   onRun?: () => void
@@ -31,9 +36,24 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
   const isReady = nodeData.isReady
   const isRunning = nodeData.isRunning
 
+  const variants = nodeData.variants || []
+  const hasVariantSlots = variants.length > 0
+
+  const videoList = nodeData.resultVideoUrls && nodeData.resultVideoUrls.length > 0
+    ? nodeData.resultVideoUrls
+    : (nodeData.resultVideoUrl ? [nodeData.resultVideoUrl] : [])
+  const maxIdx = hasVariantSlots ? Math.max(0, variants.length - 1) : Math.max(0, videoList.length - 1)
+  const currentVariantIdx = Math.min(nodeData.activeVariantIndex ?? 0, maxIdx)
+  const currentSlot = hasVariantSlots ? variants[currentVariantIdx] : null
+  const currentVideoUrl = currentSlot?.videoUrl || videoList[currentVariantIdx] || null
+
+  const hasActiveError = hasVariantSlots
+    ? currentSlot?.status === 'error'
+    : Boolean(nodeData.runError)
+
   return (
     <div
-      className={`mf-node mf-out-node ${selected ? 'selected' : ''} ${isRunning ? 'running' : ''} ${nodeData.runError ? 'has-error' : ''}`}
+      className={`mf-node mf-out-node ${selected ? 'selected' : ''} ${isRunning ? 'running' : ''} ${hasActiveError ? 'has-error' : ''}`}
       style={{ width: 330, padding: 0 }}
     >
       {/* Input Handle on the Left */}
@@ -158,8 +178,312 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
         </div>
 
         {/* Status / Output Preview Area */}
-        {nodeData.resultVideoUrl ? (
+        {hasVariantSlots ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {/* Thanh Tab Biến Thể kèm icon trạng thái */}
+            {variants.length > 1 && (
+              <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', paddingBottom: '2px' }}>
+                {variants.map((v, idx) => {
+                  const isActive = currentVariantIdx === idx
+                  let statusIcon = <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#94A3B8' }} />
+                  if (v.status === 'done') {
+                    statusIcon = <CheckCircle2 size={11} color="#10B981" />
+                  } else if (v.status === 'submitting' || v.status === 'generating') {
+                    statusIcon = <RotateCw size={11} className="animate-spin" color="#4F46E5" />
+                  } else if (v.status === 'error') {
+                    statusIcon = <AlertCircle size={11} color="#EF4444" />
+                  }
+                  return (
+                    <button
+                      key={v.index || idx}
+                      type="button"
+                      onClick={() => nodeData.onSelectVariantIndex?.(idx)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        border: isActive ? '1.5px solid #4F46E5' : '1px solid #CBD5E1',
+                        background: isActive ? '#EEF2FF' : '#FFFFFF',
+                        color: isActive ? '#4F46E5' : '#475569',
+                        fontSize: '10.5px',
+                        fontWeight: isActive ? 700 : 500,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {statusIcon}
+                      <span>Biến thể #{v.index}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Chi tiết cho biến thể đang kích hoạt */}
+            {currentSlot?.status === 'done' && currentVideoUrl ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {nodeData.showReferenceComparison && nodeData.referenceVideoUrl ? (
+                  <div style={{ padding: '7px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #DBEAFE' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px', color: '#3730A3', fontSize: '10.5px', fontWeight: 800 }}>
+                      <Columns2 size={13} />
+                      <span>Đối chiếu chuyển động</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ position: 'relative', height: 112, borderRadius: '6px', overflow: 'hidden', background: '#0F172A' }}>
+                          <video
+                            key={currentVideoUrl}
+                            src={currentVideoUrl}
+                            aria-label="Video kết quả"
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                          />
+                          <button
+                            type="button"
+                            onClick={() => nodeData.onOpenPreviewModal?.(currentVideoUrl)}
+                            title="Xem video kết quả lớn hơn"
+                            style={{ position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.62)', color: '#FFFFFF', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', display: 'flex' }}
+                          >
+                            <Eye size={12} />
+                          </button>
+                        </div>
+                        <div style={{ marginTop: '4px', color: '#4338CA', fontSize: '9.5px', fontWeight: 800 }}>
+                          Kết quả #{currentSlot.index}
+                        </div>
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ height: 112, borderRadius: '6px', overflow: 'hidden', background: '#0F172A' }}>
+                          <video
+                            src={nodeData.referenceVideoUrl}
+                            aria-label="Video tham chiếu"
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                          />
+                        </div>
+                        <div style={{ marginTop: '4px', color: '#64748B', fontSize: '9.5px', fontWeight: 800 }}>Video tham chiếu</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      position: 'relative',
+                      width: '100%',
+                      height: 140,
+                      borderRadius: '6px',
+                      overflow: 'hidden',
+                      background: '#0F172A',
+                    }}
+                  >
+                    <video
+                      key={currentVideoUrl}
+                      src={currentVideoUrl}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                    />
+                    <button
+                      type="button"
+                      onClick={() => nodeData.onOpenPreviewModal?.(currentVideoUrl)}
+                      style={{
+                        position: 'absolute',
+                        top: '6px',
+                        right: '6px',
+                        background: 'rgba(0,0,0,0.62)',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: '4px',
+                        padding: '4px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                      }}
+                      title="Mở trình phát video toàn màn hình"
+                    >
+                      <Eye size={13} />
+                    </button>
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: '#10B981' }}>
+                  <CheckCircle2 size={14} />
+                  <span>Biến thể #{currentSlot.index} render hoàn tất thành công!</span>
+                </div>
+              </div>
+            ) : (currentSlot?.status === 'submitting' || currentSlot?.status === 'generating') ? (
+              <div
+                style={{
+                  padding: '14px',
+                  borderRadius: '6px',
+                  background: '#EEF2FF',
+                  border: '1px solid #C7D2FE',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  alignItems: 'center',
+                  textAlign: 'center',
+                }}
+              >
+                <RotateCw size={22} className="animate-spin" color="#4F46E5" />
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#3730A3' }}>
+                  {currentSlot.progressText || nodeData.runningStageText || `Đang tạo Biến thể #${currentSlot.index}...`}
+                </span>
+                <small style={{ fontSize: '11px', color: '#6366F1' }}>
+                  {currentSlot.jobId ? `Job ID: ${currentSlot.jobId}` : 'Đang xử lý trực tiếp từ Google Flow'}
+                </small>
+              </div>
+            ) : currentSlot?.status === 'error' && currentSlot.error ? (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px',
+                  borderRadius: '7px',
+                  background: '#FFF7F7',
+                  border: '1px solid #FCA5A5',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                  <AlertCircle size={17} color="#DC2626" style={{ marginTop: '1px', flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1, color: '#7F1D1D', lineHeight: 1.4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                      <b style={{ fontSize: '11.5px' }}>Biến thể #{currentSlot.index}: {currentSlot.error.title}</b>
+                      <span style={{ padding: '1px 5px', borderRadius: '4px', background: '#FEE2E2', fontSize: '9px', fontWeight: 700 }}>
+                        {currentSlot.error.stageLabel}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: '4px', fontSize: '10.5px', overflowWrap: 'anywhere' }}>
+                      {currentSlot.error.message}
+                    </div>
+                    <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid #FECACA', fontSize: '10px', color: '#991B1B' }}>
+                      <b>Cách xử lý:</b> {currentSlot.error.hint}
+                    </div>
+                    <div style={{ marginTop: '5px', fontSize: '9px', color: '#B91C1C' }}>
+                      Mã: {currentSlot.error.code}
+                      {currentSlot.error.jobId ? ` · Job: ${currentSlot.error.jobId}` : ''}
+                    </div>
+                  </div>
+                </div>
+                {nodeData.onRetryVariant && (
+                  <button
+                    type="button"
+                    onClick={() => nodeData.onRetryVariant?.(currentSlot.index)}
+                    disabled={isRunning}
+                    style={{
+                      alignSelf: 'flex-start',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 10px',
+                      borderRadius: '5px',
+                      border: '1px solid #DC2626',
+                      background: '#FEF2F2',
+                      color: '#DC2626',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: isRunning ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <RotateCw size={12} />
+                    <span>Thử lại riêng Biến thể #{currentSlot.index}</span>
+                  </button>
+                )}
+              </div>
+            ) : currentSlot?.status === 'idle' ? (
+              <div
+                style={{
+                  padding: '14px',
+                  borderRadius: '6px',
+                  background: '#F8FAFC',
+                  border: '1px dashed #CBD5E1',
+                  textAlign: 'center',
+                  color: '#64748B',
+                  fontSize: '11px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <span style={{ fontWeight: 600, color: '#334155' }}>Biến thể #{currentSlot.index}</span>
+                <span>Đang chờ đến lượt xử lý sau các biến thể trước...</span>
+              </div>
+            ) : nodeData.runError ? (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px',
+                  borderRadius: '7px',
+                  background: '#FFF7F7',
+                  border: '1px solid #FCA5A5',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                }}
+              >
+                <AlertCircle size={17} color="#DC2626" style={{ marginTop: '1px', flexShrink: 0 }} />
+                <div style={{ minWidth: 0, flex: 1, color: '#7F1D1D', lineHeight: 1.4 }}>
+                  <b style={{ fontSize: '11.5px' }}>{nodeData.runError.title}</b>
+                  <div style={{ marginTop: '4px', fontSize: '10.5px' }}>{nodeData.runError.message}</div>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: '12px',
+                  borderRadius: '6px',
+                  background: '#F8FAFC',
+                  border: '1px dashed #CBD5E1',
+                  textAlign: 'center',
+                  color: '#64748B',
+                  fontSize: '11px',
+                }}
+              >
+                Sẵn sàng tạo {variants.length} biến thể Motion Control.
+              </div>
+            )}
+          </div>
+        ) : currentVideoUrl ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {/* Bộ chọn biến thể (khi có > 1 video) */}
+            {videoList.length > 1 && (
+              <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', paddingBottom: '2px' }}>
+                {videoList.map((_, idx) => {
+                  const isActive = currentVariantIdx === idx
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => nodeData.onSelectVariantIndex?.(idx)}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        border: isActive ? '1px solid #4F46E5' : '1px solid #E2E8F0',
+                        background: isActive ? '#EEF2FF' : '#FFFFFF',
+                        color: isActive ? '#4F46E5' : '#475569',
+                        fontSize: '10.5px',
+                        fontWeight: isActive ? 700 : 500,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Biến thể #{idx + 1}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
             {nodeData.showReferenceComparison && nodeData.referenceVideoUrl ? (
               <div style={{ padding: '7px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #DBEAFE' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px', color: '#3730A3', fontSize: '10.5px', fontWeight: 800 }}>
@@ -170,7 +494,8 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ position: 'relative', height: 112, borderRadius: '6px', overflow: 'hidden', background: '#0F172A' }}>
                       <video
-                        src={nodeData.resultVideoUrl}
+                        key={currentVideoUrl}
+                        src={currentVideoUrl}
                         aria-label="Video kết quả"
                         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                         autoPlay
@@ -180,14 +505,16 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
                       />
                       <button
                         type="button"
-                        onClick={() => nodeData.onOpenPreviewModal?.(nodeData.resultVideoUrl!)}
+                        onClick={() => nodeData.onOpenPreviewModal?.(currentVideoUrl)}
                         title="Xem video kết quả lớn hơn"
                         style={{ position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.62)', color: '#FFFFFF', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', display: 'flex' }}
                       >
                         <Eye size={12} />
                       </button>
                     </div>
-                    <div style={{ marginTop: '4px', color: '#4338CA', fontSize: '9.5px', fontWeight: 800 }}>Kết quả Flow</div>
+                    <div style={{ marginTop: '4px', color: '#4338CA', fontSize: '9.5px', fontWeight: 800 }}>
+                      Kết quả {videoList.length > 1 ? `(#${currentVariantIdx + 1})` : 'Flow'}
+                    </div>
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ height: 112, borderRadius: '6px', overflow: 'hidden', background: '#0F172A' }}>
@@ -217,7 +544,8 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
               }}
             >
               <video
-                src={nodeData.resultVideoUrl}
+                key={currentVideoUrl}
+                src={currentVideoUrl}
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 autoPlay
                 loop
@@ -226,25 +554,22 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
               />
               <button
                 type="button"
-                onClick={() => nodeData.onOpenPreviewModal?.(nodeData.resultVideoUrl!)}
+                onClick={() => nodeData.onOpenPreviewModal?.(currentVideoUrl)}
                 style={{
                   position: 'absolute',
-                  top: '8px',
-                  right: '8px',
-                  background: 'rgba(0,0,0,0.6)',
+                  top: '6px',
+                  right: '6px',
+                  background: 'rgba(0,0,0,0.62)',
                   color: '#FFFFFF',
                   border: 'none',
                   borderRadius: '4px',
-                  padding: '4px 8px',
-                  fontSize: '11px',
+                  padding: '4px',
                   cursor: 'pointer',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
                 }}
+                title="Mở trình phát video toàn màn hình"
               >
-                <Eye size={12} />
-                <span>Xem lớn</span>
+                <Eye size={13} />
               </button>
             </div>
             )}

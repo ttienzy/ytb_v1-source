@@ -396,6 +396,20 @@ export interface MotionCreativeDirection {
   negativePrompt: string
 }
 
+export interface MotionPresetItem {
+  id: string
+  name: string
+  description: string
+  icon?: string
+  creative_brief: string
+  subject_action: string
+  camera_movement: string
+  scene_atmosphere: string
+  style_direction: string
+  negative_prompt: string
+  is_default?: boolean
+}
+
 export interface MotionOutputConfig {
   profileId?: string
   modelDisplayName?: string
@@ -408,6 +422,7 @@ export interface MotionOutputConfig {
   projectNamePrefix?: string
   freshAssets?: boolean
   showReferenceComparison?: boolean
+  activePresetId?: string
 }
 
 export type MotionRunStage =
@@ -433,6 +448,15 @@ export interface MotionRunError {
   hint: string
   retryable: boolean
   jobId?: string
+}
+
+export interface MotionVariantSlot {
+  index: number
+  jobId?: string
+  status: 'idle' | 'submitting' | 'generating' | 'done' | 'error'
+  progressText?: string
+  videoUrl?: string | null
+  error?: MotionRunError | null
 }
 
 export interface MotionWorkflowDraft {

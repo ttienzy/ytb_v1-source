@@ -3,7 +3,7 @@
  * Gọi trực tiếp các endpoint backend chuẩn hóa: Asset Upload, Gemini, GPT, và FFmpeg Export.
  */
 
-import { API_URL } from '../../../shared/constants'
+import { API_URL } from '../../../shared/constants.ts'
 import type {
   AssetBundle,
   AssetRef,
@@ -15,8 +15,8 @@ import type {
   WorkflowExportResponse,
   ExportedVideoItem,
 } from '../contracts'
-import type { PromptPresetItem } from '../types'
-import { DEFAULT_CLIP_DURATION_SECONDS } from './buildScenePlan'
+import type { PromptPresetItem, MotionPresetItem, MotionOutputConfig, MotionCreativeDirection } from '../types'
+import { DEFAULT_CLIP_DURATION_SECONDS } from './buildScenePlan.ts'
 import { getWorkflowConfig } from './workflowConfig.ts'
 import { toApiError } from '../../../shared/apiError.ts'
 
@@ -476,6 +476,76 @@ export async function openExportFolder(filename: string): Promise<boolean> {
   }
 }
 
+export interface ExportCleanStatusResponse {
+  filename: string
+  mute: boolean
+  cached: boolean
+  isProcessing: boolean
+  status: 'idle' | 'pending' | 'running' | 'done' | 'error'
+  downloadUrl?: string | null
+  processedFrames: number
+  frameEstimate: number
+  error?: string | null
+}
+
+/**
+ * Kiểm tra trạng thái và tiến trình xóa watermark của video export
+ */
+export async function getExportCleanStatus(
+  filename: string,
+  mute: boolean = false
+): Promise<ExportCleanStatusResponse> {
+  const res = await fetch(
+    `${API_URL}/api/workflow/exports/${encodeURIComponent(filename)}/clean-status?mute=${mute}`
+  )
+  if (!res.ok) {
+    throw new Error(`Lỗi kiểm tra trạng thái xóa watermark (HTTP ${res.status})`)
+  }
+  const data = await res.json()
+  return {
+    filename: data.filename,
+    mute: data.mute,
+    cached: data.cached,
+    isProcessing: data.is_processing,
+    status: data.status,
+    downloadUrl: data.download_url
+      ? data.download_url.startsWith('http')
+        ? data.download_url
+        : `${API_URL}${data.download_url}`
+      : null,
+    processedFrames: data.processed_frames || 0,
+    frameEstimate: data.frame_estimate || 0,
+    error: data.error,
+  }
+}
+
+/**
+ * Khởi chạy tác vụ xóa watermark bằng AI trong nền cho video export
+ */
+export async function triggerExportClean(
+  filename: string,
+  mute: boolean = false
+): Promise<{ cached: boolean; status: string; downloadUrl?: string | null }> {
+  const res = await fetch(
+    `${API_URL}/api/workflow/exports/${encodeURIComponent(filename)}/clean?mute=${mute}`,
+    { method: 'POST' }
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Lỗi kích hoạt xóa watermark (HTTP ${res.status})`)
+  }
+  const data = await res.json()
+  return {
+    cached: data.cached,
+    status: data.status,
+    downloadUrl: data.download_url
+      ? data.download_url.startsWith('http')
+        ? data.download_url
+        : `${API_URL}${data.download_url}`
+      : null,
+  }
+}
+
 /**
  * Lấy danh sách các mẫu thể loại kịch bản kèm prompt chuyên biệt
  */
@@ -543,4 +613,64 @@ export async function deletePromptPreset(presetId: string): Promise<boolean> {
     throw new Error(err.detail || `Không thể xóa preset (HTTP ${res.status})`)
   }
   return true
+}
+
+/**
+ * Lấy cấu hình lưu trữ bền vững của Motion Control từ backend
+ */
+export async function fetchMotionConfig(): Promise<{
+  aspect_ratio: '9:16' | '16:9'
+  resolution: '360p' | '720p'
+  duration_seconds: number
+  project_mode: 'selected' | 'new_per_run'
+  project_name_prefix: string
+  fresh_assets: boolean
+  show_reference_comparison: boolean
+  active_preset_id: string
+  creative?: Partial<MotionCreativeDirection>
+}> {
+  const res = await fetch(`${API_URL}/api/workflow/motion/config`)
+  if (!res.ok) {
+    throw new Error(`Không thể tải cấu hình Motion Control (HTTP ${res.status})`)
+  }
+  return res.json()
+}
+
+/**
+ * Lưu cấu hình Motion Control lên backend để bảo toàn qua các lần sử dụng
+ */
+export async function saveMotionConfigApi(config: {
+  aspect_ratio: string
+  resolution: string
+  duration_seconds: number
+  project_mode: string
+  project_name_prefix: string
+  fresh_assets: boolean
+  show_reference_comparison: boolean
+  active_preset_id: string
+  num_outputs?: number
+  creative?: Partial<MotionCreativeDirection> | null
+}): Promise<any> {
+  const res = await fetch(`${API_URL}/api/workflow/motion/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể lưu cấu hình Motion Control (HTTP ${res.status})`)
+  }
+  return res.json()
+}
+
+/**
+ * Lấy danh sách mẫu phong cách chuyển động cho Motion Control
+ */
+export async function fetchMotionPresets(): Promise<MotionPresetItem[]> {
+  const res = await fetch(`${API_URL}/api/workflow/motion/presets`)
+  if (!res.ok) {
+    throw new Error(`Không thể tải danh sách Motion Presets (HTTP ${res.status})`)
+  }
+  const data = await res.json()
+  return data.presets || []
 }

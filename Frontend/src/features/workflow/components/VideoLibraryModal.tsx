@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Film,
   X,
   Download,
+  ChevronDown,
+  Volume2,
+  VolumeX,
   FolderOpen,
   Trash2,
   Play,
@@ -31,6 +34,8 @@ import {
   openExportFolder,
   callWorkflowVideoExport,
   callGenerateVoiceover,
+  getExportCleanStatus,
+  triggerExportClean,
 } from '../services/workflowApi'
 import * as veoApi from '../../veo-studio/services/veoApi'
 import { getWorkflowConfig } from '../services/workflowConfig'
@@ -56,6 +61,44 @@ export function VideoLibraryModal({
   const [filterType, setFilterType] = useState<'all' | 'export' | 'veo_scene'>('all')
   const [isExtractingFrame, setIsExtractingFrame] = useState(false)
   const [frameSaved, setFrameSaved] = useState(false)
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false)
+  const downloadMenuRef = useRef<HTMLDivElement>(null)
+
+  interface CleanProgressState {
+    filename: string
+    mute: boolean
+    processedFrames: number
+    frameEstimate: number
+    percent: number
+    isDone: boolean
+    error: string | null
+  }
+  const [cleaningState, setCleaningState] = useState<CleanProgressState | null>(null)
+  const cleanPollRef = useRef<NodeJS.Timeout | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (cleanPollRef.current) clearInterval(cleanPollRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(event.target as Node)) {
+        setIsDownloadMenuOpen(false)
+      }
+    }
+    if (isDownloadMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isDownloadMenuOpen])
+
+  useEffect(() => {
+    setIsDownloadMenuOpen(false)
+  }, [selectedIndex])
 
   // Chế độ Ghép Nhanh (Remix Multi-clip)
   const [isRemixMode, setIsRemixMode] = useState(false)
@@ -250,13 +293,96 @@ export function VideoLibraryModal({
     setTimeout(() => setCopiedPrompt(false), 2000)
   }
 
-  const handleDownload = (video: ExportedVideoItem) => {
-    const a = document.createElement('a')
-    a.href = video.videoUrl
-    a.download = video.filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+  const handleDownload = async (
+    video: ExportedVideoItem,
+    mute: boolean = false,
+    clean: boolean = false
+  ) => {
+    if (!clean) {
+      const a = document.createElement('a')
+      if (mute) {
+        const separator = video.videoUrl.includes('?') ? '&' : '?'
+        a.href = `${video.videoUrl}${separator}mute=true`
+        a.download = `${video.filename.replace(/\.mp4$/i, '')}_no_audio.mp4`
+      } else {
+        a.href = video.videoUrl
+        a.download = video.filename
+      }
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      return
+    }
+
+    // Chế độ Xóa Watermark AI (clean = true)
+    try {
+      const status = await getExportCleanStatus(video.filename, mute)
+      if (status.cached && status.downloadUrl) {
+        const a = document.createElement('a')
+        a.href = status.downloadUrl
+        a.download = `${video.filename.replace(/\.mp4$/i, '')}_clean${mute ? '_no_audio' : ''}.mp4`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        return
+      }
+
+      // Chưa có file clean trong cache -> Mở dialog tiến trình và kích hoạt background job
+      setCleaningState({
+        filename: video.filename,
+        mute,
+        processedFrames: 0,
+        frameEstimate: 0,
+        percent: 5,
+        isDone: false,
+        error: null,
+      })
+
+      await triggerExportClean(video.filename, mute)
+
+      if (cleanPollRef.current) clearInterval(cleanPollRef.current)
+      cleanPollRef.current = setInterval(async () => {
+        try {
+          const st = await getExportCleanStatus(video.filename, mute)
+          if (st.status === 'done' || st.cached) {
+            if (cleanPollRef.current) clearInterval(cleanPollRef.current)
+            setCleaningState((prev) => (prev ? { ...prev, percent: 100, isDone: true } : null))
+
+            const dlUrl = st.downloadUrl || `${API_URL}/api/workflow/exports/${video.filename}?clean=true&mute=${mute}`
+            const a = document.createElement('a')
+            a.href = dlUrl
+            a.download = `${video.filename.replace(/\.mp4$/i, '')}_clean${mute ? '_no_audio' : ''}.mp4`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+
+            setTimeout(() => {
+              setCleaningState(null)
+            }, 1800)
+          } else if (st.status === 'error') {
+            if (cleanPollRef.current) clearInterval(cleanPollRef.current)
+            setCleaningState((prev) => (prev ? { ...prev, error: st.error || 'Lỗi khi xóa watermark' } : null))
+          } else {
+            const pct = st.frameEstimate > 0 ? Math.min(98, Math.round((st.processedFrames / st.frameEstimate) * 100)) : 15
+            setCleaningState((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    processedFrames: st.processedFrames,
+                    frameEstimate: st.frameEstimate,
+                    percent: Math.max(prev.percent, pct),
+                  }
+                : null
+            )
+          }
+        } catch (pollErr: any) {
+          console.warn('Lỗi poll clean status:', pollErr)
+        }
+      }, 1000)
+    } catch (err: any) {
+      alert(err?.message || 'Không thể bắt đầu xóa watermark video')
+      setCleaningState(null)
+    }
   }
 
   const handleExtractLastFrame = async (video: ExportedVideoItem) => {
@@ -888,34 +1014,326 @@ export function VideoLibraryModal({
                       flexWrap: 'wrap',
                     }}
                   >
-                    {/* Tải MP4 */}
-                    <button
-                      type="button"
-                      onClick={() => handleDownload(currentVideo)}
-                      style={{
-                        height: 32,
-                        padding: '0 13px',
-                        borderRadius: 6,
-                        border: 'none',
-                        background: '#0f172a',
-                        color: '#ffffff',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        whiteSpace: 'nowrap',
-                        transition: 'all 0.15s ease',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#1e293b')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = '#0f172a')}
-                      title="Tải video định dạng MP4 về máy"
-                    >
-                      <Download size={13} />
-                      <span>Tải MP4</span>
-                    </button>
+                    {/* Split Button: Tải MP4 (Gốc / Không âm thanh) */}
+                    <div ref={downloadMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(currentVideo, false)}
+                        style={{
+                          height: 32,
+                          padding: '0 11px 0 13px',
+                          borderRadius: '6px 0 0 6px',
+                          border: 'none',
+                          borderRight: '1px solid rgba(255,255,255,0.18)',
+                          background: '#0f172a',
+                          color: '#ffffff',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          whiteSpace: 'nowrap',
+                          transition: 'all 0.15s ease',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = '#1e293b')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = '#0f172a')}
+                        title="Tải video định dạng MP4 gốc về máy"
+                      >
+                        <Download size={13} />
+                        <span>Tải MP4</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsDownloadMenuOpen((prev) => !prev)}
+                        style={{
+                          height: 32,
+                          width: 26,
+                          padding: 0,
+                          borderRadius: '0 6px 6px 0',
+                          border: 'none',
+                          background: isDownloadMenuOpen ? '#1e293b' : '#0f172a',
+                          color: '#ffffff',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.15s ease',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = '#1e293b')}
+                        onMouseLeave={(e) => {
+                          if (!isDownloadMenuOpen) e.currentTarget.style.background = '#0f172a'
+                        }}
+                        title="Tùy chọn tải video (có tiếng hoặc tách tiếng)"
+                      >
+                        <ChevronDown
+                          size={13}
+                          style={{
+                            transform: isDownloadMenuOpen ? 'rotate(180deg)' : 'none',
+                            transition: 'transform 0.15s ease',
+                          }}
+                        />
+                      </button>
+
+                      {/* Dropdown Menu Popup (4 Tùy chọn: Gốc & Xóa Watermark AI) */}
+                      {isDownloadMenuOpen && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 'calc(100% + 5px)',
+                            left: 0,
+                            zIndex: 100,
+                            minWidth: 260,
+                            background: '#ffffff',
+                            borderRadius: 8,
+                            border: '1px solid #e2e8f0',
+                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                            padding: '6px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 3,
+                          }}
+                        >
+                          {/* Label nhóm 1 */}
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', padding: '4px 8px 2px', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            Bản Gốc (Tải Ngay)
+                          </div>
+
+                          {/* Option 1: Tải có âm thanh (Gốc) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDownload(currentVideo, false, false)
+                              setIsDownloadMenuOpen(false)
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '7px 8px',
+                              borderRadius: 6,
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#1e293b',
+                              fontSize: 12,
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              width: '100%',
+                              transition: 'background 0.12s ease',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <div
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                background: '#eff6ff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <Volume2 size={14} color="#3b82f6" />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ fontWeight: 600, color: '#0f172a' }}>Tải có âm thanh</span>
+                              <span style={{ fontSize: 10.5, color: '#64748b' }}>Video gốc kèm đầy đủ audio (tức thì)</span>
+                            </div>
+                          </button>
+
+                          {/* Option 2: Tải không âm thanh (Mute) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDownload(currentVideo, true, false)
+                              setIsDownloadMenuOpen(false)
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '7px 8px',
+                              borderRadius: 6,
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#1e293b',
+                              fontSize: 12,
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              width: '100%',
+                              transition: 'background 0.12s ease',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#fff7ed')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <div
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                background: '#ffedd5',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <VolumeX size={14} color="#ea580c" />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontWeight: 600, color: '#c2410c' }}>Tải không âm thanh</span>
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    padding: '1px 5px',
+                                    borderRadius: 4,
+                                    background: '#ffedd5',
+                                    color: '#c2410c',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  MUTE
+                                </span>
+                              </div>
+                              <span style={{ fontSize: 10.5, color: '#9a3412' }}>Tách sạch audio (*_no_audio.mp4)</span>
+                            </div>
+                          </button>
+
+                          {/* Divider */}
+                          <div style={{ height: 1, background: '#f1f5f9', margin: '4px 2px' }} />
+
+                          {/* Label nhóm 2 */}
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', padding: '2px 8px 2px', textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Sparkles size={11} color="#7c3aed" /> Xóa Watermark AI (SynthID)
+                          </div>
+
+                          {/* Option 3: Tải sạch Watermark (Có tiếng) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDownload(currentVideo, false, true)
+                              setIsDownloadMenuOpen(false)
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '7px 8px',
+                              borderRadius: 6,
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#1e293b',
+                              fontSize: 12,
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              width: '100%',
+                              transition: 'background 0.12s ease',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#f5f3ff')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <div
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                background: '#ede9fe',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <Sparkles size={14} color="#7c3aed" />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontWeight: 600, color: '#6d28d9' }}>Tải sạch Watermark</span>
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    padding: '1px 5px',
+                                    borderRadius: 4,
+                                    background: '#ede9fe',
+                                    color: '#6d28d9',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  ✨ AI
+                                </span>
+                              </div>
+                              <span style={{ fontSize: 10.5, color: '#7c3aed' }}>Xóa logo SynthID, giữ nguyên tiếng</span>
+                            </div>
+                          </button>
+
+                          {/* Option 4: Tải sạch Watermark (Tắt tiếng) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDownload(currentVideo, true, true)
+                              setIsDownloadMenuOpen(false)
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '7px 8px',
+                              borderRadius: 6,
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#1e293b',
+                              fontSize: 12,
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              width: '100%',
+                              transition: 'background 0.12s ease',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#fdf4ff')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <div
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                background: '#fae8ff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <VolumeX size={14} color="#c026d3" />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontWeight: 600, color: '#a21caf' }}>Tải sạch + Tắt tiếng</span>
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    padding: '1px 5px',
+                                    borderRadius: 4,
+                                    background: '#fae8ff',
+                                    color: '#a21caf',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  ✨ MUTE
+                                </span>
+                              </div>
+                              <span style={{ fontSize: 10.5, color: '#a21caf' }}>Xóa logo SynthID + tắt sạch audio</span>
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Lưu frame cuối vào Thư viện Veo (nếu là clip Veo) */}
                     {currentVideo.sourceType === 'veo_scene' && (
@@ -1465,5 +1883,178 @@ export function VideoLibraryModal({
     </div>
   )
 
-  return createPortal(modalContent, document.body)
+  const cleanProgressModal = cleaningState ? createPortal(
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000001,
+        background: 'rgba(15, 23, 42, 0.75)',
+        backdropFilter: 'blur(5px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          width: 440,
+          maxWidth: '92vw',
+          background: '#ffffff',
+          borderRadius: 14,
+          padding: '22px 24px',
+          boxShadow: '0 25px 60px -12px rgba(0,0,0,0.35)',
+          border: '1px solid #e2e8f0',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          animation: 'wfScaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 10,
+              background: cleaningState.isDone
+                ? '#ecfdf5'
+                : cleaningState.error
+                ? '#fef2f2'
+                : '#f5f3ff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            {cleaningState.isDone ? (
+              <Check size={22} color="#059669" />
+            ) : cleaningState.error ? (
+              <X size={22} color="#ef4444" />
+            ) : (
+              <Sparkles size={22} color="#7c3aed" />
+            )}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>
+              {cleaningState.isDone
+                ? 'Đã Xóa Xong Watermark!'
+                : cleaningState.error
+                ? 'Xóa Watermark Thất Bại'
+                : 'Đang Xóa Watermark AI (SynthID)...'}
+            </div>
+            <div
+              style={{
+                fontSize: 11.5,
+                color: '#64748b',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                marginTop: 2,
+              }}
+              title={cleaningState.filename}
+            >
+              {cleaningState.filename}
+            </div>
+          </div>
+        </div>
+
+        {/* Progress body */}
+        {cleaningState.error ? (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: 8,
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              color: '#dc2626',
+              fontSize: 12,
+              lineHeight: 1.4,
+            }}
+          >
+            {cleaningState.error}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Progress Bar */}
+            <div
+              style={{
+                width: '100%',
+                height: 8,
+                borderRadius: 99,
+                background: '#e2e8f0',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  width: `${cleaningState.percent}%`,
+                  height: '100%',
+                  background: cleaningState.isDone
+                    ? '#059669'
+                    : 'linear-gradient(90deg, #6366f1, #a855f7)',
+                  borderRadius: 99,
+                  transition: 'width 0.4s ease',
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: 11.5,
+                color: '#64748b',
+              }}
+            >
+              <span>
+                {cleaningState.isDone
+                  ? '✓ Đang tự động tải video về máy...'
+                  : cleaningState.frameEstimate > 0
+                  ? `Đang inpainting: ${cleaningState.processedFrames} / ${cleaningState.frameEstimate} frames`
+                  : 'Đang khởi tạo Playwright Chromium inpainting...'}
+              </span>
+              <span style={{ fontWeight: 700, color: '#0f172a' }}>{cleaningState.percent}%</span>
+            </div>
+          </div>
+        )}
+
+        {/* Footer / Close Button */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+          <button
+            type="button"
+            onClick={() => {
+              if (cleanPollRef.current) clearInterval(cleanPollRef.current)
+              setCleaningState(null)
+            }}
+            style={{
+              height: 32,
+              padding: '0 14px',
+              borderRadius: 6,
+              border: '1px solid #cbd5e1',
+              background: '#ffffff',
+              color: '#334155',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {cleaningState.isDone ? 'Đóng' : 'Hủy bỏ'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null
+
+  return (
+    <>
+      {createPortal(modalContent, document.body)}
+      {cleanProgressModal}
+    </>
+  )
 }

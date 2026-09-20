@@ -1,0 +1,54 @@
+[
+  {
+    "id": "choreography",
+    "name": "Vũ đạo & Chuyển động (Choreography)",
+    "description": "Bám sát từng nhịp điệu, tư thế và động tác mẫu từ video; bảo toàn tuyệt đối nhận diện nhân vật.",
+    "icon": "sparkles",
+    "creative_brief": "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout.",
+    "subject_action": "Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video.",
+    "camera_movement": "",
+    "scene_atmosphere": "Natural biomechanics, fluid body movement, photorealistic cinematic lighting.",
+    "style_direction": "",
+    "negative_prompt": "blurry, jittery motion, deformed hands, inconsistent face, identity loss, extra limbs",
+    "is_default": true
+  },
+  {
+    "id": "fashion_walk",
+    "name": "Trình diễn Thời trang (Fashion Runway)",
+    "description": "Bước đi người mẫu tự tin, tà áo và chuyển động cơ thể thanh thoát, góc máy tracking mượt mà.",
+    "icon": "shirt",
+    "creative_brief": "The subject from the image reference is an elegant fashion model walking forward with poise and grace, matching the exact stride and posture from the motion video. Maintain accurate clothing texture, fabric drape, and sharp facial features.",
+    "subject_action": "Confident catwalk stride, smooth shoulder swing, balanced rhythmic steps, graceful head turns.",
+    "camera_movement": "Smooth forward tracking shot, medium full body framing with steady gimbal stabilization.",
+    "scene_atmosphere": "High-fashion editorial lighting, soft runway spotlights, subtle depth of field with creamy bokeh.",
+    "style_direction": "Vogue magazine aesthetic, ultra-clean commercial look, rich color grading.",
+    "negative_prompt": "stiff movement, unnatural posture, fabric clipping, distorted feet, blurry face",
+    "is_default": false
+  },
+  {
+    "id": "martial_arts",
+    "name": "Hành động & Võ thuật (Action & Martial Arts)",
+    "description": "Chuyển động dứt khoát, lực đánh mạnh mẽ, nhịp độ nhanh và động lực học sống động.",
+    "icon": "flame",
+    "creative_brief": "The subject from the image reference performs dynamic martial arts combat choreography mirroring the reference video. Maintain anatomical precision, focused gaze, and sharp clothing motion.",
+    "subject_action": "Crisp strikes, fluid defensive stances, sharp pivots, energetic kicks, and athletic martial arts footwork.",
+    "camera_movement": "Dynamic camera tracking following the momentum, slight handheld action feel, dramatic low-angle accentuation.",
+    "scene_atmosphere": "High contrast dramatic lighting, volumetric dust particles, cinematic backlight rim on silhouette.",
+    "style_direction": "Cinematic action film aesthetic, anamorphic lens flare, gritty realism.",
+    "negative_prompt": "slow sluggish movement, deformed limbs, floating feet, unnatural joint rotation",
+    "is_default": false
+  },
+  {
+    "id": "cinematic_camera",
+    "name": "Điện ảnh & Máy quay (Cinematic Tracking)",
+    "description": "Góc máy quỹ đạo điện ảnh, chuyển động máy quay mượt mà, biểu cảm tự nhiên và ánh sáng có chiều sâu.",
+    "icon": "film",
+    "creative_brief": "The subject from the image reference is framed in a premium cinematic sequence, faithfully transferring the motion, pacing, and camera choreography from the reference clip.",
+    "subject_action": "Natural authentic movement, subtle micro-expressions, coordinated body language matching the reference scene.",
+    "camera_movement": "Precision Steadicam orbit and push-in, smooth parallax motion between subject and background.",
+    "scene_atmosphere": "Warm golden hour backlight, atmospheric haze, 35mm film grain, beautiful directional key light.",
+    "style_direction": "Hollywood blockbuster cinematography, ARRI Alexa color tone, deep cinematic contrast.",
+    "negative_prompt": "digital video look, flat lighting, jittery camera, overexposed, low detail",
+    "is_default": false
+  }
+]

@@ -11,6 +11,8 @@ import {
   Copy,
   Check,
   RotateCcw,
+  RotateCw,
+  CheckCircle2,
   AlertCircle,
   FolderPlus,
   FolderOpen,
@@ -21,9 +23,16 @@ import type {
   MotionCreativeDirection,
   MotionOutputConfig,
   MotionRunError,
+  MotionPresetItem,
+  MotionVariantSlot,
 } from '../types'
 import type { StructuredPromptResult } from '../services/motionPromptBuilder'
-import { MOTION_DURATION_OPTIONS } from '../services/motionProfiles'
+import {
+  MOTION_DURATION_OPTIONS,
+  getAvailableAspectRatios,
+  getAvailableResolutions,
+  getAvailableDurations,
+} from '../services/motionProfiles'
 import type { VeoCapabilityProfile, VeoProject } from '../../veo-studio/types'
 
 interface MotionInspectorPanelProps {
@@ -32,6 +41,9 @@ interface MotionInspectorPanelProps {
   selectedNodeType: 'reference' | 'creative' | 'preview' | 'output' | null
   activeRole: 'character' | 'motion' | 'scene'
   setActiveRole: (role: 'character' | 'motion' | 'scene') => void
+  presets?: MotionPresetItem[]
+  activePresetId?: string
+  onSelectPreset?: (presetId: string) => void
   // Reference Assets
   character: MotionReferenceAsset
   motion: MotionReferenceAsset
@@ -69,6 +81,10 @@ interface MotionInspectorPanelProps {
   isReadyToRun: boolean
   isRunning: boolean
   runError?: MotionRunError | null
+  variants?: MotionVariantSlot[]
+  activeVariantIndex?: number
+  onSelectVariantIndex?: (idx: number) => void
+  onRetryVariant?: (variantIndex: number) => void
   onRunWorkflow: () => void
 }
 
@@ -111,12 +127,26 @@ export function MotionInspectorPanel({
   isReadyToRun,
   isRunning,
   runError,
+  variants,
+  activeVariantIndex,
+  onSelectVariantIndex,
+  onRetryVariant,
   onRunWorkflow,
+  presets,
+  activePresetId,
+  onSelectPreset,
 }: MotionInspectorPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [copied, setCopied] = React.useState(false)
   const [newProjectName, setNewProjectName] = React.useState('Motion Control')
   const [projectActionError, setProjectActionError] = React.useState<string | null>(null)
+
+  const availableAspectRatios = React.useMemo(() => getAvailableAspectRatios(profiles), [profiles])
+  const availableResolutions = React.useMemo(
+    () => getAvailableResolutions(profiles, outputConfig.aspectRatio),
+    [profiles, outputConfig.aspectRatio]
+  )
+  const availableDurations = React.useMemo(() => getAvailableDurations(profiles), [profiles])
 
   if (!isOpen) return null
 
@@ -736,6 +766,50 @@ export function MotionInspectorPanel({
               </div>
             )}
 
+            {/* Bộ Mẫu Phong Cách Chuyển Động (Motion Presets) */}
+            {presets && presets.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', padding: '10px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Sparkles size={13} color="#4F46E5" />
+                    <span>Mẫu phong cách chuyển động</span>
+                  </label>
+                  <span style={{ fontSize: '9.5px', color: '#059669', fontWeight: 700 }}>✓ Tự động lưu</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                  {presets.map((preset) => {
+                    const active = (activePresetId || outputConfig.activePresetId || 'choreography') === preset.id
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => onSelectPreset?.(preset.id)}
+                        style={{
+                          padding: '7px 8px',
+                          borderRadius: '7px',
+                          border: active ? '2px solid #4F46E5' : '1px solid #CBD5E1',
+                          background: active ? '#EEF2FF' : '#FFFFFF',
+                          color: active ? '#3730A3' : '#334155',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px',
+                        }}
+                      >
+                        <div style={{ fontSize: '10.5px', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {preset.name}
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#64748B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {preset.description}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* 1. Creative Brief */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1070,22 +1144,18 @@ export function MotionInspectorPanel({
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-              <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Chất lượng tạo</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {([
-                  { value: '360p', title: 'Draft 360p', detail: 'Nhanh để thử chuyển động' },
-                  { value: '720p', title: 'Standard 720p', detail: 'Chi tiết tốt hơn' },
-                ] as const).map((option) => {
-                  const active = outputConfig.resolution === option.value
-                  const supported = profiles.some(
-                    (profile) => profile.resolution === option.value && profile.aspect_ratio === outputConfig.aspectRatio
-                  )
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Chất lượng tạo</label>
+                <span style={{ fontSize: '9.5px', color: '#059669', fontWeight: 700 }}>✓ Tự động lưu</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${availableResolutions.length}, 1fr)`, gap: '8px' }}>
+                {availableResolutions.map((option) => {
+                  const active = outputConfig.resolution === option.resolution
                   return (
                     <button
-                      key={option.value}
+                      key={option.resolution}
                       type="button"
-                      disabled={!supported}
-                      onClick={() => onSelectResolution(option.value)}
+                      onClick={() => onSelectResolution(option.resolution)}
                       style={{
                         padding: '9px',
                         borderRadius: '7px',
@@ -1093,11 +1163,15 @@ export function MotionInspectorPanel({
                         background: active ? '#EEF2FF' : '#FFFFFF',
                         color: active ? '#3730A3' : '#334155',
                         textAlign: 'left',
-                        cursor: supported ? 'pointer' : 'not-allowed',
-                        opacity: supported ? 1 : 0.45,
+                        cursor: 'pointer',
                       }}
                     >
-                      <div style={{ fontSize: '11.5px', fontWeight: 700 }}>{option.title}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '11.5px', fontWeight: 700 }}>{option.title}</span>
+                        <span style={{ fontSize: '9px', fontWeight: 800, padding: '2px 4px', borderRadius: '4px', background: active ? '#C7D2FE' : '#F1F5F9', color: active ? '#312E81' : '#64748B' }}>
+                          {option.creditCost}c
+                        </span>
+                      </div>
                       <div style={{ marginTop: '2px', fontSize: '9.5px', color: '#64748B' }}>{option.detail}</div>
                     </button>
                   )
@@ -1107,21 +1181,14 @@ export function MotionInspectorPanel({
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
               <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Tỉ lệ khung hình</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {([
-                  { value: '9:16', label: '9:16 · Dọc' },
-                  { value: '16:9', label: '16:9 · Ngang' },
-                ] as const).map((option) => {
-                  const active = outputConfig.aspectRatio === option.value
-                  const supported = profiles.some(
-                    (profile) => profile.aspect_ratio === option.value && profile.resolution === outputConfig.resolution
-                  )
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${availableAspectRatios.length}, 1fr)`, gap: '8px' }}>
+                {availableAspectRatios.map((ratio) => {
+                  const active = outputConfig.aspectRatio === ratio
                   return (
                     <button
-                      key={option.value}
+                      key={ratio}
                       type="button"
-                      disabled={!supported}
-                      onClick={() => onSelectAspectRatio(option.value)}
+                      onClick={() => onSelectAspectRatio(ratio)}
                       style={{
                         padding: '8px',
                         borderRadius: '7px',
@@ -1130,11 +1197,10 @@ export function MotionInspectorPanel({
                         color: active ? '#3730A3' : '#334155',
                         fontSize: '11.5px',
                         fontWeight: 700,
-                        cursor: supported ? 'pointer' : 'not-allowed',
-                        opacity: supported ? 1 : 0.45,
+                        cursor: 'pointer',
                       }}
                     >
-                      {option.label}
+                      {ratio === '9:16' ? '9:16 · Dọc' : '16:9 · Ngang'}
                     </button>
                   )
                 })}
@@ -1143,8 +1209,8 @@ export function MotionInspectorPanel({
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
               <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Thời lượng đoạn chuyển động</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                {MOTION_DURATION_OPTIONS.map((duration) => {
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${availableDurations.length}, 1fr)`, gap: '6px' }}>
+                {availableDurations.map((duration) => {
                   const active = outputConfig.durationSeconds === duration
                   return (
                     <button
@@ -1172,16 +1238,67 @@ export function MotionInspectorPanel({
               </small>
             </div>
 
+            {/* SỐ LƯỢNG BIẾN THỂ (VARIANTS) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Số lượng biến thể video</span>
+                <span style={{ fontSize: '11px', color: '#4F46E5', fontWeight: 700 }}>
+                  {outputConfig.numOutputs || 1} biến thể
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                {[1, 2, 3, 4].map((count) => {
+                  const isActive = (outputConfig.numOutputs || 1) === count
+                  return (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => onUpdateProjectConfig({ numOutputs: count })}
+                      disabled={isRunning}
+                      style={{
+                        padding: '7px 4px',
+                        borderRadius: '6px',
+                        border: isActive ? '1.5px solid #4F46E5' : '1px solid #CBD5E1',
+                        background: isActive ? '#EEF2FF' : '#FFFFFF',
+                        color: isActive ? '#4F46E5' : '#334155',
+                        fontWeight: isActive ? 700 : 600,
+                        fontSize: '12px',
+                        cursor: isRunning ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '2px',
+                        boxShadow: isActive ? '0 1px 3px rgba(79, 70, 229, 0.2)' : 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', fontWeight: 700 }}>{count}</span>
+                      <small style={{ fontSize: '9.5px', color: isActive ? '#4338CA' : '#64748B' }}>
+                        {count === 1 ? '1 bản' : `${count} bản`}
+                      </small>
+                    </button>
+                  )
+                })}
+              </div>
+              <small style={{ fontSize: '10px', color: '#64748B', lineHeight: 1.4 }}>
+                Mỗi biến thể sinh ra một phiên bản biểu cảm & chi tiết chuyển động độc lập từ cùng video mẫu.
+              </small>
+            </div>
+
             <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '11px', color: '#64748B' }}>Chi phí dự kiến / 1 kết quả</span>
+                <span style={{ fontSize: '11px', color: '#64748B' }}>
+                  Chi phí: {outputConfig.creditCost ?? selectedProfile?.credit_cost ?? 40}c × {outputConfig.numOutputs || 1}
+                </span>
                 <strong style={{ fontSize: '14px', color: '#C2410C' }}>
-                  {outputConfig.creditCost ?? selectedProfile?.credit_cost ?? '—'} credits
+                  {((outputConfig.creditCost ?? selectedProfile?.credit_cost ?? 40) * (outputConfig.numOutputs || 1))} credits
                 </strong>
               </div>
               <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '11px', color: '#64748B' }}>Số kết quả</span>
-                <strong style={{ fontSize: '11.5px', color: '#0F172A' }}>1 · đang khóa</strong>
+                <span style={{ fontSize: '11px', color: '#64748B' }}>Số video kết quả</span>
+                <strong style={{ fontSize: '11.5px', color: '#0F172A' }}>
+                  {outputConfig.numOutputs || 1} video hoàn chỉnh
+                </strong>
               </div>
               <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #E2E8F0', fontSize: '10px', color: selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds ? '#047857' : '#B45309' }}>
                 {selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds
@@ -1233,37 +1350,143 @@ export function MotionInspectorPanel({
               <strong>1080p là bước upscale riêng.</strong> Bản hiện tại tạo tối đa 720p; adapter upscale sẽ được nối sau khi có trace runtime, nên UI chưa cho chọn 1080p như độ phân giải tạo.
             </div>
 
-            {runError ? (
-              <div role="alert" style={{ padding: '11px', borderRadius: '8px', border: '1px solid #FCA5A5', background: '#FFF7F7', color: '#7F1D1D' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                  <AlertCircle size={17} color="#DC2626" style={{ marginTop: '1px', flexShrink: 0 }} />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 800 }}>{runError.title}</div>
-                    <div style={{ marginTop: '3px', fontSize: '10px', fontWeight: 700, color: '#B91C1C' }}>
-                      Công đoạn: {runError.stageLabel}
+            {/* Thanh chọn biến thể trong Inspector nếu có nhiều biến thể */}
+            {variants && variants.length > 1 && (
+              <div style={{ padding: '8px 10px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  Biến thể kiểm tra ({variants.length} bản):
+                </div>
+                <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', paddingBottom: '2px' }}>
+                  {variants.map((v, idx) => {
+                    const isActive = (activeVariantIndex ?? 0) === idx
+                    let statusIcon = <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#94A3B8' }} />
+                    if (v.status === 'done') statusIcon = <CheckCircle2 size={11} color="#10B981" />
+                    else if (v.status === 'submitting' || v.status === 'generating') statusIcon = <RotateCw size={11} className="animate-spin" color="#4F46E5" />
+                    else if (v.status === 'error') statusIcon = <AlertCircle size={11} color="#EF4444" />
+                    return (
+                      <button
+                        key={v.index || idx}
+                        type="button"
+                        onClick={() => onSelectVariantIndex?.(idx)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '4px 8px',
+                          borderRadius: '5px',
+                          border: isActive ? '1.5px solid #4F46E5' : '1px solid #CBD5E1',
+                          background: isActive ? '#EEF2FF' : '#FFFFFF',
+                          color: isActive ? '#4F46E5' : '#475569',
+                          fontSize: '10.5px',
+                          fontWeight: isActive ? 700 : 500,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {statusIcon}
+                        <span>Biến thể #{v.index}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {(() => {
+              const activeSlot = (variants && variants.length > 0)
+                ? variants[Math.min(activeVariantIndex ?? 0, variants.length - 1)]
+                : null
+              const activeSlotError = activeSlot?.error
+              const displayError = activeSlotError || (!variants || variants.length === 0 ? runError : null)
+
+              if (displayError) {
+                return (
+                  <div role="alert" style={{ padding: '11px', borderRadius: '8px', border: '1px solid #FCA5A5', background: '#FFF7F7', color: '#7F1D1D' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                      <AlertCircle size={17} color="#DC2626" style={{ marginTop: '1px', flexShrink: 0 }} />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: '12px', fontWeight: 800 }}>
+                          {activeSlotError ? `Biến thể #${activeSlot?.index}: ${displayError.title}` : displayError.title}
+                        </div>
+                        <div style={{ marginTop: '3px', fontSize: '10px', fontWeight: 700, color: '#B91C1C' }}>
+                          Công đoạn: {displayError.stageLabel}
+                        </div>
+                        <div style={{ marginTop: '7px', fontSize: '10.5px', lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+                          {displayError.message}
+                        </div>
+                        <div style={{ marginTop: '8px', padding: '7px', borderRadius: '6px', background: '#FEE2E2', fontSize: '10px', lineHeight: 1.45 }}>
+                          <strong>Cách xử lý:</strong> {displayError.hint}
+                        </div>
+                        <div style={{ marginTop: '6px', fontSize: '9px', color: '#B91C1C' }}>
+                          Mã lỗi: {displayError.code}{displayError.jobId ? ` · Job: ${displayError.jobId}` : ''}
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ marginTop: '7px', fontSize: '10.5px', lineHeight: 1.45, overflowWrap: 'anywhere' }}>
-                      {runError.message}
-                    </div>
-                    <div style={{ marginTop: '8px', padding: '7px', borderRadius: '6px', background: '#FEE2E2', fontSize: '10px', lineHeight: 1.45 }}>
-                      <strong>Cách xử lý:</strong> {runError.hint}
-                    </div>
-                    <div style={{ marginTop: '6px', fontSize: '9px', color: '#B91C1C' }}>
-                      Mã lỗi: {runError.code}{runError.jobId ? ` · Job: ${runError.jobId}` : ''}
+                    {activeSlot && activeSlotError && onRetryVariant && (
+                      <button
+                        type="button"
+                        onClick={() => onRetryVariant(activeSlot.index)}
+                        disabled={isRunning}
+                        style={{
+                          marginTop: '10px',
+                          width: '100%',
+                          padding: '7px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid #DC2626',
+                          background: '#FEF2F2',
+                          color: '#DC2626',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          cursor: isRunning ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <RotateCw size={13} />
+                        <span>Thử lại riêng Biến thể #{activeSlot.index}</span>
+                      </button>
+                    )}
+                  </div>
+                )
+              }
+
+              if (activeSlot && (activeSlot.status === 'submitting' || activeSlot.status === 'generating')) {
+                return (
+                  <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #C7D2FE', background: '#EEF2FF', color: '#3730A3', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+                    <RotateCw size={15} className="animate-spin" color="#4F46E5" />
+                    <div>
+                      <b>Biến thể #{activeSlot.index}:</b> {activeSlot.progressText || 'Đang tạo video...'}
                     </div>
                   </div>
-                </div>
-              </div>
-            ) : !isReadyToRun && missingReasons.length > 0 ? (
-              <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #FCD34D', background: '#FFFBEB', color: '#92400E' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 800 }}>
-                  <AlertCircle size={15} /> Chưa thể tạo video
-                </div>
-                <ul style={{ margin: '6px 0 0', paddingLeft: '18px', fontSize: '10.5px', lineHeight: 1.5 }}>
-                  {missingReasons.map((reason) => <li key={reason}>{reason}</li>)}
-                </ul>
-              </div>
-            ) : null}
+                )
+              }
+
+              if (activeSlot && activeSlot.status === 'done') {
+                return (
+                  <div style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid #A7F3D0', background: '#ECFDF5', color: '#065F46', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                    <CheckCircle2 size={14} color="#10B981" />
+                    <span>Biến thể #{activeSlot.index} đã tạo thành công!</span>
+                  </div>
+                )
+              }
+
+              if (!isReadyToRun && missingReasons.length > 0) {
+                return (
+                  <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #FCD34D', background: '#FFFBEB', color: '#92400E' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 800 }}>
+                      <AlertCircle size={15} /> Chưa thể tạo video
+                    </div>
+                    <ul style={{ margin: '6px 0 0', paddingLeft: '18px', fontSize: '10.5px', lineHeight: 1.5 }}>
+                      {missingReasons.map((reason) => <li key={reason}>{reason}</li>)}
+                    </ul>
+                  </div>
+                )
+              }
+
+              return null
+            })()}
 
             {/* Big Trigger Run Button */}
             <button

@@ -23,7 +23,7 @@ from app.ai.gemini.recap import (
     RecapConfigError,
 )
 from app.core.config import TOOLS_DIR, DATA_DIR
-from app.core.storage import read_config
+from app.core.storage import read_config, write_config
 from app.ai.chatgpt.service import (
     chat_completion,
     ensure_9router_running,
@@ -46,6 +46,9 @@ from app.workflow.schemas import (
     PromptPresetUpdateRequest,
     PromptPresetListResponse,
     WorkflowConfigResponse,
+    MotionWorkflowConfig,
+    MotionPresetItem,
+    MotionPresetListResponse,
 )
 from app.workflow.config import (
     resolve_default_script_model,
@@ -483,6 +486,51 @@ def get_default_motion_prompt() -> str:
         "Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video. "
         "Natural biomechanics, fluid body movement, photorealistic cinematic lighting."
     )
+
+
+MOTION_PRESETS_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "motion_prompt_presets.json"
+MOTION_PRESETS_DATA_FILE = DATA_DIR / "motion_prompt_presets.json"
+
+
+def get_motion_workflow_config() -> MotionWorkflowConfig:
+    """Đọc cấu hình lưu trữ bền vững cho Motion Control từ config.json."""
+    saved_config = read_config() or {}
+    motion_data = saved_config.get("motion_workflow") or {}
+    return MotionWorkflowConfig(
+        aspect_ratio=motion_data.get("aspect_ratio", "9:16"),
+        resolution=motion_data.get("resolution", "720p"),
+        duration_seconds=int(motion_data.get("duration_seconds", 10)),
+        project_mode=motion_data.get("project_mode", "selected"),
+        project_name_prefix=motion_data.get("project_name_prefix", "Motion Control"),
+        fresh_assets=bool(motion_data.get("fresh_assets", False)),
+        show_reference_comparison=bool(motion_data.get("show_reference_comparison", True)),
+        active_preset_id=motion_data.get("active_preset_id", "choreography"),
+        num_outputs=max(1, min(4, int(motion_data.get("num_outputs", 1)))),
+        creative=motion_data.get("creative"),
+    )
+
+
+def save_motion_workflow_config(req: MotionWorkflowConfig) -> MotionWorkflowConfig:
+    """Lưu cấu hình Motion Control vào config.json."""
+    saved_config = read_config() or {}
+    saved_config["motion_workflow"] = req.model_dump(mode="json")
+    write_config(saved_config)
+    logger.info("Đã lưu cấu hình Motion Workflow vào config.json: %s", req.model_dump(mode="json"))
+    return req
+
+
+def get_motion_presets() -> list[dict[str, Any]]:
+    """Đọc danh sách mẫu phong cách chuyển động từ motion_prompt_presets.json."""
+    target_file = MOTION_PRESETS_FILE if MOTION_PRESETS_FILE.exists() else MOTION_PRESETS_DATA_FILE
+    if not target_file.exists():
+        return []
+    try:
+        data = json.loads(target_file.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+    except Exception as e:
+        logger.error(f"Lỗi đọc motion presets {target_file}: {e}")
+    return []
 
 
 PROMPT_PRESETS_FILE = DATA_DIR / "workflow_prompt_presets.json"

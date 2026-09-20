@@ -240,3 +240,36 @@ class PromptPresetUpdateRequest(BaseModel):
 class PromptPresetListResponse(BaseModel):
     presets: list[PromptPresetItem] = Field(default_factory=list)
 
+
+class MotionWorkflowConfig(BaseModel):
+    """Cấu hình lưu trữ bền vững cho Motion Control Studio."""
+    aspect_ratio: str = Field(default="9:16", description="Tỉ lệ khung hình: 9:16 hoặc 16:9")
+    resolution: str = Field(default="720p", description="Độ phân giải: 360p hoặc 720p")
+    duration_seconds: int = Field(default=10, description="Thời lượng phân cảnh (giây)")
+    project_mode: str = Field(default="selected", description="selected hoặc new_per_run")
+    project_name_prefix: str = Field(default="Motion Control", description="Tiền tố tên project")
+    fresh_assets: bool = Field(default=False, description="True nếu muốn ép tải lại nguyên liệu mỗi lượt")
+    show_reference_comparison: bool = Field(default=True, description="Hiển thị màn hình so sánh video đối chiếu")
+    active_preset_id: str = Field(default="choreography", description="ID của preset sáng tạo đang chọn")
+    num_outputs: int = Field(default=1, ge=1, le=4, description="Số lượng biến thể video cần tạo (1-4)")
+    creative: Optional[dict[str, Any]] = Field(default=None, description="Các trường creative direction đã lưu")
+
+
+class MotionPresetItem(BaseModel):
+    """Mẫu phong cách chuyển động định sẵn cho Motion Control."""
+    id: str = Field(description="Mã định danh preset")
+    name: str = Field(description="Tên hiển thị của preset")
+    description: str = Field(description="Mô tả phong cách")
+    icon: Optional[str] = Field(default="sparkles", description="Tên icon Lucide")
+    creative_brief: str = Field(default="", description="Mô tả chỉ dẫn sáng tạo")
+    subject_action: str = Field(default="", description="Động tác và hành động của nhân vật")
+    camera_movement: str = Field(default="", description="Góc máy và chuyển động camera")
+    scene_atmosphere: str = Field(default="", description="Bối cảnh, ánh sáng, chất điện ảnh")
+    style_direction: str = Field(default="", description="Phong cách thẩm mỹ")
+    negative_prompt: str = Field(default="", description="Các yếu tố cần tránh")
+    is_default: bool = Field(default=False, description="True nếu là preset mặc định")
+
+
+class MotionPresetListResponse(BaseModel):
+    presets: list[MotionPresetItem] = Field(default_factory=list)
+

@@ -829,6 +829,8 @@
 }
 
 /* Group Node */
+
+/* Group Node */
 .mf-group-node {
   border: 1.5px solid #CBD5E1;
   background: #FFFFFF;
@@ -846,3 +848,376 @@
   }
 }
 
+/* ==========================================================================
+   Motion Reference Group Node (Redesigned Hero & Multi-Slot System)
+   ========================================================================== */
+.mf-ref-node {
+  width: 400px !important;
+  background: #FFFFFF;
+  border-radius: 14px;
+  overflow: visible !important;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.mf-ref-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Hero Slot - Motion Reference Video (Required) */
+.mf-hero-slot {
+  position: relative;
+  background: linear-gradient(180deg, #FFFDFB 0%, #FFF8F1 100%);
+  border: 1.5px solid #FFD8A8;
+  border-radius: 12px;
+  padding: 12px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mf-hero-slot.selected {
+  border-color: #FF7A00;
+  box-shadow: 0 0 0 3px rgba(255, 122, 0, 0.18), 0 4px 12px rgba(255, 122, 0, 0.1);
+}
+
+.mf-hero-slot.drag-over {
+  border-color: #FF7A00;
+  background: #FFF0DF;
+  box-shadow: 0 0 0 4px rgba(255, 122, 0, 0.25);
+  transform: scale(1.01);
+}
+
+.mf-hero-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mf-hero-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mf-hero-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #FFE8CC;
+  color: #D9480F;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mf-hero-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1E293B;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mf-hero-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #FEE2E2;
+  color: #DC2626;
+  border: 1px solid #FECACA;
+}
+
+/* Dropzone & Preview Box */
+.mf-hero-preview-box {
+  width: 100%;
+  height: 140px;
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111827;
+  border: 1.5px dashed #E2E8F0;
+  transition: all 0.2s ease;
+}
+
+.mf-hero-preview-box.empty {
+  background: #FAFAFA;
+  border-color: #CBD5E1;
+  cursor: pointer;
+}
+
+.mf-hero-preview-box.empty:hover {
+  background: #F8FAFC;
+  border-color: #FF7A00;
+}
+
+.mf-hero-preview-box.drag-active {
+  border-color: #FF7A00;
+  background: #FFF7ED;
+}
+
+.mf-hero-preview-media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Glassmorphism Action Bar Overlay */
+.mf-hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.2) 0%, rgba(15, 23, 42, 0.75) 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.mf-hero-preview-box:hover .mf-hero-overlay {
+  opacity: 1;
+}
+
+.mf-hero-overlay-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mf-hero-overlay-bottom {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Modern Action Buttons */
+.mf-btn-primary-hero {
+  flex: 1;
+  height: 38px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #FF7A00 0%, #EA580C 100%);
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(234, 88, 12, 0.3);
+  transition: all 0.15s ease;
+}
+
+.mf-btn-primary-hero:hover {
+  background: linear-gradient(135deg, #F97316 0%, #C2410C 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(234, 88, 12, 0.4);
+}
+
+.mf-btn-secondary-hero {
+  flex: 1;
+  height: 38px;
+  border-radius: 8px;
+  border: 1.5px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mf-btn-secondary-hero:hover {
+  border-color: #94A3B8;
+  background: #F8FAFC;
+  color: #0F172A;
+  transform: translateY(-1px);
+}
+
+.mf-btn-glass {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(8px);
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.mf-btn-glass:hover {
+  background: rgba(255, 255, 255, 0.95);
+  color: #0F172A;
+}
+
+.mf-btn-glass-danger {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(220, 38, 38, 0.7);
+  backdrop-filter: blur(8px);
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.mf-btn-glass-danger:hover {
+  background: #DC2626;
+}
+
+/* Secondary Slots Grid (Character & Scene) */
+.mf-secondary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.mf-sub-slot {
+  position: relative;
+  background: #F8FAFC;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mf-sub-slot.selected {
+  border-color: #4F46E5;
+  background: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+.mf-sub-slot.drag-over {
+  border-color: #10B981;
+  background: #ECFDF5;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.mf-sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mf-sub-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #1E293B;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mf-sub-preview-box {
+  width: 100%;
+  height: 86px;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  background: #F1F5F9;
+  border: 1px dashed #CBD5E1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mf-sub-preview-box:hover {
+  border-color: #94A3B8;
+  background: #E2E8F0;
+}
+
+.mf-sub-btn-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.mf-sub-btn {
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mf-sub-btn:hover {
+  border-color: #64748B;
+  color: #0F172A;
+  background: #F8FAFC;
+}
+
+.mf-sub-btn.primary {
+  background: #EEF2FF;
+  border-color: #C7D2FE;
+  color: #4F46E5;
+}
+
+.mf-sub-btn.primary:hover {
+  background: #4F46E5;
+  color: #FFFFFF;
+  border-color: #4F46E5;
+}
+
+/* React Flow Port Handles on Reference Node */
+.mf-ref-handle {
+  width: 12px !important;
+  height: 12px !important;
+  border-radius: 50% !important;
+  border: 2px solid #FFFFFF !important;
+  background: #94A3B8 !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.mf-ref-handle.vid {
+  background: #FF7A00 !important;
+}
+
+.mf-ref-handle.img {
+  background: #10B981 !important;
+}
+
+.mf-ref-handle.on {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25) !important;
+}
+
+.mf-ref-handle.vid.on {
+  box-shadow: 0 0 0 3px rgba(255, 122, 0, 0.25) !important;
+}
