@@ -393,7 +393,7 @@ export function ContactSection() {
                   border: '1px solid #cbd5e1',
                 }}
               >
-                <Github size={13} />
+                <GithubIcon size={13} />
                 <span>GitHub Repository</span>
                 <ExternalLink size={11} style={{ opacity: 0.7 }} />
               </a>
