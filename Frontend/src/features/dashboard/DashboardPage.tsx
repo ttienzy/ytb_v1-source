@@ -204,7 +204,7 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
             title="Mở Node Graph Workflow tạo video từ ảnh sản phẩm"
           >
             <div className="studio-create-left">
-              <div className="studio-create-icon workflow">
+              <div className="studio-create-icon">
                 <Workflow size={20} />
               </div>
               <div className="studio-create-info">
@@ -221,7 +221,7 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
             title="Mở Veo Studio để sinh video & ảnh AI"
           >
             <div className="studio-create-left">
-              <div className="studio-create-icon veo">
+              <div className="studio-create-icon">
                 <Clapperboard size={20} />
               </div>
               <div className="studio-create-info">
@@ -238,7 +238,7 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth }: DashboardP
             title="Mở quản lý lịch đăng YouTube Shorts & Video"
           >
             <div className="studio-create-left">
-              <div className="studio-create-icon publish">
+              <div className="studio-create-icon">
                 <Calendar size={20} />
               </div>
               <div className="studio-create-info">

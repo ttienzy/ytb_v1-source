@@ -1,7 +1,7 @@
 {
-  "name": "google-search-app",
+  "name": "creatorflow-ai",
   "version": "0.1.0",
-  "description": "Google Search & Studio Recap Desktop App",
+  "description": "CreatorFlow AI - AI Video Production & Multi-Channel Studio",
   "author": "ttienzy",
   "repository": {
     "type": "git",
@@ -39,8 +39,8 @@
     "vite": "^7.3.6"
   },
   "build": {
-    "appId": "com.googlesearch.app",
-    "productName": "Google Search App",
+    "appId": "com.creatorflow.app",
+    "productName": "CreatorFlow AI",
     "publish": {
       "provider": "github",
       "owner": "ttienzy",
@@ -104,7 +104,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Google Search App"
+      "shortcutName": "CreatorFlow AI"
     }
   }
 }

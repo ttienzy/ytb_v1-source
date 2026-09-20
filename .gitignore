@@ -18,9 +18,9 @@ Backend/Data/app.db
 Backend/Data/media/
 Backend/Data/watermark/
 Backend/Data/Downloads/
-Desktop/Data/
 Data/
-Backend/Data/test_*.txt
+!Frontend/src/features/help/data/
+!Frontend/src/features/help/data/**
 Backend/Data/*_response.txt
 Backend/Data/*_answer.txt
 1.txt

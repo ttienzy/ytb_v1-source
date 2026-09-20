@@ -172,25 +172,34 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+  box-shadow: none;
+  transition: all 0.15s ease;
 }
 
-/* Vibrant distinct icon styles kept as requested */
-.studio-create-icon.workflow {
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+.studio-create-card:hover .studio-create-icon {
+  background: #0f172a;
   color: #ffffff;
-  box-shadow: 0 3px 8px rgba(59, 130, 246, 0.25);
+  border-color: #0f172a;
 }
 
-.studio-create-icon.veo {
-  background: linear-gradient(135deg, #a855f7, #ec4899);
-  color: #ffffff;
-  box-shadow: 0 3px 8px rgba(168, 85, 247, 0.25);
-}
-
+/* Neutral monochrome fallback for workflow / veo / publish variants */
+.studio-create-icon.workflow,
+.studio-create-icon.veo,
 .studio-create-icon.publish {
-  background: linear-gradient(135deg, #10b981, #06b6d4);
+  background: #f1f5f9;
+  color: #334155;
+  box-shadow: none;
+}
+
+.studio-create-card:hover .studio-create-icon.workflow,
+.studio-create-card:hover .studio-create-icon.veo,
+.studio-create-card:hover .studio-create-icon.publish {
+  background: #0f172a;
   color: #ffffff;
-  box-shadow: 0 3px 8px rgba(16, 185, 129, 0.25);
+  border-color: #0f172a;
 }
 
 .studio-create-info h4 {

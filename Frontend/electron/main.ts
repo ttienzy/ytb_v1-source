@@ -1,9 +1,37 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
 import { basename, delimiter, join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import http from 'node:http'
+
+function getAppIcon() {
+  const candidates = [
+    join(__dirname, '../resources/icon.ico'),
+    join(__dirname, '../../assets/forever.ico'),
+    join(app.getAppPath(), 'resources/icon.ico'),
+    'D:\\GOOGLE SEARCH\\tools\\assets\\forever.ico',
+    join(__dirname, '../../assets/forever.png'),
+    join(__dirname, '../resources/icon.png'),
+    join(app.getAppPath(), '../assets/forever.png'),
+    join(app.getAppPath(), 'resources/icon.png'),
+    join(app.getAppPath(), 'public/forever.png'),
+    join(process.cwd(), 'assets/forever.png'),
+    join(process.cwd(), '../assets/forever.png'),
+    'D:\\GOOGLE SEARCH\\tools\\assets\\forever.png',
+  ]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      try {
+        const img = nativeImage.createFromPath(candidate)
+        if (!img.isEmpty()) return img
+      } catch {
+        /* continue */
+      }
+    }
+  }
+  return undefined
+}
 
 let mainWindow: BrowserWindow | null = null
 let routerDashboardWindow: BrowserWindow | null = null
@@ -170,17 +198,29 @@ async function startProductionBackend() {
 }
 
 function createWindow() {
+  const appIcon = getAppIcon()
+
   mainWindow = new BrowserWindow({
+    title: 'CreatorFlow AI',
     width: 1280,
     height: 800,
     minWidth: 960,
     minHeight: 640,
+    ...(appIcon ? { icon: appIcon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   })
+
+  if (appIcon) {
+    try {
+      mainWindow.setIcon(appIcon)
+    } catch {
+      /* ignore */
+    }
+  }
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -254,6 +294,7 @@ ipcMain.handle('open-9router-dashboard', async () => {
   }
 
   // 3. Mở cửa sổ Electron chuyên biệt cho 9Router
+  const appIcon = getAppIcon()
   routerDashboardWindow = new BrowserWindow({
     width: 1040,
     height: 720,
@@ -261,12 +302,21 @@ ipcMain.handle('open-9router-dashboard', async () => {
     minHeight: 550,
     title: '9Router - AI Infrastructure Management',
     autoHideMenuBar: true,
+    ...(appIcon ? { icon: appIcon } : {}),
     webPreferences: {
       partition: 'persist:9router',
       contextIsolation: true,
       nodeIntegration: false,
     },
   })
+
+  if (appIcon) {
+    try {
+      routerDashboardWindow.setIcon(appIcon)
+    } catch {
+      /* ignore */
+    }
+  }
 
   // Các popup OAuth mở bằng trình duyệt hệ thống
   routerDashboardWindow.webContents.setWindowOpenHandler(({ url }) => {

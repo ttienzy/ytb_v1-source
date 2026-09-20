@@ -44,6 +44,25 @@ export function StoriesPage() {
   const [selectedStory, setSelectedStory] = useState<StorySummary | null>(null)
   const [hoveredStory, setHoveredStory] = useState<string | null>(null)
   const [hoverPosition, setHoverPosition] = useState<{ top: number; left: number } | null>(null)
+
+  const hideStoryHoverDetail = () => {
+    setHoveredStory(null)
+    setHoverPosition(null)
+  }
+
+  const showStoryHoverDetail = (story: StorySummary, target: HTMLElement) => {
+    const rect = target.getBoundingClientRect()
+    const cardHeight = 245
+    const cardWidth = 330
+    const left = rect.right + 10 + cardWidth > window.innerWidth
+      ? Math.max(10, rect.left - cardWidth - 10)
+      : rect.right + 10
+    setHoveredStory(story.url)
+    setHoverPosition({
+      top: Math.max(10, Math.min(rect.top, window.innerHeight - cardHeight - 10)),
+      left,
+    })
+  }
   const [metadata, setMetadata] = useState<StoryMetadata | null>(null)
   const [savedStory, setSavedStory] = useState<SavedStory | null>(null)
   const [viewingChapter, setViewingChapter] = useState<number | null>(null)
@@ -286,6 +305,7 @@ export function StoriesPage() {
   }
 
   const selectStory = async (story: StorySummary) => {
+    hideStoryHoverDetail()
     setSelectedStory(story)
     setMetadata(null)
     setSavedStory(null)
@@ -409,16 +429,6 @@ export function StoriesPage() {
     void handleCategoryChange(targetIds)
   }
 
-  const showStoryHoverDetail = (story: StorySummary, target: HTMLElement) => {
-    const rect = target.getBoundingClientRect()
-    const cardHeight = 245
-    setHoveredStory(story.url)
-    setHoverPosition({
-      top: Math.max(10, Math.min(rect.top, window.innerHeight - cardHeight - 10)),
-      left: rect.right + 10,
-    })
-  }
-
   const imageUrl = (path?: string) => (path?.startsWith('http') ? path : path ? `${SOURCE_URL}${path}` : '')
   const savedChapter = savedStory?.chapters.find(chapter => chapter.chapterNumber === viewingChapter)
   const activeJobChapter = (chapterNumber: number) => crawlJob?.chapters.find(chapter => chapter.chapter_number === chapterNumber)
@@ -531,35 +541,45 @@ export function StoriesPage() {
               <div><h2>{viewMode === 'crawled' ? 'Truyện đã cào' : 'Danh sách truyện'}</h2><span>{loadingStories ? 'Đang tải…' : `${stories.length} truyện`}</span></div>
               <label className="story-sort-control"><span>Sắp xếp</span><select value={storySort} onChange={event => setStorySort(event.target.value as StorySortOption)}><option value="views-desc">Lượt xem: cao → thấp</option><option value="views-asc">Lượt xem: thấp → cao</option><option value="updated-desc">Cập nhật: mới → cũ</option><option value="updated-asc">Cập nhật: cũ → mới</option>{viewMode === 'crawled' && <><option value="imported-desc">Import CSDL: mới → cũ</option><option value="imported-asc">Import CSDL: cũ → mới</option></>}</select></label>
             </div>
-            <div className="story-list">
+            <div className="story-list" onScroll={hideStoryHoverDetail}>
               {loadingStories ? (
                 <div className="story-empty"><RefreshCw className="spin" size={20} /> Đang tải truyện…</div>
               ) : visibleStories.length === 0 ? (
                 <div className="story-empty"><BookOpen size={22} /> Không tìm thấy truyện.</div>
-              ) : visibleStories.map(story => (
-                <div
-                  className="story-item-wrap"
-                  key={story.url}
-                  onMouseEnter={event => showStoryHoverDetail(story, event.currentTarget)}
-                  onFocus={event => showStoryHoverDetail(story, event.currentTarget)}
-                  onMouseLeave={() => setHoveredStory(null)}
-                  onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHoveredStory(null) }}
-                >
-                  <button type="button" className={`story-item ${selectedStory?.url === story.url ? 'selected' : ''}`} onClick={() => selectStory(story)} disabled={crawling !== null}>
-                    {story.image ? <img src={imageUrl(story.image)} alt="" /> : <div className="story-cover"><BookOpen size={17} /></div>}
-                    <span className="story-item-copy"><strong>{story.name}</strong><small>{viewMode === 'crawled' ? `${story.crawledChapterCount || 0}/${story.totalChapter || '?'} chương đã lưu` : `${story.teamName || story.authorName || 'Đang cập nhật'} · ${story.totalChapter || '?'} chương`}</small></span>
-                    <span className="story-item-action">{selectedStory?.url === story.url ? <CheckCircle2 size={16} /> : <ChevronRight size={16} />}</span>
-                  </button>
-                  <div className="story-hover-detail" role="tooltip" style={hoveredStory === story.url && hoverPosition ? hoverPosition : undefined}>
-                    <div className="story-hover-heading">
+              ) : visibleStories.map(story => {
+                const isHovered = hoveredStory === story.url && !!hoverPosition
+                return (
+                  <div
+                    className="story-item-wrap"
+                    key={story.url}
+                    onMouseEnter={event => showStoryHoverDetail(story, event.currentTarget)}
+                    onMouseLeave={hideStoryHoverDetail}
+                  >
+                    <button
+                      type="button"
+                      className={`story-item ${selectedStory?.url === story.url ? 'selected' : ''}`}
+                      onClick={() => selectStory(story)}
+                      disabled={crawling !== null}
+                      onFocus={event => showStoryHoverDetail(story, event.currentTarget)}
+                      onBlur={hideStoryHoverDetail}
+                    >
                       {story.image ? <img src={imageUrl(story.image)} alt="" /> : <div className="story-cover"><BookOpen size={17} /></div>}
-                      <div><strong>{story.name}</strong><small>{story.authorName || 'Tác giả đang cập nhật'}</small></div>
-                    </div>
-                    <div className="story-hover-stats"><span><strong>{formatNumber(story.totalView)}</strong><small>Total view</small></span><span><strong>{formatNumber(story.following)}</strong><small>Following</small></span><span><strong>{formatNumber(story.totalChapter)}</strong><small>Chương</small></span></div>
-                    <dl className="story-hover-meta"><div><dt>Nhóm dịch</dt><dd>{story.teamName || 'Đang cập nhật'}</dd></div><div><dt>Cập nhật gần nhất</dt><dd>{formatDate(storyLastUpdated(story))}</dd></div>{viewMode === 'crawled' && <div><dt>Import vào CSDL</dt><dd>{formatDate(story.importedAt)}</dd></div>}</dl>
+                      <span className="story-item-copy"><strong>{story.name}</strong><small>{viewMode === 'crawled' ? `${story.crawledChapterCount || 0}/${story.totalChapter || '?'} chương đã lưu` : `${story.teamName || story.authorName || 'Đang cập nhật'} · ${story.totalChapter || '?'} chương`}</small></span>
+                      <span className="story-item-action">{selectedStory?.url === story.url ? <CheckCircle2 size={16} /> : <ChevronRight size={16} />}</span>
+                    </button>
+                    {isHovered && (
+                      <div className="story-hover-detail" role="tooltip" style={hoverPosition}>
+                        <div className="story-hover-heading">
+                          {story.image ? <img src={imageUrl(story.image)} alt="" /> : <div className="story-cover"><BookOpen size={17} /></div>}
+                          <div><strong>{story.name}</strong><small>{story.authorName || 'Tác giả đang cập nhật'}</small></div>
+                        </div>
+                        <div className="story-hover-stats"><span><strong>{formatNumber(story.totalView)}</strong><small>Total view</small></span><span><strong>{formatNumber(story.following)}</strong><small>Following</small></span><span><strong>{formatNumber(story.totalChapter)}</strong><small>Chương</small></span></div>
+                        <dl className="story-hover-meta"><div><dt>Nhóm dịch</dt><dd>{story.teamName || 'Đang cập nhật'}</dd></div><div><dt>Cập nhật gần nhất</dt><dd>{formatDate(storyLastUpdated(story))}</dd></div>{viewMode === 'crawled' && <div><dt>Import vào CSDL</dt><dd>{formatDate(story.importedAt)}</dd></div>}</dl>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 

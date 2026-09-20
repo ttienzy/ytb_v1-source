@@ -47,7 +47,7 @@ export function Sidebar({
             <div className="brand-mark">
               <Sparkles size={15} />
             </div>
-            <span className="brand-name">Search Studio</span>
+            <span className="brand-name">CreatorFlow AI</span>
             <button
               type="button"
               className="sidebar-toggle"

@@ -18,6 +18,7 @@ import { VeoStudioPage } from './features/veo-studio/VeoStudioPage'
 import { YouTubePublisherPage } from './features/youtube-publisher/YouTubePublisherPage'
 import { WorkflowPage } from './features/workflow/WorkflowPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
+import { HelpDrawer } from './features/help/components/HelpDrawer'
 
 export function App() {
   const [activePage, setActivePage] = useState('Dashboard')
@@ -26,6 +27,7 @@ export function App() {
   const [monitorSummary, setMonitorSummary] = useState<PublisherDailySummary | null>(null)
   const [isRefreshingMonitor, setIsRefreshingMonitor] = useState(false)
   const [showHealthModal, setShowHealthModal] = useState(false)
+  const [showHelpDrawer, setShowHelpDrawer] = useState(false)
 
   const loadMonitorSummary = useCallback(async (forceSync = false) => {
     if (forceSync) {
@@ -53,6 +55,18 @@ export function App() {
   useEffect(() => {
     loadMonitorSummary(false)
   }, [activePage, loadMonitorSummary])
+
+  // Global F1 shortcut to open Help Drawer
+  useEffect(() => {
+    const handleF1 = (e: KeyboardEvent) => {
+      if (e.key === 'F1') {
+        e.preventDefault()
+        setShowHelpDrawer(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleF1)
+    return () => window.removeEventListener('keydown', handleF1)
+  }, [])
 
   const handleSendToStudioBatch = (urls: string[]) => {
     setStudioBatchUrls(urls)
@@ -132,7 +146,12 @@ export function App() {
               </button>
             )}
 
-            <button type="button" className="help-button" title="Trợ giúp">
+            <button
+              type="button"
+              className="help-button"
+              onClick={() => setShowHelpDrawer(true)}
+              title="Mở cẩm nang hướng dẫn sử dụng (F1 / ?)"
+            >
               ?
             </button>
           </div>
@@ -195,6 +214,14 @@ export function App() {
         summary={monitorSummary}
         isRefreshing={isRefreshingMonitor}
         onRefresh={() => loadMonitorSummary(true)}
+        onNavigate={page => setActivePage(page)}
+      />
+
+      {/* In-App Help & Docs Drawer */}
+      <HelpDrawer
+        isOpen={showHelpDrawer}
+        onClose={() => setShowHelpDrawer(false)}
+        currentSidebar={activePage}
         onNavigate={page => setActivePage(page)}
       />
     </div>

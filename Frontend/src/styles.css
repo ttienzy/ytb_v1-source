@@ -10089,9 +10089,6 @@ input[type="checkbox"],
 .story-hover-detail {
   position: fixed;
   z-index: 100;
-  top: 0;
-  left: 0;
-  display: none;
   width: min(330px, calc(100vw - 20px));
   padding: 12px;
   background: #fff;
@@ -10099,11 +10096,18 @@ input[type="checkbox"],
   border-radius: 10px;
   box-shadow: 0 14px 28px #26324a24;
   pointer-events: none;
+  animation: storyHoverFadeIn 0.12s ease-out;
 }
 
-.story-item-wrap:hover .story-hover-detail,
-.story-item-wrap:focus-within .story-hover-detail {
-  display: block;
+@keyframes storyHoverFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .story-hover-heading {
