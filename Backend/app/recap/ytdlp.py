@@ -259,3 +259,17 @@ def yt_login_status() -> dict:
     mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).isoformat()
     return {"logged_in": True, "cookie_count": n, "saved_at": mtime}
 
+
+def reset_youtube_cookies() -> dict:
+    """Delete yt-dlp fallback cookies while keeping the reusable Chrome profile."""
+    try:
+        settings.yt_cookies_file.unlink(missing_ok=True)
+    except OSError as error:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Không thể xóa cookie YouTube đã lưu: {error}",
+        ) from error
+    return {"ok": True, "logged_in": False, "cookie_count": 0, "saved_at": None}
+

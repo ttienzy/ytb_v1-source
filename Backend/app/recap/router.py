@@ -27,7 +27,7 @@ from app.recap.schemas import (
     JobPublishFacebookRequest,
     JobPublishYouTubeRequest,
 )
-from app.recap.ytdlp import login_youtube, yt_login_status
+from app.recap.ytdlp import login_youtube, reset_youtube_cookies, yt_login_status
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
 
@@ -365,6 +365,12 @@ def yt_login_status_endpoint() -> dict:
 def yt_login_endpoint() -> dict:
     """Mở Chrome tới youtube.com để user login Google → xuất cookies cho yt-dlp."""
     return login_youtube()
+
+
+@router.delete("/yt/login")
+def yt_reset_login_endpoint() -> dict:
+    """Xóa cookie YouTube đang dùng làm fallback cho yt-dlp."""
+    return reset_youtube_cookies()
 
 
 # ── Batch Queue ───────────────────────────────────────────────────────────────

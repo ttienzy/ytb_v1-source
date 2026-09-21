@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Save,
   Sparkles,
+  Trash2,
   Tv,
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
@@ -56,6 +57,7 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
   const [yt, setYt] = useState<YtState>({ logged_in: false, cookie_count: 0 })
   const [ytLoading, setYtLoading] = useState(false)
   const [ytMsg, setYtMsg] = useState('')
+  const [ytMsgType, setYtMsgType] = useState<'success' | 'error' | 'info'>('info')
 
   // Update check states
   const [updateChecking, setUpdateChecking] = useState(false)
@@ -100,7 +102,11 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       })
       if (!response.ok) throw new Error()
       const next = await response.json()
-      setState(prev => ({ ...prev, has_cookie: next.has_cookie }))
+      setState(prev => ({
+        ...prev,
+        has_cookie: next.has_cookie,
+        cookie_count: next.cookie_count ?? prev.cookie_count,
+      }))
       onCookieStatusChange?.(!!next.has_cookie)
       setCookies('')
       setMessage('Đã lưu cấu hình Gemini thành công.')
@@ -139,9 +145,35 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
     }
   }
 
+  async function resetGeminiCookie() {
+    if (!window.confirm('Xóa cookie Gemini đã lưu? Bạn sẽ cần đăng nhập lại trước khi chạy Gemini.')) {
+      return
+    }
+    setLoading(true)
+    setMessage('')
+    try {
+      const response = await fetch(`${API_URL}/api/settings/gemini`, {
+        method: 'DELETE',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Xóa cookie Gemini thất bại.')
+      setState(prev => ({ ...prev, has_cookie: false, cookie_count: 0, saved_at: undefined }))
+      setCookies('')
+      onCookieStatusChange?.(false)
+      setMessage('Đã xóa cookie Gemini. Profile Chrome và template vẫn được giữ lại.')
+      setMessageType('success')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Xóa cookie Gemini thất bại.')
+      setMessageType('error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function loginYt() {
     setYtLoading(true)
     setYtMsg('Đang mở Chrome tới YouTube. Vui lòng đăng nhập Google...')
+    setYtMsgType('info')
     try {
       const response = await fetch(`${API_URL}/api/recap/yt/login`, {
         method: 'POST',
@@ -150,8 +182,33 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
       setYt({ logged_in: true, cookie_count: result.cookie_count })
       setYtMsg('Đã đăng nhập YouTube — cookies đã lưu để yt-dlp fallback khi bị bot-wall.')
+      setYtMsgType('success')
     } catch (error) {
       setYtMsg(error instanceof Error ? error.message : 'Đăng nhập thất bại.')
+      setYtMsgType('error')
+    } finally {
+      setYtLoading(false)
+    }
+  }
+
+  async function resetYtCookie() {
+    if (!window.confirm('Xóa cookie YouTube dự phòng đã lưu cho yt-dlp?')) {
+      return
+    }
+    setYtLoading(true)
+    setYtMsg('')
+    try {
+      const response = await fetch(`${API_URL}/api/recap/yt/login`, {
+        method: 'DELETE',
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Xóa cookie YouTube thất bại.')
+      setYt({ logged_in: false, cookie_count: 0, saved_at: null })
+      setYtMsg('Đã xóa cookie YouTube dự phòng. yt-dlp sẽ tiếp tục chạy không cookie.')
+      setYtMsgType('success')
+    } catch (error) {
+      setYtMsg(error instanceof Error ? error.message : 'Xóa cookie YouTube thất bại.')
+      setYtMsgType('error')
     } finally {
       setYtLoading(false)
     }
@@ -300,6 +357,18 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
               <span>Đăng nhập Gemini (Chrome)</span>
             </button>
 
+            {state.has_cookie && (
+              <button
+                type="button"
+                className="btn-gemini-danger"
+                onClick={resetGeminiCookie}
+                disabled={loading}
+              >
+                <Trash2 size={14} />
+                <span>Reset cookie</span>
+              </button>
+            )}
+
             {message && (
               <div className={`gemini-inline-message ${messageType}`}>
                 {messageType === 'success' && <CheckCircle2 size={14} />}
@@ -376,9 +445,23 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
               </span>
             </button>
 
+            {yt.logged_in && (
+              <button
+                type="button"
+                className="btn-gemini-danger"
+                onClick={resetYtCookie}
+                disabled={ytLoading}
+              >
+                <Trash2 size={14} />
+                <span>Reset cookie</span>
+              </button>
+            )}
+
             {ytMsg && (
-              <div className="gemini-inline-message info">
-                <Info size={14} />
+              <div className={`gemini-inline-message ${ytMsgType}`}>
+                {ytMsgType === 'success' && <CheckCircle2 size={14} />}
+                {ytMsgType === 'error' && <AlertCircle size={14} />}
+                {ytMsgType === 'info' && <Info size={14} />}
                 <span>{ytMsg}</span>
               </div>
             )}

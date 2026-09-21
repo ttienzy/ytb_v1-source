@@ -20,9 +20,42 @@ def get_settings() -> dict:
 @router.put("")
 def save_settings(payload: GeminiSettingsPayload) -> dict:
     config = read_config()
-    config["gemini"] = mark_saved({**config["gemini"], "cookies": payload.cookies.strip(), "client_context_token": payload.client_context_token.strip(), "app_url": payload.app_url.strip() or "https://gemini.google.com/app"})
+    current = config["gemini"]
+    next_data = {
+        **current,
+        "client_context_token": payload.client_context_token.strip(),
+        "app_url": payload.app_url.strip() or "https://gemini.google.com/app",
+    }
+
+    # The UI leaves this field blank when a cookie is already stored. Preserve
+    # the existing cookie; deletion is handled explicitly by DELETE below.
+    cookies = payload.cookies.strip()
+    if cookies:
+        next_data["cookies"] = cookies
+        next_data["cookie_count"] = sum(1 for item in cookies.split(";") if item.strip())
+
+    config["gemini"] = mark_saved(next_data)
     write_config(config)
-    return {"ok": True, "has_cookie": bool(payload.cookies.strip())}
+    return {
+        "ok": True,
+        "has_cookie": bool(config["gemini"].get("cookies")),
+        "cookie_count": config["gemini"].get("cookie_count", 0),
+    }
+
+
+@router.delete("")
+def reset_cookie() -> dict:
+    """Delete the stored Gemini cookie while preserving profile and template data."""
+    config = read_config()
+    config["gemini"] = {
+        **config["gemini"],
+        "cookies": "",
+        "cookie_count": 0,
+        "saved_at": None,
+        "cookie_cleared_at": datetime.now(timezone.utc).isoformat(),
+    }
+    write_config(config)
+    return {"ok": True, "has_cookie": False, "cookie_count": 0}
 
 
 @router.post("/login")

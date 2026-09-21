@@ -34,6 +34,9 @@ const btnTest                = $('btnTest');
 const btnTestCaptcha         = $('btnTestCaptcha');
 const btnCookieVoice         = $('btnCookieVoice');
 const extVersionDisplay      = $('extVersionDisplay');
+const overallStatus          = $('overallStatus');
+const overallStatusText      = $('overallStatusText');
+const logToggleLabel         = $('logToggleLabel');
 
 // System status dots & values
 const dotBridge  = $('dotBridge');
@@ -77,6 +80,27 @@ function send(payload, cb) {
   }
 }
 
+const idleButtonMarkup = new WeakMap();
+
+function setButtonBusy(button) {
+  if (!button) return;
+  if (!idleButtonMarkup.has(button)) idleButtonMarkup.set(button, button.innerHTML);
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="sr-only">Working</span>';
+}
+
+function restoreButton(button) {
+  if (!button) return;
+  const markup = idleButtonMarkup.get(button);
+  if (markup) button.innerHTML = markup;
+  button.disabled = false;
+}
+
+function setOverallStatus(statusClass, text) {
+  if (overallStatus) overallStatus.className = `overall-status ${statusClass || ''}`.trim();
+  if (overallStatusText) overallStatusText.textContent = text || 'Unknown';
+}
+
 function setStatus(dotEl, valEl, statusClass, text) {
   if (dotEl) dotEl.className = `dot ${statusClass || ''}`.trim();
   if (valEl) valEl.textContent = text || '-';
@@ -90,7 +114,8 @@ let logVisible = false;
 logToggle.addEventListener('click', () => {
   logVisible = !logVisible;
   logSection.style.display = logVisible ? 'block' : 'none';
-  logToggle.innerHTML      = logVisible ? '&#9662; Activity Log' : '&#9656; Activity Log';
+  logToggle.classList.toggle('expanded', logVisible);
+  if (logToggleLabel) logToggleLabel.textContent = logVisible ? 'Hide activity' : 'Activity log';
   if (logVisible) renderLog();
 });
 
@@ -137,10 +162,8 @@ function loadRemoteLogs() {
 // ─── Status Check ─────────────────────────────────────────────────────────────
 
 async function checkAll() {
-  if (btnCheck) {
-    btnCheck.disabled = true;
-    btnCheck.innerHTML = '<span class="spinner"></span>';
-  }
+  setButtonBusy(btnCheck);
+  setOverallStatus('', 'Checking');
   setStatus(dotBridge,  valBridge,  '', 'Checking...');
   setStatus(dotTab,     valTab,     '', 'Checking...');
   setStatus(dotLogin,   valLogin,   '', 'Checking...');
@@ -169,14 +192,17 @@ async function checkAll() {
           setStatus(dotToken, valToken, res.token.ok ? 'ok' : 'warn', res.token.text);
           if (res.token.ok) addLogEntry('success', `Token active: ${res.token.text}`);
         }
+
+        if (!res.bridge?.ok) setOverallStatus('err', 'Offline');
+        else if (!res.tab?.ok) setOverallStatus('warn', 'Open Flow');
+        else if (!res.login?.ok) setOverallStatus('warn', 'Sign in');
+        else setOverallStatus('ok', 'Ready');
       } else {
         setStatus(dotBridge, valBridge, 'err', 'Offline');
+        setOverallStatus('err', 'Offline');
       }
 
-      if (btnCheck) {
-        btnCheck.disabled = false;
-        btnCheck.textContent = 'Check';
-      }
+      restoreButton(btnCheck);
       resolve();
     });
   });
@@ -212,20 +238,32 @@ function loadStats() {
 function loadAccounts() {
   send({ type: 'GET_ACCOUNTS' }, (resp) => {
     if (!resp?.accounts?.length) {
-      accountsListEl.innerHTML = '<div class="acc-empty">No account harvested yet</div>';
+      accountsListEl.innerHTML = `<div class="acc-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="8" r="3"></circle><path d="M5.5 20a6.5 6.5 0 0 1 13 0"></path>
+        </svg>
+        No account connected
+      </div>`;
       return;
     }
-    accountsListEl.innerHTML = resp.accounts.map((a, i) => {
-      const tier   = escapeHtml(String(a.tier || 'FREE').toUpperCase());
+    accountsListEl.innerHTML = resp.accounts.map((a) => {
+      const email   = String(a.email || 'Google account');
+      const rawTier = String(a.tier || 'FREE').toUpperCase();
+      const tier    = ['FREE', 'PRO', 'ULTRA'].includes(rawTier) ? rawTier : 'FREE';
       const credit = (a.credit != null && a.credit !== 0) ? Number(a.credit).toLocaleString('vi-VN') : '0';
-      const incog  = a.incognito ? ' &#128374;' : '';
-      const tab    = a.tabId ? `${escapeHtml(String(a.tabId))}${incog}` : '';
+      const initial = escapeHtml(email.trim().charAt(0).toUpperCase() || 'G');
+      const privateBadge = a.incognito ? '<span class="acc-private">PRIVATE</span>' : '';
+      const tab = a.tabId ? `Tab ${escapeHtml(String(a.tabId))}` : 'Flow session';
       return `<div class="acc-row">
-        <div class="acc-email">[${i}] ${escapeHtml(a.email)}</div>
+        <span class="acc-avatar" aria-hidden="true">${initial}</span>
+        <div class="acc-info">
+          <div class="acc-email">${escapeHtml(email)}</div>
+          <div class="acc-sub">${tab}</div>
+        </div>
         <div class="acc-meta">
           <span class="acc-tier ${tier}">${tier}</span>
-          <span class="acc-credit">${credit}cr</span>
-          <span class="acc-tab">${tab}</span>
+          <span class="acc-credit">${credit} cr</span>
+          ${privateBadge}
         </div>
       </div>`;
     }).join('');
@@ -265,8 +303,7 @@ function openLabs() {
 }
 
 function reloadNow() {
-  btnReloadNow.disabled  = true;
-  btnReloadNow.innerHTML = '<span class="spinner"></span>';
+  setButtonBusy(btnReloadNow);
   addLogEntry('info', 'Manual reload cycle...');
 
   send({ type: 'REFRESH_TAB' }, () => {
@@ -277,8 +314,7 @@ function reloadNow() {
         } else {
           addLogEntry('warn', 'Reload done but push failed');
         }
-        btnReloadNow.disabled = false;
-        btnReloadNow.textContent = 'Reload Now';
+        restoreButton(btnReloadNow);
         checkAll();
       });
     }, 10_000);
@@ -287,79 +323,64 @@ function reloadNow() {
 
 async function copyCookieVoice() {
   if (!btnCookieVoice) return;
-  btnCookieVoice.disabled  = true;
-  const originalText       = btnCookieVoice.textContent;
-  btnCookieVoice.innerHTML = '<span class="spinner"></span>';
+  setButtonBusy(btnCookieVoice);
   addLogEntry('info', 'Copying Cookie Voice (.google.com)...');
 
   send({ type: 'GET_COOKIE_VOICE' }, async (res) => {
     if (res && res.ok && res.cookie) {
       try {
         await navigator.clipboard.writeText(res.cookie);
-        btnCookieVoice.textContent = '✓ Copied!';
+        btnCookieVoice.textContent = 'Copied';
         addLogEntry('success', `Cookie Voice copied to clipboard (${res.count} cookies)`);
       } catch {
-        btnCookieVoice.textContent = '✓ Ready';
+        btnCookieVoice.textContent = 'Ready';
         addLogEntry('warn', 'Could not write to clipboard automatically');
       }
     } else {
-      btnCookieVoice.textContent = '✗ Failed';
+      btnCookieVoice.textContent = 'Failed';
       addLogEntry('error', res?.error || 'No voice cookies found. Login to Google first.');
     }
     setTimeout(() => {
-      btnCookieVoice.disabled    = false;
-      btnCookieVoice.textContent = originalText;
+      restoreButton(btnCookieVoice);
     }, 3_000);
   });
 }
 
 async function testToken() {
   const targetBtn = btnTestCaptcha || btnTest;
-  if (targetBtn) {
-    targetBtn.disabled  = true;
-    targetBtn.innerHTML = '<span class="spinner"></span>';
-  }
+  setButtonBusy(targetBtn);
   addLogEntry('info', 'Testing reCAPTCHA Enterprise execution...');
 
   send({ type: 'TEST_CAPTCHA', action: 'USER_GENERATION' }, (res) => {
     if (res && res.token) {
       addLogEntry('success', `Captcha solved! Token: ${res.token.slice(0, 16)}...`);
-      if (targetBtn) targetBtn.textContent = '✓ Success';
+      if (targetBtn) targetBtn.textContent = 'Passed';
     } else {
       addLogEntry('error', `Captcha test failed: ${res?.error || 'unknown'}`);
-      if (targetBtn) targetBtn.textContent = '✗ Failed';
+      if (targetBtn) targetBtn.textContent = 'Failed';
     }
     loadStats();
     setTimeout(() => {
-      if (targetBtn) {
-        targetBtn.disabled    = false;
-        targetBtn.textContent = 'Test Captcha';
-      }
+      restoreButton(targetBtn);
     }, 3_000);
   });
 }
 
 async function pushToken() {
-  if (btnPush) {
-    btnPush.disabled  = true;
-    btnPush.innerHTML = '<span class="spinner"></span>';
-  }
+  setButtonBusy(btnPush);
   addLogEntry('info', 'Harvesting & pushing credentials to bridge...');
 
   send({ type: 'FORCE_PUSH' }, (res) => {
     if (res && res.ok) {
       addLogEntry('success', `Pushed to bridge: ${res.token_preview || 'OK'}`);
-      if (btnPush) btnPush.textContent = '✓ Pushed!';
+      if (btnPush) btnPush.textContent = 'Pushed';
       setStatus(dotToken, valToken, 'ok', 'Active');
     } else {
       addLogEntry('warn', 'Push failed — ensure labs.google is open & logged in');
-      if (btnPush) btnPush.textContent = '✗ Failed';
+      if (btnPush) btnPush.textContent = 'Failed';
     }
     setTimeout(() => {
-      if (btnPush) {
-        btnPush.disabled    = false;
-        btnPush.textContent = 'Push';
-      }
+      restoreButton(btnPush);
     }, 3_000);
   });
 }
@@ -394,14 +415,12 @@ if (btnPush)        btnPush.addEventListener('click', pushToken);
 if (btnCheck)       btnCheck.addEventListener('click', checkAll);
 
 btnClearCacheNow.addEventListener('click', () => {
-  btnClearCacheNow.disabled    = true;
-  btnClearCacheNow.textContent = '...';
+  setButtonBusy(btnClearCacheNow);
   addLogEntry('info', 'Clearing labs.google cache...');
   send({ type: 'CLEAR_CACHE_NOW' }, (resp) => {
     if (resp?.ok) addLogEntry('success', 'Labs cache cleared!');
     else          addLogEntry('error',   'Cache clear failed');
-    btnClearCacheNow.disabled    = false;
-    btnClearCacheNow.textContent = 'Now';
+    restoreButton(btnClearCacheNow);
   });
 });
 
