@@ -2,7 +2,7 @@
 from pathlib import Path
 import os
 import sys
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 service_dir = Path(SPECPATH).resolve()
@@ -12,32 +12,39 @@ a = Analysis(
     pathex=[str(service_dir)],
     binaries=[],
     # Runtime voices/model cache live under APP_DATA_DIR and must never be baked
-    # into a release. Only VieNeu's built-in preset assets belong in the EXE.
-    datas=collect_data_files('vieneu', includes=['assets/**/*']),
-    hiddenimports=[
-        'uvicorn',
-        'uvicorn.logging',
-        'uvicorn.loops',
-        'uvicorn.loops.auto',
-        'uvicorn.protocols',
-        'uvicorn.protocols.http',
-        'uvicorn.protocols.http.auto',
-        'uvicorn.protocols.websockets',
-        'uvicorn.protocols.websockets.auto',
-        'uvicorn.lifespan',
-        'uvicorn.lifespan.on',
-        'app',
-        'app.main',
-        'app.engine',
-        'app.routers',
-        'app.routers.health',
-        'app.routers.voices',
-        'app.routers.tts',
-        'pydantic_settings',
-        'vieneu',
-        'onnxruntime',
-        'huggingface_hub',
-    ],
+    # into a release. Built-in preset assets and sea_g2p binary dictionary belong in the EXE.
+    datas=(
+        collect_data_files('vieneu', includes=['assets/**/*'])
+        + collect_data_files('sea_g2p')
+    ),
+    hiddenimports=(
+        collect_submodules('sea_g2p')
+        + collect_submodules('vieneu_utils')
+        + [
+            'uvicorn',
+            'uvicorn.logging',
+            'uvicorn.loops',
+            'uvicorn.loops.auto',
+            'uvicorn.protocols',
+            'uvicorn.protocols.http',
+            'uvicorn.protocols.http.auto',
+            'uvicorn.protocols.websockets',
+            'uvicorn.protocols.websockets.auto',
+            'uvicorn.lifespan',
+            'uvicorn.lifespan.on',
+            'app',
+            'app.main',
+            'app.engine',
+            'app.routers',
+            'app.routers.health',
+            'app.routers.voices',
+            'app.routers.tts',
+            'pydantic_settings',
+            'vieneu',
+            'onnxruntime',
+            'huggingface_hub',
+        ]
+    ),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -118,7 +118,10 @@ jobs:
 
             if (-not $health.model_loaded) { throw 'Voice model did not become ready within 10 minutes' }
             if (-not $health.ffmpeg_available) { throw 'Bundled FFmpeg was not detected by Voice Service' }
-            Write-Host "Voice smoke test passed: $($health | ConvertTo-Json -Compress)"
+            $previewPayload = @{ text = 'Xin chào' } | ConvertTo-Json
+            $previewResp = Invoke-WebRequest -Uri 'http://127.0.0.1:8001/preview' -Method Post -ContentType 'application/json' -Body $previewPayload -TimeoutSec 60
+            if ($previewResp.StatusCode -ne 200) { throw "Voice preview endpoint returned HTTP $($previewResp.StatusCode)" }
+            Write-Host "Voice smoke test passed: $($health | ConvertTo-Json -Compress) (preview synthesis verified)"
           } finally {
             if ($voiceProcess -and -not $voiceProcess.HasExited) {
               Stop-Process -Id $voiceProcess.Id -Force

@@ -36,6 +36,12 @@ class RuntimeConfigTests(unittest.TestCase):
         with patch("app.config.shutil.which", return_value="system-ffmpeg"):
             self.assertEqual(resolve_ffmpeg_path(), "system-ffmpeg")
 
+    def test_g2p_dictionary_available(self) -> None:
+        from sea_g2p import G2P
+        g2p = G2P(lang="vi")
+        phones = g2p.convert("Xin chào")
+        self.assertTrue(bool(phones))
+
 
 if __name__ == "__main__":
     unittest.main()
