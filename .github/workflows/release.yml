@@ -27,20 +27,33 @@ jobs:
             Backend/requirements.txt
             services/voice-service/uv.lock
 
-      - name: Install Python Dependencies & PyInstaller
+      - name: Cache Packaged Backend Executable
+        id: cache-backend
+        uses: actions/cache@v4
+        with:
+          path: Backend/dist/backend_server.exe
+          key: backend-bin-${{ runner.os }}-${{ hashFiles('Backend/requirements.txt', 'Backend/backend.spec', 'Backend/app/**', 'Backend/run_server.py') }}
+
+      - name: Build Standalone Backend Executable
+        if: steps.cache-backend.outputs.cache-hit != 'true'
         run: |
           cd Backend
           python -m pip install --upgrade pip
           if (Test-Path requirements.txt) { pip install -r requirements.txt }
           pip install pyinstaller uvicorn fastapi httpx pydantic pydantic-settings sqlalchemy alembic yt-dlp youtube-transcript-api python-dotenv playwright pyyaml requests websockets
-
-      - name: Build Standalone Backend Executable
-        run: |
-          cd Backend
           python -m unittest tests.test_watermark_runtime -v
           pyinstaller --noconfirm backend.spec
+          if (-not (Test-Path dist\backend_server.exe)) { throw 'backend_server.exe was not created' }
+
+      - name: Cache Packaged Voice Service Executable
+        id: cache-voice
+        uses: actions/cache@v4
+        with:
+          path: services/voice-service/dist/voice_server.exe
+          key: voice-bin-${{ runner.os }}-${{ hashFiles('services/voice-service/pyproject.toml', 'services/voice-service/uv.lock', 'services/voice-service/voice.spec', 'services/voice-service/app/**') }}
 
       - name: Install Voice Service Dependencies & Build Executable
+        if: steps.cache-voice.outputs.cache-hit != 'true'
         run: |
           cd services/voice-service
           python -m pip install uv==0.12.5
