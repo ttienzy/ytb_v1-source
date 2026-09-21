@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { basename, delimiter, join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -376,8 +377,136 @@ ipcMain.handle('check-9router-status', async () => {
   return { running }
 })
 
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow?.webContents.send('updater:status', { status: 'checking' })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    mainWindow?.webContents.send('updater:status', {
+      status: 'available',
+      version: info.version,
+      releaseDate: info.releaseDate,
+      releaseNotes: info.releaseNotes,
+    })
+  })
+
+  autoUpdater.on('update-not-available', (info) => {
+    mainWindow?.webContents.send('updater:status', {
+      status: 'up_to_date',
+      version: info.version,
+    })
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    mainWindow?.webContents.send('updater:status', {
+      status: 'downloading',
+      percent: Math.round(progress.percent),
+      bytesPerSecond: progress.bytesPerSecond,
+      transferred: progress.transferred,
+      total: progress.total,
+    })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    mainWindow?.webContents.send('updater:status', {
+      status: 'downloaded',
+      version: info.version,
+      releaseNotes: info.releaseNotes,
+    })
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('[AutoUpdater] Error:', err)
+    mainWindow?.webContents.send('updater:status', {
+      status: 'error',
+      message: err?.message || 'Có lỗi xảy ra khi kiểm tra/tải bản cập nhật',
+    })
+  })
+}
+
+ipcMain.handle('updater:get-app-version', () => {
+  return app.getVersion()
+})
+
+ipcMain.handle('updater:check', async () => {
+  if (!app.isPackaged) {
+    try {
+      const res = await fetch('https://api.github.com/repos/ttienzy/ytb_v1/releases/latest', {
+        headers: { 'User-Agent': 'CreatorFlow-App' },
+      })
+      if (!res.ok) {
+        if (res.status === 404) {
+          const payload = { status: 'up_to_date', currentVersion: app.getVersion() }
+          mainWindow?.webContents.send('updater:status', payload)
+          return payload
+        }
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const data = (await res.json()) as { tag_name?: string; name?: string; body?: string; published_at?: string }
+      const latestTag = data.tag_name?.replace(/^v/, '') || ''
+      const currentVer = app.getVersion().replace(/^v/, '')
+      if (latestTag && latestTag !== currentVer) {
+        const payload = {
+          status: 'available',
+          isDev: true,
+          currentVersion: app.getVersion(),
+          version: data.tag_name,
+          releaseDate: data.published_at,
+          releaseNotes: data.body,
+        }
+        mainWindow?.webContents.send('updater:status', payload)
+        return payload
+      }
+      const payload = { status: 'up_to_date', currentVersion: app.getVersion() }
+      mainWindow?.webContents.send('updater:status', payload)
+      return payload
+    } catch (err: any) {
+      const payload = { status: 'error', message: err?.message || 'Không thể kiểm tra cập nhật' }
+      mainWindow?.webContents.send('updater:status', payload)
+      return payload
+    }
+  }
+
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    return {
+      status: result?.updateInfo?.version ? 'checked' : 'idle',
+      updateInfo: result?.updateInfo,
+      currentVersion: app.getVersion(),
+    }
+  } catch (err: any) {
+    console.error('[AutoUpdater] Check error:', err)
+    return { status: 'error', message: err?.message || 'Không thể kiểm tra cập nhật' }
+  }
+})
+
+ipcMain.handle('updater:download', async () => {
+  if (!app.isPackaged) {
+    return { error: 'Tính năng tự động tải cập nhật hoạt động trên bản phát hành chính thức (.exe).' }
+  }
+  try {
+    await autoUpdater.downloadUpdate()
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[AutoUpdater] Download error:', err)
+    return { error: err?.message || 'Tải bản cập nhật thất bại' }
+  }
+})
+
+ipcMain.handle('updater:quit-and-install', () => {
+  cleanUpBackends()
+  setImmediate(() => {
+    autoUpdater.quitAndInstall(false, true)
+  })
+})
+
 app.whenReady().then(async () => {
   await startProductionBackend()
+  setupAutoUpdater()
   createWindow()
   if (mainWindow) {
     mainWindow.on('focus', () => {

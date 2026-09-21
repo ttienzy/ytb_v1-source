@@ -189,7 +189,10 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: Frontend/release/*.exe
+          files: |
+            Frontend/release/*.exe
+            Frontend/release/latest.yml
+            Frontend/release/*.blockmap
           generate_release_notes: true
           draft: false
           prerelease: false

@@ -1,5 +1,19 @@
 /// <reference types="vite/client" />
 
+export interface UpdaterStatusEvent {
+  status: 'checking' | 'available' | 'up_to_date' | 'downloading' | 'downloaded' | 'error' | 'checked' | 'idle'
+  version?: string
+  releaseDate?: string
+  releaseNotes?: string | null
+  percent?: number
+  bytesPerSecond?: number
+  transferred?: number
+  total?: number
+  message?: string
+  isDev?: boolean
+  currentVersion?: string
+}
+
 interface Window {
   desktop?: {
     platform: string
@@ -10,5 +24,10 @@ interface Window {
     open9routerDashboard: () => Promise<{ ok: boolean; message?: string }>
     check9routerStatus: () => Promise<{ running: boolean }>
     on9RouterUpdated: (callback: () => void) => () => void
+    getAppVersion: () => Promise<string>
+    checkForUpdates: () => Promise<UpdaterStatusEvent>
+    startDownloadUpdate: () => Promise<{ ok?: boolean; error?: string }>
+    quitAndInstall: () => Promise<void>
+    onUpdaterStatus: (callback: (data: UpdaterStatusEvent) => void) => () => void
   }
 }

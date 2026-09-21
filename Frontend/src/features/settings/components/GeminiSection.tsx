@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   AlertCircle,
+  ArrowDownCircle,
   CheckCircle2,
   ExternalLink,
   Film,
@@ -9,6 +10,7 @@ import {
   KeyRound,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Save,
   Sparkles,
   Trash2,
@@ -38,6 +40,13 @@ export function ChromeBrandIcon({ size = 15 }: { size?: number }) {
   )
 }
 
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`
+}
+
 interface GeminiSectionProps {
   onCookieStatusChange?: (hasCookie: boolean) => void
 }
@@ -60,12 +69,25 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
   const [ytMsgType, setYtMsgType] = useState<'success' | 'error' | 'info'>('info')
 
   // Update check states
+  const [appVersion, setAppVersion] = useState('v1.0.1')
   const [updateChecking, setUpdateChecking] = useState(false)
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'up_to_date' | 'available'>('idle')
-  const [updateInfo, setUpdateInfo] = useState<any>(null)
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'up_to_date' | 'available' | 'downloading' | 'downloaded'>('idle')
+  const [updateInfo, setUpdateInfo] = useState<{
+    version?: string
+    name?: string
+    published_at?: string
+    releaseNotes?: string | null
+    isDev?: boolean
+    html_url?: string
+  } | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState<{
+    percent: number
+    bytesPerSecond: number
+    transferred: number
+    total: number
+  }>({ percent: 0, bytesPerSecond: 0, transferred: 0, total: 0 })
   const [updateError, setUpdateError] = useState('')
-
-  const CURRENT_APP_VERSION = 'v1.0.1'
+  const [installing, setInstalling] = useState(false)
 
   useEffect(() => {
     fetch(`${API_URL}/api/settings/gemini`)
@@ -85,6 +107,52 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       .then(r => r.json())
       .then(setYt)
       .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (window.desktop?.getAppVersion) {
+      window.desktop.getAppVersion().then((ver) => {
+        if (ver) setAppVersion(ver.startsWith('v') ? ver : `v${ver}`)
+      }).catch(() => {})
+    }
+
+    if (window.desktop?.onUpdaterStatus) {
+      const unsub = window.desktop.onUpdaterStatus((data) => {
+        if (data.status === 'checking') {
+          setUpdateChecking(true)
+          setUpdateError('')
+        } else if (data.status === 'available') {
+          setUpdateChecking(false)
+          setUpdateStatus('available')
+          setUpdateInfo({
+            version: data.version,
+            published_at: data.releaseDate,
+            releaseNotes: data.releaseNotes,
+            isDev: data.isDev,
+          })
+        } else if (data.status === 'up_to_date') {
+          setUpdateChecking(false)
+          setUpdateStatus('up_to_date')
+          setUpdateInfo(null)
+        } else if (data.status === 'downloading') {
+          setUpdateChecking(false)
+          setUpdateStatus('downloading')
+          setDownloadProgress({
+            percent: data.percent ?? 0,
+            bytesPerSecond: data.bytesPerSecond ?? 0,
+            transferred: data.transferred ?? 0,
+            total: data.total ?? 0,
+          })
+        } else if (data.status === 'downloaded') {
+          setUpdateChecking(false)
+          setUpdateStatus('downloaded')
+        } else if (data.status === 'error') {
+          setUpdateChecking(false)
+          setUpdateError(data.message || 'Lỗi cập nhật')
+        }
+      })
+      return unsub
+    }
   }, [])
 
   async function save() {
@@ -219,6 +287,31 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
     setUpdateStatus('idle')
     setUpdateInfo(null)
     setUpdateError('')
+
+    if (window.desktop?.checkForUpdates) {
+      try {
+        const res = await window.desktop.checkForUpdates()
+        if (res.status === 'up_to_date') {
+          setUpdateStatus('up_to_date')
+        } else if (res.status === 'available') {
+          setUpdateStatus('available')
+          setUpdateInfo({
+            version: res.version,
+            published_at: res.releaseDate,
+            releaseNotes: res.releaseNotes,
+            isDev: res.isDev,
+          })
+        } else if (res.status === 'error') {
+          setUpdateError(res.message || 'Không thể kiểm tra cập nhật.')
+        }
+      } catch (err: any) {
+        setUpdateError(err?.message || 'Không thể kiểm tra cập nhật.')
+      } finally {
+        setUpdateChecking(false)
+      }
+      return
+    }
+
     try {
       const res = await fetch('https://api.github.com/repos/ttienzy/ytb_v1/releases/latest')
       if (!res.ok) {
@@ -230,9 +323,15 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       }
       const data = await res.json()
       const latestTag = data.tag_name
-      if (latestTag && latestTag !== CURRENT_APP_VERSION) {
+      if (latestTag && latestTag !== appVersion) {
         setUpdateStatus('available')
-        setUpdateInfo(data)
+        setUpdateInfo({
+          version: data.tag_name,
+          name: data.name,
+          published_at: data.published_at,
+          releaseNotes: data.body,
+          html_url: data.html_url,
+        })
       } else {
         setUpdateStatus('up_to_date')
       }
@@ -240,6 +339,33 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       setUpdateError('Không thể kiểm tra cập nhật. Vui lòng kiểm tra kết nối Internet.')
     } finally {
       setUpdateChecking(false)
+    }
+  }
+
+  async function handleDownloadUpdate() {
+    setUpdateError('')
+    if (updateInfo?.isDev) {
+      alert('Bạn đang ở môi trường phát triển (Dev mode). Tính năng tự động tải và cài đặt đè hoạt động trên bản phát hành chính thức (.exe).')
+      return
+    }
+
+    if (window.desktop?.startDownloadUpdate) {
+      setUpdateStatus('downloading')
+      setDownloadProgress({ percent: 0, bytesPerSecond: 0, transferred: 0, total: 0 })
+      const res = await window.desktop.startDownloadUpdate()
+      if (res?.error) {
+        setUpdateError(res.error)
+        setUpdateStatus('available')
+      }
+    } else if (updateInfo?.html_url) {
+      window.open(updateInfo.html_url, '_blank')
+    }
+  }
+
+  function handleQuitAndInstall() {
+    if (window.desktop?.quitAndInstall) {
+      setInstalling(true)
+      window.desktop.quitAndInstall()
     }
   }
 
@@ -487,14 +613,14 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
             <div>
               <h3 className="gemini-title">Cập nhật Ứng dụng</h3>
               <p className="gemini-subtitle">
-                Kiểm tra phiên bản mới nhất được phát hành từ GitHub Releases.
+                Kiểm tra và nâng cấp trực tiếp lên phiên bản mới nhất từ máy chủ phát hành.
               </p>
             </div>
           </div>
 
           <div className="gemini-header-status">
             <span className="gemini-version-pill">
-              Phiên bản: <strong>{CURRENT_APP_VERSION}</strong>
+              Phiên bản: <strong>{appVersion}</strong>
             </span>
           </div>
         </div>
@@ -505,7 +631,7 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
               type="button"
               className="btn-gemini-secondary"
               onClick={checkUpdates}
-              disabled={updateChecking}
+              disabled={updateChecking || updateStatus === 'downloading'}
             >
               {updateChecking ? (
                 <Loader2 size={14} className="spin-icon" />
@@ -530,23 +656,84 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
             )}
           </div>
 
-          {updateInfo && (
+          {/* 1. Trạng thái ĐÃ CÓ BẢN MỚI -> Nút Cập nhật ngay */}
+          {updateStatus === 'available' && updateInfo && (
             <div className="gemini-update-banner">
+              <div className="update-banner-header">
+                <div className="update-banner-title">
+                  🎉 Đã có phiên bản mới: <strong>{updateInfo.version}</strong> {updateInfo.name ? `(${updateInfo.name})` : ''}
+                </div>
+                {updateInfo.published_at && (
+                  <div className="update-banner-date">
+                    Ngày phát hành: {new Date(updateInfo.published_at).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+
+              <div className="update-action-row">
+                <button
+                  type="button"
+                  className="btn-gemini-primary update-btn"
+                  onClick={handleDownloadUpdate}
+                >
+                  <ArrowDownCircle size={15} />
+                  <span>Cập nhật ngay</span>
+                </button>
+                {updateInfo.isDev && (
+                  <span className="update-dev-note">
+                    (Môi trường Dev: Nhấn để xem lưu ý)
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 2. Trạng thái ĐANG TẢI BẢN CẬP NHẬT -> Progress Bar */}
+          {updateStatus === 'downloading' && (
+            <div className="gemini-update-banner downloading">
               <div className="update-banner-title">
-                🎉 Đã có phiên bản mới: <strong>{updateInfo.tag_name}</strong> {updateInfo.name ? `(${updateInfo.name})` : ''}
+                <Loader2 size={14} className="spin-icon" />
+                <span>Đang tải bản cập nhật <strong>{updateInfo?.version || ''}</strong>... {downloadProgress.percent}%</span>
               </div>
-              <div className="update-banner-date">
-                Ngày phát hành: {new Date(updateInfo.published_at).toLocaleDateString()}
+
+              <div className="gemini-progress-bar-container">
+                <div
+                  className="gemini-progress-bar-fill"
+                  style={{ width: `${Math.max(4, downloadProgress.percent)}%` }}
+                />
               </div>
-              <a
-                href={updateInfo.html_url}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-gemini-primary update-link"
-              >
-                <span>Tải bản cập nhật tại GitHub Releases</span>
-                <ExternalLink size={13} />
-              </a>
+
+              <div className="gemini-progress-meta">
+                <span>{formatBytes(downloadProgress.transferred)} / {formatBytes(downloadProgress.total)}</span>
+                {downloadProgress.bytesPerSecond > 0 && (
+                  <span>Tốc độ: {formatBytes(downloadProgress.bytesPerSecond)}/s</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. Trạng thái TẢI XONG -> Nút Khởi động lại để hoàn tất */}
+          {updateStatus === 'downloaded' && (
+            <div className="gemini-update-banner downloaded">
+              <div className="update-banner-title success">
+                <CheckCircle2 size={16} />
+                <span>Bản cập nhật <strong>{updateInfo?.version || ''}</strong> đã sẵn sàng!</span>
+              </div>
+              <p className="update-banner-desc">
+                Bản cài đặt đã được tải về an toàn. Nhấn nút bên dưới để khởi động lại ứng dụng và hoàn tất nâng cấp (dữ liệu của bạn được bảo toàn 100%).
+              </p>
+
+              <div className="update-action-row">
+                <button
+                  type="button"
+                  className="btn-gemini-success update-btn"
+                  onClick={handleQuitAndInstall}
+                  disabled={installing}
+                >
+                  {installing ? <Loader2 size={15} className="spin-icon" /> : <RotateCcw size={15} />}
+                  <span>{installing ? 'Đang khởi động lại...' : 'Khởi động lại để cập nhật'}</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

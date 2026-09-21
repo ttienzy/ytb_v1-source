@@ -15,4 +15,15 @@ contextBridge.exposeInMainWorld('desktop', {
       ipcRenderer.removeListener('9router:updated', sub)
     }
   },
+  getAppVersion: () => ipcRenderer.invoke('updater:get-app-version'),
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  startDownloadUpdate: () => ipcRenderer.invoke('updater:download'),
+  quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),
+  onUpdaterStatus: (callback: (data: any) => void) => {
+    const sub = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('updater:status', sub)
+    return () => {
+      ipcRenderer.removeListener('updater:status', sub)
+    }
+  },
 })
