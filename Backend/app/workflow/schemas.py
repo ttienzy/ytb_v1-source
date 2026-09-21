@@ -35,6 +35,10 @@ class GeminiPromptResponse(BaseModel):
     prompt: str = Field(description="Nội dung prompt phân tích sản phẩm mặc định")
 
 
+class GeminiPromptUpdateRequest(BaseModel):
+    prompt: str = Field(..., min_length=10, description="Nội dung prompt phân tích sản phẩm mặc định mới")
+
+
 class GeminiAnalysisRequest(BaseModel):
     images: list[str] = Field(default_factory=list, description="Danh sách ảnh (data URLs base64 hoặc file paths)")
     prompt: Optional[str] = Field(default=None, description="Prompt tùy chỉnh. Nếu None, dùng prompt mặc định từ file.")
@@ -84,7 +88,8 @@ class GptScriptItem(BaseModel):
 
 
 class ScriptGenerationConfig(BaseModel):
-    count: int = Field(default=3, ge=1, le=10, description="Số lượng kịch bản mong muốn")
+    count: int = Field(default=3, ge=1, le=200, description="Tổng số kịch bản mong muốn")
+    batch_size: int = Field(default=8, ge=1, le=10, description="Số kịch bản sinh trong mỗi lần gọi model")
     content_mode: str = Field(default="sales", description="Loại nội dung: sales, review, ugc, lifestyle, tutorial, unboxing")
     story_mode: Literal["sequential", "independent"] = Field(default="sequential", description="sequential (chuỗi liên hoàn) hoặc independent (clip độc lập)")
     clip_duration_seconds: int = Field(default=DEFAULT_CLIP_DURATION_SECONDS, ge=1, le=60, description="Thời lượng một clip Google Flow")
@@ -105,6 +110,11 @@ class GptScriptRequest(BaseModel):
     script_config: Optional[ScriptGenerationConfig] = Field(default=None, description="Cấu hình sinh kịch bản riêng biệt")
     prompt_template: Optional[str] = Field(default=None, description="Prompt tùy chỉnh. Nếu None, dùng prompt từ file.")
     model: Optional[str] = Field(default=None, description="Model GPT sử dụng (e.g. cx/gpt-5.5)")
+
+
+class GptPromptPreviewResponse(BaseModel):
+    user_prompt: str = Field(description="Prompt hoàn chỉnh được gửi ở vai trò user")
+    system_prompt: str = Field(description="Contract kỹ thuật được gửi ở vai trò system")
 
 
 class GptScriptResponse(BaseModel):
@@ -217,10 +227,11 @@ class WorkflowExtractProfilesResponse(BaseModel):
 class PromptPresetItem(BaseModel):
     id: str = Field(description="Mã định danh duy nhất của preset")
     name: str = Field(description="Tên thể loại nội dung hiển thị")
-    content_mode: str = Field(default="sales", description="Mã content mode: sales, review, ugc, lifestyle, tutorial, comparison, unboxing, custom...")
+    content_mode: str = Field(default="custom", description="Mã content mode: sales, review, ugc, lifestyle, tutorial, comparison, unboxing, custom...")
     prompt: str = Field(description="Nội dung template prompt")
     description: Optional[str] = Field(default=None, description="Mô tả ngắn về thể loại này")
-    is_system: bool = Field(default=False, description="True nếu là mẫu mặc định của hệ thống")
+    is_system: bool = Field(default=False, description="True nếu là mẫu chuẩn của hệ thống")
+    is_default: bool = Field(default=False, description="True nếu là thể loại kịch bản mặc định")
     updated_at: Optional[str] = Field(default=None, description="Thời gian cập nhật gần nhất (ISO format)")
 
 
@@ -229,12 +240,14 @@ class PromptPresetCreateRequest(BaseModel):
     content_mode: Optional[str] = Field(default="custom", description="Mã content mode")
     prompt: str = Field(..., min_length=10, description="Nội dung prompt template")
     description: Optional[str] = Field(default=None, max_length=300, description="Mô tả ngắn")
+    is_default: Optional[bool] = Field(default=False, description="Đặt làm thể loại kịch bản mặc định")
 
 
 class PromptPresetUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100, description="Tên thể loại")
     prompt: Optional[str] = Field(default=None, min_length=10, description="Nội dung prompt template")
     description: Optional[str] = Field(default=None, max_length=300, description="Mô tả ngắn")
+    is_default: Optional[bool] = Field(default=None, description="Đặt hoặc bỏ đặt thể loại mặc định")
 
 
 class PromptPresetListResponse(BaseModel):

@@ -261,6 +261,15 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
   }), true)
   assert.equal(isScriptCollectionStale(collection, {
     count: 3,
+    batchSize: 5,
+    contentMode: 'sales',
+    platform: 'auto',
+    clipDurationSeconds: 10,
+    promptTemplate: 'prompt-v1',
+    model: 'cx/gpt-5.5',
+  }), true, 'Thay đổi batch size phải đánh dấu output cũ')
+  assert.equal(isScriptCollectionStale(collection, {
+    count: 3,
     contentMode: 'ugc',
     platform: 'auto',
     clipDurationSeconds: 6,
@@ -284,6 +293,27 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
     model: 'cx/gpt-5.5',
   }), true)
   console.log('✅ TEST 7 PASSED: phát hiện output stale thành công')
+}
+
+// ─── TEST 8: Preset thể loại kịch bản động với is_default ───────────────────
+{
+  const mockPresets = [
+    { id: 'custom_review', name: 'Review', content_mode: 'review', prompt: 'Prompt review...', is_system: false, is_default: false },
+    { id: 'custom_default', name: 'Mặc định của tôi', content_mode: 'custom', prompt: 'Prompt mặc định...', is_system: false, is_default: true },
+    { id: 'sales', name: 'Bán hàng', content_mode: 'sales', prompt: 'Prompt sales...', is_system: true, is_default: false },
+  ]
+
+  // Tìm preset mặc định
+  const defaultPreset = mockPresets.find((p) => p.is_default) || mockPresets[0]
+  assert.equal(defaultPreset.id, 'custom_default', 'Phải ưu tiên preset có is_default: true')
+  assert.equal(defaultPreset.prompt, 'Prompt mặc định...', 'Prompt mặc định phải tương ứng với thể loại mặc định')
+
+  // Trường hợp không có preset nào được đánh dấu is_default
+  const noDefaultPresets = mockPresets.map((p) => ({ ...p, is_default: false }))
+  const fallbackPreset = noDefaultPresets.find((p) => p.is_default) || noDefaultPresets[0]
+  assert.equal(fallbackPreset.id, 'custom_review', 'Nếu không có is_default thì fallback về preset đầu tiên, không hardcode')
+
+  console.log('✅ TEST 8 PASSED: giải quyết thể loại mặc định động thành công')
 }
 
 console.log('🎉 TOÀN BỘ WORKFLOW FRONTEND UNIT TESTS ĐÃ HOÀN TẤT VÀ VƯỢT QUA!')

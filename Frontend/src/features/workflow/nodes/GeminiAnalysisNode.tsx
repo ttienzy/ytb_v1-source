@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import {
   Sparkles,
@@ -19,6 +19,7 @@ import {
   Key,
   Bot,
   Star,
+  Save,
 } from 'lucide-react'
 import type { GeminiAnalysisNodeData } from '../types'
 
@@ -38,8 +39,25 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
   const promptText = data.prompt ?? ''
   const res = data.analysisResult
 
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false)
+  const [saveNotification, setSaveNotification] = useState<string | null>(null)
+
   const handleResetPrompt = () => {
     data.onResetPrompt?.()
+  }
+
+  const handleSaveDefaultPrompt = async () => {
+    if (!promptText.trim()) return
+    setIsSavingPrompt(true)
+    try {
+      await data.onSaveDefaultPrompt?.(promptText.trim())
+      setSaveNotification('✓ Đã lưu làm prompt mặc định!')
+      setTimeout(() => setSaveNotification(null), 2500)
+    } catch (err: any) {
+      alert(err?.message || 'Lỗi khi lưu prompt mặc định')
+    } finally {
+      setIsSavingPrompt(false)
+    }
   }
 
   return (
@@ -387,23 +405,47 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                   <FileText size={12} color="#10b981" />
                   Prompt chỉ thị Gemini Vision:
                 </label>
-                <button
-                  type="button"
-                  onClick={handleResetPrompt}
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#64748b',
-                    fontSize: 10,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    cursor: 'pointer',
-                  }}
-                  title="Khôi phục prompt mặc định"
-                >
-                  <RotateCcw size={10} /> Mặc định
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={handleSaveDefaultPrompt}
+                    disabled={isSavingPrompt || !promptText.trim()}
+                    style={{
+                      background: '#f1f5f9',
+                      border: '1px solid #cbd5e1',
+                      color: '#0f172a',
+                      fontSize: 9.5,
+                      fontWeight: 600,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 3,
+                    }}
+                    title="Lưu nội dung prompt hiện tại làm mặc định lâu dài cho Gemini"
+                  >
+                    <Save size={10} />
+                    {isSavingPrompt ? 'Đang lưu...' : 'Lưu mặc định'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetPrompt}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#64748b',
+                      fontSize: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 3,
+                      cursor: 'pointer',
+                    }}
+                    title="Khôi phục prompt mặc định đã lưu từ Backend"
+                  >
+                    <RotateCcw size={10} /> Mặc định
+                  </button>
+                </div>
               </div>
 
               <textarea
@@ -421,6 +463,12 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                   resize: 'vertical',
                 }}
               />
+
+              {saveNotification && (
+                <div style={{ marginTop: 4, fontSize: 9.5, color: '#059669', fontWeight: 600 }}>
+                  {saveNotification}
+                </div>
+              )}
             </div>
 
             {/* 3. Analyze Action Button */}

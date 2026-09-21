@@ -45,7 +45,9 @@ export interface ProductAnalysis {
 
 export interface ScriptGenerationConfig {
   count: number
-  contentMode: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing'
+  contentMode: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing' | string
+  /** Số kịch bản tối đa trong mỗi request model; backend tự ghép các batch. */
+  batchSize?: number
   /** sequential = phễu liên hoàn; independent = các clip độc lập */
   storyMode?: 'sequential' | 'independent'
   /** Thời lượng của một clip Google Flow mà mỗi kịch bản sẽ tạo ra. */
@@ -94,6 +96,7 @@ export interface ScriptCollection {
   requestedModel: string
   generationModel?: string
   storyMode?: string
+  batchSize?: number
   voiceId?: string
 }
 

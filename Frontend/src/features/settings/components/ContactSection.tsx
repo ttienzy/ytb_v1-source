@@ -11,6 +11,8 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
+import telegramQrImg from '@/assets/telegram_qr.png'
+import foreverAvatarImg from '@/assets/forever.png'
 
 export function ContactSection() {
   const [copied, setCopied] = useState(false)
@@ -158,7 +160,7 @@ export function ContactSection() {
               }}
             >
               <img
-                src="/telegram_qr.png"
+                src={telegramQrImg}
                 alt="Telegram QR Code - Tien (@ttienzy)"
                 style={{
                   display: 'block',
@@ -240,7 +242,7 @@ export function ContactSection() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <img
-                  src="/forever.png"
+                  src={foreverAvatarImg}
                   alt="Tien Avatar"
                   style={{
                     width: 46,

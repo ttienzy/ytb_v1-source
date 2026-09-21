@@ -240,6 +240,9 @@ function createWindow() {
   // Avoid exposing Chromium's first incomplete paint. The renderer can prepare
   // the stable Dashboard shell/skeleton before the window becomes visible.
   mainWindow.once('ready-to-show', () => {
+    // Open the main app maximized on startup while preserving the normal
+    // Windows title bar controls (minimize, restore/maximize, close).
+    mainWindow?.maximize()
     mainWindow?.show()
     // Loading the ONNX voice model is disk/CPU intensive. Give Chromium's
     // first Dashboard paint a short uncontested window, then start TTS.

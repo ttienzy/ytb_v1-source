@@ -77,10 +77,11 @@ function scriptConfig(context: RunContext, node: Node): ScriptGenerationConfig {
     context.config.defaultClipDurationSeconds)
   return {
     count: typeof data.requestedCount === 'number' ? data.requestedCount : 3,
-    contentMode: data.contentMode || 'sales',
+    batchSize: 8,
+    contentMode: data.contentMode || 'custom',
     storyMode: data.storyMode || 'sequential',
     voiceId: data.voiceId,
-    platform: data.platform || 'auto',
+    platform: 'auto',
     clipDurationSeconds: duration,
     minWords: Math.max(1, Math.round(duration * context.config.voiceoverWordsPerSecond.min)),
     maxWords: Math.max(1, Math.round(duration * context.config.voiceoverWordsPerSecond.max)),

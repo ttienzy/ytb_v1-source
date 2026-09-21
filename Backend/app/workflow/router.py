@@ -15,7 +15,7 @@ from app.watermark.service import (
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
@@ -23,7 +23,9 @@ from app.workflow.schemas import (
     GeminiAnalysisRequest,
     GeminiAnalysisResponse,
     GeminiPromptResponse,
+    GeminiPromptUpdateRequest,
     GptPromptResponse,
+    GptPromptPreviewResponse,
     MotionPromptResponse,
     GptScriptRequest,
     GptScriptResponse,
@@ -59,6 +61,8 @@ from app.workflow.service import (
     generate_voiceover_batch,
     get_all_prompt_presets,
     get_default_gemini_prompt,
+    save_default_gemini_prompt,
+    reset_system_gemini_prompt,
     get_default_gpt_prompt,
     get_default_motion_prompt,
     get_motion_workflow_config,
@@ -70,6 +74,7 @@ from app.workflow.service import (
     list_exported_videos,
     open_export_folder_in_explorer,
     parse_analysis_to_structured,
+    preview_gpt_script_prompt,
     save_workflow_asset,
     update_prompt_preset,
     VOICEOVER_DIR,
@@ -182,6 +187,23 @@ def get_gemini_prompt() -> GeminiPromptResponse:
     return GeminiPromptResponse(prompt=prompt)
 
 
+@router.put("/prompts/gemini", response_model=GeminiPromptResponse)
+def update_gemini_prompt(req: GeminiPromptUpdateRequest) -> GeminiPromptResponse:
+    """Lưu prompt tùy biến của người dùng làm prompt mặc định lâu dài cho Gemini Vision."""
+    try:
+        saved = save_default_gemini_prompt(req.prompt)
+        return GeminiPromptResponse(prompt=saved)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/prompts/gemini/reset", response_model=GeminiPromptResponse)
+def reset_gemini_prompt() -> GeminiPromptResponse:
+    """Khôi phục prompt phân tích Gemini về mẫu mặc định gốc của hệ thống."""
+    prompt = reset_system_gemini_prompt()
+    return GeminiPromptResponse(prompt=prompt)
+
+
 @router.post("/gemini/refresh-cookie")
 async def refresh_gemini_cookie():
     """Tự động mở Chrome profile ngầm trong 3-5 giây để làm mới cookies xác thực Gemini."""
@@ -245,9 +267,12 @@ async def analyze_product(req: GeminiAnalysisRequest) -> GeminiAnalysisResponse:
 
 
 @router.get("/prompts/gpt", response_model=GptPromptResponse)
-def get_gpt_prompt() -> GptPromptResponse:
-    """Lấy prompt mẫu sinh số lượng kịch bản động từ file Backend."""
-    prompt = get_default_gpt_prompt()
+def get_gpt_prompt(
+    preset_id: Optional[str] = Query(None, description="ID của thể loại kịch bản"),
+    content_mode: Optional[str] = Query(None, description="Mã content mode"),
+) -> GptPromptResponse:
+    """Lấy prompt mẫu sinh kịch bản theo thể loại được chỉ định hoặc thể loại mặc định."""
+    prompt = get_default_gpt_prompt(preset_id=preset_id, content_mode=content_mode)
     return GptPromptResponse(prompt=prompt)
 
 
@@ -293,6 +318,7 @@ def create_new_prompt_preset(req: PromptPresetCreateRequest) -> PromptPresetItem
             prompt=req.prompt,
             content_mode=req.content_mode or "custom",
             description=req.description,
+            is_default=bool(req.is_default),
         )
         return PromptPresetItem(**new_preset)
     except Exception as exc:
@@ -301,13 +327,14 @@ def create_new_prompt_preset(req: PromptPresetCreateRequest) -> PromptPresetItem
 
 @router.put("/prompt-presets/{preset_id}", response_model=PromptPresetItem)
 def update_existing_prompt_preset(preset_id: str, req: PromptPresetUpdateRequest) -> PromptPresetItem:
-    """Cập nhật nội dung prompt hoặc tên của thể loại kịch bản."""
+    """Cập nhật nội dung prompt, tên hoặc trạng thái mặc định của thể loại kịch bản."""
     try:
         updated = update_prompt_preset(
             preset_id=preset_id,
             name=req.name,
             prompt=req.prompt,
             description=req.description,
+            is_default=req.is_default,
         )
         return PromptPresetItem(**updated)
     except Exception as exc:
@@ -357,6 +384,26 @@ async def generate_sales_script(req: GptScriptRequest) -> GptScriptResponse:
             status_code=500,
             detail=f"Lỗi tạo kịch bản GPT: {exc}",
         ) from exc
+
+
+@router.post("/gpt/preview-prompt", response_model=GptPromptPreviewResponse)
+async def preview_script_prompt(req: GptScriptRequest) -> GptPromptPreviewResponse:
+    """Dựng prompt thực tế của batch đầu tiên mà không gọi model."""
+    try:
+        script_config = req.script_config.model_dump() if req.script_config else None
+        user_prompt, system_prompt = await run_in_threadpool(
+            preview_gpt_script_prompt,
+            product_data=req.product_data,
+            images=req.images,
+            product_analysis=req.product_analysis,
+            assets=req.assets,
+            scene_config=req.scene_config,
+            script_config=script_config,
+            prompt_template=req.prompt_template,
+        )
+        return GptPromptPreviewResponse(user_prompt=user_prompt, system_prompt=system_prompt)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Không thể dựng prompt xem trước: {exc}") from exc
 
 
 @router.post("/extract-profiles", response_model=WorkflowExtractProfilesResponse)

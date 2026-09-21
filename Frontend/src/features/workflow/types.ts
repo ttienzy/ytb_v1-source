@@ -102,6 +102,8 @@ export interface GeminiAnalysisNodeData {
   onAnalyze9Router?: () => void
   onChangePrompt?: (prompt: string) => void
   onResetPrompt?: () => void
+  onSaveDefaultPrompt?: (prompt: string) => Promise<void> | void
+  onResetSystemPrompt?: () => Promise<void> | void
   onSetStartNode?: () => void
   onDelete?: () => void
 }
@@ -183,6 +185,7 @@ export interface PromptPresetItem {
   prompt: string
   description?: string
   is_system: boolean
+  is_default?: boolean
   updated_at?: string
 }
 
@@ -204,6 +207,7 @@ export interface GptScriptNodeData {
   isScriptOutputStale?: boolean
   activeScriptIndex?: number
   requestedCount?: number
+  batchSize?: number
   contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing' | string
   platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
   /** sequential = phễu liên hoàn; independent = clip độc lập */
@@ -215,15 +219,18 @@ export interface GptScriptNodeData {
   selectedPresetId?: string
   availablePresets?: PromptPresetItem[]
   onGenerate?: () => void
+  onPreviewPrompt?: () => Promise<{ userPrompt: string; systemPrompt: string }>
   onChangePrompt?: (val: string) => void
   onResetPrompt?: () => void
   onSelectScript?: (index: number) => void
   onSelectPreset?: (presetId: string) => void
   onSaveAsNewPreset?: (name: string, contentMode: string, prompt: string) => Promise<void> | void
   onUpdatePreset?: (presetId: string, prompt: string) => Promise<void> | void
+  onSetDefaultPreset?: (presetId: string) => Promise<void> | void
   onDeletePreset?: (presetId: string) => Promise<void> | void
   onChangeScriptConfig?: (cfg: {
     count?: number
+    batchSize?: number
     contentMode?: 'sales' | 'review' | 'ugc' | 'lifestyle' | 'tutorial' | 'comparison' | 'unboxing' | string
     platform?: 'tiktok' | 'reels' | 'shorts' | 'auto'
     storyMode?: 'sequential' | 'independent'

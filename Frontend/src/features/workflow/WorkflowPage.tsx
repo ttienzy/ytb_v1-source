@@ -51,15 +51,19 @@ import {
   callRefreshGeminiCookie,
   callCheckGeminiCookieStatus,
   callGptScriptGeneration,
+  callGptPromptPreview,
   callWorkflowVideoExport,
   callExtractProfiles,
   callGenerateVoiceover,
   fetchGeminiDefaultPrompt,
+  saveGeminiDefaultPrompt,
+  resetGeminiSystemPrompt,
   fetchGptDefaultPrompt,
   fetchExportedVideos,
   fetchPromptPresets,
   createPromptPreset,
   updatePromptPreset,
+  setDefaultPromptPreset,
   deletePromptPreset,
 } from './services/workflowApi'
 import {
@@ -160,7 +164,7 @@ function WorkflowCanvas() {
       .then((presets) => {
         if (presets && presets.length > 0) {
           setPromptPresets(presets)
-          const defaultSales = presets.find((p) => p.id === 'sales') || presets[0]
+          const defaultPreset = presets.find((p) => p.is_default) || presets[0]
           setNodes((nds) =>
             nds.map((n) => {
               if (n.type === 'gptScript' && !n.data?.prompt) {
@@ -168,9 +172,9 @@ function WorkflowCanvas() {
                   ...n,
                   data: {
                     ...n.data,
-                    selectedPresetId: defaultSales.id,
-                    contentMode: defaultSales.content_mode,
-                    prompt: defaultSales.prompt,
+                    selectedPresetId: defaultPreset.id,
+                    contentMode: defaultPreset.content_mode,
+                    prompt: defaultPreset.prompt,
                   },
                 }
               }
@@ -477,21 +481,6 @@ function WorkflowCanvas() {
       })
       .catch((err) => console.warn('Could not load Gemini prompt from Backend:', err))
 
-    fetch(`${API_URL}/api/workflow/prompts/gpt`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.prompt) {
-          setNodes((nds) =>
-            nds.map((n) => {
-              if (n.type === 'gptScript' && !n.data?.prompt) {
-                return { ...n, data: { ...n.data, prompt: data.prompt } }
-              }
-              return n
-            })
-          )
-        }
-      })
-      .catch((err) => console.warn('Could not load GPT prompt from Backend:', err))
 
     // Tự động load danh sách projects và capabilities cho Veo
     veoApi.getProjects().then(setVeoProjects).catch(console.warn)
@@ -566,9 +555,10 @@ function WorkflowCanvas() {
       const collection = gptNode?.data?.scriptCollection as ScriptCollection | undefined
       const outputIsStale = isScriptCollectionStale(collection, {
         count: Number(gptNode?.data?.requestedCount || scripts.length),
-        contentMode: (gptNode?.data?.contentMode || 'sales') as any,
+        batchSize: 8,
+        contentMode: (gptNode?.data?.contentMode || 'custom') as any,
         storyMode: (gptNode?.data?.storyMode || 'sequential') as any,
-        platform: (gptNode?.data?.platform || 'auto') as any,
+        platform: 'auto',
         clipDurationSeconds: clipDuration,
         promptTemplate: (gptNode?.data?.prompt as string) || '',
         model: (gptNode?.data?.model as string) || getWorkflowConfig().defaultScriptModel,
@@ -636,9 +626,10 @@ function WorkflowCanvas() {
       const collection = gptNode?.data?.scriptCollection as ScriptCollection | undefined
       if (isScriptCollectionStale(collection, {
         count: Number(gptNode?.data?.requestedCount || scripts.length),
-        contentMode: (gptNode?.data?.contentMode || 'sales') as any,
+        batchSize: 8,
+        contentMode: (gptNode?.data?.contentMode || 'custom') as any,
         storyMode: (gptNode?.data?.storyMode || 'sequential') as any,
-        platform: (gptNode?.data?.platform || 'auto') as any,
+        platform: 'auto',
         clipDurationSeconds: targetDuration,
         promptTemplate: (gptNode?.data?.prompt as string) || '',
         model: (gptNode?.data?.model as string) || getWorkflowConfig().defaultScriptModel,
@@ -740,18 +731,73 @@ function WorkflowCanvas() {
       .catch((err) => console.error(err))
   }, [])
 
-  // Reset GPT prompt to backend default
+  // Save custom Gemini prompt as permanent default
+  const handleSaveGeminiDefaultPrompt = useCallback(async (nodeId: string, prompt: string) => {
+    try {
+      await saveGeminiDefaultPrompt(prompt)
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, prompt } } : n))
+      )
+    } catch (err) {
+      console.error('Lỗi khi lưu prompt mặc định Gemini:', err)
+      throw err
+    }
+  }, [])
+
+  // Reset Gemini prompt to system factory default
+  const handleResetGeminiSystemPrompt = useCallback(async (nodeId: string) => {
+    try {
+      const prompt = await resetGeminiSystemPrompt()
+      if (prompt) {
+        setNodes((nds) =>
+          nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, prompt } } : n))
+        )
+      }
+    } catch (err) {
+      console.error('Lỗi khi khôi phục prompt gốc Gemini:', err)
+      throw err
+    }
+  }, [])
+
+  // Reset GPT prompt to current preset or default preset prompt
   const handleResetGptPrompt = useCallback((nodeId: string) => {
-    fetch(`${API_URL}/api/workflow/prompts/gpt`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.prompt) {
-          setNodes((nds) =>
-            nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, prompt: data.prompt } } : n))
-          )
-        }
-      })
-      .catch((err) => console.error(err))
+    setNodes((nds) => {
+      const target = nds.find((n) => n.id === nodeId)
+      const currentPreset =
+        promptPresets.find((p) => p.id === target?.data?.selectedPresetId) ||
+        promptPresets.find((p) => p.is_default) ||
+        promptPresets[0]
+      if (!currentPreset) return nds
+
+      return nds.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                selectedPresetId: currentPreset.id,
+                contentMode: currentPreset.content_mode,
+                prompt: currentPreset.prompt,
+              },
+            }
+          : n
+      )
+    })
+  }, [promptPresets])
+
+  // Set default preset
+  const handleSetDefaultPreset = useCallback(async (presetId: string) => {
+    try {
+      await setDefaultPromptPreset(presetId)
+      setPromptPresets((prev) =>
+        prev.map((p) => ({
+          ...p,
+          is_default: p.id === presetId,
+        }))
+      )
+    } catch (err) {
+      console.error('Lỗi khi đặt thể loại mặc định:', err)
+    }
   }, [])
 
   // Select a prompt preset
@@ -804,9 +850,31 @@ function WorkflowCanvas() {
 
   // Update existing preset
   const handleUpdatePreset = useCallback(async (nodeId: string, presetId: string, prompt: string) => {
+    const sourcePreset = promptPresets.find((preset) => preset.id === presetId)
+    if (sourcePreset?.is_system) {
+      const created = await createPromptPreset(
+        `${sourcePreset.name} (Bản chỉnh sửa)`,
+        prompt,
+        sourcePreset.content_mode,
+        `Bản tùy chỉnh từ mẫu hệ thống ${sourcePreset.name}`,
+      )
+      setPromptPresets((prev) => [...prev, created])
+      setNodes((nds) => nds.map((node) => node.id === nodeId
+        ? {
+            ...node,
+            data: {
+              ...node.data,
+              selectedPresetId: created.id,
+              contentMode: created.content_mode,
+              prompt: created.prompt,
+            },
+          }
+        : node))
+      return
+    }
     const updated = await updatePromptPreset(presetId, { prompt })
     setPromptPresets((prev) => prev.map((p) => (p.id === presetId ? updated : p)))
-  }, [])
+  }, [promptPresets])
 
   // Delete preset
   const handleDeletePreset = useCallback(async (nodeId: string, presetId: string) => {
@@ -914,6 +982,40 @@ function WorkflowCanvas() {
   }, [handleAnalyzeGemini])
 
 
+  const handlePreviewGptPrompt = useCallback(async (nodeId: string) => {
+    const gptNode = nodes.find((node) => node.id === nodeId)
+    if (!gptNode) throw new Error('Không tìm thấy node kịch bản.')
+
+    const geminiRes = resolveGeminiAnalysisInput({ nodes, edges, targetNodeId: nodeId })
+    const productRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: nodeId })
+    const charSceneRes = resolveCharacterSceneInput({ nodes, edges, targetNodeId: nodeId })
+    const outgoingFlowEdges = edges.filter((edge) => edge.source === nodeId)
+    const targetFlowNode = nodes.find((node) =>
+      outgoingFlowEdges.some((edge) => edge.target === node.id && node.type === 'veoFlowStudio')
+    )
+    const targetFlowConfig = targetFlowNode?.data?.videoConfig as VeoVideoConfig | undefined
+    const clipDurationSeconds = normalizeClipDuration(targetFlowConfig?.duration ?? veoVideoConfig.duration)
+    const gptData = (gptNode.data || {}) as Record<string, any>
+
+    return callGptPromptPreview({
+      images: productRes.ok && productRes.data ? productRes.data.rawImages : [],
+      productAnalysis: geminiRes.ok ? geminiRes.data : undefined,
+      assets: charSceneRes.data,
+      scriptConfig: {
+        count: typeof gptData.requestedCount === 'number' ? gptData.requestedCount : 3,
+        batchSize: 8,
+        contentMode: gptData.contentMode || 'custom',
+        storyMode: gptData.storyMode || 'sequential',
+        platform: 'auto',
+        characterProfile: charSceneRes.data?.characterProfile,
+        sceneProfile: charSceneRes.data?.sceneProfile,
+        clipDurationSeconds,
+      },
+      promptTemplate: String(gptData.prompt || ''),
+      model: String(gptData.model || getWorkflowConfig().defaultScriptModel),
+    })
+  }, [nodes, edges, veoVideoConfig.duration])
+
   // Trigger GPT Script generation via Backend API (Sử dụng graphResolver & Object payload)
   const handleGenerateGptScript = useCallback(async (nodeId: string) => {
     if (taskKeys.current.has(nodeId)) return
@@ -956,8 +1058,8 @@ function WorkflowCanvas() {
 
     const gptData = (gptNode?.data || {}) as Record<string, any>
     const requestedCount = typeof gptData.requestedCount === 'number' ? gptData.requestedCount : 3
-    const contentMode = gptData.contentMode || 'sales'
-    const platform = gptData.platform || 'auto'
+    const contentMode = gptData.contentMode || 'custom'
+    const platform = 'auto'
     const outgoingFlowEdges = edges.filter((edge) => edge.source === nodeId)
     const targetFlowNode = nodes.find((node) =>
       outgoingFlowEdges.some((edge) => edge.target === node.id && node.type === 'veoFlowStudio')
@@ -978,6 +1080,7 @@ function WorkflowCanvas() {
         assets: charSceneRes.data,
         scriptConfig: {
           count: requestedCount,
+          batchSize: 8,
           contentMode: contentMode,
           storyMode: (gptData.storyMode as any) || 'sequential',
           voiceId: gptData.voiceId,
@@ -1493,7 +1596,8 @@ function WorkflowCanvas() {
             provider: 'Viết phân cảnh & lời thoại',
             prompt: '',
             requestedCount: 3,
-            contentMode: 'sales',
+            batchSize: 8,
+            contentMode: '',
             platform: 'auto',
             salesScripts: [],
           },
@@ -1618,6 +1722,8 @@ function WorkflowCanvas() {
             connectedImages: connectedProductImages,
             onChangePrompt: (prompt: string) => handleGeminiPromptChange(node.id, prompt),
             onResetPrompt: () => handleResetGeminiPrompt(node.id),
+            onSaveDefaultPrompt: (prompt: string) => handleSaveGeminiDefaultPrompt(node.id, prompt),
+            onResetSystemPrompt: () => handleResetGeminiSystemPrompt(node.id),
             onAnalyze: () => handleAnalyzeGemini(node.id, 'gemini'),
             onRefreshCookie: () => handleRefreshGeminiCookie(node.id),
             onAnalyze9Router: () => handleAnalyzeGemini(node.id, '9router'),
@@ -1638,9 +1744,10 @@ function WorkflowCanvas() {
         const scriptCollection = node.data?.scriptCollection as ScriptCollection | undefined
         const isScriptOutputStale = isScriptCollectionStale(scriptCollection, {
           count: Number(node.data?.requestedCount || 3),
-          contentMode: (node.data?.contentMode || 'sales') as any,
+          batchSize: 8,
+          contentMode: (node.data?.contentMode || 'custom') as any,
           storyMode: (node.data?.storyMode || 'sequential') as any,
-          platform: (node.data?.platform || 'auto') as any,
+          platform: 'auto',
           clipDurationSeconds,
           promptTemplate: (node.data?.prompt as string) || '',
           model: (node.data?.model as string) || getWorkflowConfig().defaultScriptModel,
@@ -1653,11 +1760,12 @@ function WorkflowCanvas() {
             ? geminiRes.data.rawText || (geminiRes.data.features || []).join(', ') || ''
             : ''
 
+        const defaultPreset = promptPresets.find((p) => p.is_default) || promptPresets[0]
         const selectedPresetId =
           (node.data?.selectedPresetId as string) ||
           promptPresets.find((p) => p.content_mode === node.data?.contentMode)?.id ||
-          promptPresets[0]?.id ||
-          'sales'
+          defaultPreset?.id ||
+          ''
 
         return {
           ...node,
@@ -1673,11 +1781,13 @@ function WorkflowCanvas() {
             onSelectPreset: (presetId: string) => handleSelectGptPreset(node.id, presetId),
             onSaveAsNewPreset: (name: string, cm: string, p: string) => handleSaveAsNewPreset(node.id, name, cm, p),
             onUpdatePreset: (presetId: string, p: string) => handleUpdatePreset(node.id, presetId, p),
+            onSetDefaultPreset: (presetId: string) => handleSetDefaultPreset(presetId),
             onDeletePreset: (presetId: string) => handleDeletePreset(node.id, presetId),
             onChangePrompt: (val: string) => handleGptPromptChange(node.id, val),
             onResetPrompt: () => handleResetGptPrompt(node.id),
+            onPreviewPrompt: () => handlePreviewGptPrompt(node.id),
             onGenerate: () => handleGenerateGptScript(node.id),
-            onChangeScriptConfig: (cfg: { count?: number; contentMode?: any; platform?: any; storyMode?: any }) => {
+            onChangeScriptConfig: (cfg: { count?: number; batchSize?: number; contentMode?: any; platform?: any; storyMode?: any }) => {
               setNodes((nds) =>
                 nds.map((n) =>
                   n.id === node.id
@@ -1686,6 +1796,7 @@ function WorkflowCanvas() {
                         data: {
                           ...n.data,
                           requestedCount: cfg.count ?? n.data?.requestedCount,
+                          batchSize: cfg.batchSize ?? n.data?.batchSize,
                           contentMode: cfg.contentMode ?? n.data?.contentMode,
                           platform: cfg.platform ?? n.data?.platform,
                           storyMode: cfg.storyMode ?? n.data?.storyMode,
@@ -1712,9 +1823,10 @@ function WorkflowCanvas() {
         const isSourceScriptStale = sourceGptNode
           ? isScriptCollectionStale(sourceCollection, {
               count: Number(sourceGptNode.data?.requestedCount || availableGptScripts.length),
-              contentMode: (sourceGptNode.data?.contentMode || 'sales') as any,
+              batchSize: 8,
+              contentMode: (sourceGptNode.data?.contentMode || 'custom') as any,
               storyMode: (sourceGptNode.data?.storyMode || 'sequential') as any,
-              platform: (sourceGptNode.data?.platform || 'auto') as any,
+              platform: 'auto',
               clipDurationSeconds: veoVideoConfig.duration,
               promptTemplate: (sourceGptNode.data?.prompt as string) || '',
               model: (sourceGptNode.data?.model as string) || getWorkflowConfig().defaultScriptModel,
@@ -1842,6 +1954,7 @@ function WorkflowCanvas() {
     handleResetGptPrompt,
     handleAnalyzeGemini,
     handleRefreshGeminiCookie,
+    handlePreviewGptPrompt,
     handleGenerateGptScript,
     handleApplyAllGptScriptsToVeo,
     handleApplySingleScriptToCurrentScene,

@@ -59,6 +59,7 @@ export function isScriptCollectionStale(
     collection.actualCount !== collection.items.length ||
     collection.contentMode !== current.contentMode ||
     (collection.storyMode || 'sequential') !== (current.storyMode || 'sequential') ||
+    (collection.batchSize || 8) !== (current.batchSize || 8) ||
     (current.minWords !== undefined && collection.minWords !== current.minWords) ||
     (current.maxWords !== undefined && collection.maxWords !== current.maxWords) ||
     collection.platform !== (current.platform || 'auto') ||

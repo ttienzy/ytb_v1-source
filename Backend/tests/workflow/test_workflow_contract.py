@@ -178,6 +178,46 @@ def test_invalid_story_mode_rejected_before_generation(monkeypatch):
     call.assert_not_called()
 
 
+def test_script_count_supports_more_than_ten_and_has_a_safety_ceiling():
+    config = ScriptGenerationConfig(count=50, batch_size=8)
+    assert config.count == 50
+    assert config.batch_size == 8
+    with pytest.raises(ValidationError):
+        ScriptGenerationConfig(count=201)
+
+
+def test_large_generation_is_batched_and_keeps_continuity(monkeypatch):
+    calls = []
+
+    def fake_execute(**kwargs):
+        cfg = kwargs["script_config"]
+        calls.append(cfg.copy())
+        items = []
+        for index in range(cfg["count"]):
+            is_global_last = cfg["batch_end"] == cfg["total_count"] and index == cfg["count"] - 1
+            items.append({
+                "title": f"scene {cfg['batch_start'] + index}",
+                "visual_direction": "Cinematic product close-up",
+                "voiceover": " ".join(["word"] * 20),
+                "on_screen_text": "short text",
+                "cta": "buy" if is_global_last else "",
+            })
+        return json.dumps({"scripts": items}), "model"
+
+    monkeypatch.setattr(service, "execute_gpt_script_generation", fake_execute)
+    result = service.generate_validated_gpt_scripts(
+        "product",
+        script_config={"count": 12, "batch_size": 5, "story_mode": "sequential"},
+    )
+
+    assert len(result[2]) == 12
+    assert [call["count"] for call in calls] == [5, 5, 2]
+    assert [call["batch_start"] for call in calls] == [1, 6, 11]
+    assert calls[0]["continuity_context"] == ""
+    assert "scene 5" in calls[1]["continuity_context"]
+    assert result[2][-1].cta == "buy"
+
+
 @pytest.mark.parametrize("mode", ["sequential", "independent"])
 def test_generation_prompt_matches_mode_and_clean_audio(monkeypatch, mode):
     monkeypatch.setattr(service, "read_config", lambda: {"chatgpt_9router": {"endpoint": "http://test/v1", "api_key": "test"}})

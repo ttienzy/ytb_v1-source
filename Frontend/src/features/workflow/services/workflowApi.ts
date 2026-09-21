@@ -104,6 +104,38 @@ export async function fetchGeminiDefaultPrompt(): Promise<string> {
 }
 
 /**
+ * Lưu prompt tùy biến của người dùng làm prompt mặc định lâu dài cho Gemini Vision
+ */
+export async function saveGeminiDefaultPrompt(prompt: string): Promise<string> {
+  const res = await fetch(`${API_URL}/api/workflow/prompts/gemini`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể lưu prompt mặc định (HTTP ${res.status})`)
+  }
+  const data = await res.json()
+  return data.prompt || prompt
+}
+
+/**
+ * Khôi phục prompt phân tích Gemini về mẫu mặc định gốc của hệ thống
+ */
+export async function resetGeminiSystemPrompt(): Promise<string> {
+  const res = await fetch(`${API_URL}/api/workflow/prompts/gemini/reset`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể khôi phục prompt gốc (HTTP ${res.status})`)
+  }
+  const data = await res.json()
+  return data.prompt || ''
+}
+
+/**
  * Lấy prompt GPT mặc định từ backend
  */
 export async function fetchGptDefaultPrompt(): Promise<string> {
@@ -207,7 +239,7 @@ export async function callCheckGeminiCookieStatus(): Promise<{ valid: boolean; e
  * Gọi ChatGPT sinh số lượng kịch bản động từ payload có cấu trúc.
  * Mỗi kịch bản tương ứng với một clip Google Flow độc lập.
  */
-export async function callGptScriptGeneration(params: {
+export interface GptScriptRequestParams {
   productData?: string
   images?: string[]
   productAnalysis?: ProductAnalysis
@@ -216,33 +248,56 @@ export async function callGptScriptGeneration(params: {
   scriptConfig?: ScriptGenerationConfig
   promptTemplate?: string
   model?: string
-}): Promise<{ scripts: SalesScript[]; rawText: string; model: string; collection: ScriptCollection }> {
+}
+
+function buildGptScriptRequestBody(params: GptScriptRequestParams) {
+  return {
+    product_data: params.productData || '',
+    images: params.images || [],
+    product_analysis: params.productAnalysis,
+    assets: params.assets,
+    scene_config: params.sceneConfig,
+    script_config: params.scriptConfig
+      ? {
+          count: params.scriptConfig.count,
+          batch_size: params.scriptConfig.batchSize,
+          content_mode: params.scriptConfig.contentMode,
+          story_mode: params.scriptConfig.storyMode,
+          voice_id: params.scriptConfig.voiceId,
+          character_profile: params.scriptConfig.characterProfile,
+          scene_profile: params.scriptConfig.sceneProfile,
+          clip_duration_seconds: params.scriptConfig.clipDurationSeconds,
+          min_words: params.scriptConfig.minWords,
+          max_words: params.scriptConfig.maxWords,
+          platform: params.scriptConfig.platform,
+        }
+      : undefined,
+    prompt_template: params.promptTemplate,
+    model: params.model || getWorkflowConfig().defaultScriptModel,
+  }
+}
+
+export async function callGptPromptPreview(
+  params: GptScriptRequestParams,
+): Promise<{ userPrompt: string; systemPrompt: string }> {
+  const res = await fetch(`${API_URL}/api/workflow/gpt/preview-prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildGptScriptRequestBody(params)),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Không thể xem prompt hoàn chỉnh (HTTP ${res.status})`)
+  }
+  const data = await res.json()
+  return { userPrompt: data.user_prompt || '', systemPrompt: data.system_prompt || '' }
+}
+
+export async function callGptScriptGeneration(params: GptScriptRequestParams): Promise<{ scripts: SalesScript[]; rawText: string; model: string; collection: ScriptCollection }> {
   const res = await fetch(`${API_URL}/api/workflow/gpt/generate-script`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      product_data: params.productData || '',
-      images: params.images || [],
-      product_analysis: params.productAnalysis,
-      assets: params.assets,
-      scene_config: params.sceneConfig,
-      script_config: params.scriptConfig
-        ? {
-            count: params.scriptConfig.count,
-            content_mode: params.scriptConfig.contentMode,
-            story_mode: params.scriptConfig.storyMode,
-            voice_id: params.scriptConfig.voiceId,
-            character_profile: params.scriptConfig.characterProfile,
-            scene_profile: params.scriptConfig.sceneProfile,
-            clip_duration_seconds: params.scriptConfig.clipDurationSeconds,
-            min_words: params.scriptConfig.minWords,
-            max_words: params.scriptConfig.maxWords,
-            platform: params.scriptConfig.platform,
-          }
-        : undefined,
-      prompt_template: params.promptTemplate,
-      model: params.model || getWorkflowConfig().defaultScriptModel,
-    }),
+    body: JSON.stringify(buildGptScriptRequestBody(params)),
   })
 
   if (!res.ok) {
@@ -278,9 +333,10 @@ export async function callGptScriptGeneration(params: {
       requestedCount: data.requested_count ?? params.scriptConfig?.count ?? normalizedScripts.length,
       actualCount: data.actual_count ?? normalizedScripts.length,
       items: normalizedScripts,
-      contentMode: params.scriptConfig?.contentMode || 'sales',
+      contentMode: params.scriptConfig?.contentMode || 'custom',
       platform: params.scriptConfig?.platform || 'auto',
       storyMode: params.scriptConfig?.storyMode || 'sequential',
+      batchSize: params.scriptConfig?.batchSize ?? 8,
       voiceId: params.scriptConfig?.voiceId,
       clipDurationSeconds: data.clip_duration_seconds ?? params.scriptConfig?.clipDurationSeconds ?? DEFAULT_CLIP_DURATION_SECONDS,
       minWords: data.min_words ?? params.scriptConfig?.minWords ?? 0,
@@ -587,7 +643,7 @@ export async function createPromptPreset(
  */
 export async function updatePromptPreset(
   presetId: string,
-  data: { name?: string; prompt?: string; description?: string },
+  data: { name?: string; prompt?: string; description?: string; is_default?: boolean },
 ): Promise<PromptPresetItem> {
   const res = await fetch(`${API_URL}/api/workflow/prompt-presets/${encodeURIComponent(presetId)}`, {
     method: 'PUT',
@@ -599,6 +655,27 @@ export async function updatePromptPreset(
     throw new Error(err.detail || `Không thể cập nhật preset (HTTP ${res.status})`)
   }
   return res.json()
+}
+
+/**
+ * Đặt một preset làm thể loại mặc định
+ */
+export async function setDefaultPromptPreset(presetId: string): Promise<PromptPresetItem> {
+  return updatePromptPreset(presetId, { is_default: true })
+}
+
+/**
+ * Lấy prompt mẫu theo preset hoặc thể loại mặc định từ backend
+ */
+export async function fetchGptPrompt(presetId?: string, contentMode?: string): Promise<string> {
+  const params = new URLSearchParams()
+  if (presetId) params.set('preset_id', presetId)
+  if (contentMode) params.set('content_mode', contentMode)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`${API_URL}/api/workflow/prompts/gpt${qs}`)
+  if (!res.ok) return ''
+  const data = await res.json()
+  return data?.prompt || ''
 }
 
 /**

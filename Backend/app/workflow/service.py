@@ -59,14 +59,11 @@ from app.workflow.config import (
 logger = logging.getLogger("workflow.service")
 
 PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "gemini_product_analysis.txt"
+GEMINI_PROMPT_DATA_FILE = DATA_DIR / "gemini_product_analysis.txt"
 
 
 def get_workflow_config() -> WorkflowConfigResponse:
-    """Return the single runtime policy consumed by the workflow API and UI.
-
-    Keeping this mapping at the backend boundary prevents the generation code and
-    the frontend from drifting apart when a policy value is changed by env/config.
-    """
+    """Return the single runtime policy consumed by the workflow API and UI."""
     saved_config = read_config() or {}
     router_config = saved_config.get("chatgpt_9router", {})
     return WorkflowConfigResponse(
@@ -91,18 +88,41 @@ def get_workflow_config() -> WorkflowConfigResponse:
 
 
 def get_default_gemini_prompt() -> str:
-    """Đọc prompt mặc định từ Backend/prompts/workflow/gemini_product_analysis.txt."""
-    if PROMPT_FILE.exists():
+    """Đọc prompt mặc định từ Backend/Data/gemini_product_analysis.txt hoặc file hệ thống mẫu."""
+    target_file = GEMINI_PROMPT_DATA_FILE if GEMINI_PROMPT_DATA_FILE.exists() else PROMPT_FILE
+    if target_file.exists():
         try:
-            return PROMPT_FILE.read_text(encoding="utf-8").strip()
+            return target_file.read_text(encoding="utf-8").strip()
         except Exception as e:
-            logger.error(f"Không thể đọc file prompt {PROMPT_FILE}: {e}")
+            logger.error(f"Không thể đọc file prompt {target_file}: {e}")
     return (
         "Dựa vào hình ảnh đính kèm, hãy tra cứu và phân tích dòng sản phẩm này. Trình bày ngắn gọn, trực diện theo cấu trúc sau:\n\n"
         "Điểm 'ăn tiền' và yếu tố thu hút chung (USP, thiết kế, công nghệ nổi bật).\n"
         "Phân loại chi tiết từng sản phẩm trong hình (Tên/màu sắc, Thành phần chính, Công dụng cốt lõi, Trải nghiệm/Mùi hương).\n"
         "Vui lòng sử dụng gạch đầu dòng súc tích, không viết lan man."
     )
+
+
+def save_default_gemini_prompt(prompt: str) -> str:
+    """Lưu prompt tùy biến của người dùng làm prompt mặc định cho Gemini Vision."""
+    cleaned = prompt.strip()
+    if not cleaned:
+        raise ValueError("Nội dung prompt không được để trống!")
+    GEMINI_PROMPT_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    GEMINI_PROMPT_DATA_FILE.write_text(cleaned, encoding="utf-8")
+    logger.info("Đã lưu prompt mặc định Gemini vào %s", GEMINI_PROMPT_DATA_FILE)
+    return cleaned
+
+
+def reset_system_gemini_prompt() -> str:
+    """Khôi phục prompt phân tích Gemini về mẫu mặc định gốc của hệ thống."""
+    if GEMINI_PROMPT_DATA_FILE.exists():
+        try:
+            GEMINI_PROMPT_DATA_FILE.unlink()
+            logger.info("Đã xóa file prompt tùy biến %s, khôi phục gốc", GEMINI_PROMPT_DATA_FILE)
+        except Exception as e:
+            logger.error(f"Lỗi khi xóa {GEMINI_PROMPT_DATA_FILE}: {e}")
+    return get_default_gemini_prompt()
 
 
 def _parse_image_data(img_str: str, index: int = 0) -> tuple[bytes, str, str]:
@@ -193,7 +213,7 @@ def execute_9router_vision_analysis(
     """Sử dụng 9Router (OpenAI-compatible Vision endpoint) để phân tích ảnh sản phẩm bằng AI Vision."""
     cfg = read_config().get("chatgpt_9router", {})
     endpoint = cfg.get("endpoint", "http://localhost:20128/v1")
-    api_key = cfg.get("api_key", "").strip() or get_local_cli_secret()
+    api_key = "" if preview_only else (cfg.get("api_key", "").strip() or get_local_cli_secret())
     target_model = model or resolve_default_script_model(cfg)
 
     if "20128" in endpoint and not is_9router_running(20128):
@@ -449,22 +469,75 @@ def parse_analysis_to_structured(raw_text: str, provider_used: str = "gemini") -
 GPT_PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "gpt_sales_script.txt"
 
 
-def get_default_gpt_prompt() -> str:
-    """Đọc prompt mẫu tạo kịch bản bán hàng từ Backend/prompts/workflow/gpt_sales_script.txt."""
+PROMPT_PRESETS_FILE = DATA_DIR / "workflow_prompt_presets.json"
+PROMPT_PRESETS_SYSTEM_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "workflow_prompt_presets.json"
+
+
+def get_all_prompt_presets() -> list[dict[str, Any]]:
+    """Đọc danh sách preset từ Backend/Data/workflow_prompt_presets.json hoặc file hệ thống mẫu."""
+    target_file = PROMPT_PRESETS_FILE if PROMPT_PRESETS_FILE.exists() else PROMPT_PRESETS_SYSTEM_FILE
+    if not target_file.exists():
+        return []
+    try:
+        data = json.loads(target_file.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            # Đảm bảo có ít nhất 1 preset được đánh dấu là mặc định
+            if data and not any(p.get("is_default") for p in data):
+                data[0]["is_default"] = True
+                try:
+                    save_prompt_presets(data)
+                except Exception:
+                    pass
+            elif not PROMPT_PRESETS_FILE.exists() and data:
+                # Tự động khởi tạo sang DATA_DIR nếu chưa có
+                try:
+                    save_prompt_presets(data)
+                except Exception:
+                    pass
+            return data
+    except Exception as e:
+        logger.error(f"Lỗi đọc prompt presets {target_file}: {e}")
+    return []
+
+
+def save_prompt_presets(presets: list[dict[str, Any]]) -> None:
+    """Ghi danh sách preset vào Backend/Data/workflow_prompt_presets.json."""
+    PROMPT_PRESETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROMPT_PRESETS_FILE.write_text(json.dumps(presets, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def get_default_gpt_prompt(preset_id: str | None = None, content_mode: str | None = None) -> str:
+    """Lấy prompt kịch bản theo thể loại.
+    Ưu tiên tìm theo preset_id -> content_mode -> preset mặc định (is_default=True) -> preset đầu tiên.
+    """
+    presets = get_all_prompt_presets()
+    if presets:
+        found: dict[str, Any] | None = None
+        if preset_id:
+            found = next((p for p in presets if p.get("id") == preset_id), None)
+        if not found and content_mode:
+            found = next((p for p in presets if p.get("content_mode") == content_mode), None)
+        if not found:
+            found = next((p for p in presets if p.get("is_default")), None)
+        if not found and len(presets) > 0:
+            found = presets[0]
+
+        if found and found.get("prompt"):
+            return found["prompt"].strip()
+
     if GPT_PROMPT_FILE.exists():
         try:
             return GPT_PROMPT_FILE.read_text(encoding="utf-8").strip()
         except Exception as e:
             logger.error(f"Không thể đọc file prompt {GPT_PROMPT_FILE}: {e}")
+
     return (
         "Hãy phân tích dữ liệu sản phẩm và tạo đúng {{SCRIPT_COUNT}} kịch bản video độc lập.\n"
         "Mỗi kịch bản tương ứng với một clip Google Flow dài {{CLIP_DURATION}} giây, "
         "có {{MIN_WORDS}}-{{MAX_WORDS}} từ lời thoại và không bị chia thành nhiều cảnh.\n"
-        "Tự chọn góc tiếp cận phù hợp với sản phẩm và chế độ {{CONTENT_MODE}}; "
+        "Tự chọn góc tiếp cận phù hợp với sản phẩm và thể loại kịch bản;\n"
         "chỉ dùng dữ liệu đầu vào, không phóng đại hoặc tự bịa.\n"
-        "Chỉ trả về JSON object có key scripts. Mỗi phần tử phải có angle, title, hook, "
-        "visual_direction, voiceover, on_screen_text và cta. Voiceover là toàn bộ lời đọc "
-        "hoàn chỉnh từ hook đến CTA.\n\n"
+        "Chỉ trả về JSON object có key scripts.\n\n"
         "Dữ liệu sản phẩm:\n"
         "{{PRODUCT_DATA}}"
     )
@@ -533,39 +606,22 @@ def get_motion_presets() -> list[dict[str, Any]]:
     return []
 
 
-PROMPT_PRESETS_FILE = DATA_DIR / "workflow_prompt_presets.json"
-
-
-def get_all_prompt_presets() -> list[dict[str, Any]]:
-    """Đọc danh sách preset từ Backend/data/workflow_prompt_presets.json."""
-    if not PROMPT_PRESETS_FILE.exists():
-        return []
-    try:
-        data = json.loads(PROMPT_PRESETS_FILE.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            return data
-    except Exception as e:
-        logger.error(f"Lỗi đọc prompt presets {PROMPT_PRESETS_FILE}: {e}")
-    return []
-
-
-def save_prompt_presets(presets: list[dict[str, Any]]) -> None:
-    """Ghi danh sách preset vào Backend/data/workflow_prompt_presets.json."""
-    PROMPT_PRESETS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PROMPT_PRESETS_FILE.write_text(json.dumps(presets, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
 def create_prompt_preset(
     name: str,
     prompt: str,
     content_mode: str = "custom",
     description: str | None = None,
+    is_default: bool = False,
 ) -> dict[str, Any]:
     """Tạo mới một preset thể loại nội dung kèm prompt tùy chỉnh."""
     from datetime import datetime, timezone
     presets = get_all_prompt_presets()
     preset_id = f"custom_{uuid.uuid4().hex[:8]}"
     now_iso = datetime.now(timezone.utc).isoformat()
+    if is_default:
+        for p in presets:
+            p["is_default"] = False
+
     new_item = {
         "id": preset_id,
         "name": name.strip(),
@@ -573,6 +629,7 @@ def create_prompt_preset(
         "description": description.strip() if description else f"Mẫu {name.strip()} do người dùng tạo",
         "prompt": prompt.strip(),
         "is_system": False,
+        "is_default": bool(is_default),
         "updated_at": now_iso,
     }
     presets.append(new_item)
@@ -585,8 +642,9 @@ def update_prompt_preset(
     name: str | None = None,
     prompt: str | None = None,
     description: str | None = None,
+    is_default: bool | None = None,
 ) -> dict[str, Any]:
-    """Cập nhật tên, prompt hoặc mô tả của một preset."""
+    """Cập nhật tên, prompt, mô tả hoặc trạng thái mặc định của một preset."""
     from datetime import datetime, timezone
     presets = get_all_prompt_presets()
     found = None
@@ -596,12 +654,24 @@ def update_prompt_preset(
             break
     if not found:
         raise ValueError(f"Không tìm thấy preset có ID '{preset_id}'")
+
+    if found.get("is_system") and any(value is not None for value in (name, prompt, description)):
+        raise ValueError("Mẫu hệ thống được bảo vệ. Hãy lưu nội dung đã chỉnh sửa thành mẫu mới.")
+
+    if is_default is True:
+        for p in presets:
+            p["is_default"] = False
+        found["is_default"] = True
+    elif is_default is False:
+        found["is_default"] = False
+
     if name is not None and name.strip():
         found["name"] = name.strip()
     if prompt is not None and prompt.strip():
         found["prompt"] = prompt.strip()
     if description is not None:
         found["description"] = description.strip()
+
     found["updated_at"] = datetime.now(timezone.utc).isoformat()
     save_prompt_presets(presets)
     return found
@@ -614,7 +684,10 @@ def delete_prompt_preset(preset_id: str) -> bool:
         if p["id"] == preset_id:
             if p.get("is_system"):
                 raise ValueError("Không thể xóa mẫu kịch bản mặc định của hệ thống!")
+            was_default = p.get("is_default", False)
             presets.remove(p)
+            if was_default and presets:
+                presets[0]["is_default"] = True
             save_prompt_presets(presets)
             return True
     raise ValueError(f"Không tìm thấy preset có ID '{preset_id}'")
@@ -625,7 +698,7 @@ def calculate_voiceover_word_range(
     min_words: int | None = None,
     max_words: int | None = None,
 ) -> tuple[int, int]:
-    """Tính ngân sách lời thoại theo nhịp bán hàng chuẩn 2.0-2.4 từ/giây."""
+    """Tính ngân sách lời thoại theo tốc độ đọc đã cấu hình."""
     duration = max(1, round(float(clip_duration_seconds)))
     resolved_min = int(min_words) if min_words is not None else max(
         1, round(duration * workflow_settings.voiceover_words_per_second_min)
@@ -636,6 +709,15 @@ def calculate_voiceover_word_range(
     if resolved_min > resolved_max:
         raise ValueError("min_words không được lớn hơn max_words")
     return resolved_min, resolved_max
+
+
+def _cta_instruction(story_mode: str, includes_final_scene: bool = True) -> str:
+    """Quy tắc CTA dùng chung cho prompt chính, validation và repair."""
+    if story_mode == "independent":
+        return "Mỗi kịch bản độc lập phải có CTA riêng."
+    if includes_final_scene:
+        return "Chỉ phân cảnh cuối cùng của toàn chuỗi có CTA; các phân cảnh trước để CTA trống."
+    return "Batch này chưa có cảnh cuối cùng, vì vậy tất cả CTA phải để trống."
 
 
 def extract_gemini_analysis_text(product_analysis: dict[str, Any] | None) -> str:
@@ -768,6 +850,7 @@ def execute_gpt_script_generation(
     script_config: dict[str, Any] | None = None,
     prompt_template: str | None = None,
     model: str | None = None,
+    preview_only: bool = False,
 ) -> tuple[str, str]:
     """Gọi 9Router / ChatGPT để sinh kịch bản video bán hàng từ Object có cấu trúc."""
     cfg = read_config().get("chatgpt_9router", {})
@@ -776,7 +859,7 @@ def execute_gpt_script_generation(
     target_model = model or resolve_default_script_model(cfg)
 
     # Đảm bảo 9Router đang chạy nếu dùng endpoint 20128
-    if "20128" in endpoint and not is_9router_running(20128):
+    if not preview_only and "20128" in endpoint and not is_9router_running(20128):
         logger.info("[Workflow] 9Router chưa chạy, tiến hành khởi động trên port 20128...")
         ensure_9router_running(20128)
 
@@ -786,13 +869,19 @@ def execute_gpt_script_generation(
     elif scene_config and scene_config.get("count"):
         target_count = int(scene_config["count"])
 
-    content_mode = "sales"
+    total_count = int((script_config or {}).get("total_count") or target_count)
+    batch_start = int((script_config or {}).get("batch_start") or 1)
+    batch_end = int((script_config or {}).get("batch_end") or (batch_start + target_count - 1))
+    continuity_context = str((script_config or {}).get("continuity_context") or "").strip()
+
+    content_mode = "custom"
     if script_config and script_config.get("content_mode"):
         content_mode = str(script_config["content_mode"])
 
     platform = "auto"
     if script_config and script_config.get("platform"):
         platform = str(script_config["platform"])
+    platform_prompt_value = "nền tảng phù hợp nhất" if platform == "auto" else platform
 
     clip_duration_seconds = workflow_settings.clip_duration_seconds
     if script_config and script_config.get("clip_duration_seconds"):
@@ -804,58 +893,69 @@ def execute_gpt_script_generation(
         script_config.get("max_words") if script_config else None,
     )
 
-    template = (prompt_template or "").strip() or get_default_gpt_prompt()
-    user_desc = (product_data or "").strip()
-    gemini_text = extract_gemini_analysis_text(product_analysis)
+    preset_id = script_config.get("preset_id") if script_config else None
+    if prompt_template is None:
+        template = get_default_gpt_prompt(preset_id=preset_id, content_mode=content_mode)
+    else:
+        template = prompt_template.strip()
+    if not template:
+        template = "Viết kịch bản phù hợp với dữ liệu nguồn và chế độ kịch bản đã chọn."
     usp_text = extract_usp_text(product_analysis)
+
+    prompt_assets = dict(assets or {})
+    if images:
+        prompt_assets["products"] = [{"attached": True} for _ in images if _ and _.strip()]
 
     unified_data_str = format_product_data_from_structured(
         product_data,
         product_analysis,
-        assets,
+        prompt_assets,
         scene_config,
         script_config,
     )
 
-    # 1. Thay thế các biến mở rộng tường minh
+    # 1. Placeholder là tiện ích nâng cao; source context không phụ thuộc vào placeholder.
     filled_prompt = template
     # Nếu template có {{GEMINI_ANALYSIS}} hoặc {{PRODUCT_ANALYSIS}}
     filled_prompt = re.sub(
         r"\{\{\s*(?:GEMINI_ANALYSIS|PRODUCT_ANALYSIS)\s*\}\}",
-        gemini_text or "Đã phân tích từ hình ảnh sản phẩm đính kèm.",
+        "[Xem phần PHÂN TÍCH GEMINI trong SOURCE CONTEXT]",
         filled_prompt,
         flags=re.IGNORECASE,
     )
     # Thay thế {{USP}} hoặc {{SELLING_POINTS}}
     filled_prompt = re.sub(
         r"\{\{\s*(?:USP|SELLING_POINTS)\s*\}\}",
-        usp_text or "Tập trung vào công năng nổi bật của sản phẩm.",
+        usp_text or "[Xem phần USP trong SOURCE CONTEXT]",
         filled_prompt,
         flags=re.IGNORECASE,
     )
 
-    # Nếu template có cả {{PRODUCT_DATA}} và {{GEMINI_ANALYSIS}}, thì {{PRODUCT_DATA}} chỉ chứa mô tả gốc
-    # Nếu template chỉ dùng {{PRODUCT_DATA}}, thì điền unified_data_str (gộp cả 2 để tương thích ngược)
-    has_explicit_gemini_var = bool(
-        re.search(r"\{\{\s*(?:GEMINI_ANALYSIS|PRODUCT_ANALYSIS)\s*\}\}", template, flags=re.IGNORECASE)
+    # Data placeholder chỉ trỏ tới SOURCE CONTEXT để không lặp lại payload lớn.
+    filled_prompt = re.sub(
+        r"\{\{\s*PRODUCT_DATA\s*\}\}",
+        "[Xem toàn bộ dữ liệu sản phẩm trong SOURCE CONTEXT]",
+        filled_prompt,
+        flags=re.IGNORECASE,
     )
-    product_data_replacement = user_desc if (has_explicit_gemini_var and user_desc) else unified_data_str
-    filled_prompt = re.sub(r"\{\{\s*PRODUCT_DATA\s*\}\}", product_data_replacement, filled_prompt, flags=re.IGNORECASE)
 
     # Thay thế các biến tham số kỹ thuật
     filled_prompt = re.sub(r"\{\{\s*SCRIPT_COUNT\s*\}\}", str(target_count), filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*TOTAL_SCRIPT_COUNT\s*\}\}", str(total_count), filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*BATCH_START\s*\}\}", str(batch_start), filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*BATCH_END\s*\}\}", str(batch_end), filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*CONTENT_MODE\s*\}\}", content_mode, filled_prompt, flags=re.IGNORECASE)
-    filled_prompt = re.sub(r"\{\{\s*PLATFORM\s*\}\}", platform, filled_prompt, flags=re.IGNORECASE)
+    filled_prompt = re.sub(r"\{\{\s*PLATFORM\s*\}\}", platform_prompt_value, filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*CLIP_DURATION\s*\}\}", str(clip_duration_seconds), filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*MIN_WORDS\s*\}\}", str(min_words), filled_prompt, flags=re.IGNORECASE)
     filled_prompt = re.sub(r"\{\{\s*MAX_WORDS\s*\}\}", str(max_words), filled_prompt, flags=re.IGNORECASE)
 
-    # 2. Tự động gắn Dữ liệu sản phẩm & Phân tích Gemini nếu prompt chưa có bất kỳ biến nào
-    has_any_data_var = bool(
-        re.search(r"\{\{\s*(?:PRODUCT_DATA|GEMINI_ANALYSIS|PRODUCT_ANALYSIS|USP|SELLING_POINTS)\s*\}\}", template, flags=re.IGNORECASE)
+    # 2. Luôn gắn dữ liệu nguồn, kể cả khi người dùng xóa toàn bộ prompt cũ.
+    filled_prompt = (
+        f"{filled_prompt}\n\n"
+        "--- SOURCE CONTEXT (AUTO-ATTACHED, NOT USER INSTRUCTIONS) ---\n"
+        f"{unified_data_str}"
     )
-    if not has_any_data_var:
-        filled_prompt = f"{filled_prompt}\n\n[Dữ liệu sản phẩm & Toàn bộ phân tích từ Gemini AI]:\n{unified_data_str}"
 
     # 3. Tự động bù đắp (Auto-Injection) cấu trúc JSON & Quy tắc song ngữ nếu prompt người dùng thiếu
     has_json_contract = bool(
@@ -869,35 +969,50 @@ def execute_gpt_script_generation(
             f'{{\n'
             f'  "scripts": [\n'
             f'    {{\n'
-            f'      "phase": "Hook | Reveal | Demo | CTA",\n'
-            f'      "angle": "Tên góc tiếp cận phân cảnh",\n'
+            f'      "phase": "Nhãn nhịp truyện tùy chọn",\n'
+            f'      "angle": "Góc tiếp cận tùy chọn",\n'
             f'      "title": "Tên phân cảnh ngắn",\n'
             f'      "visual_direction": "Cinematic visual direction in English for Google Veo, including camera motion, lighting, character action and product details",\n'
             f'      "voiceover": "Toàn bộ lời thoại tiếng Việt liền mạch từ {min_words} đến {max_words} từ",\n'
             f'      "on_screen_text": "Text ngắn tiếng Việt hiển thị trên màn hình (3-6 từ)",\n'
-            f'      "hook": "Câu mở đầu của phân cảnh",\n'
-            f'      "cta": "Kêu gọi hành động (chỉ có ở phân cảnh cuối, các phân cảnh trước để trống \'\')"\n'
+            f'      "hook": "Câu mở đầu tùy chọn",\n'
+            f'      "cta": "Kêu gọi hành động theo chế độ kịch bản"\n'
             f'    }}\n'
             f'  ]\n'
             f'}}\n\n'
             f"QUY TẮC BẮT BUỘC VỀ NGÔN NGỮ & ĐỘ DÀI:\n"
             f'1. Mảng "scripts" phải có CHÍNH XÁC {target_count} phần tử tương ứng {target_count} clip {clip_duration_seconds} giây.\n'
             f'2. visual_direction: 100% TIẾNG ANH điện ảnh cho Google Veo. Tuyệt đối không để Veo tự nói lời thoại.\n'
-            f'3. voiceover: 100% TIẾNG VIỆT tự nhiên bắt tai, chuẩn xác {min_words}-{max_words} từ/phân cảnh.\n'
+            f'3. voiceover: 100% TIẾNG VIỆT, đúng tone trong prompt người dùng, chuẩn xác {min_words}-{max_words} từ/phân cảnh.\n'
             f'4. on_screen_text: Text tiếng Việt ngắn gọn 3-6 từ.'
         )
         filled_prompt = f"{filled_prompt}\n{auto_json_contract}"
 
-    # Các bất biến của pipeline nằm ở system prompt để prompt người dùng vẫn tùy biến được.
+    # System prompt chỉ giữ contract kỹ thuật. Cấu trúc sáng tạo thuộc về prompt người dùng.
     story_mode = (script_config or {}).get("story_mode", "sequential") if script_config else "sequential"
+    if story_mode not in {"sequential", "independent"}:
+        raise ValueError("story_mode phải là 'sequential' hoặc 'independent'")
     if story_mode == "sequential":
         mode_instruction = (
-            f"Tạo chính xác {target_count} phân cảnh liên hoàn theo phễu bán hàng video ngắn TikTok: "
-            f"Hook → Reveal → Demo → CTA. Tất cả phân cảnh tạo thành 1 cốt truyện duy nhất xuyên suốt. "
-            f"CHỈ đặt CTA ở phân cảnh cuối cùng, các phân cảnh trước KHÔNG có CTA. "
+            f"Tạo các phân cảnh {batch_start}-{batch_end} trong tổng số {total_count} phân cảnh liên hoàn. "
+            "Bám sát cấu trúc và phong cách trong prompt người dùng; không tự áp thêm phễu bán hàng. "
+            f"{_cta_instruction(story_mode, batch_end == total_count)} "
         )
     else:
-        mode_instruction = f"Tạo chính xác {target_count} kịch bản độc lập, mỗi kịch bản có CTA riêng. "
+        mode_instruction = (
+            f"Tạo các kịch bản độc lập {batch_start}-{batch_end} trong tổng số {total_count}. "
+            f"{_cta_instruction(story_mode, True)} "
+        )
+
+    if continuity_context:
+        mode_instruction += f"Ngữ cảnh các phân cảnh ngay trước batch này:\n{continuity_context}\n"
+
+    # Đặt quy tắc batch trong cả user prompt để model/fallback không bỏ sót khi template cũ có CTA xung đột.
+    filled_prompt = (
+        f"{filled_prompt}\n\n[TECHNICAL BATCH CONTRACT]\n"
+        f"Output only items {batch_start}-{batch_end} ({target_count} items) of {total_count}. "
+        f"{_cta_instruction(story_mode, batch_end == total_count)}"
+    )
 
     system_instruction = (
         f"{mode_instruction}"
@@ -905,15 +1020,18 @@ def execute_gpt_script_generation(
         f"Lời thoại mỗi phân cảnh từ {min_words} đến {max_words} từ tiếng Việt. "
         "QUY TẮC NGÔN NGỮ BẮT BUỘC: "
         "1) visual_direction PHẢI viết 100% TIẾNG ANH dùng thuật ngữ điện ảnh (camera motion, lighting, character action). "
-        "2) voiceover PHẢI viết 100% TIẾNG VIỆT nhịp nhanh bắt tai. "
+        "2) voiceover PHẢI viết 100% TIẾNG VIỆT và tuân theo tone trong prompt người dùng. "
         "3) Nếu có Character Profile, bắt buộc lồng mô tả nhân vật vào visual_direction bằng tiếng Anh. "
-        "4) Cuối visual_direction bắt buộc có dòng: 'The narrator speaks naturally in Vietnamese: \"[trích voiceover]\"'. "
+        "4) Không chèn lời thoại hoặc câu narrator vào visual_direction; voiceover được xử lý riêng. "
         "Chỉ sử dụng dữ liệu đầu vào; không tự tạo claim. "
         "Chỉ trả về JSON object hợp lệ theo dạng {\"scripts\": [...]}, không dùng Markdown."
     )
 
     # Lọc ảnh hợp lệ
     valid_images = [img for img in (images or []) if img and img.strip()]
+
+    if preview_only:
+        return filled_prompt, system_instruction
 
     # Gọi chat_completion
     res = chat_completion(
@@ -949,6 +1067,39 @@ def execute_gpt_script_generation(
         raise RuntimeError(f"Lỗi khi gọi ChatGPT qua 9Router: {res.get('error', 'Không xác định')}")
 
     return res.get("content", ""), target_model
+
+
+def preview_gpt_script_prompt(
+    product_data: str,
+    images: list[str] | None = None,
+    product_analysis: dict[str, Any] | None = None,
+    assets: dict[str, Any] | None = None,
+    scene_config: dict[str, Any] | None = None,
+    script_config: dict[str, Any] | None = None,
+    prompt_template: str | None = None,
+) -> tuple[str, str]:
+    """Dựng chính xác prompt sẽ gửi model mà không khởi động/gọi model."""
+    config = dict(script_config or {})
+    total_count = int(config.get("count") or (scene_config or {}).get("count") or 3)
+    batch_size = max(1, min(10, int(config.get("batch_size") or 8)))
+    current_count = min(total_count, batch_size)
+    config.update({
+        "count": current_count,
+        "total_count": total_count,
+        "batch_start": 1,
+        "batch_end": current_count,
+        "continuity_context": "",
+    })
+    return execute_gpt_script_generation(
+        product_data=product_data,
+        images=images,
+        product_analysis=product_analysis,
+        assets=assets,
+        scene_config=scene_config,
+        script_config=config,
+        prompt_template=prompt_template,
+        preview_only=True,
+    )
 
 
 def parse_gpt_scripts(raw_text: str, expected_count: int = 3) -> list[GptScriptItem]:
@@ -1104,18 +1255,20 @@ def validate_gpt_scripts(
     expected_count: int,
     min_words: int,
     max_words: int,
+    story_mode: str = "sequential",
+    includes_final_scene: bool = True,
 ) -> None:
     """Kiểm tra contract trước khi dữ liệu được phép đi tiếp sang Google Flow."""
     errors: list[str] = []
     if len(scripts) != expected_count:
         errors.append(f"Cần đúng {expected_count} kịch bản, nhận được {len(scripts)}")
 
-    seen_angles: set[str] = set()
-    # CTA chỉ bắt buộc ở phân cảnh cuối (sequential mode)
+    if story_mode not in {"sequential", "independent"}:
+        raise ValueError("story_mode phải là 'sequential' hoặc 'independent'")
+
+    # Giữ contract tối thiểu mà Flow/TTS thực sự cần. Các trường sáng tạo là tùy chọn.
     base_required_fields = (
-        ("angle", "góc tiếp cận"),
         ("title", "tiêu đề"),
-        ("hook", "hook"),
         ("visual_direction", "gợi ý hình ảnh"),
         ("voiceover", "lời thoại"),
         ("on_screen_text", "chữ trên màn hình"),
@@ -1127,12 +1280,15 @@ def validate_gpt_scripts(
             if not isinstance(value, str) or not value.strip():
                 errors.append(f"Kịch bản {index} thiếu {label}")
 
-        # CTA chỉ bắt buộc ở phân cảnh cuối cùng
-        is_last = (index == expected_count)
-        if is_last:
-            cta_val = getattr(script, "cta", None)
-            if not isinstance(cta_val, str) or not cta_val.strip():
-                errors.append(f"Kịch bản {index} (phân cảnh cuối) thiếu CTA")
+        cta = (script.cta or "").strip()
+        is_global_last = includes_final_scene and index == expected_count
+        if story_mode == "independent" and not cta:
+            errors.append(f"Kịch bản độc lập {index} thiếu CTA")
+        elif story_mode == "sequential":
+            if is_global_last and not cta:
+                errors.append(f"Phân cảnh cuối {index} thiếu CTA")
+            elif not is_global_last and cta:
+                errors.append(f"Phân cảnh {index} chưa phải cảnh cuối nhưng có CTA")
 
         voiceover = (script.voiceover or script.content or "").strip()
         word_count = len(voiceover.split())
@@ -1141,12 +1297,6 @@ def validate_gpt_scripts(
             errors.append(
                 f"Kịch bản {index} có {word_count} từ lời thoại; yêu cầu {min_words}-{max_words} từ"
             )
-
-        normalized_angle = re.sub(r"\s+", " ", (script.angle or "").strip().casefold())
-        if normalized_angle:
-            if normalized_angle in seen_angles:
-                errors.append(f"Kịch bản {index} trùng góc tiếp cận với kịch bản trước")
-            seen_angles.add(normalized_angle)
 
     if errors:
         raise ValueError("; ".join(errors))
@@ -1162,9 +1312,15 @@ def generate_validated_gpt_scripts(
     prompt_template: str | None = None,
     model: str | None = None,
 ) -> tuple[str, str, list[GptScriptItem], bool, int, int, int]:
-    """Sinh, parse và validate; nếu sai contract thì yêu cầu model tự sửa đúng một lần."""
+    """Sinh theo batch, validate từng batch và repair duy nhất batch bị lỗi."""
     config = script_config or {}
     expected_count = int(config.get("count") or (scene_config or {}).get("count") or 3)
+    if not 1 <= expected_count <= 200:
+        raise ValueError("count phải nằm trong khoảng 1-200")
+    batch_size = max(1, min(10, int(config.get("batch_size") or 8)))
+    story_mode = str(config.get("story_mode") or "sequential")
+    if story_mode not in {"sequential", "independent"}:
+        raise ValueError("story_mode phải là 'sequential' hoặc 'independent'")
     clip_duration = int(config.get("clip_duration_seconds") or workflow_settings.clip_duration_seconds)
     min_words, max_words = calculate_voiceover_word_range(
         clip_duration,
@@ -1172,44 +1328,91 @@ def generate_validated_gpt_scripts(
         config.get("max_words"),
     )
 
-    raw_text, used_model = execute_gpt_script_generation(
-        product_data=product_data,
-        images=images,
-        product_analysis=product_analysis,
-        assets=assets,
-        scene_config=scene_config,
-        script_config=script_config,
-        prompt_template=prompt_template,
-        model=model,
-    )
+    all_scripts: list[GptScriptItem] = []
+    raw_batches: list[str] = []
+    used_model = model or ""
+    repaired_any = False
+    continuity_context = ""
 
-    try:
-        scripts = parse_gpt_scripts(raw_text, expected_count=expected_count)
-        validate_gpt_scripts(scripts, expected_count, min_words, max_words)
-        return raw_text, used_model, scripts, False, clip_duration, min_words, max_words
-    except ValueError as first_error:
-        repair_prompt = (
-            "Hãy sửa kết quả không hợp lệ bên dưới. Chỉ trả về một JSON object hợp lệ có key "
-            f"\"scripts\" chứa đúng {expected_count} phần tử. Mỗi phần tử bắt buộc có angle, title, "
-            "hook, visual_direction, voiceover, on_screen_text và cta. "
-            f"Voiceover phải là toàn bộ lời đọc từ hook đến CTA và có {min_words}-{max_words} từ. "
-            "Các angle phải khác nhau.\n\n"
-            f"Lỗi cần sửa:\n{first_error}\n\n"
-            f"Kết quả cũ:\n{raw_text[:12000]}"
-        )
-        repaired_raw, repaired_model = execute_gpt_script_generation(
+    for batch_start in range(1, expected_count + 1, batch_size):
+        batch_end = min(expected_count, batch_start + batch_size - 1)
+        current_count = batch_end - batch_start + 1
+        includes_final_scene = batch_end == expected_count
+        batch_config = {
+            **config,
+            "count": current_count,
+            "total_count": expected_count,
+            "batch_start": batch_start,
+            "batch_end": batch_end,
+            "continuity_context": continuity_context if story_mode == "sequential" else "",
+        }
+
+        raw_text, used_model = execute_gpt_script_generation(
             product_data=product_data,
             images=images,
             product_analysis=product_analysis,
             assets=assets,
             scene_config=scene_config,
-            script_config=script_config,
-            prompt_template=repair_prompt,
-            model=used_model,
+            script_config=batch_config,
+            prompt_template=prompt_template,
+            model=used_model or model,
         )
-        scripts = parse_gpt_scripts(repaired_raw, expected_count=expected_count)
-        validate_gpt_scripts(scripts, expected_count, min_words, max_words)
-        return repaired_raw, repaired_model, scripts, True, clip_duration, min_words, max_words
+
+        try:
+            batch_scripts = parse_gpt_scripts(raw_text, expected_count=current_count)
+            validate_gpt_scripts(
+                batch_scripts, current_count, min_words, max_words, story_mode, includes_final_scene
+            )
+        except ValueError as first_error:
+            repair_prompt = (
+                "Hãy sửa kết quả không hợp lệ bên dưới. Chỉ trả về một JSON object hợp lệ có key "
+                f"\"scripts\" chứa đúng {current_count} phần tử. Mỗi phần tử bắt buộc có "
+                "title, visual_direction, voiceover và on_screen_text; phase, angle, hook và cta là metadata. "
+                f"Voiceover phải có {min_words}-{max_words} từ. "
+                f"{_cta_instruction(story_mode, includes_final_scene)}\n\n"
+                f"Lỗi cần sửa:\n{first_error}\n\n"
+                f"Kết quả cũ:\n{raw_text[:12000]}"
+            )
+            raw_text, used_model = execute_gpt_script_generation(
+                product_data=product_data,
+                images=images,
+                product_analysis=product_analysis,
+                assets=assets,
+                scene_config=scene_config,
+                script_config=batch_config,
+                prompt_template=repair_prompt,
+                model=used_model,
+            )
+            batch_scripts = parse_gpt_scripts(raw_text, expected_count=current_count)
+            validate_gpt_scripts(
+                batch_scripts, current_count, min_words, max_words, story_mode, includes_final_scene
+            )
+            repaired_any = True
+
+        for local_index, script in enumerate(batch_scripts, start=batch_start):
+            if not script.angle:
+                script.angle = f"Phân cảnh {local_index}"
+            if not script.title:
+                script.title = f"Phân cảnh {local_index}"
+        all_scripts.extend(batch_scripts)
+        raw_batches.append(raw_text)
+
+        if story_mode == "sequential":
+            context_items = all_scripts[-2:]
+            continuity_context = json.dumps(
+                [
+                    {
+                        "scene": len(all_scripts) - len(context_items) + offset + 1,
+                        "title": item.title,
+                        "visual_direction": item.visual_direction,
+                        "voiceover": item.voiceover,
+                    }
+                    for offset, item in enumerate(context_items)
+                ],
+                ensure_ascii=False,
+            )
+
+    return "\n\n".join(raw_batches), used_model, all_scripts, repaired_any, clip_duration, min_words, max_words
 
 
 # ─────────────────────────────────────────────────────────────────────────────

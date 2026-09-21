@@ -92,6 +92,97 @@ def test_gpt_prompt_uses_dynamic_clip_contract(monkeypatch):
     assert "đúng một clip Google Flow dài 10 giây" in captured["system_prompt"]
 
 
+def test_plain_user_prompt_always_receives_source_context(monkeypatch):
+    from app.workflow import service as workflow_service
+
+    captured = {}
+    monkeypatch.setattr(
+        workflow_service,
+        "read_config",
+        lambda: {"chatgpt_9router": {"endpoint": "http://router.test/v1", "api_key": "test-key"}},
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "chat_completion",
+        lambda **kwargs: captured.update(kwargs) or {"ok": True, "content": "mock response"},
+    )
+
+    execute_gpt_script_generation(
+        product_data="Sản phẩm không được phép thất lạc",
+        product_analysis={"rawText": "Phân tích Gemini chi tiết"},
+        prompt_template="Viết theo phong cách gần gũi, không dùng template hay biến.",
+    )
+
+    assert "SOURCE CONTEXT (AUTO-ATTACHED" in captured["prompt"]
+    assert "Sản phẩm không được phép thất lạc" in captured["prompt"]
+    assert "Phân tích Gemini chi tiết" in captured["prompt"]
+
+
+def test_empty_user_prompt_uses_neutral_instruction(monkeypatch):
+    from app.workflow import service as workflow_service
+
+    captured = {}
+    monkeypatch.setattr(
+        workflow_service,
+        "read_config",
+        lambda: {"chatgpt_9router": {"endpoint": "http://router.test/v1", "api_key": "test-key"}},
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "get_default_gpt_prompt",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("không được nạp preset khi user đã xóa prompt")),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "chat_completion",
+        lambda **kwargs: captured.update(kwargs) or {"ok": True, "content": "mock response"},
+    )
+
+    execute_gpt_script_generation(product_data="product", prompt_template="")
+
+    assert "dữ liệu nguồn" in captured["prompt"]
+
+
+def test_system_prompt_preset_cannot_be_overwritten(monkeypatch):
+    from app.workflow import service as workflow_service
+
+    presets = [{
+        "id": "sales", "name": "Sales", "content_mode": "sales", "prompt": "factory prompt",
+        "is_system": True, "is_default": True,
+    }]
+    monkeypatch.setattr(workflow_service, "get_all_prompt_presets", lambda: presets)
+    saved = []
+    monkeypatch.setattr(workflow_service, "save_prompt_presets", lambda value: saved.append(value))
+
+    with pytest.raises(ValueError, match="bảo vệ"):
+        workflow_service.update_prompt_preset("sales", prompt="overwritten")
+    assert presets[0]["prompt"] == "factory prompt"
+    assert saved == []
+
+
+def test_prompt_preview_matches_first_batch_without_calling_model(monkeypatch):
+    from app.workflow import service as workflow_service
+
+    monkeypatch.setattr(
+        workflow_service,
+        "read_config",
+        lambda: {"chatgpt_9router": {"endpoint": "http://localhost:20128/v1", "api_key": "test-key"}},
+    )
+    monkeypatch.setattr(workflow_service, "ensure_9router_running", pytest.fail)
+    monkeypatch.setattr(workflow_service, "chat_completion", pytest.fail)
+
+    user_prompt, system_prompt = workflow_service.preview_gpt_script_prompt(
+        product_data="preview product",
+        images=["image-one", "image-two"],
+        script_config={"count": 20, "batch_size": 8, "story_mode": "sequential"},
+        prompt_template="Phong cách tự nhiên.",
+    )
+
+    assert "items 1-8 (8 items) of 20" in user_prompt
+    assert "2 ảnh sản phẩm" in user_prompt
+    assert "1-8" in system_prompt and "20" in system_prompt
+
+
 def test_validate_gpt_scripts_rejects_invalid_flow_contract():
     scripts = parse_gpt_scripts(
         json.dumps({
