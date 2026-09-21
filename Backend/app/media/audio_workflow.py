@@ -57,9 +57,10 @@ def _process_thumbnail(source: Path, story_name: str, chapter_number: int | None
     text_file.write_text(label, encoding="utf-8")
     size = "1080:1920" if aspect == "9:16" else "1920:1080"
     output = work / "thumbnail.jpg"
+    text_file_arg = text_file.as_posix().replace(":", r"\:")
     vf = (
         f"scale={size}:force_original_aspect_ratio=increase,crop={size},"
-        f"drawtext=textfile='{text_file.as_posix().replace(':', '\\:')}':fontcolor=white:fontsize=46:"
+        f"drawtext=textfile='{text_file_arg}':fontcolor=white:fontsize=46:"
         "line_spacing=10:fix_bounds=1:x=(w-text_w)/2:y=110:"
         "box=1:boxcolor=black@0.65:boxborderw=24"
     )

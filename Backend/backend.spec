@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import sys
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 # SPECPATH là biến môi trường nội bộ của PyInstaller chứa đường dẫn thư mục spec file
@@ -15,7 +16,7 @@ a = Analysis(
         (str(backend_dir / 'prompts'), 'prompts'),
         (str(backend_dir / 'resources'), 'resources'),
     ],
-    hiddenimports=[
+    hiddenimports=collect_submodules('app') + [
         'uvicorn',
         'uvicorn.logging',
         'uvicorn.loops',
@@ -27,8 +28,6 @@ a = Analysis(
         'uvicorn.protocols.websockets.auto',
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
-        'app',
-        'app.main',
         'sqlite3',
         'pydantic_settings',
     ],
