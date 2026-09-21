@@ -1,10 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
-import { autoUpdater } from 'electron-updater'
+import type { AppUpdater } from 'electron-updater'
 import { basename, delimiter, join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import http from 'node:http'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const { autoUpdater } = require('electron-updater') as { autoUpdater: AppUpdater }
 
 function getAppIcon() {
   const candidates = [
