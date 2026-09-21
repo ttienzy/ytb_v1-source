@@ -1,11 +1,11 @@
 {
   "name": "creatorflow-ai",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "CreatorFlow AI - AI Video Production & Multi-Channel Studio",
   "author": "ttienzy",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ttienzy/ytb_v1.git"
+    "url": "https://github.com/ttienzy/ytb_v1-source.git"
   },
   "private": true,
   "type": "module",

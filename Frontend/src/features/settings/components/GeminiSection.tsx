@@ -70,7 +70,7 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
   const [ytMsgType, setYtMsgType] = useState<'success' | 'error' | 'info'>('info')
 
   // Update check states
-  const [appVersion, setAppVersion] = useState('v1.0.1')
+  const [appVersion, setAppVersion] = useState(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v1.0.0')
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'up_to_date' | 'available' | 'downloading' | 'downloaded'>('idle')
   const [updateInfo, setUpdateInfo] = useState<{
@@ -317,8 +317,11 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       return
     }
 
+    const owner = typeof __GITHUB_REPO__ !== 'undefined' ? __GITHUB_REPO__.owner : 'ttienzy'
+    const repo = typeof __GITHUB_REPO__ !== 'undefined' ? __GITHUB_REPO__.repo : 'ytb_v1'
+
     try {
-      const res = await fetch('https://api.github.com/repos/ttienzy/ytb_v1/releases/latest')
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`)
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`)
       }
@@ -345,21 +348,33 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
 
   async function handleDownloadUpdate() {
     setUpdateError('')
-    if (updateInfo?.isDev) {
-      alert('Bạn đang ở môi trường phát triển (Dev mode). Tính năng tự động tải và cài đặt đè hoạt động trên bản phát hành chính thức (.exe).')
-      return
-    }
+    setUpdateStatus('downloading')
+    setDownloadProgress({ percent: 0, bytesPerSecond: 0, transferred: 0, total: 0 })
 
     if (window.desktop?.startDownloadUpdate) {
-      setUpdateStatus('downloading')
-      setDownloadProgress({ percent: 0, bytesPerSecond: 0, transferred: 0, total: 0 })
       const res = await window.desktop.startDownloadUpdate()
       if (res?.error) {
         setUpdateError(res.error)
         setUpdateStatus('available')
       }
-    } else if (updateInfo?.html_url) {
-      window.open(updateInfo.html_url, '_blank')
+    } else {
+      // Giả lập tiến trình trong môi trường Web để test đầy đủ các state
+      let percent = 0
+      const total = 480000000
+      const interval = setInterval(() => {
+        percent += 20
+        if (percent >= 100) {
+          clearInterval(interval)
+          setUpdateStatus('downloaded')
+        } else {
+          setDownloadProgress({
+            percent,
+            bytesPerSecond: 16500000,
+            transferred: Math.round((total * percent) / 100),
+            total,
+          })
+        }
+      }, 400)
     }
   }
 
@@ -367,6 +382,8 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
     if (window.desktop?.quitAndInstall) {
       setInstalling(true)
       window.desktop.quitAndInstall()
+    } else {
+      alert('Ứng dụng đã tải xong bản cập nhật (môi trường Web). Trên bản cài Windows (.exe), ứng dụng sẽ tự khởi động lại và hoàn tất cài đặt.')
     }
   }
 
@@ -682,7 +699,7 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
                 </button>
                 {updateInfo.isDev && (
                   <span className="update-dev-note">
-                    (Môi trường Dev: Nhấn để xem lưu ý)
+                    (Môi trường Dev: Tải thử nghiệm)
                   </span>
                 )}
               </div>

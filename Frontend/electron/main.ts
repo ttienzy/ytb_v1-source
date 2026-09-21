@@ -10,6 +10,9 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { autoUpdater } = require('electron-updater') as { autoUpdater: AppUpdater }
 
+declare const __APP_VERSION__: string | undefined
+declare const __GITHUB_REPO__: { owner: string; repo: string } | undefined
+
 function getAppIcon() {
   const candidates = [
     join(__dirname, '../resources/icon.ico'),
@@ -227,6 +230,18 @@ function startPackagedVoiceService() {
   }
 }
 
+function getPreloadPath(): string {
+  const candidates = [
+    join(__dirname, '../preload/preload.cjs'),
+    join(__dirname, '../preload/preload.mjs'),
+    join(__dirname, '../preload/preload.js'),
+  ]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+  }
+  return join(__dirname, '../preload/preload.cjs')
+}
+
 function createWindow() {
   const appIcon = getAppIcon()
 
@@ -239,7 +254,8 @@ function createWindow() {
     show: false,
     ...(appIcon ? { icon: appIcon } : {}),
     webPreferences: {
-      preload: join(__dirname, '../preload/preload.mjs'),
+      preload: getPreloadPath(),
+      sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -504,10 +520,50 @@ ipcMain.handle('updater:get-app-version', () => {
 
 ipcMain.handle('updater:get-status', () => latestUpdaterStatus)
 
+let devSimTimer: NodeJS.Timeout | null = null
+
+function simulateDevDownload() {
+  if (devSimTimer) clearInterval(devSimTimer)
+  let percent = 0
+  const total = 480000000
+  publishUpdaterStatus({
+    status: 'downloading',
+    percent: 0,
+    bytesPerSecond: 15000000,
+    transferred: 0,
+    total,
+    isDev: true,
+  })
+  devSimTimer = setInterval(() => {
+    percent += 20
+    if (percent >= 100) {
+      if (devSimTimer) clearInterval(devSimTimer)
+      devSimTimer = null
+      publishUpdaterStatus({
+        status: 'downloaded',
+        version: latestUpdaterStatus.version || app.getVersion(),
+        releaseNotes: latestUpdaterStatus.releaseNotes,
+        isDev: true,
+      })
+    } else {
+      publishUpdaterStatus({
+        status: 'downloading',
+        percent,
+        bytesPerSecond: 16500000,
+        transferred: Math.round((total * percent) / 100),
+        total,
+        isDev: true,
+      })
+    }
+  }, 400)
+}
+
 async function checkForUpdatesNow(): Promise<UpdaterStatusPayload> {
   if (!app.isPackaged) {
     try {
-      const res = await fetch('https://api.github.com/repos/ttienzy/ytb_v1/releases/latest', {
+      const owner = typeof __GITHUB_REPO__ !== 'undefined' && __GITHUB_REPO__?.owner ? __GITHUB_REPO__.owner : 'ttienzy'
+      const repo = typeof __GITHUB_REPO__ !== 'undefined' && __GITHUB_REPO__?.repo ? __GITHUB_REPO__.repo : 'ytb_v1'
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`, {
         headers: { 'User-Agent': 'CreatorFlow-App' },
       })
       if (!res.ok) {
@@ -517,7 +573,7 @@ async function checkForUpdatesNow(): Promise<UpdaterStatusPayload> {
       const latestTag = data.tag_name?.replace(/^v/, '') || ''
       const currentVer = app.getVersion().replace(/^v/, '')
       if (latestTag && latestTag !== currentVer) {
-        const payload = {
+        const payload: UpdaterStatusPayload = {
           status: 'available',
           isDev: true,
           currentVersion: app.getVersion(),
@@ -579,7 +635,8 @@ ipcMain.handle('updater:check', checkForUpdatesNow)
 
 ipcMain.handle('updater:download', async () => {
   if (!app.isPackaged) {
-    return { error: 'Tính năng tự động tải cập nhật hoạt động trên bản phát hành chính thức (.exe).' }
+    simulateDevDownload()
+    return { ok: true }
   }
   try {
     await autoUpdater.downloadUpdate()
@@ -591,6 +648,14 @@ ipcMain.handle('updater:download', async () => {
 })
 
 ipcMain.handle('updater:quit-and-install', () => {
+  if (!app.isPackaged) {
+    dialog.showMessageBoxSync(mainWindow || undefined, {
+      type: 'info',
+      title: 'Môi trường Dev',
+      message: 'Trong môi trường phát triển (Dev mode), ứng dụng không ghi đè mã nguồn. Trên bản cài (.exe), ứng dụng sẽ tự khởi động lại và cập nhật.',
+    })
+    return
+  }
   cleanUpBackends()
   setImmediate(() => {
     autoUpdater.quitAndInstall(false, true)
