@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*' # Tự động kích hoạt khi push tag dạng v1.0.0, v1.0.1...
+  workflow_dispatch: # Cho phép kích hoạt thủ công từ GitHub Actions UI
 
 jobs:
   release:
@@ -62,6 +63,7 @@ jobs:
           cd Frontend
           npm ci
           npm run typecheck
+          npm test
 
       - name: Install and Smoke Test Watermark Runtime
         run: |
@@ -141,10 +143,11 @@ jobs:
           cd Frontend
           npm run build
           npx electron-builder --win nsis --x64 --publish never
-          if (-not (Get-ChildItem release\*.exe -ErrorAction SilentlyContinue)) {
-            throw 'Electron installer was not created'
+          $unpackedApp = (Get-ChildItem 'release\win-unpacked\*.exe' | Where-Object { $_.Name -notlike '*Uninstall*' } | Select-Object -First 1).FullName
+          if (-not $unpackedApp -or -not (Test-Path $unpackedApp)) {
+            throw 'Packaged Electron executable was not found in release\win-unpacked'
           }
-          $unpackedApp = (Resolve-Path 'release\win-unpacked\Google Search App.exe').Path
+          Write-Host "Found unpacked app executable: $unpackedApp"
           $runtimeDir = (Resolve-Path 'release\win-unpacked\resources\watermark-runtime').Path
           $env:ELECTRON_RUN_AS_NODE = '1'
           $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $runtimeDir 'node_modules\playwright-core\.local-browsers'

@@ -65,7 +65,7 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [updateError, setUpdateError] = useState('')
 
-  const CURRENT_APP_VERSION = 'v0.1.0'
+  const CURRENT_APP_VERSION = 'v1.0.1'
 
   useEffect(() => {
     fetch(`${API_URL}/api/settings/gemini`)

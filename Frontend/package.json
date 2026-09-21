@@ -1,6 +1,6 @@
 {
   "name": "creatorflow-ai",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "description": "CreatorFlow AI - AI Video Production & Multi-Channel Studio",
   "author": "ttienzy",
   "repository": {
@@ -90,6 +90,7 @@
       }
     ],
     "win": {
+      "icon": "resources/icon.ico",
       "target": [
         {
           "target": "nsis",

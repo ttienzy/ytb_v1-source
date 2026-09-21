@@ -8,7 +8,20 @@ $ErrorActionPreference = 'Stop'
 $resolvedAppRoot = (Resolve-Path -LiteralPath $AppRoot).Path
 $resourcesDir = Join-Path $resolvedAppRoot 'resources'
 $runtimeDir = Join-Path $resourcesDir 'watermark-runtime'
-$appExe = Join-Path $resolvedAppRoot 'Google Search App.exe'
+$appExeCandidates = @(
+    (Join-Path $resolvedAppRoot 'CreatorFlow AI.exe'),
+    (Join-Path $resolvedAppRoot 'Google Search App.exe')
+)
+$appExe = $appExeCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $appExe) {
+    $foundExe = Get-ChildItem -LiteralPath $resolvedAppRoot -Filter *.exe | Where-Object { $_.Name -notlike '*Uninstall*' } | Select-Object -First 1
+    if ($foundExe) {
+        $appExe = $foundExe.FullName
+    }
+}
+if (-not $appExe) {
+    $appExe = Join-Path $resolvedAppRoot 'CreatorFlow AI.exe'
+}
 $backendExe = Join-Path $resourcesDir 'bin\backend_server.exe'
 $gwrScript = Join-Path $runtimeDir 'node_modules\@pilio\gemini-watermark-remover\bin\gwr.mjs'
 $browserDir = Join-Path $runtimeDir 'node_modules\playwright-core\.local-browsers'

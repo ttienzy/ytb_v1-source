@@ -12,7 +12,7 @@ from app.watermark import service
 
 class WatermarkRuntimeTests(unittest.TestCase):
     def _runtime_files(self, root: Path, *, with_browser: bool = True) -> dict[str, str]:
-        node = root / "Google Search App.exe"
+        node = root / "CreatorFlow AI.exe"
         script = root / "node_modules" / "@pilio" / "gemini-watermark-remover" / "bin" / "gwr.mjs"
         browsers = root / "node_modules" / "playwright-core" / ".local-browsers"
         script.parent.mkdir(parents=True)

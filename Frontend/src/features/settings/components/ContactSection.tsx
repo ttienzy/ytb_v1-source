@@ -362,7 +362,7 @@ export function ContactSection() {
             >
               <ShieldCheck size={16} style={{ color: '#6366f1', flexShrink: 0 }} />
               <span>
-                <strong>CreatorFlow AI</strong> · v0.1.0 · AI Video Production &amp; Multi-Channel Studio
+                <strong>CreatorFlow AI</strong> · v1.0.1 · AI Video Production &amp; Multi-Channel Studio
               </span>
             </div>
           </div>
