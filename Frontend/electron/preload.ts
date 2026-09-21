@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('desktop', {
     }
   },
   getAppVersion: () => ipcRenderer.invoke('updater:get-app-version'),
+  getUpdaterStatus: () => ipcRenderer.invoke('updater:get-status'),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   startDownloadUpdate: () => ipcRenderer.invoke('updater:download'),
   quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),

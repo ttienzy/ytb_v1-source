@@ -42,6 +42,7 @@
   "build": {
     "appId": "com.creatorflow.app",
     "productName": "CreatorFlow AI",
+    "artifactName": "CreatorFlow-AI-Setup-${version}.${ext}",
     "publish": {
       "provider": "github",
       "owner": "ttienzy",

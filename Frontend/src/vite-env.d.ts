@@ -25,6 +25,7 @@ interface Window {
     check9routerStatus: () => Promise<{ running: boolean }>
     on9RouterUpdated: (callback: () => void) => () => void
     getAppVersion: () => Promise<string>
+    getUpdaterStatus: () => Promise<UpdaterStatusEvent>
     checkForUpdates: () => Promise<UpdaterStatusEvent>
     startDownloadUpdate: () => Promise<{ ok?: boolean; error?: string }>
     quitAndInstall: () => Promise<void>

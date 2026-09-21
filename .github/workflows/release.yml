@@ -159,6 +159,19 @@ jobs:
           cd Frontend
           npm run build
           npx electron-builder --win nsis --x64 --publish never
+          $updateManifest = Get-Content 'release\latest.yml' -Raw
+          $artifactMatch = [regex]::Match($updateManifest, '(?m)^\s*-\s+url:\s+(.+?)\s*$')
+          if (-not $artifactMatch.Success) {
+            throw 'Could not read the installer URL from release\latest.yml'
+          }
+          $expectedInstaller = $artifactMatch.Groups[1].Value.Trim().Trim('"', "'")
+          if (-not (Test-Path (Join-Path 'release' $expectedInstaller))) {
+            throw "Update manifest points to missing installer: $expectedInstaller"
+          }
+          if (-not (Test-Path (Join-Path 'release' "$expectedInstaller.blockmap"))) {
+            throw "Update manifest installer is missing its blockmap: $expectedInstaller.blockmap"
+          }
+          Write-Host "Verified update artifacts: $expectedInstaller"
           $unpackedApp = (Get-ChildItem 'release\win-unpacked\*.exe' | Where-Object { $_.Name -notlike '*Uninstall*' } | Select-Object -First 1).FullName
           if (-not $unpackedApp -or -not (Test-Path $unpackedApp)) {
             throw 'Packaged Electron executable was not found in release\win-unpacked'
@@ -178,9 +191,6 @@ jobs:
           if ($smokeProcess.ExitCode -ne 0) {
             throw "Packaged watermark runtime smoke test failed: $($smokeProcess.ExitCode)"
           }
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Smoke Test Packaged Backend Watermark Flow
         run: |
           .\.github\scripts\smoke-packaged-watermark.ps1 `
@@ -189,6 +199,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          repository: ttienzy/ytb_v1
+          token: ${{ secrets.RELEASES_TOKEN }}
           files: |
             Frontend/release/*.exe
             Frontend/release/latest.yml
@@ -196,5 +208,3 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

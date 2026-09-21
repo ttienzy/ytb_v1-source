@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
 import type { AppUpdater } from 'electron-updater'
 import { basename, delimiter, join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -43,6 +43,22 @@ let routerDashboardWindow: BrowserWindow | null = null
 let routerProcess: ChildProcess | null = null
 const backendProcesses: ChildProcess[] = []
 let voiceProcessStarted = false
+type UpdaterStatusPayload = {
+  status: 'checking' | 'available' | 'up_to_date' | 'downloading' | 'downloaded' | 'error' | 'idle'
+  version?: string
+  releaseDate?: string
+  releaseNotes?: string | null
+  percent?: number
+  bytesPerSecond?: number
+  transferred?: number
+  total?: number
+  message?: string
+  isDev?: boolean
+  currentVersion?: string
+}
+let latestUpdaterStatus: UpdaterStatusPayload = { status: 'idle' }
+let updateNotification: Notification | null = null
+let lastNotifiedUpdateVersion = ''
 
 const configuredBackendPort = Number.parseInt(process.env.BACKEND_PORT || process.env.PORT || '8000', 10)
 const backendPort = Number.isFinite(configuredBackendPort) && configuredBackendPort > 0 ? configuredBackendPort : 8000
@@ -249,6 +265,13 @@ function createWindow() {
     setTimeout(() => {
       if (mainWindow && !mainWindow.isDestroyed()) startPackagedVoiceService()
     }, 750)
+    // Check silently after startup. The status is cached for the Settings page,
+    // and an OS notification is shown when a newer release is available.
+    if (app.isPackaged) {
+      setTimeout(() => {
+        void checkForUpdatesNow()
+      }, 4_000)
+    }
   })
 
   // Mở các liên kết ngoài (Telegram, GitHub, Google Drive...) bằng trình duyệt mặc định
@@ -389,27 +412,31 @@ function setupAutoUpdater() {
   autoUpdater.autoInstallOnAppQuit = false
 
   autoUpdater.on('checking-for-update', () => {
-    mainWindow?.webContents.send('updater:status', { status: 'checking' })
+    publishUpdaterStatus({ status: 'checking', currentVersion: app.getVersion() })
   })
 
   autoUpdater.on('update-available', (info) => {
-    mainWindow?.webContents.send('updater:status', {
+    const payload: UpdaterStatusPayload = {
       status: 'available',
       version: info.version,
       releaseDate: info.releaseDate,
       releaseNotes: info.releaseNotes,
-    })
+      currentVersion: app.getVersion(),
+    }
+    publishUpdaterStatus(payload)
+    showUpdateNotification(info.version)
   })
 
   autoUpdater.on('update-not-available', (info) => {
-    mainWindow?.webContents.send('updater:status', {
+    publishUpdaterStatus({
       status: 'up_to_date',
       version: info.version,
+      currentVersion: app.getVersion(),
     })
   })
 
   autoUpdater.on('download-progress', (progress) => {
-    mainWindow?.webContents.send('updater:status', {
+    publishUpdaterStatus({
       status: 'downloading',
       percent: Math.round(progress.percent),
       bytesPerSecond: progress.bytesPerSecond,
@@ -419,7 +446,7 @@ function setupAutoUpdater() {
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    mainWindow?.webContents.send('updater:status', {
+    publishUpdaterStatus({
       status: 'downloaded',
       version: info.version,
       releaseNotes: info.releaseNotes,
@@ -428,29 +455,62 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     console.error('[AutoUpdater] Error:', err)
-    mainWindow?.webContents.send('updater:status', {
+    publishUpdaterStatus({
       status: 'error',
-      message: err?.message || 'Có lỗi xảy ra khi kiểm tra/tải bản cập nhật',
+      message: getFriendlyUpdaterError(err),
+      currentVersion: app.getVersion(),
     })
   })
+}
+
+function publishUpdaterStatus(payload: UpdaterStatusPayload) {
+  latestUpdaterStatus = payload
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updater:status', payload)
+  }
+}
+
+function showUpdateNotification(version: string) {
+  if (!Notification.isSupported() || lastNotifiedUpdateVersion === version) return
+  lastNotifiedUpdateVersion = version
+  updateNotification = new Notification({
+    title: 'CreatorFlow AI có bản cập nhật mới',
+    body: `Phiên bản ${version} đã sẵn sàng. Mở Cài đặt để tải và cài đặt.`,
+    icon: getAppIcon(),
+  })
+  updateNotification.on('click', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+  updateNotification.on('close', () => {
+    updateNotification = null
+  })
+  updateNotification.show()
+}
+
+function getFriendlyUpdaterError(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : String(error || '')
+  if (/404|not found|latest\.yml/i.test(rawMessage)) {
+    return 'Không thể truy cập nguồn cập nhật (HTTP 404). Kho phát hành có thể đang để riêng tư hoặc thiếu tệp latest.yml.'
+  }
+  return rawMessage || 'Có lỗi xảy ra khi kiểm tra hoặc tải bản cập nhật.'
 }
 
 ipcMain.handle('updater:get-app-version', () => {
   return app.getVersion()
 })
 
-ipcMain.handle('updater:check', async () => {
+ipcMain.handle('updater:get-status', () => latestUpdaterStatus)
+
+async function checkForUpdatesNow(): Promise<UpdaterStatusPayload> {
   if (!app.isPackaged) {
     try {
       const res = await fetch('https://api.github.com/repos/ttienzy/ytb_v1/releases/latest', {
         headers: { 'User-Agent': 'CreatorFlow-App' },
       })
       if (!res.ok) {
-        if (res.status === 404) {
-          const payload = { status: 'up_to_date', currentVersion: app.getVersion() }
-          mainWindow?.webContents.send('updater:status', payload)
-          return payload
-        }
         throw new Error(`HTTP ${res.status}`)
       }
       const data = (await res.json()) as { tag_name?: string; name?: string; body?: string; published_at?: string }
@@ -465,31 +525,57 @@ ipcMain.handle('updater:check', async () => {
           releaseDate: data.published_at,
           releaseNotes: data.body,
         }
-        mainWindow?.webContents.send('updater:status', payload)
+        publishUpdaterStatus(payload)
         return payload
       }
-      const payload = { status: 'up_to_date', currentVersion: app.getVersion() }
-      mainWindow?.webContents.send('updater:status', payload)
+      const payload: UpdaterStatusPayload = { status: 'up_to_date', currentVersion: app.getVersion() }
+      publishUpdaterStatus(payload)
       return payload
-    } catch (err: any) {
-      const payload = { status: 'error', message: err?.message || 'Không thể kiểm tra cập nhật' }
-      mainWindow?.webContents.send('updater:status', payload)
+    } catch (err: unknown) {
+      const payload: UpdaterStatusPayload = {
+        status: 'error',
+        message: getFriendlyUpdaterError(err),
+        currentVersion: app.getVersion(),
+      }
+      publishUpdaterStatus(payload)
       return payload
     }
   }
 
   try {
     const result = await autoUpdater.checkForUpdates()
-    return {
-      status: result?.updateInfo?.version ? 'checked' : 'idle',
-      updateInfo: result?.updateInfo,
+    if (!result) {
+      const payload: UpdaterStatusPayload = {
+        status: 'error',
+        message: 'Máy chủ cập nhật không trả về thông tin phiên bản.',
+        currentVersion: app.getVersion(),
+      }
+      publishUpdaterStatus(payload)
+      return payload
+    }
+    const payload: UpdaterStatusPayload = {
+      status: result.isUpdateAvailable ? 'available' : 'up_to_date',
+      version: result.updateInfo.version,
+      releaseDate: result.updateInfo.releaseDate,
+      releaseNotes: result.updateInfo.releaseNotes,
       currentVersion: app.getVersion(),
     }
-  } catch (err: any) {
+    publishUpdaterStatus(payload)
+    if (result.isUpdateAvailable) showUpdateNotification(result.updateInfo.version)
+    return payload
+  } catch (err: unknown) {
     console.error('[AutoUpdater] Check error:', err)
-    return { status: 'error', message: err?.message || 'Không thể kiểm tra cập nhật' }
+    const payload: UpdaterStatusPayload = {
+      status: 'error',
+      message: getFriendlyUpdaterError(err),
+      currentVersion: app.getVersion(),
+    }
+    publishUpdaterStatus(payload)
+    return payload
   }
-})
+}
+
+ipcMain.handle('updater:check', checkForUpdatesNow)
 
 ipcMain.handle('updater:download', async () => {
   if (!app.isPackaged) {

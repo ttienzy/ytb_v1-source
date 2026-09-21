@@ -17,6 +17,7 @@ import {
   Tv,
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
+import type { UpdaterStatusEvent } from '../../../vite-env'
 import type { GeminiState, YtState } from '../types'
 
 export function ChromeBrandIcon({ size = 15 }: { size?: number }) {
@@ -116,41 +117,45 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       }).catch(() => {})
     }
 
+    const handleUpdaterStatus = (data: UpdaterStatusEvent) => {
+      if (data.status === 'checking') {
+        setUpdateChecking(true)
+        setUpdateError('')
+      } else if (data.status === 'available') {
+        setUpdateChecking(false)
+        setUpdateStatus('available')
+        setUpdateInfo({
+          version: data.version,
+          published_at: data.releaseDate,
+          releaseNotes: data.releaseNotes,
+          isDev: data.isDev,
+        })
+      } else if (data.status === 'up_to_date') {
+        setUpdateChecking(false)
+        setUpdateStatus('up_to_date')
+        setUpdateInfo(null)
+      } else if (data.status === 'downloading') {
+        setUpdateChecking(false)
+        setUpdateStatus('downloading')
+        setDownloadProgress({
+          percent: data.percent ?? 0,
+          bytesPerSecond: data.bytesPerSecond ?? 0,
+          transferred: data.transferred ?? 0,
+          total: data.total ?? 0,
+        })
+      } else if (data.status === 'downloaded') {
+        setUpdateChecking(false)
+        setUpdateStatus('downloaded')
+      } else if (data.status === 'error') {
+        setUpdateChecking(false)
+        setUpdateError(data.message || 'Lỗi cập nhật')
+      }
+    }
+
+    window.desktop?.getUpdaterStatus?.().then(handleUpdaterStatus).catch(() => {})
+
     if (window.desktop?.onUpdaterStatus) {
-      const unsub = window.desktop.onUpdaterStatus((data) => {
-        if (data.status === 'checking') {
-          setUpdateChecking(true)
-          setUpdateError('')
-        } else if (data.status === 'available') {
-          setUpdateChecking(false)
-          setUpdateStatus('available')
-          setUpdateInfo({
-            version: data.version,
-            published_at: data.releaseDate,
-            releaseNotes: data.releaseNotes,
-            isDev: data.isDev,
-          })
-        } else if (data.status === 'up_to_date') {
-          setUpdateChecking(false)
-          setUpdateStatus('up_to_date')
-          setUpdateInfo(null)
-        } else if (data.status === 'downloading') {
-          setUpdateChecking(false)
-          setUpdateStatus('downloading')
-          setDownloadProgress({
-            percent: data.percent ?? 0,
-            bytesPerSecond: data.bytesPerSecond ?? 0,
-            transferred: data.transferred ?? 0,
-            total: data.total ?? 0,
-          })
-        } else if (data.status === 'downloaded') {
-          setUpdateChecking(false)
-          setUpdateStatus('downloaded')
-        } else if (data.status === 'error') {
-          setUpdateChecking(false)
-          setUpdateError(data.message || 'Lỗi cập nhật')
-        }
-      })
+      const unsub = window.desktop.onUpdaterStatus(handleUpdaterStatus)
       return unsub
     }
   }, [])
@@ -315,10 +320,6 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
     try {
       const res = await fetch('https://api.github.com/repos/ttienzy/ytb_v1/releases/latest')
       if (!res.ok) {
-        if (res.status === 404) {
-          setUpdateStatus('up_to_date')
-          return
-        }
         throw new Error(`HTTP ${res.status}`)
       }
       const data = await res.json()
