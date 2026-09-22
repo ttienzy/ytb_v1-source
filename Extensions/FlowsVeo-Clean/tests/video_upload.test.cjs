@@ -1,14 +1,9 @@
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 
-const source = readFileSync(join(__dirname, '..', 'background.js'), 'utf8');
-const start = source.indexOf('async function runVideoUploadInPage(');
-const end = source.indexOf('async function uploadVideoToFlow(', start);
-assert.ok(start > 0 && end > start);
-const uploadSource = source.slice(start, end);
+const { pageSource } = require('./helpers/modules.cjs');
+const uploadSource = pageSource('src/providers/google-flow/page/upload.js', 'runVideoUploadInPage');
 
 function harness() {
   const calls = [];

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlowsVeo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f4f5;
+      --surface: #ffffff;
+      --surface-soft: #fafafa;
+      --line: #e4e4e7;
+      --line-strong: #d4d4d8;
+      --text: #18181b;
+      --muted: #71717a;
+      --quiet: #a1a1aa;
+      --accent: #334155;
+      --accent-hover: #1e293b;
+      --ok: #3f8f68;
+      --warn: #b88332;
+      --err: #b75a62;
+      --radius: 12px;
+      --shadow: 0 1px 2px rgba(24, 24, 27, .04), 0 8px 24px rgba(24, 24, 27, .04);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 360px;
+      min-height: 180px;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.4 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input { font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+    svg { display: block; }
+    :focus-visible { outline: 2px solid #64748b; outline-offset: 2px; }
+    .app { padding-bottom: 10px; }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 14px 16px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      color: var(--accent);
+      background: var(--surface-soft);
+    }
+
+    .brand-mark svg { width: 19px; height: 19px; }
+    .brand { min-width: 0; flex: 1; }
+    .brand-name { font-size: 14px; line-height: 1.2; font-weight: 680; letter-spacing: -.15px; }
+    .brand-sub { margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+
+    .overall-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      min-height: 26px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--surface-soft);
+      font-size: 10.5px;
+      font-weight: 600;
+    }
+
+    .overall-status.ok { color: #356f53; border-color: #d9e8df; background: #f4f9f6; }
+    .overall-status.warn { color: #8b6428; border-color: #eadfcf; background: #fbf8f2; }
+    .overall-status.err { color: #91464d; border-color: #ead9dc; background: #fcf6f7; }
+
+    .overall-dot, .dot {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--quiet);
+    }
+
+    .overall-status.ok .overall-dot, .dot.ok { background: var(--ok); }
+    .overall-status.warn .overall-dot, .dot.warn { background: var(--warn); }
+    .overall-status.err .overall-dot, .dot.err { background: var(--err); }
+    .content { display: grid; gap: 8px; padding: 10px 14px 4px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px 0; }
+    .stat { position: relative; min-width: 0; padding: 8px 10px; }
+    .stat + .stat::before {
+      content: "";
+      position: absolute;
+      top: 9px;
+      bottom: 9px;
+      left: 0;
+      width: 1px;
+      background: var(--line);
+    }
+
+    .stat-value {
+      overflow: hidden;
+      color: var(--text);
+      font-size: 17px;
+      line-height: 1.2;
+      font-weight: 680;
+      letter-spacing: -.25px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stat-label { margin-top: 3px; color: var(--quiet); font-size: 9px; font-weight: 650; letter-spacing: .65px; text-transform: uppercase; }
+    .card-head { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+    .card-title { display: inline-flex; align-items: center; gap: 8px; color: #3f3f46; font-size: 11px; font-weight: 650; letter-spacing: .15px; }
+    .card-title svg { width: 15px; height: 15px; color: var(--muted); }
+
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+
+    .icon-btn:hover { color: var(--text); border-color: var(--line); background: var(--surface-soft); }
+    .icon-btn:disabled { opacity: .45; cursor: default; }
+    .icon-btn svg { width: 15px; height: 15px; }
+    .status-list { padding: 5px 12px 7px; }
+    .status-row { min-height: 31px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .status-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 11.5px; }
+    .status-name svg { width: 14px; height: 14px; color: var(--quiet); }
+    .status-value { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 11px; font-weight: 570; }
+    .status-value > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+
+    .core-status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 8px 12px; }
+    .core-status .status-row { min-width: 0; min-height: 42px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 0 8px; }
+    .core-status .status-row:first-child { padding-left: 0; }
+    .core-status .status-row:last-child { padding-right: 0; }
+    .core-status .status-row + .status-row { border-left: 1px solid var(--line); }
+    .core-status .status-name { gap: 5px; font-size: 9.5px; }
+    .core-status .status-name svg { width: 12px; height: 12px; }
+    .core-status .status-value { max-width: 100%; gap: 5px; font-size: 10px; }
+    .core-status .status-value > span:last-child { max-width: 78px; }
+
+    #accountsList { min-height: 52px; padding: 5px 12px; }
+    .acc-row { display: flex; align-items: center; gap: 9px; min-height: 42px; border-top: 1px solid var(--line); }
+    .acc-row:first-child { border-top: 0; }
+    .acc-avatar { width: 26px; height: 26px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--surface-soft); font-size: 10px; font-weight: 700; }
+    .acc-info { min-width: 0; flex: 1; }
+    .acc-email { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .acc-sub { margin-top: 1px; color: var(--quiet); font-size: 9.5px; }
+    .acc-meta { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+    .acc-tier, .acc-private { padding: 2px 5px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--surface-soft); font-size: 8.5px; font-weight: 700; letter-spacing: .25px; }
+    .acc-tier.ULTRA { color: #3f3f46; border-color: #c4c4c8; background: #f0f0f1; }
+    .acc-tier.PRO { color: #52525b; background: #f4f4f5; }
+    .acc-credit { color: var(--muted); font-size: 10px; font-weight: 620; }
+    .acc-empty { min-height: 50px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--quiet); font-size: 10.5px; }
+    .acc-empty svg { width: 14px; height: 14px; }
+
+    .setting-list { padding: 3px 12px; }
+    .setting-row { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); }
+    .setting-row:first-child { border-top: 0; }
+    .setting-label { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .setting-label > svg { width: 15px; height: 15px; color: var(--quiet); }
+    .setting-copy { min-width: 0; }
+    .setting-name { color: #3f3f46; font-size: 11.5px; font-weight: 580; }
+    .setting-hint { margin-top: 1px; color: var(--quiet); font-size: 9.5px; }
+    .setting-control { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+
+    .toggle { position: relative; width: 32px; height: 18px; cursor: pointer; }
+    .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+    .slider { position: absolute; inset: 0; border-radius: 999px; background: #d4d4d8; transition: background .18s; }
+    .slider::before { content: ""; position: absolute; left: 3px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: white; box-shadow: 0 1px 2px rgba(0, 0, 0, .18); transition: transform .18s; }
+    .toggle input:checked + .slider { background: var(--accent); }
+    .toggle input:checked + .slider::before { transform: translateX(14px); }
+    .toggle input:focus-visible + .slider { outline: 2px solid #64748b; outline-offset: 2px; }
+
+    .input-wrap { height: 29px; display: flex; align-items: center; gap: 3px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+    .input-wrap:focus-within { border-color: #94a3b8; background: white; }
+    .num-input { width: 34px; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 11px; text-align: right; appearance: textfield; }
+    .num-input::-webkit-outer-spin-button, .num-input::-webkit-inner-spin-button { margin: 0; appearance: none; }
+    #bridgePort { width: 52px; text-align: left; }
+    .unit { color: var(--quiet); font-size: 9.5px; }
+
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btn { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 10px; color: #3f3f46; background: var(--surface); font-size: 11px; font-weight: 620; cursor: pointer; box-shadow: 0 1px 2px rgba(24, 24, 27, .03); transition: background .15s, border-color .15s, color .15s, transform .1s; }
+    .btn:hover { color: var(--text); border-color: #a1a1aa; background: var(--surface-soft); }
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled { opacity: .5; cursor: default; transform: none; }
+    .btn svg { width: 14px; height: 14px; }
+    .btn.primary { color: white; border-color: var(--accent); background: var(--accent); box-shadow: none; }
+    .btn.primary:hover { color: white; border-color: var(--accent-hover); background: var(--accent-hover); }
+    .btn.full { grid-column: 1 / -1; }
+    .btn.compact { min-height: 29px; padding: 0 9px; border-radius: 8px; font-size: 10px; }
+    .btn.ghost { border-color: transparent; box-shadow: none; background: transparent; }
+
+    .advanced-card { overflow: hidden; }
+    .advanced-card > summary { min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 620; list-style: none; user-select: none; }
+    .advanced-card > summary::-webkit-details-marker { display: none; }
+    .advanced-card > summary .summary-icon { width: 15px; height: 15px; color: var(--quiet); }
+    .advanced-card > summary .chevron { width: 14px; height: 14px; margin-left: auto; transition: transform .18s; }
+    .advanced-card[open] > summary .chevron { transform: rotate(180deg); }
+    .advanced-body { border-top: 1px solid var(--line); }
+    .advanced-block { padding: 7px 12px; border-top: 1px solid var(--line); }
+    .advanced-block:first-child { border-top: 0; }
+    .advanced-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .advanced-tools .btn { min-width: 0; padding: 0 5px; font-size: 9.5px; }
+    .bridge-row { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .bridge-label { color: var(--muted); font-size: 10.5px; }
+
+    .log-toggle { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 10.5px; font-weight: 600; cursor: pointer; }
+    .log-toggle svg { width: 14px; height: 14px; }
+    .log-toggle .log-chevron { margin-left: auto; transition: transform .18s; }
+    .log-toggle.expanded .log-chevron { transform: rotate(180deg); }
+    .log-section { display: none; padding-bottom: 5px; }
+    .log-header { display: flex; align-items: center; justify-content: flex-end; padding: 0 0 5px; }
+    #logContainer { max-height: 128px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+    .log-entry { padding: 4px 7px; border-bottom: 1px solid var(--line); color: var(--muted); font: 9px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-word; }
+    .log-entry:last-child { border-bottom: 0; }
+    .log-entry .time { margin-right: 5px; color: var(--quiet); }
+    .log-entry.success .msg { color: #397255; }
+    .log-entry.warn .msg { color: #8b6428; }
+    .log-entry.error .msg { color: #91464d; }
+    .log-empty { padding: 12px; color: var(--quiet); font-size: 9.5px; text-align: center; }
+    .footer { padding: 8px 14px 0; color: var(--quiet); font-size: 9px; text-align: center; }
+
+    .spinner { width: 13px; height: 13px; display: inline-block; border: 1.5px solid #d4d4d8; border-top-color: var(--accent); border-radius: 50%; animation: spin .65s linear infinite; }
+    .primary .spinner { border-color: rgba(255, 255, 255, .35); border-top-color: white; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+    ::-webkit-scrollbar { width: 7px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #c9c9cf; background-clip: padding-box; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.5" y="4" width="7" height="6" rx="1.5"></rect><rect x="13.5" y="14" width="7" height="6" rx="1.5"></rect><path d="M10.5 7h3a3 3 0 0 1 3 3v4"></path><path d="m14.5 12 2 2 2-2"></path>
+        </svg>
+      </div>
+      <div class="brand"><div class="brand-name">FlowsVeo</div><div class="brand-sub">Flow session bridge</div></div>
+      <div class="overall-status" id="overallStatus" aria-live="polite"><span class="overall-dot"></span><span id="overallStatusText">Checking</span></div>
+    </header>
+
+    <div class="content">
+      <section class="card stats" aria-label="Usage summary">
+        <div class="stat"><div class="stat-value" id="tokenCount">–</div><div class="stat-label">Tokens</div></div>
+        <div class="stat"><div class="stat-value" id="sessionCount">–</div><div class="stat-label">Sessions</div></div>
+        <div class="stat"><div class="stat-value" id="lastTime">–</div><div class="stat-label">Last sync</div></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h4l2-7 4 12 2-5h4"></path></svg>
+            Connection
+          </div>
+          <button class="icon-btn" id="btnCheck" type="button" title="Check status" aria-label="Check status">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"></path><path d="M19 11a7 7 0 1 0 1 4"></path></svg>
+          </button>
+        </div>
+        <div class="status-list core-status">
+          <div class="status-row"><span class="status-name"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12h8"></path><path d="M10 9 7 12l3 3"></path><path d="m14 9 3 3-3 3"></path><rect x="3" y="4" width="18" height="16" rx="3"></rect></svg>Bridge</span><span class="status-value"><span class="dot" id="dotBridge"></span><span id="valBridge">–</span></span></div>
+          <div class="status-row"><span class="status-name"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18"></path><path d="M8 6.5h.01"></path></svg>Flow tab</span><span class="status-value"><span class="dot" id="dotTab"></span><span id="valTab">–</span></span></div>
+          <div class="status-row"><span class="status-name"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20a7 7 0 0 1 14 0"></path></svg>Google</span><span class="status-value"><span class="dot" id="dotLogin"></span><span id="valLogin">–</span></span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M17 8h4"></path><path d="M19 6v4"></path></svg>Accounts</div></div>
+        <div id="accountsList"><div class="acc-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3"></circle><path d="M5.5 20a6.5 6.5 0 0 1 13 0"></path></svg>No account connected</div></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"></path><path d="M12 18v3"></path><path d="m4.2 4.2 2.1 2.1"></path><path d="m17.7 17.7 2.1 2.1"></path><path d="M3 12h3"></path><path d="M18 12h3"></path><circle cx="12" cy="12" r="3"></circle></svg>Automation</div></div>
+        <div class="setting-list">
+          <div class="setting-row">
+            <div class="setting-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"></path><path d="M19 11a7 7 0 1 0 1 4"></path></svg><div class="setting-copy"><div class="setting-name">Auto reload</div><div class="setting-hint">Refresh Flow session</div></div></div>
+            <div class="setting-control"><div class="input-wrap"><input type="number" class="num-input" id="reloadTime" value="5" min="1" max="60" step="1" aria-label="Reload interval"><span class="unit">min</span></div><label class="toggle" title="Auto reload"><input type="checkbox" id="toggleAutoReload" checked><span class="slider"></span></label></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 3h6"></path><path d="m6 7 1 13h10l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg><div class="setting-copy"><div class="setting-name">Auto cache clear</div><div class="setting-hint">Keep the session light</div></div></div>
+            <div class="setting-control"><div class="input-wrap"><input type="number" class="num-input" id="clearCacheSeconds" value="300" min="1" max="3600" step="1" aria-label="Cache interval"><span class="unit">sec</span></div><label class="toggle" title="Auto clear cache"><input type="checkbox" id="toggleAutoClearCache"><span class="slider"></span></label></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button class="btn" id="btnRefresh" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"></path><path d="M19 11a7 7 0 1 0 1 4"></path></svg>Refresh</button>
+        <button class="btn" id="btnOpen" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 5h5v5"></path><path d="m10 14 9-9"></path><path d="M19 13v6H5V5h6"></path></svg>Open Flow</button>
+        <button class="btn primary full" id="btnReloadNow" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9"></path><path d="M20 4v5h-5"></path><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15"></path><path d="M4 20v-5h5"></path></svg>Sync session</button>
+      </div>
+
+      <details class="card advanced-card">
+        <summary>
+          <svg class="summary-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg>
+          Advanced
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 9 5 5 5-5"></path></svg>
+        </summary>
+        <div class="advanced-body">
+          <div class="advanced-block status-list">
+            <div class="status-row"><span class="status-name">reCAPTCHA</span><span class="status-value"><span class="dot" id="dotCaptcha"></span><span id="valCaptcha">–</span></span></div>
+            <div class="status-row"><span class="status-name">OAuth token</span><span class="status-value"><span class="dot" id="dotToken"></span><span id="valToken">–</span></span></div>
+          </div>
+          <div class="advanced-block">
+            <div class="advanced-tools">
+              <button class="btn compact" id="btnClearCacheNow" type="button" title="Clear Labs cache"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 3h6"></path><path d="m6 7 1 13h10l1-13"></path></svg>Cache</button>
+              <button class="btn compact" id="btnCookieVoice" type="button" title="Copy Google Voice cookies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="3"></circle><path d="m10.5 13.5 8-8"></path><path d="m16 8 2 2"></path><path d="m14 10 2 2"></path></svg>Cookie</button>
+              <button class="btn compact" id="btnTestCaptcha" type="button" title="Test reCAPTCHA"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 11 2 2 4-4"></path><circle cx="12" cy="12" r="9"></circle></svg>Test</button>
+            </div>
+          </div>
+          <div class="advanced-block">
+            <div class="bridge-row"><span class="bridge-label">Bridge port</span><div class="setting-control"><div class="input-wrap"><input type="number" class="num-input" id="bridgePort" value="60526" min="1" max="65535" aria-label="Bridge port"></div><button class="btn compact" id="btnSetPort" type="button">Apply</button></div></div>
+          </div>
+          <div class="advanced-block">
+            <button class="log-toggle" id="logToggle" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6h14"></path><path d="M5 12h14"></path><path d="M5 18h9"></path></svg><span id="logToggleLabel">Activity log</span><svg class="log-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 9 5 5 5-5"></path></svg></button>
+            <div class="log-section" id="logSection"><div class="log-header"><button class="btn compact ghost" id="btnClearLog" type="button">Clear log</button></div><div id="logContainer"><div class="log-empty">No activity yet</div></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <footer class="footer">FlowsVeo · v<span id="extVersionDisplay">1.0.0</span></footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "flowsveo-clean",
+  "version": "1.0.10",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Google Flow browser adapter with a backwards-compatible localhost bridge",
+  "scripts": {
+    "snapshot": "node scripts/snapshot.mjs",
+    "build": "node scripts/build.mjs",
+    "build:release": "node scripts/build.mjs --release",
+    "test": "node --test tests/*.test.cjs tests/contract/*.test.cjs tests/integration/*.test.cjs",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:minify": "node scripts/test-minified.mjs",
+    "test:standalone": "node scripts/standalone-check.mjs",
+    "package": "node scripts/package.mjs",
+    "verify": "node scripts/verify.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "acorn": "8.15.0",
+    "esbuild": "0.25.12",
+    "eslint-scope": "8.4.0",
+    "fflate": "0.8.2",
+    "playwright": "1.63.0"
+  }
+}

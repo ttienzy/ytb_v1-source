@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "FlowsVeo Clean",
+  "description": "Cookie & Auth Token Service for Google AI Sandbox (labs.google)",
+  "version": "1.0.10",
+  "permissions": [
+    "alarms",
+    "browsingData",
+    "cookies",
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://labs.google/*",
+    "https://flow.google.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "*://*.google.com/*",
+    "*://*.googleapis.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://labs.google/*",
+        "https://flow.google.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "incognito": "spanning",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/48.png",
+        "popup.html"
+      ],
+      "matches": [
+        "https://labs.google/*",
+        "https://flow.google.com/*"
+      ]
+    }
+  ]
+}

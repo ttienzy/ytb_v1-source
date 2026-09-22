@@ -1,12 +1,8 @@
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 
-const source = readFileSync(join(__dirname, '..', 'background.js'), 'utf8');
-const boundary = source.indexOf('async function harvestSingleTab(');
-assert.ok(boundary > 0);
+const { loadModules } = require('./helpers/modules.cjs');
 
 function pageHarness({ path = '/u/1/project/test-project', ready = true,
   scripts = ['https://www.google.com/recaptcha/enterprise.js?render=test-site-key'],
@@ -26,7 +22,7 @@ function pageHarness({ path = '/u/1/project/test-project', ready = true,
       scripting: { executeScript: async ({ func, args }) => [{ result: await func(...args) }] },
     },
   });
-  vm.runInContext(source.slice(0, boundary), context);
+  loadModules(["src/bridge/config.js","src/config/defaults.js","src/background/runtime/state.js","src/providers/google-flow/captcha.js","src/providers/google-flow/page/captcha.js","src/providers/google-flow/tabs.js"], context);
   return { window, api, calls, run: (code) => vm.runInContext(code, context),
     inspect: (wait = 0) => vm.runInContext(`inspectRecaptchaInPage(DEFAULT_HARVEST_CFG.c, ${wait})`, context) };
 }
