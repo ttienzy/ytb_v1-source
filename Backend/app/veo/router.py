@@ -540,7 +540,18 @@ def upload_video_reference(req: VideoUploadRequest):
         raise HTTPException(status_code=400, detail=result.get("error") or "Upload video thất bại.")
 
     media_id = result["media_id"]
-    # 3. Đăng ký media_id mới vào Registry kèm thời lượng
+    # Lưu bản sao video tham chiếu vào veo_references để đối chiếu sau này
+    local_ref_name = f"{video_hash}.mp4"
+    try:
+        ref_dir = _BASE_DIR / "Data" / "media" / "veo_references"
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        ref_file = ref_dir / local_ref_name
+        if not ref_file.exists():
+            ref_file.write_bytes(raw_bytes if 'raw_bytes' in locals() else clean_bytes)
+    except Exception as save_err:
+        logger.warning("[UploadVideo] Không thể lưu file veo_references: %s", save_err)
+
+    # 3. Đăng ký media_id mới vào Registry kèm thời lượng và local_filename
     media_registry.register_media(
         project_id=req.project_id,
         file_hash=video_hash,
@@ -549,6 +560,7 @@ def upload_video_reference(req: VideoUploadRequest):
         mime_type=req.video_mime,
         kind="video",
         duration=video_duration or 0.0,
+        local_filename=local_ref_name,
     )
 
     return {
@@ -559,3 +571,12 @@ def upload_video_reference(req: VideoUploadRequest):
         "duration": video_duration,
         "cached": False,
     }
+
+@router.get("/references/{filename}")
+def get_reference_video(filename: str):
+    """Serve video tham chiếu lưu trong Data/media/veo_references hỗ trợ Range request."""
+    ref_dir = _BASE_DIR / "Data" / "media" / "veo_references"
+    target = (ref_dir / filename).resolve()
+    if not str(target).startswith(str(ref_dir.resolve())) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Video tham chiếu không tồn tại")
+    return FileResponse(target, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})

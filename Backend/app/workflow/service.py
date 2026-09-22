@@ -1975,6 +1975,8 @@ def list_exported_videos() -> list[dict]:
             "resolution": meta.get("resolution") or "1080p",
             "title": meta.get("title") or f"Video Hoàn Chỉnh #{meta.get('id', fname)[:8]}",
             "source_type": "export",
+            "is_motion_control": False,
+            "input_mode": "",
             "prompt": meta.get("prompt"),
             "model_display_name": "FFmpeg Concat (1080p)",
         }
@@ -2008,9 +2010,36 @@ def list_exported_videos() -> list[dict]:
             h = veo_meta.get("height")
             res_str = f"{w}x{h}" if w and h else "720p"
 
+            input_mode = str(veo_meta.get("input_mode") or "").strip().lower()
+            provider_model_id = str(veo_meta.get("provider_model_id") or "").strip().lower()
+            is_motion = (
+                input_mode == "video_edit"
+                or provider_model_id == "abra_edit"
+                or any(k in prompt_text.lower() for k in ("motion reference", "motion-reference", "choreography", "motion video"))
+            )
+
             display_title = prompt_text[:70].strip() if prompt_text else f"Clip Veo AI ({f.stem[:8]})"
             if len(prompt_text) > 70:
                 display_title += "..."
+
+            # Tra cứu video tham chiếu cho Motion Control
+            ref_vid_id = veo_meta.get("reference_video_id")
+            ref_start = float(veo_meta.get("reference_video_start_seconds") or 0.0)
+            ref_end = float(veo_meta.get("reference_video_end_seconds") or 0.0)
+            ref_url = veo_meta.get("reference_video_url")
+            if not ref_url:
+                # Kiểm tra file tham chiếu trực tiếp {stem}_ref.mp4
+                ref_direct = DATA_DIR / "media" / "veo_references" / f"{f.stem}_ref.mp4"
+                if ref_direct.exists():
+                    ref_url = f"/api/veo/references/{ref_direct.name}"
+                elif ref_vid_id:
+                    try:
+                        from app.veo import media_registry
+                        minfo = media_registry.get_media_info_by_id(ref_vid_id)
+                        if minfo and minfo.get("local_filename"):
+                            ref_url = f"/api/veo/references/{minfo['local_filename']}"
+                    except Exception:
+                        pass
 
             item = {
                 "id": f.stem,
@@ -2025,8 +2054,13 @@ def list_exported_videos() -> list[dict]:
                 "resolution": res_str,
                 "title": display_title,
                 "source_type": "veo_scene",
+                "is_motion_control": is_motion,
+                "input_mode": input_mode,
                 "prompt": prompt_text,
                 "model_display_name": model_name,
+                "reference_video_url": ref_url,
+                "reference_trim_start": ref_start,
+                "reference_trim_end": ref_end,
             }
             result.append(item)
 

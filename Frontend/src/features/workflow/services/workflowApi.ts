@@ -495,6 +495,17 @@ export async function fetchExportedVideos(): Promise<ExportedVideoItem[]> {
       sourceType: item.source_type || 'export',
       prompt: item.prompt || '',
       modelDisplayName: item.model_display_name || '',
+      isMotionControl: Boolean(
+        item.is_motion_control ||
+        item.input_mode === 'video_edit' ||
+        (item.prompt && /motion reference|motion-reference|choreography|motion video/i.test(item.prompt))
+      ),
+      inputMode: item.input_mode || '',
+      referenceVideoUrl: item.reference_video_url
+        ? (item.reference_video_url.startsWith('http') ? item.reference_video_url : `${API_URL}${item.reference_video_url}`)
+        : undefined,
+      referenceTrimStart: item.reference_trim_start,
+      referenceTrimEnd: item.reference_trim_end,
     }))
   } catch (err) {
     console.warn('Lỗi khi lấy danh sách video đã xuất:', err)
@@ -750,4 +761,35 @@ export async function fetchMotionPresets(): Promise<MotionPresetItem[]> {
   }
   const data = await res.json()
   return data.presets || []
+}
+
+/**
+ * Gắn video gốc tham chiếu cho một video export / clip Veo trong thư viện
+ */
+export async function attachReferenceVideoToExport(
+  filename: string,
+  file: File,
+): Promise<{ ok: boolean; reference_video_url?: string }> {
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch(`${API_URL}/api/workflow/exports/${encodeURIComponent(filename)}/reference`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Upload video tham chiếu thất bại')
+    }
+    const data = await res.json()
+    return {
+      ok: true,
+      reference_video_url: data.reference_video_url?.startsWith('http')
+        ? data.reference_video_url
+        : `${API_URL}${data.reference_video_url}`,
+    }
+  } catch (err) {
+    console.error('Lỗi khi gắn video tham chiếu:', err)
+    return { ok: false }
+  }
 }

@@ -753,3 +753,46 @@ async def get_voiceover_audio(job_id: str, filename: str):
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="Không tìm thấy file audio.")
     return FileResponse(p, media_type="audio/wav")
+
+@router.post("/exports/{filename}/reference")
+async def attach_reference_video(filename: str, file: UploadFile = File(...)):
+    """Gắn hoặc cập nhật video gốc tham chiếu cho clip Veo / Motion Control."""
+    base_name = Path(filename).name
+    veo_p = VEO_DATA_DIR / base_name
+    if not veo_p.exists():
+        # Kiểm tra trong WORKFLOW_EXPORTS_DIR
+        veo_p = WORKFLOW_EXPORTS_DIR / base_name
+        if not veo_p.exists():
+            raise HTTPException(status_code=404, detail="Không tìm thấy video")
+
+    ref_dir = DATA_DIR / "media" / "veo_references"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    ref_filename = f"{veo_p.stem}_ref.mp4"
+    target_ref = ref_dir / ref_filename
+    
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="File video rỗng")
+    target_ref.write_bytes(file_bytes)
+
+    ref_url = f"/api/veo/references/{ref_filename}"
+
+    # Cập nhật metadata .json
+    meta_p = veo_p.with_suffix(".json")
+    meta = {}
+    if meta_p.exists():
+        try:
+            meta = json.loads(meta_p.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    meta["reference_video_url"] = ref_url
+    try:
+        meta_p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning("Không thể cập nhật sidecar json: %s", e)
+
+    return {
+        "ok": True,
+        "filename": filename,
+        "reference_video_url": ref_url
+    }

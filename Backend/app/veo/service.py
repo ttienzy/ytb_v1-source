@@ -1220,6 +1220,9 @@ def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any]) -> Pa
         "width": media_width,
         "height": media_height,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "reference_video_id": job.get("reference_video_id"),
+        "reference_video_start_seconds": job.get("reference_video_start_seconds", 0),
+        "reference_video_end_seconds": job.get("reference_video_end_seconds"),
     }
     output_path.with_suffix(".json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"

@@ -25,6 +25,9 @@ import {
   Video,
   Mic,
   Music,
+  Columns2,
+  Pause,
+  Upload,
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 import type { ExportedVideoItem } from '../contracts'
@@ -36,6 +39,7 @@ import {
   callGenerateVoiceover,
   getExportCleanStatus,
   triggerExportClean,
+  attachReferenceVideoToExport,
 } from '../services/workflowApi'
 import * as veoApi from '../../veo-studio/services/veoApi'
 import { getWorkflowConfig } from '../services/workflowConfig'
@@ -58,9 +62,40 @@ export function VideoLibraryModal({
   const [copied, setCopied] = useState(false)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [filterType, setFilterType] = useState<'all' | 'export' | 'veo_scene'>('all')
+  const [filterType, setFilterType] = useState<'all' | 'export' | 'veo_scene' | 'motion_control'>('all')
   const [isExtractingFrame, setIsExtractingFrame] = useState(false)
   const [frameSaved, setFrameSaved] = useState(false)
+
+  // Chế độ Đối chiếu video gốc cho Motion Control
+  const [isComparing, setIsComparing] = useState(false)
+  const [compareMode, setCompareMode] = useState<'side_by_side' | 'slider'>('side_by_side')
+  const [sliderPercent, setSliderPercent] = useState(50)
+  const sliderStageRef = useRef<HTMLDivElement | null>(null)
+  const isDraggingSliderRef = useRef(false)
+  const [localRefUrl, setLocalRefUrl] = useState<string | null>(null)
+  const [selectedRefFile, setSelectedRefFile] = useState<File | null>(null)
+  const [isSavingRef, setIsSavingRef] = useState(false)
+  const [isSyncPlaying, setIsSyncPlaying] = useState(false)
+  const [syncCurrentTime, setSyncCurrentTime] = useState(0)
+  const [syncDuration, setSyncDuration] = useState(10)
+  const [syncSpeed, setSyncSpeed] = useState(1)
+  const [isMutedRef, setIsMutedRef] = useState(true)
+  const [isMutedVeo, setIsMutedVeo] = useState(false)
+
+  const mainVideoRef = useRef<HTMLVideoElement | null>(null)
+  const refVideoRef = useRef<HTMLVideoElement | null>(null)
+
+  useEffect(() => {
+    if (mainVideoRef.current) {
+      mainVideoRef.current.muted = isMutedVeo
+    }
+  }, [isMutedVeo])
+
+  useEffect(() => {
+    if (refVideoRef.current) {
+      refVideoRef.current.muted = isMutedRef
+    }
+  }, [isMutedRef])
   const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false)
   const downloadMenuRef = useRef<HTMLDivElement>(null)
 
@@ -98,6 +133,18 @@ export function VideoLibraryModal({
 
   useEffect(() => {
     setIsDownloadMenuOpen(false)
+    setIsComparing(false)
+    setCompareMode('side_by_side')
+    setSliderPercent(50)
+    setIsMutedRef(true)
+    setIsMutedVeo(false)
+    if (localRefUrl) {
+      URL.revokeObjectURL(localRefUrl)
+      setLocalRefUrl(null)
+    }
+    setSelectedRefFile(null)
+    setIsSyncPlaying(false)
+    setSyncCurrentTime(0)
   }, [selectedIndex])
 
   // Chế độ Ghép Nhanh (Remix Multi-clip)
@@ -239,12 +286,16 @@ export function VideoLibraryModal({
   }, [isOpen, onClose])
 
   const exportCount = videos.filter((v) => (v.sourceType || 'export') === 'export').length
-  const veoCount = videos.filter((v) => v.sourceType === 'veo_scene').length
+  const motionCount = videos.filter((v) => v.isMotionControl).length
+  const veoPromptCount = videos.filter((v) => v.sourceType === 'veo_scene' && !v.isMotionControl).length
 
   const filtered = videos.filter((v) => {
-    if (filterType !== 'all') {
-      const vType = v.sourceType || 'export'
-      if (vType !== filterType) return false
+    if (filterType === 'export') {
+      if ((v.sourceType || 'export') !== 'export') return false
+    } else if (filterType === 'motion_control') {
+      if (!v.isMotionControl) return false
+    } else if (filterType === 'veo_scene') {
+      if (v.sourceType !== 'veo_scene' || v.isMotionControl) return false
     }
     if (!searchTerm.trim()) return true
     const term = searchTerm.toLowerCase()
@@ -256,6 +307,138 @@ export function VideoLibraryModal({
   })
 
   const currentVideo = filtered[selectedIndex] || filtered[0]
+
+  
+  const formatSyncTime = (secs: number) => {
+    const s = Math.floor(secs || 0)
+    const m = Math.floor(s / 60)
+    const rem = s % 60
+    return `${m}:${rem < 10 ? '0' : ''}${rem}`
+  }
+
+  const toggleSyncPlay = () => {
+    if (isSyncPlaying) {
+      mainVideoRef.current?.pause()
+      refVideoRef.current?.pause()
+      setIsSyncPlaying(false)
+    } else {
+      mainVideoRef.current?.play()
+      refVideoRef.current?.play()
+      setIsSyncPlaying(true)
+    }
+  }
+
+  const handleSyncScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const targetSec = parseFloat(e.target.value)
+    setSyncCurrentTime(targetSec)
+    if (mainVideoRef.current) {
+      mainVideoRef.current.currentTime = targetSec
+    }
+    if (refVideoRef.current) {
+      const trimStart = currentVideo?.referenceTrimStart || 0
+      refVideoRef.current.currentTime = trimStart + targetSec
+    }
+  }
+
+  const changeSyncSpeed = (speed: number) => {
+    setSyncSpeed(speed)
+    if (mainVideoRef.current) mainVideoRef.current.playbackRate = speed
+    if (refVideoRef.current) refVideoRef.current.playbackRate = speed
+  }
+
+  const switchCompareMode = (mode: 'side_by_side' | 'slider') => {
+    setCompareMode(mode)
+    setTimeout(() => {
+      if (mainVideoRef.current) {
+        mainVideoRef.current.currentTime = syncCurrentTime
+        mainVideoRef.current.playbackRate = syncSpeed
+        if (isSyncPlaying) mainVideoRef.current.play().catch(() => {})
+      }
+      if (refVideoRef.current) {
+        const trimStart = currentVideo?.referenceTrimStart || 0
+        refVideoRef.current.currentTime = trimStart + syncCurrentTime
+        refVideoRef.current.playbackRate = syncSpeed
+        if (isSyncPlaying) refVideoRef.current.play().catch(() => {})
+      }
+    }, 50)
+  }
+
+  const updateSliderPos = (clientX: number) => {
+    if (!sliderStageRef.current) return
+    const rect = sliderStageRef.current.getBoundingClientRect()
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width))
+    const pct = Math.round((x / rect.width) * 100)
+    setSliderPercent(pct)
+  }
+
+  const handleSliderPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingSliderRef.current = true
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch (_) {}
+    updateSliderPos(e.clientX)
+  }
+
+  const handleSliderPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDraggingSliderRef.current || e.buttons > 0) {
+      updateSliderPos(e.clientX)
+    }
+  }
+
+  const handleSliderPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingSliderRef.current = false
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch (_) {}
+  }
+
+  const handleSyncTimeUpdate = () => {
+    if (mainVideoRef.current) {
+      const cur = mainVideoRef.current.currentTime
+      setSyncCurrentTime(cur)
+      if (mainVideoRef.current.duration) {
+        setSyncDuration(mainVideoRef.current.duration)
+      }
+      if (refVideoRef.current) {
+        const trimStart = currentVideo?.referenceTrimStart || 0
+        const targetRefTime = trimStart + cur
+        if (Math.abs(refVideoRef.current.currentTime - targetRefTime) > 0.25) {
+          refVideoRef.current.currentTime = targetRefTime
+        }
+      }
+    }
+  }
+
+  const handleSyncEnded = () => {
+    setIsSyncPlaying(false)
+    if (refVideoRef.current) refVideoRef.current.pause()
+  }
+
+  const handleLocalRefChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (localRefUrl) URL.revokeObjectURL(localRefUrl)
+      const url = URL.createObjectURL(file)
+      setLocalRefUrl(url)
+      setSelectedRefFile(file)
+    }
+  }
+
+  const handleSaveRefToBackend = async () => {
+    if (!selectedRefFile || !currentVideo) return
+    setIsSavingRef(true)
+    try {
+      const res = await attachReferenceVideoToExport(currentVideo.filename, selectedRefFile)
+      if (res.ok && res.reference_video_url) {
+        currentVideo.referenceVideoUrl = res.reference_video_url
+        alert('Đã lưu liên kết video gốc thành công!')
+      } else {
+        alert('Không thể lưu liên kết video gốc.')
+      }
+    } finally {
+      setIsSavingRef(false)
+    }
+  }
 
   const handleDelete = async (filename: string) => {
     if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn video "${filename}" khỏi ổ đĩa?`)) {
@@ -539,7 +722,7 @@ export function VideoLibraryModal({
               title="Bật/tắt chế độ chọn nhiều clip Veo để ghép video mới (Remix)"
             >
               <Sparkles size={13} color={isRemixMode ? '#ffffff' : '#4f46e5'} />
-              <span>{isRemixMode ? `Remix (${selectedRemixClips.length} clip)` : '⚡ Ghép Nhanh (Remix)'}</span>
+              <span>{isRemixMode ? `Remix (${selectedRemixClips.length} clip)` : 'Ghép Nhanh (Remix)'}</span>
             </button>
 
             <button
@@ -668,17 +851,19 @@ export function VideoLibraryModal({
                   }}
                   style={{
                     flex: 1,
-                    padding: '4px 6px',
+                    padding: '4px 3px',
                     borderRadius: 5,
                     border: 'none',
                     background: filterType === 'all' ? '#ffffff' : 'transparent',
                     color: filterType === 'all' ? '#0f172a' : '#64748b',
                     boxShadow: filterType === 'all' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                    fontSize: 10.5,
+                    fontSize: 10,
                     fontWeight: filterType === 'all' ? 700 : 500,
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
                   }}
+                  title="Toàn bộ video và clip"
                 >
                   Tất cả ({videos.length})
                 </button>
@@ -690,19 +875,45 @@ export function VideoLibraryModal({
                   }}
                   style={{
                     flex: 1,
-                    padding: '4px 6px',
+                    padding: '4px 3px',
                     borderRadius: 5,
                     border: 'none',
                     background: filterType === 'veo_scene' ? '#ffffff' : 'transparent',
                     color: filterType === 'veo_scene' ? '#059669' : '#64748b',
                     boxShadow: filterType === 'veo_scene' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                    fontSize: 10.5,
+                    fontSize: 10,
                     fontWeight: filterType === 'veo_scene' ? 700 : 500,
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
                   }}
+                  title="Các clip Veo sinh từ Prompt"
                 >
-                  Clip Veo ({veoCount})
+                  Clip Veo ({veoPromptCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('motion_control')
+                    setSelectedIndex(0)
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '4px 3px',
+                    borderRadius: 5,
+                    border: 'none',
+                    background: filterType === 'motion_control' ? '#ffffff' : 'transparent',
+                    color: filterType === 'motion_control' ? '#c026d3' : '#64748b',
+                    boxShadow: filterType === 'motion_control' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                    fontSize: 10,
+                    fontWeight: filterType === 'motion_control' ? 700 : 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="Các clip điều khiển chuyển động nhân vật từ Motion Control Studio"
+                >
+                  Motion ({motionCount})
                 </button>
                 <button
                   type="button"
@@ -712,17 +923,19 @@ export function VideoLibraryModal({
                   }}
                   style={{
                     flex: 1,
-                    padding: '4px 6px',
+                    padding: '4px 3px',
                     borderRadius: 5,
                     border: 'none',
                     background: filterType === 'export' ? '#ffffff' : 'transparent',
                     color: filterType === 'export' ? '#4f46e5' : '#64748b',
                     boxShadow: filterType === 'export' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                    fontSize: 10.5,
+                    fontSize: 10,
                     fontWeight: filterType === 'export' ? 700 : 500,
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
                   }}
+                  title="Các video hoàn chỉnh đã ghép nối"
                 >
                   Hoàn chỉnh ({exportCount})
                 </button>
@@ -847,19 +1060,35 @@ export function VideoLibraryModal({
                               {item.title || item.filename}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                              <span
-                                style={{
-                                  fontSize: 9,
-                                  fontWeight: 600,
-                                  padding: '1px 5px',
-                                  borderRadius: 3,
-                                  background: item.sourceType === 'veo_scene' ? '#ecfdf5' : '#eef2ff',
-                                  color: item.sourceType === 'veo_scene' ? '#059669' : '#4338ca',
-                                  border: item.sourceType === 'veo_scene' ? '1px solid #a7f3d0' : '1px solid #c7d2fe',
-                                }}
-                              >
-                                {item.sourceType === 'veo_scene' ? 'Clip Veo' : 'Hoàn Chỉnh'}
-                              </span>
+                              {item.isMotionControl ? (
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 600,
+                                    padding: '1px 5px',
+                                    borderRadius: 3,
+                                    background: '#fdf4ff',
+                                    color: '#c026d3',
+                                    border: '1px solid #f0abfc',
+                                  }}
+                                >
+                                  Motion Control
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 600,
+                                    padding: '1px 5px',
+                                    borderRadius: 3,
+                                    background: item.sourceType === 'veo_scene' ? '#ecfdf5' : '#eef2ff',
+                                    color: item.sourceType === 'veo_scene' ? '#059669' : '#4338ca',
+                                    border: item.sourceType === 'veo_scene' ? '1px solid #a7f3d0' : '1px solid #c7d2fe',
+                                  }}
+                                >
+                                  {item.sourceType === 'veo_scene' ? 'Clip Veo' : 'Hoàn Chỉnh'}
+                                </span>
+                              )}
                               <span style={{ fontSize: 9.5, color: '#94a3b8' }}>
                                 {formatDate(item.createdAt)}
                               </span>
@@ -941,34 +1170,613 @@ export function VideoLibraryModal({
           >
             {currentVideo ? (
               <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Cinema Screen (Contain format - No crop/zoom) */}
-                <div
-                  style={{
-                    width: '100%',
-                    height: 380,
-                    background: '#070a12',
-                    borderRadius: 10,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                    border: '1px solid #1e293b',
-                  }}
-                >
-                  <video
-                    key={currentVideo.videoUrl}
-                    src={currentVideo.videoUrl}
-                    controls
-                    autoPlay
-                    playsInline
+                {/* Cinema Screen hoặc Chế độ Đối Chiếu 2 Màn Hình */}
+                {isComparing ? (
+                  <div
                     style={{
                       width: '100%',
-                      height: '100%',
-                      objectFit: 'contain',
+                      background: '#070a12',
+                      borderRadius: 10,
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+                      border: '1px solid #1e293b',
                     }}
-                  />
-                </div>
+                  >
+                    {/* Header bar đối chiếu */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 14px',
+                        background: '#0f172a',
+                        borderBottom: '1px solid #1e293b',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#f8fafc', fontSize: 12, fontWeight: 700 }}>
+                          <Columns2 size={14} color="#f0abfc" />
+                          <span>Đối chiếu chuyển động</span>
+                        </div>
+
+                        {/* Chuyển đổi giữa 2 chế độ: Song song & Soi đè lớp */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            background: 'rgba(255,255,255,0.08)',
+                            borderRadius: 5,
+                            padding: 2,
+                            gap: 2,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => switchCompareMode('side_by_side')}
+                            style={{
+                              border: 'none',
+                              background: compareMode === 'side_by_side' ? '#334155' : 'transparent',
+                              color: compareMode === 'side_by_side' ? '#f8fafc' : '#94a3b8',
+                              fontSize: 10.5,
+                              fontWeight: compareMode === 'side_by_side' ? 700 : 500,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title="Hiển thị 2 video song song từ đầu đến chân không bị cắt"
+                          >
+                            <Columns2 size={11} />
+                            <span>Song song</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => switchCompareMode('slider')}
+                            disabled={!localRefUrl && !currentVideo.referenceVideoUrl}
+                            style={{
+                              border: 'none',
+                              background: compareMode === 'slider' ? '#334155' : 'transparent',
+                              color: compareMode === 'slider' ? '#f8fafc' : '#94a3b8',
+                              fontSize: 10.5,
+                              fontWeight: compareMode === 'slider' ? 700 : 500,
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              cursor: (!localRefUrl && !currentVideo.referenceVideoUrl) ? 'not-allowed' : 'pointer',
+                              opacity: (!localRefUrl && !currentVideo.referenceVideoUrl) ? 0.4 : 1,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title="Xếp đè 2 video và kéo thanh trượt để soi khớp vị trí từng milimet"
+                          >
+                            <Layers size={11} />
+                            <span>Soi đè lớp</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <label
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: '#cbd5e1',
+                            background: 'rgba(255,255,255,0.1)',
+                            padding: '3px 9px',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            transition: 'background 0.15s',
+                          }}
+                          title="Chọn file video tham chiếu gốc từ máy tính"
+                        >
+                          <Upload size={11} />
+                          <span>{(localRefUrl || currentVideo.referenceVideoUrl) ? 'Đổi clip gốc' : 'Chọn clip gốc từ máy'}</span>
+                          <input
+                            type="file"
+                            accept="video/*"
+                            style={{ display: 'none' }}
+                            onChange={handleLocalRefChosen}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsComparing(false)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#94a3b8',
+                            fontSize: 11,
+                            cursor: 'pointer',
+                            padding: '2px 6px',
+                          }}
+                        >
+                          Đóng
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Vùng Video: Chế độ Song Song (Side-by-Side) */}
+                    {compareMode === 'side_by_side' ? (
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr',
+                          gap: 8,
+                          padding: '8px 12px',
+                          height: 480,
+                          background: '#090d16',
+                          boxSizing: 'border-box',
+                        }}
+                      >
+                        {/* Video Gốc (Trái) */}
+                        <div
+                          style={{
+                            position: 'relative',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '100%',
+                            width: '100%',
+                            minWidth: 0,
+                            minHeight: 0,
+                            overflow: 'hidden',
+                            background: '#020617',
+                            borderRadius: 8,
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 8,
+                              left: 8,
+                              zIndex: 10,
+                              background: 'rgba(15,23,42,0.85)',
+                              backdropFilter: 'blur(4px)',
+                              color: '#f8fafc',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: 4,
+                              border: '1px solid rgba(255,255,255,0.15)',
+                            }}
+                          >
+                            Clip Gốc (Tham Chiếu)
+                          </div>
+                          {(localRefUrl || currentVideo.referenceVideoUrl) ? (
+                            <video
+                              ref={refVideoRef}
+                              src={localRefUrl || currentVideo.referenceVideoUrl}
+                              playsInline
+                              muted={isMutedRef}
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: '100%',
+                                width: 'auto',
+                                height: '100%',
+                                objectFit: 'contain',
+                                display: 'block',
+                                borderRadius: 6,
+                                boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                              }}
+                            />
+                          ) : (
+                            <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                              <Film size={32} color="#475569" />
+                              <div style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 600 }}>Chưa có file gốc đi kèm</div>
+                              <div style={{ fontSize: 11, color: '#64748b', maxWidth: 220 }}>Bấm bên dưới để chọn clip gốc từ máy tính và soi chuyển động ngay</div>
+                              <label
+                                style={{
+                                  padding: '6px 14px',
+                                  borderRadius: 6,
+                                  background: '#4f46e5',
+                                  color: '#ffffff',
+                                  fontSize: 11.5,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  boxShadow: '0 2px 6px rgba(79, 70, 229, 0.4)',
+                                }}
+                              >
+                                <Upload size={12} />
+                                <span>Chọn clip gốc từ máy</span>
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  style={{ display: 'none' }}
+                                  onChange={handleLocalRefChosen}
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Video Kết Quả Veo AI (Phải) */}
+                        <div
+                          style={{
+                            position: 'relative',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '100%',
+                            width: '100%',
+                            minWidth: 0,
+                            minHeight: 0,
+                            overflow: 'hidden',
+                            background: '#020617',
+                            borderRadius: 8,
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 8,
+                              left: 8,
+                              zIndex: 10,
+                              background: 'rgba(192,38,211,0.85)',
+                              backdropFilter: 'blur(4px)',
+                              color: '#ffffff',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: 4,
+                            }}
+                          >
+                            Kết Quả Veo AI
+                          </div>
+                          <video
+                            ref={mainVideoRef}
+                            src={currentVideo.videoUrl}
+                            playsInline
+                            muted={isMutedVeo}
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              width: 'auto',
+                              height: '100%',
+                              objectFit: 'contain',
+                              display: 'block',
+                              borderRadius: 6,
+                              boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                            }}
+                            onTimeUpdate={handleSyncTimeUpdate}
+                            onEnded={handleSyncEnded}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      /* Vùng Video: Chế độ Soi Đè Lớp (Split Slider) */
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '8px 12px',
+                          height: 480,
+                          background: '#090d16',
+                          boxSizing: 'border-box',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <div
+                          ref={sliderStageRef}
+                          onPointerDown={handleSliderPointerDown}
+                          onPointerMove={handleSliderPointerMove}
+                          onPointerUp={handleSliderPointerUp}
+                          style={{
+                            position: 'relative',
+                            height: '100%',
+                            aspectRatio: currentVideo.aspectRatio === '16:9' ? '16/9' : currentVideo.aspectRatio === '1:1' ? '1/1' : '9/16',
+                            maxWidth: '100%',
+                            borderRadius: 8,
+                            overflow: 'hidden',
+                            background: '#000000',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            cursor: 'ew-resize',
+                          }}
+                        >
+                          {/* Badge bên trái */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 8,
+                              left: 8,
+                              zIndex: 20,
+                              background: 'rgba(15,23,42,0.85)',
+                              backdropFilter: 'blur(4px)',
+                              color: '#f8fafc',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: 4,
+                              border: '1px solid rgba(255,255,255,0.15)',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            Clip Gốc (Tham Chiếu)
+                          </div>
+
+                          {/* Badge bên phải */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 8,
+                              right: 8,
+                              zIndex: 20,
+                              background: 'rgba(192,38,211,0.85)',
+                              backdropFilter: 'blur(4px)',
+                              color: '#ffffff',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: 4,
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            Kết Quả Veo AI
+                          </div>
+
+                          {/* Lớp Video Gốc (Nền bên dưới) */}
+                          <div style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+                            <video
+                              ref={refVideoRef}
+                              src={localRefUrl || currentVideo.referenceVideoUrl}
+                              playsInline
+                              muted={isMutedRef}
+                              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            />
+                          </div>
+
+                          {/* Lớp Video Veo AI (Đè bên trên với clipPath) */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              width: '100%',
+                              height: '100%',
+                              clipPath: `inset(0 0 0 ${sliderPercent}%)`,
+                            }}
+                          >
+                            <video
+                              ref={mainVideoRef}
+                              src={currentVideo.videoUrl}
+                              playsInline
+                              muted={isMutedVeo}
+                              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                              onTimeUpdate={handleSyncTimeUpdate}
+                              onEnded={handleSyncEnded}
+                            />
+                          </div>
+
+                          {/* Thanh trượt phân cách và nút kéo */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              bottom: 0,
+                              left: `${sliderPercent}%`,
+                              width: 2,
+                              background: '#ffffff',
+                              boxShadow: '0 0 8px rgba(0,0,0,0.8)',
+                              transform: 'translateX(-50%)',
+                              pointerEvents: 'none',
+                              zIndex: 30,
+                            }}
+                          >
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: '50%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                width: 28,
+                                height: 28,
+                                background: '#ffffff',
+                                borderRadius: '50%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
+                                fontSize: 10,
+                                fontWeight: 800,
+                                color: '#0f172a',
+                                letterSpacing: -1,
+                              }}
+                            >
+                              ◀▶
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Thanh điều khiển đồng bộ (Unified Sync Controller) */}
+                    <div style={{ padding: '8px 14px', background: '#0f172a', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                      {/* Timeline Scrubber */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 10.5, color: '#94a3b8', fontFamily: 'monospace', minWidth: 32 }}>
+                          {formatSyncTime(syncCurrentTime)}
+                        </span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={syncDuration || 10}
+                          step={0.05}
+                          value={syncCurrentTime}
+                          onChange={handleSyncScrub}
+                          style={{ flex: 1, accentColor: '#c026d3', cursor: 'pointer', height: 4 }}
+                        />
+                        <span style={{ fontSize: 10.5, color: '#94a3b8', fontFamily: 'monospace', minWidth: 32 }}>
+                          {formatSyncTime(syncDuration || 10)}
+                        </span>
+                      </div>
+
+                      {/* Các nút bấm Play/Speed/Mute */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button
+                            type="button"
+                            onClick={toggleSyncPlay}
+                            style={{
+                              height: 28,
+                              padding: '0 12px',
+                              borderRadius: 5,
+                              border: 'none',
+                              background: '#c026d3',
+                              color: '#ffffff',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                            }}
+                          >
+                            {isSyncPlaying ? <Pause size={12} fill="#ffffff" /> : <Play size={12} fill="#ffffff" />}
+                            <span>{isSyncPlaying ? 'Tạm dừng' : 'Phát đồng bộ'}</span>
+                          </button>
+
+                          {/* Chọn tốc độ phát */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'rgba(255,255,255,0.08)', borderRadius: 5, padding: 2 }}>
+                            {[1, 0.75, 0.5].map((speed) => (
+                              <button
+                                key={speed}
+                                type="button"
+                                onClick={() => changeSyncSpeed(speed)}
+                                style={{
+                                  border: 'none',
+                                  background: syncSpeed === speed ? '#334155' : 'transparent',
+                                  color: syncSpeed === speed ? '#f8fafc' : '#94a3b8',
+                                  fontSize: 10,
+                                  fontWeight: syncSpeed === speed ? 700 : 500,
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  cursor: 'pointer',
+                                }}
+                                title={`Tốc độ ${speed}x (Soi chi tiết)`}
+                              >
+                                {speed}x
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Bật/Tắt âm thanh clip gốc */}
+                          <button
+                            type="button"
+                            onClick={() => setIsMutedRef((prev) => !prev)}
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              borderRadius: 5,
+                              border: isMutedRef ? '1px solid #334155' : '1px solid rgba(255,255,255,0.3)',
+                              background: isMutedRef ? 'transparent' : 'rgba(255,255,255,0.12)',
+                              color: isMutedRef ? '#94a3b8' : '#f8fafc',
+                              fontSize: 10.5,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title={isMutedRef ? 'Bật âm thanh clip gốc' : 'Tắt âm thanh clip gốc'}
+                          >
+                            {isMutedRef ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                            <span>Âm gốc</span>
+                          </button>
+
+                          {/* Bật/Tắt âm thanh clip Veo AI */}
+                          <button
+                            type="button"
+                            onClick={() => setIsMutedVeo((prev) => !prev)}
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              borderRadius: 5,
+                              border: isMutedVeo ? '1px solid #334155' : '1px solid rgba(192, 38, 211, 0.4)',
+                              background: isMutedVeo ? 'transparent' : 'rgba(192, 38, 211, 0.2)',
+                              color: isMutedVeo ? '#94a3b8' : '#f0abfc',
+                              fontSize: 10.5,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title={isMutedVeo ? 'Bật âm thanh clip Veo AI' : 'Tắt âm thanh clip Veo AI'}
+                          >
+                            {isMutedVeo ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                            <span>Âm Veo</span>
+                          </button>
+                        </div>
+
+                        {/* Nút lưu liên kết clip gốc nếu là clip vừa chọn từ máy */}
+                        {selectedRefFile && !currentVideo.referenceVideoUrl && (
+                          <button
+                            type="button"
+                            onClick={handleSaveRefToBackend}
+                            disabled={isSavingRef}
+                            style={{
+                              height: 26,
+                              padding: '0 10px',
+                              borderRadius: 5,
+                              border: 'none',
+                              background: '#059669',
+                              color: '#ffffff',
+                              fontSize: 10.5,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title="Lưu file video gốc này vào hệ thống để các lần sau tự động có sẵn"
+                          >
+                            {isSavingRef ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                            <span>{isSavingRef ? 'Đang lưu...' : 'Lưu liên kết vào clip'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      width: '100%',
+                      height: 380,
+                      background: '#070a12',
+                      borderRadius: 10,
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                      border: '1px solid #1e293b',
+                    }}
+                  >
+                    <video
+                      key={currentVideo.videoUrl}
+                      src={currentVideo.videoUrl}
+                      controls
+                      autoPlay
+                      playsInline
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                      }}
+                    />
+                  </div>
+                )}
 
                 {/* Video Info Header & Actions */}
                 <div
@@ -995,10 +1803,18 @@ export function VideoLibraryModal({
                       <span
                         style={{
                           fontWeight: 600,
-                          color: currentVideo.sourceType === 'veo_scene' ? '#059669' : '#4f46e5',
+                          color: currentVideo.isMotionControl
+                            ? '#c026d3'
+                            : currentVideo.sourceType === 'veo_scene'
+                            ? '#059669'
+                            : '#4f46e5',
                         }}
                       >
-                        {currentVideo.sourceType === 'veo_scene' ? '🎥 Phân cảnh Veo AI' : '🎬 Video hoàn chỉnh'}
+                        {currentVideo.isMotionControl
+                          ? 'Phân cảnh Motion Control (AI Edit)'
+                          : currentVideo.sourceType === 'veo_scene'
+                          ? 'Phân cảnh Veo AI'
+                          : 'Video hoàn chỉnh'}
                       </span>
                       <span style={{ margin: '0 6px' }}>•</span>
                       <span>Đã tạo {formatDate(currentVideo.createdAt)}</span>
@@ -1373,6 +2189,35 @@ export function VideoLibraryModal({
                           <ImageDown size={13} />
                         )}
                         <span>{frameSaved ? 'Đã lưu vào Thư viện' : 'Lưu frame cuối'}</span>
+                      </button>
+                    )}
+
+                    {/* Đối chiếu bản gốc cho Motion Control */}
+                    {currentVideo.isMotionControl && (
+                      <button
+                        type="button"
+                        onClick={() => setIsComparing((prev) => !prev)}
+                        style={{
+                          height: 32,
+                          padding: '0 12px',
+                          borderRadius: 6,
+                          border: isComparing ? '1.5px solid #c026d3' : '1px solid #cbd5e1',
+                          background: isComparing ? '#fdf4ff' : '#ffffff',
+                          color: isComparing ? '#c026d3' : '#334155',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          whiteSpace: 'nowrap',
+                          transition: 'all 0.15s ease',
+                          boxShadow: isComparing ? '0 2px 6px rgba(192, 38, 211, 0.2)' : '0 1px 2px rgba(0,0,0,0.05)',
+                        }}
+                        title="So sánh song song đối chiếu với video tham chiếu gốc"
+                      >
+                        <Columns2 size={13} color={isComparing ? '#c026d3' : '#64748b'} />
+                        <span>{isComparing ? 'Thoát đối chiếu' : 'Đối chiếu bản gốc'}</span>
                       </button>
                     )}
 

@@ -165,4 +165,9 @@ export interface ExportedVideoItem {
   sourceType?: 'export' | 'veo_scene'
   prompt?: string
   modelDisplayName?: string
+  isMotionControl?: boolean
+  inputMode?: string
+  referenceVideoUrl?: string
+  referenceTrimStart?: number
+  referenceTrimEnd?: number
 }

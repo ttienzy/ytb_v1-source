@@ -590,7 +590,9 @@ export function VeoVideoPickerModal({
                         <span
                           style={{
                             background:
-                              clip.sourceType === 'veo_history'
+                              clip.isMotionControl
+                                ? 'rgba(192, 38, 211, 0.85)'
+                                : clip.sourceType === 'veo_history'
                                 ? 'rgba(124, 58, 237, 0.85)'
                                 : clip.sourceType === 'veo_scene'
                                 ? 'rgba(79, 70, 229, 0.85)'
@@ -603,7 +605,9 @@ export function VeoVideoPickerModal({
                             backdropFilter: 'blur(4px)',
                           }}
                         >
-                          {clip.sourceType === 'veo_history'
+                          {clip.isMotionControl
+                            ? 'Motion'
+                            : clip.sourceType === 'veo_history'
                             ? 'Veo'
                             : clip.sourceType === 'veo_scene'
                             ? 'Cảnh'

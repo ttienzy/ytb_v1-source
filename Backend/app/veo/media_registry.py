@@ -123,6 +123,7 @@ def register_media(
     kind: str = "image",
     file_size: int = 0,
     duration: float = 0.0,
+    local_filename: str = "",
 ) -> None:
     """
     Lưu vết media_id vừa upload thành công vào Registry.
@@ -142,6 +143,7 @@ def register_media(
             "kind": kind,
             "file_size": file_size,
             "duration": float(duration or 0.0),
+            "local_filename": local_filename or "",
             "created_at": int(time.time()),
         }
         _save_registry()
