@@ -39,7 +39,6 @@ import {
   callGenerateVoiceover,
   getExportCleanStatus,
   triggerExportClean,
-  attachReferenceVideoToExport,
 } from '../services/workflowApi'
 import * as veoApi from '../../veo-studio/services/veoApi'
 import { getWorkflowConfig } from '../services/workflowConfig'
@@ -73,8 +72,6 @@ export function VideoLibraryModal({
   const sliderStageRef = useRef<HTMLDivElement | null>(null)
   const isDraggingSliderRef = useRef(false)
   const [localRefUrl, setLocalRefUrl] = useState<string | null>(null)
-  const [selectedRefFile, setSelectedRefFile] = useState<File | null>(null)
-  const [isSavingRef, setIsSavingRef] = useState(false)
   const [isSyncPlaying, setIsSyncPlaying] = useState(false)
   const [syncCurrentTime, setSyncCurrentTime] = useState(0)
   const [syncDuration, setSyncDuration] = useState(10)
@@ -142,7 +139,6 @@ export function VideoLibraryModal({
       URL.revokeObjectURL(localRefUrl)
       setLocalRefUrl(null)
     }
-    setSelectedRefFile(null)
     setIsSyncPlaying(false)
     setSyncCurrentTime(0)
   }, [selectedIndex])
@@ -420,23 +416,6 @@ export function VideoLibraryModal({
       if (localRefUrl) URL.revokeObjectURL(localRefUrl)
       const url = URL.createObjectURL(file)
       setLocalRefUrl(url)
-      setSelectedRefFile(file)
-    }
-  }
-
-  const handleSaveRefToBackend = async () => {
-    if (!selectedRefFile || !currentVideo) return
-    setIsSavingRef(true)
-    try {
-      const res = await attachReferenceVideoToExport(currentVideo.filename, selectedRefFile)
-      if (res.ok && res.reference_video_url) {
-        currentVideo.referenceVideoUrl = res.reference_video_url
-        alert('Đã lưu liên kết video gốc thành công!')
-      } else {
-        alert('Không thể lưu liên kết video gốc.')
-      }
-    } finally {
-      setIsSavingRef(false)
     }
   }
 
@@ -1718,33 +1697,6 @@ export function VideoLibraryModal({
                             <span>Âm Veo</span>
                           </button>
                         </div>
-
-                        {/* Nút lưu liên kết clip gốc nếu là clip vừa chọn từ máy */}
-                        {selectedRefFile && !currentVideo.referenceVideoUrl && (
-                          <button
-                            type="button"
-                            onClick={handleSaveRefToBackend}
-                            disabled={isSavingRef}
-                            style={{
-                              height: 26,
-                              padding: '0 10px',
-                              borderRadius: 5,
-                              border: 'none',
-                              background: '#059669',
-                              color: '#ffffff',
-                              fontSize: 10.5,
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                            }}
-                            title="Lưu file video gốc này vào hệ thống để các lần sau tự động có sẵn"
-                          >
-                            {isSavingRef ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                            <span>{isSavingRef ? 'Đang lưu...' : 'Lưu liên kết vào clip'}</span>
-                          </button>
-                        )}
                       </div>
                     </div>
                   </div>
