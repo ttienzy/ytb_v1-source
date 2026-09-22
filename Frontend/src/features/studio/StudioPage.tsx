@@ -88,7 +88,7 @@ export function StudioPage({
   const [bgmList, setBgmList] = useState<BgmOut[]>([])
   const [bgmEnabled, setBgmEnabled] = useState(initialCfg.bgmEnabled !== undefined ? initialCfg.bgmEnabled : true)
   const [bgmIds, setBgmIds] = useState<string[]>(initialCfg.bgmIds || [])
-  const [bgmVolume, setBgmVolume] = useState(initialCfg.bgmVolume !== undefined ? initialCfg.bgmVolume : 0.1)
+  const [bgmVolume, setBgmVolume] = useState(initialCfg.bgmVolume !== undefined ? initialCfg.bgmVolume : 0.5)
   const [showRawTranscript, setShowRawTranscript] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [job, setJob] = useState<JobOut | null>(null)

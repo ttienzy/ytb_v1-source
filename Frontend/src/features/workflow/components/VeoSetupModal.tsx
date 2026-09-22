@@ -64,7 +64,7 @@ export function VeoSetupModal({
   // Audio settings — BGM
   const [bgmEnabled, setBgmEnabled] = useState<boolean>(currentConfig.bgmEnabled !== false)
   const [bgmTrackIds, setBgmTrackIds] = useState<string[]>(currentConfig.bgmTrackIds || [])
-  const [bgmVolume, setBgmVolume] = useState<number>(currentConfig.bgmVolume ?? 0.10)
+  const [bgmVolume, setBgmVolume] = useState<number>(currentConfig.bgmVolume ?? 0.50)
 
   // Voice & BGM library data
   const [availableVoices, setAvailableVoices] = useState<Array<{ voice_id: string; name: string }>>([])
@@ -94,7 +94,7 @@ export function VeoSetupModal({
     setVeoAmbientVolume(currentConfig.veoAmbientVolume ?? 0.10)
     setBgmEnabled(currentConfig.bgmEnabled !== false)
     setBgmTrackIds(currentConfig.bgmTrackIds || [])
-    setBgmVolume(currentConfig.bgmVolume ?? 0.10)
+    setBgmVolume(currentConfig.bgmVolume ?? 0.50)
 
     // Load available voices from backend
     fetch(`${API_URL}/api/voices`)
@@ -818,8 +818,8 @@ export function VeoSetupModal({
                     <Volume2 size={12} color="#059669" />
                     <input
                       type="range"
-                      min="0.03"
-                      max="0.30"
+                      min="0"
+                      max="1"
                       step="0.01"
                       value={bgmVolume}
                       onChange={(e) => setBgmVolume(parseFloat(e.target.value))}

@@ -108,7 +108,7 @@ function WorkflowCanvas() {
     keepVeoAmbient: false,
     veoAmbientVolume: 0,
     bgmEnabled: true,
-    bgmVolume: 0.10,
+    bgmVolume: 0.50,
   })
 
   useEffect(() => {

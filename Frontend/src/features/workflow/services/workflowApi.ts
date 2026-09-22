@@ -449,7 +449,7 @@ export async function callWorkflowVideoExport(
       voiceover_audio_path: voiceoverAudioPath,
       mix_original_audio: mixOriginalAudio ?? false,
       bgm_track_ids: bgmTrackIds && bgmTrackIds.length > 0 ? bgmTrackIds : undefined,
-      bgm_volume: bgmVolume ?? 0.10,
+      bgm_volume: bgmVolume ?? 0.50,
       veo_ambient_volume: veoAmbientVolume ?? 0,
     }),
   })

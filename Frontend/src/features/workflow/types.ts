@@ -172,7 +172,7 @@ export interface VeoVideoConfig {
   // Audio settings — BGM
   bgmEnabled?: boolean         // Thêm nhạc nền khi ghép
   bgmTrackIds?: string[]       // Danh sách BGM track IDs đã chọn
-  bgmVolume?: number           // Volume BGM (0.05 - 0.30, default 0.10)
+  bgmVolume?: number           // Volume BGM (0.0 - 1.0, default 0.50)
   // Audio settings — Veo Ambient
   keepVeoAmbient?: boolean     // Giữ SFX/ambient sound từ Veo clips
   veoAmbientVolume?: number    // Volume ambient Veo (0.0 - 0.20, default 0.10)
