@@ -201,10 +201,17 @@ jobs:
         with:
           repository: ttienzy/ytb_v1
           token: ${{ secrets.RELEASES_TOKEN }}
+          name: CreatorFlow AI ${{ github.ref_name }}
+          body: |
+            CreatorFlow AI Release ${{ github.ref_name }}
+
+            - Tự động tải và cài đặt bản cập nhật in-app với thanh tiến trình real-time
+            - Sửa lỗi nạp preload và bridge hệ thống trong môi trường Electron sandbox
+            - Khởi động lại và nâng cấp mượt mà không bị chuyển hướng ra web
           files: |
             Frontend/release/*.exe
             Frontend/release/latest.yml
             Frontend/release/*.blockmap
-          generate_release_notes: true
+          generate_release_notes: false
           draft: false
           prerelease: false
