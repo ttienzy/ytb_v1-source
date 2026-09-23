@@ -40,7 +40,7 @@ cd ..
 ### Bước 2.3: Cài đặt Voice Service (VieNeu-TTS)
 ```bash
 cd services/voice-service
-pip install -r requirements.txt
+uv sync --locked
 cd ../..
 ```
 

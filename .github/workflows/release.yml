@@ -57,7 +57,7 @@ jobs:
         run: |
           cd services/voice-service
           python -m pip install uv==0.12.5
-          uv sync --frozen --group build --python 3.11
+          uv sync --frozen --group build --group test --python 3.11
           .\.venv\Scripts\python.exe -m unittest discover -s tests -v
           .\.venv\Scripts\python.exe -m PyInstaller --noconfirm voice.spec
           if (-not (Test-Path dist\voice_server.exe)) { throw 'voice_server.exe was not created' }
@@ -77,6 +77,7 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+          npm run test:voices
 
       - name: Install and Smoke Test Watermark Runtime
         run: |
@@ -205,9 +206,10 @@ jobs:
           body: |
             CreatorFlow AI Release ${{ github.ref_name }}
 
-            - Tự động tải và cài đặt bản cập nhật in-app với thanh tiến trình real-time
-            - Sửa lỗi nạp preload và bridge hệ thống trong môi trường Electron sandbox
-            - Khởi động lại và nâng cấp mượt mà không bị chuyển hướng ra web
+            - Nâng VieNeu-TTS lên 3.8.1, mặc định CPU fp32 và bổ sung profile int8/GPU/Nano
+            - Nghe thử giọng streaming, dừng/chuyển giọng và chèn biểu cảm trực tiếp
+            - Sửa metadata thời lượng, tối ưu batch và khôi phục giọng clone đã lưu
+            - Bổ sung kiểm thử TTS, streaming và tương thích giọng cũ
           files: |
             Frontend/release/*.exe
             Frontend/release/latest.yml

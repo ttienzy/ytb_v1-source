@@ -17,6 +17,8 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     engine.start()
     yield
+    if engine.ready:
+        engine.vieneu.close()
 
 
 app = FastAPI(title="Voice Service", version="0.1.0", lifespan=lifespan)

@@ -108,3 +108,15 @@ async def tts_batch(items: list[dict], voice_id: str) -> bytes:
             return r.content
     except httpx.HTTPError as error:
         raise _connection_error(error) from error
+
+
+async def open_preview_stream(voice_id: str, text: str | None = None):
+    client = _client(TIMEOUT_TTS)
+    payload = {"voice": voice_id, "input": text or "Xin chào, đây là giọng đọc thử được tổng hợp bằng VieNeu-TTS.",
+               "response_format": "pcm", "stream": True, "temperature": 0.6}
+    try:
+        response = await client.send(client.build_request("POST", "/v1/audio/speech", json=payload), stream=True)
+        return client, response
+    except httpx.HTTPError as error:
+        await client.aclose()
+        raise _connection_error(error) from error

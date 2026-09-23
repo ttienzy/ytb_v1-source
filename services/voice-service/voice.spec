@@ -2,7 +2,7 @@
 from pathlib import Path
 import os
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 block_cipher = None
 service_dir = Path(SPECPATH).resolve()
@@ -16,10 +16,12 @@ a = Analysis(
     datas=(
         collect_data_files('vieneu', includes=['assets/**/*'])
         + collect_data_files('sea_g2p')
+        + copy_metadata('vieneu')
     ),
     hiddenimports=(
         collect_submodules('sea_g2p')
         + collect_submodules('vieneu_utils')
+        + collect_submodules('cpuinfo')
         + [
             'uvicorn',
             'uvicorn.logging',
@@ -41,6 +43,8 @@ a = Analysis(
             'app.routers.tts',
             'pydantic_settings',
             'vieneu',
+            'vieneu.v3turbo',
+            'vieneu.v3nano',
             'onnxruntime',
             'huggingface_hub',
         ]

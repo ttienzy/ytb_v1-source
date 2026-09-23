@@ -2193,7 +2193,7 @@ async def generate_voiceover_batch(
             # Duration từ manifest hoặc ffprobe
             dur = 0.0
             if i < len(manifest_items):
-                dur = float(manifest_items[i].get("duration_sec", 0.0))
+                dur = float(manifest_items[i].get("duration_sec", manifest_items[i].get("duration", 0.0)))
             if dur == 0.0:
                 try:
                     dur = ffprobe_duration(wav_path)

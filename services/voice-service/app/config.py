@@ -2,7 +2,9 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Hỗ trợ tùy chỉnh APP_DATA_DIR khi chạy môi trường đóng gói (Production) hoặc mặc định thư mục gốc (Dev)
@@ -26,8 +28,12 @@ class Settings(BaseSettings):
     voice_port: int = 8001
     device: str = "cpu"          # cpu -> đường ONNX
     backend: str = "onnx"       # ép ONNX/CPU torch-free; KHÔNG "auto" (auto thử import torch)
-    precision: str = "int8"     # "int8" (nhanh, mặc định) | "fp32" (chất lượng tối đa)
-    threads: int = 0            # ONNX intra-op threads; 0 = engine default
+    precision: Literal["fp32", "int8"] = "fp32"
+    voice_profile: Literal["turbo-fp32", "turbo-int8", "turbo-gpu", "nano"] | None = None
+    threads: int = Field(default=0, ge=0, le=128)
+    max_batch_size: int = Field(default=8, ge=1, le=32)
+    inference_wait_seconds: float = Field(default=30, gt=0, le=300)
+    nano_repo: str = "pnnbao-ump/VieNeu-TTS-v3-Nano"
     backbone_repo: str = "pnnbao-ump/VieNeu-TTS-v3-Turbo"
     onnx_dir: str | None = None  # thư mục weights local (Phase 5 offline); None -> tải HF
     model_cache_dir: str = os.environ.get("HF_HOME", str(VOICE_ROOT / "models"))

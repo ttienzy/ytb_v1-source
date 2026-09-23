@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { API_URL } from '../../shared/constants'
 import type { Preset, Voice } from './types'
+import { PcmPreviewPlayer } from './pcmPreview'
 import './VoicesPage.css'
 
 interface UnifiedVoice {
@@ -51,11 +52,14 @@ export function VoicesPage() {
   const [voices, setVoices] = useState<Voice[]>([])
   const [presets, setPresets] = useState<Preset[]>([])
   const [name, setName] = useState('')
+  const [cloneConsent, setCloneConsent] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState<'success' | 'info' | 'error'>('info')
   const [serviceReady, setServiceReady] = useState(false)
+  const [engineLabel, setEngineLabel] = useState('VieNeu-TTS')
+  const [engineWarning, setEngineWarning] = useState('')
   const [serviceMessage, setServiceMessage] = useState(
     'Đang khởi động Voice Service hoặc tải model lần đầu…'
   )
@@ -72,8 +76,12 @@ export function VoicesPage() {
   const sampleAudioRef = useRef<HTMLAudioElement | null>(null)
   const currentUrlRef = useRef<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const previewPlayerRef = useRef<PcmPreviewPlayer | null>(null)
 
   function stopAudio() {
+    previewPlayerRef.current?.stop()
+    previewPlayerRef.current = null
+    setGeneratingVoiceId(null)
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
@@ -111,8 +119,12 @@ export function VoicesPage() {
                 ? `Voice Service không khởi tạo được: ${health.error}`
                 : 'Voice Service chưa tải xong model.'
             )
+            if (attempt < 180) retryTimer = setTimeout(() => void pollVoiceService(attempt + 1), 2000)
             return
           }
+          setEngineLabel(health.profile === 'nano' ? 'VieNeu Nano · Tiết kiệm tài nguyên'
+            : health.profile === 'turbo-gpu' ? 'VieNeu Turbo · Tăng tốc GPU' : 'VieNeu Turbo · Chất lượng cao')
+          setEngineWarning(health.warning || '')
 
           const [voicesResponse, presetsResponse] = await Promise.all([
             fetch(`${API_URL}/api/voices`),
@@ -165,11 +177,17 @@ export function VoicesPage() {
       setMessageType('error')
       return
     }
+    if (!cloneConsent) {
+      setMessage('Vui lòng xác nhận quyền sử dụng giọng mẫu.')
+      setMessageType('error')
+      return
+    }
     setLoading(true)
     setMessage('')
     const form = new FormData()
     form.append('name', name.trim())
     form.append('ref_audio', file)
+    form.append('consent', String(cloneConsent))
     try {
       const r = await fetch(`${API_URL}/api/voices`, {
         method: 'POST',
@@ -183,6 +201,7 @@ export function VoicesPage() {
       setVoices([v, ...voices])
       setName('')
       setFile(null)
+      setCloneConsent(false)
       setShowCloneForm(false)
       setMessage(`Đã tạo thành công giọng clone "${name.trim()}".`)
       setMessageType('success')
@@ -220,7 +239,7 @@ export function VoicesPage() {
   // Nghe thử giọng (TTS Preview)
   async function togglePreview(id: string) {
     // Nếu đang phát chính giọng này -> Dừng lại
-    if (playingVoiceId === id) {
+    if (playingVoiceId === id || generatingVoiceId === id) {
       stopAudio()
       return
     }
@@ -229,41 +248,23 @@ export function VoicesPage() {
     stopAudio()
     setGeneratingVoiceId(id)
     setMessage('')
+    const player = new PcmPreviewPlayer()
+    previewPlayerRef.current = player
     try {
-      const r = await fetch(
-        `${API_URL}/api/voices/${encodeURIComponent(id)}/preview`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: previewText.trim() || undefined }),
+      await player.play(`${API_URL}/api/voices/${encodeURIComponent(id)}/preview/stream`, previewText.trim(), () => {
+        if (previewPlayerRef.current === player) {
+          setGeneratingVoiceId(null)
+          setPlayingVoiceId(id)
         }
-      )
-      if (!r.ok) {
-        const e = await r.json().catch(() => null)
-        throw new Error(e?.detail || `Lỗi máy chủ (${r.status})`)
-      }
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      currentUrlRef.current = url
-
-      const audio = new Audio(url)
-      audioRef.current = audio
-      setPlayingVoiceId(id)
-
-      audio.onended = () => {
-        stopAudio()
-      }
-      audio.onerror = () => {
-        stopAudio()
-      }
-
-      await audio.play()
+      })
     } catch (error) {
-      stopAudio()
-      setMessage(error instanceof Error ? error.message : 'Tổng hợp giọng đọc thất bại.')
-      setMessageType('error')
+      if (previewPlayerRef.current === player) {
+        setMessage(error instanceof Error ? error.message : 'Tổng hợp giọng đọc thất bại.')
+        setMessageType('error')
+      }
     } finally {
-      setGeneratingVoiceId(null)
+      player.stop()
+      if (previewPlayerRef.current === player) stopAudio()
     }
   }
 
@@ -380,7 +381,7 @@ export function VoicesPage() {
             <div className={`voice-engine-status ${serviceReady ? 'ready' : 'loading'}`}>
               <span className="voice-status-dot" />
               <span>
-                {serviceReady ? 'VieNeu-TTS Sẵn sàng' : 'Đang nạp Model...'}
+                {serviceReady ? engineLabel : 'Đang nạp Model...'}
               </span>
             </div>
 
@@ -417,6 +418,8 @@ export function VoicesPage() {
           </div>
         </div>
       </section>
+
+      {engineWarning && <p className="voice-section-sub">{engineWarning}</p>}
 
       {/* Thông báo trạng thái hệ thống */}
       {serviceMessage && (
@@ -484,13 +487,17 @@ export function VoicesPage() {
               <div className="voice-protips">
                 Khuyến nghị audio <strong>3 đến 8 giây</strong>, giọng đọc rõ ràng, không lẫn nhạc nền để đạt chất lượng tốt nhất.
               </div>
+              <label className="voice-section-sub">
+                <input type="checkbox" checked={cloneConsent} onChange={e => setCloneConsent(e.target.checked)} />
+                {' '}Đây là giọng của tôi hoặc tôi được chủ giọng cho phép sử dụng.
+              </label>
 
               <div>
                 <button
                   type="button"
                   className="voice-btn-primary"
                   onClick={create}
-                  disabled={loading || !serviceReady || !name.trim() || !file}
+                  disabled={loading || !serviceReady || !name.trim() || !file || !cloneConsent}
                   style={{ width: '100%', justifyContent: 'center' }}
                 >
                   {loading ? (
@@ -631,6 +638,13 @@ export function VoicesPage() {
               </button>
             )
           })}
+          {['[cười]', '[thở dài]', '[hắng giọng]'].map(cue => (
+            <button key={cue} type="button" className="voice-chip"
+              title="Biểu cảm thử nghiệm — kết quả phụ thuộc giọng"
+              onClick={() => setPreviewText(text => `${text.trim()} ${cue} `.trimStart())}>
+              {cue}
+            </button>
+          ))}
         </div>
       </section>
 
@@ -730,7 +744,7 @@ export function VoicesPage() {
                       type="button"
                       className={`voice-play-btn ${isPlaying ? 'playing' : ''}`}
                       onClick={() => togglePreview(item.id)}
-                      disabled={isGenerating || !serviceReady}
+                      disabled={!serviceReady}
                       title={isPlaying ? 'Dừng phát' : 'Nghe thử giọng này'}
                     >
                       {isGenerating ? (

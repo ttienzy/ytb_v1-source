@@ -1,6 +1,6 @@
 {
   "name": "creatorflow-ai",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "CreatorFlow AI - AI Video Production & Multi-Channel Studio",
   "author": "ttienzy",
   "repository": {
@@ -16,6 +16,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/features/workflow/__tests__/*.test.ts src/features/workflow/__tests__/*.test.mjs",
+    "test:voices": "node --experimental-strip-types --test src/features/voices/*.test.ts",
     "package": "npm run build && electron-builder"
   },
   "dependencies": {

@@ -6,16 +6,20 @@ readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = { text = "Internal" }
 dependencies = [
-    # VieNeu-TTS v3 Turbo — torch-free core (ONNX Runtime, CPU, int8, 48kHz).
-    # `pip install vieneu` pulls onnxruntime + huggingface_hub + librosa + gradio.
-    "vieneu==3.3.0",
+    # Torch-free CPU runtime. GPU dependencies are opt-in.
+    "vieneu==3.8.1",
     "fastapi==0.141.1",
     "uvicorn[standard]==0.52.4",
     "python-multipart==0.0.32",   # multipart upload (ref audio) cho /internal/voices/{id}
     "pydantic-settings==2.15.0",
+    "py-cpuinfo==9.0.0",
 ]
 
+[project.optional-dependencies]
+cuda = ["vieneu[cuda]==3.8.1", "transformers==4.57.6"]
+
 [dependency-groups]
+test = ["httpx>=0.28,<1"]
 build = [
     "pyinstaller==6.22.3",
 ]
