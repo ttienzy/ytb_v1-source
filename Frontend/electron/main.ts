@@ -426,6 +426,8 @@ ipcMain.handle('check-9router-status', async () => {
 function setupAutoUpdater() {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.disableDifferentialDownload = true
+  autoUpdater.disableWebInstaller = true
 
   autoUpdater.on('checking-for-update', () => {
     publishUpdaterStatus({ status: 'checking', currentVersion: app.getVersion() })

@@ -108,7 +108,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "CreatorFlow AI"
+      "shortcutName": "CreatorFlow AI",
+      "differentialPackage": false
     }
   }
 }

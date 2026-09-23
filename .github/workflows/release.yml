@@ -169,8 +169,11 @@ jobs:
           if (-not (Test-Path (Join-Path 'release' $expectedInstaller))) {
             throw "Update manifest points to missing installer: $expectedInstaller"
           }
-          if (-not (Test-Path (Join-Path 'release' "$expectedInstaller.blockmap"))) {
-            throw "Update manifest installer is missing its blockmap: $expectedInstaller.blockmap"
+          $blockmapFile = Join-Path 'release' "$expectedInstaller.blockmap"
+          if (Test-Path $blockmapFile) {
+            Write-Host "Found blockmap artifact: $expectedInstaller.blockmap"
+          } else {
+            Write-Host "Full installer distribution mode active (differential blockmap skipped for maximum download speed): $expectedInstaller"
           }
           Write-Host "Verified update artifacts: $expectedInstaller"
           $unpackedApp = (Get-ChildItem 'release\win-unpacked\*.exe' | Where-Object { $_.Name -notlike '*Uninstall*' } | Select-Object -First 1).FullName
@@ -213,7 +216,6 @@ jobs:
           files: |
             Frontend/release/*.exe
             Frontend/release/latest.yml
-            Frontend/release/*.blockmap
           generate_release_notes: false
           draft: false
           prerelease: false
