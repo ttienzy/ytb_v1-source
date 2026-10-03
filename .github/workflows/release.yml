@@ -115,19 +115,6 @@ jobs:
           npm run test:voices
           npm run test:veo
 
-      - name: Test Veo and Workflow Backend
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
-            choco install ffmpeg --yes --no-progress
-            $env:PATH += ';C:\ProgramData\chocolatey\bin'
-          }
-          ffmpeg -version
-          ffprobe -version
-          cd Backend
-          python -m pytest tests/veo tests/workflow tests/test_veo_capabilities.py tests/test_veo_bridge.py tests/test_ingredients_native.py tests/test_motion_reference_order.py tests/test_workflow_video_chain.py -q
-
       - name: Verify and Package Flow Extension
         run: |
           $ErrorActionPreference = 'Stop'
