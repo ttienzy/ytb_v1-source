@@ -2543,17 +2543,19 @@
     }
     if (!response) throw new Error("Flow did not return video creation data.");
     const isUuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-    if (response.rpcId === "nprQif") {
-      const records = [];
-      const walk = (node) => {
-        if (!Array.isArray(node)) return;
-        if (node.length >= 4 && isUuid(node[0]) && node[3] === "CAE") records.push(node);
-        node.forEach(walk);
-      };
-      walk(response.payload);
-      const record = records.find((item) => !expected?.project_id || item[1] === expected.project_id);
-      if (!record) throw new Error("Flow response contains no video asset record for the selected project.");
+    const records = [];
+    const walk = (node) => {
+      if (!Array.isArray(node)) return;
+      if (node.length >= 4 && isUuid(node[0]) && (node[3] === "CAE" || node[3] === "CAM")) records.push(node);
+      node.forEach(walk);
+    };
+    walk(response.payload);
+    const record = records.find((item) => !expected?.project_id || item[1] === expected.project_id);
+    if (record) {
       return { mediaId: record[0], sceneId: record[2] || null, projectId: record[1] || null };
+    }
+    if (response.rpcId === "nprQif") {
+      throw new Error("Flow response contains no video asset record for the selected project.");
     }
     const findMediaId = (node) => {
       if (isUuid(node)) return node;
