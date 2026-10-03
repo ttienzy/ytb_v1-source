@@ -180,6 +180,15 @@ def request_flow_recovery(provider_model_id: str = "", project_id: str = "") -> 
         return None
 
 
+def request_extension_reload() -> bool:
+    """Yêu cầu extension tự nạp lại mã mới (chrome.runtime.reload())."""
+    try:
+        _captcha_pending.put_nowait({"reload": True, "created_at": time.time()})
+        return True
+    except Exception:
+        return False
+
+
 def request_create_project(name: str = "") -> str | None:
     """Yêu cầu Extension tự động tạo Project mới trên tab Google Flow."""
     request_id = secrets.token_hex(16)

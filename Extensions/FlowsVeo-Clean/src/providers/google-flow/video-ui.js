@@ -404,6 +404,7 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
     }
 
     // Bước 2: Theo dõi quá trình render video trên Flow đến khi hoàn tất
+    const pollStart = Date.now();
     const renderDeadline = Date.now() + 540_000; // 9 phút timeout
     while (Date.now() < renderDeadline) {
       await sleep(3_500);
@@ -425,6 +426,28 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
           provider_model_id: flowRequest.provider_model_id || 'abra_t2v_6s',
           project_id: flowRequest.project_id,
         };
+      }
+
+      // Fallback: sau 15s nếu thăm dò theo mediaId chưa có kết quả,
+      // thử thăm dò toàn cảnh scene hiện tại (targetMediaId = null).
+      if (Date.now() - pollStart > 15_000) {
+        const fallbackInjected = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: recoverCurrentSceneInPage,
+          args: [flowRequest.provider_model_id || 'abra_t2v_6s', null],
+        }).catch(() => null);
+        const fallbackResult = fallbackInjected?.[0]?.result;
+        if (fallbackResult && fallbackResult.ok && fallbackResult.video_url) {
+          return {
+            ok: true,
+            video_url: fallbackResult.video_url,
+            image_url: fallbackResult.image_url || null,
+            media_id: fallbackResult.media_id || mediaId,
+            provider_model_id: flowRequest.provider_model_id || 'abra_t2v_6s',
+            project_id: flowRequest.project_id,
+          };
+        }
       }
 
       if (pollResult?.terminal_error) {

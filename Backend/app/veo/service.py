@@ -837,22 +837,23 @@ def _process_job(job_id: str) -> None:
             _update_job(job, JobStatus.GENERATING, step_msg)
         flow_timeout = 1080.0 if job.get("input_mode") in ("ingredients", "video_edit") else (780.0 if job.get("input_mode") == "frames" else 630.0)
         flow_envelope = bridge.wait_flow_result(request_id, timeout=flow_timeout)
+
         if not flow_envelope:
+            if _try_recover_completed_scene(job):
+                return
             _update_job(job, JobStatus.ERROR, error="Timeout chờ kết quả Google Flow")
             return
         if flow_envelope.get("error"):
             flow_error = str(flow_envelope["error"])
-            if "no result" in flow_error.lower() and "scene recovery:" not in flow_error.lower():
-                if _try_recover_completed_scene(job):
-                    return
+            if _try_recover_completed_scene(job):
+                return
             _update_job(job, JobStatus.ERROR, error=f"Google Flow: {flow_error}")
             return
         flow_result = flow_envelope.get("result") or {}
         if not flow_result.get("ok") or not flow_result.get("video_url"):
             flow_error = str(flow_result.get("error") or "response không hợp lệ")
-            if "no result" in flow_error.lower() and "scene recovery:" not in flow_error.lower():
-                if _try_recover_completed_scene(job):
-                    return
+            if _try_recover_completed_scene(job):
+                return
             _update_job(
                 job, JobStatus.ERROR,
                 error=f"Google Flow không trả video: {flow_error}",

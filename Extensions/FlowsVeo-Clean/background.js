@@ -2844,6 +2844,7 @@
         releaseUiLock();
         releaseUiLock = null;
       }
+      const pollStart = Date.now();
       const renderDeadline = Date.now() + 54e4;
       while (Date.now() < renderDeadline) {
         await sleep(3500);
@@ -2863,6 +2864,25 @@
             provider_model_id: flowRequest.provider_model_id || "abra_t2v_6s",
             project_id: flowRequest.project_id
           };
+        }
+        if (Date.now() - pollStart > 15e3) {
+          const fallbackInjected = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: recoverCurrentSceneInPage,
+            args: [flowRequest.provider_model_id || "abra_t2v_6s", null]
+          }).catch(() => null);
+          const fallbackResult = fallbackInjected?.[0]?.result;
+          if (fallbackResult && fallbackResult.ok && fallbackResult.video_url) {
+            return {
+              ok: true,
+              video_url: fallbackResult.video_url,
+              image_url: fallbackResult.image_url || null,
+              media_id: fallbackResult.media_id || mediaId,
+              provider_model_id: flowRequest.provider_model_id || "abra_t2v_6s",
+              project_id: flowRequest.project_id
+            };
+          }
         }
         if (pollResult?.terminal_error) {
           return { ok: false, error: `Google Flow từ chối render: ${pollResult.error}` };

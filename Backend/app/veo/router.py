@@ -133,6 +133,14 @@ def recover_current_scene(job_id: str):
     return job
 
 
+@router.post("/extension/reload")
+def reload_extension():
+    """Gửi yêu cầu Extension tự nạp lại mã mới nhất."""
+    from app.veo import bridge
+    ok = bridge.request_extension_reload()
+    return {"ok": ok, "message": "Đã gửi yêu cầu reload Extension" if ok else "Không thể gửi yêu cầu"}
+
+
 @router.delete("/jobs/{job_id}")
 def delete_job(job_id: str):
     """Xóa job khỏi danh sách."""
