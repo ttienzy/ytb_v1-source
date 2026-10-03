@@ -428,9 +428,9 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
         };
       }
 
-      // Fallback: sau 15s nếu thăm dò theo mediaId chưa có kết quả,
+      // Fallback: sau 7s nếu thăm dò theo mediaId chưa có kết quả,
       // thử thăm dò toàn cảnh scene hiện tại (targetMediaId = null).
-      if (Date.now() - pollStart > 15_000) {
+      if (Date.now() - pollStart > 7_000) {
         const fallbackInjected = await chrome.scripting.executeScript({
           target: { tabId },
           world: 'MAIN',

@@ -158,20 +158,41 @@ export async function recoverCurrentSceneInPage(providerModelId = '', targetMedi
     if (projectId) {
       try {
         const sceneData = await callRpcInPage('Zzl0ze', [`projects/${projectId}`, null, null, null, [1]]);
-        // Kênh ưu tiên: Kiểm tra nếu sceneData chứa URL video thành phẩm
-        // A project can already contain many completed clips. Never return an
-        // unrelated clip while recovering a specific in-flight generation.
-        const sceneVideoUrl = mediaIdToQuery ? null : findVideoUrl(sceneData);
-        if (sceneVideoUrl) {
-          try { (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null; } catch { }
-          return {
-            ok: true,
-            video_url: sceneVideoUrl,
-            image_url: findImageUrl(sceneData),
-            media_id: mediaIdToQuery || null,
-            provider_model_id: activeModelId,
-            project_id: projectId,
-          };
+        const rawNodes = sceneData?.[1] || [];
+        let newestMediaId = null;
+        let newestTime = 0;
+        let newestNode = null;
+        for (const node of rawNodes) {
+          try {
+            const info = node?.[3];
+            const timeSec = info?.[1]?.[0] || 0;
+            const mid = info?.[4];
+            if (mid && timeSec > newestTime) {
+              newestTime = timeSec;
+              newestMediaId = mid;
+              newestNode = node;
+            }
+          } catch { }
+        }
+
+        // Kênh ưu tiên: Kiểm tra nếu sceneData chứa URL video thành phẩm.
+        // Chỉ chấp nhận khi không có mediaIdToQuery (lấy clip mới nhất) hoặc
+        // mediaIdToQuery khớp với node mới nhất vừa tạo trong scene.
+        const isTargetNewest = Boolean(newestMediaId && (!mediaIdToQuery || mediaIdToQuery === newestMediaId));
+        if (isTargetNewest || !mediaIdToQuery) {
+          const nodeVideoUrl = newestNode ? findVideoUrl(newestNode) : null;
+          const sceneVideoUrl = nodeVideoUrl || findVideoUrl(sceneData);
+          if (sceneVideoUrl) {
+            try { (typeof window !== 'undefined' ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null; } catch { }
+            return {
+              ok: true,
+              video_url: sceneVideoUrl,
+              image_url: findImageUrl(sceneData),
+              media_id: mediaIdToQuery || newestMediaId,
+              provider_model_id: activeModelId,
+              project_id: projectId,
+            };
+          }
         }
 
         // Duyệt danh sách assets (sceneData[2]) tìm video asset (CAE/CAM)
@@ -194,22 +215,8 @@ export async function recoverCurrentSceneInPage(providerModelId = '', targetMedi
           }
         }
 
-        if (!mediaIdToQuery) {
-          const rawNodes = sceneData?.[1] || [];
-          let newestMediaId = null;
-          let newestTime = 0;
-          for (const node of rawNodes) {
-            try {
-              const info = node?.[3];
-              const timeSec = info?.[1]?.[0] || 0;
-              const mid = info?.[4];
-              if (mid && timeSec > newestTime) {
-                newestTime = timeSec;
-                newestMediaId = mid;
-              }
-            } catch { }
-          }
-          if (newestMediaId) mediaIdToQuery = newestMediaId;
+        if (!mediaIdToQuery && newestMediaId) {
+          mediaIdToQuery = newestMediaId;
         }
       } catch { }
     }

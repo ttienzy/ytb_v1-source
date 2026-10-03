@@ -73,17 +73,20 @@ export function videoUiStep(action, request) {
 
     if (action === 'aspect') {
       const el = radio(aspect);
-      return el?.getAttribute('aria-checked') === 'true' ? null : point(el);
+      if (!el) return null;
+      return el.getAttribute('aria-checked') === 'true' ? null : point(el);
     }
 
     if (action === 'resolution') {
       const el = radio(new RegExp(`^${res}`, 'i'));
-      return el?.getAttribute('aria-checked') === 'true' ? null : point(el);
+      if (!el) return null;
+      return el.getAttribute('aria-checked') === 'true' ? null : point(el);
     }
 
     if (action === 'duration') {
       const el = radio(new RegExp(`^${dur}\\s*(giây|s|sec)`, 'i')) || radio(String(dur));
-      return el?.getAttribute('aria-checked') === 'true' ? null : point(el);
+      if (!el) return null;
+      return el.getAttribute('aria-checked') === 'true' ? null : point(el);
     }
 
     if (action === 'modelMenu') {
@@ -105,7 +108,7 @@ export function videoUiStep(action, request) {
       const aspectRadio = radio(aspect);
       const durRadio = radio(new RegExp(`^${dur}\\s*(giây|s|sec)`, 'i')) || radio(String(dur));
 
-      if (modeRadio?.getAttribute('aria-checked') !== 'true') {
+      if (modeRadio && modeRadio.getAttribute('aria-checked') !== 'true') {
         fail('Chưa chọn được chế độ Video trên Flow.');
       }
       if (aspectRadio && aspectRadio.getAttribute('aria-checked') !== 'true') {

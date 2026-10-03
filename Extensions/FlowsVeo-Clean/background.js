@@ -1990,15 +1990,18 @@
       }
       if (action === "aspect") {
         const el = radio(aspect);
-        return el?.getAttribute("aria-checked") === "true" ? null : point(el);
+        if (!el) return null;
+        return el.getAttribute("aria-checked") === "true" ? null : point(el);
       }
       if (action === "resolution") {
         const el = radio(new RegExp(`^${res}`, "i"));
-        return el?.getAttribute("aria-checked") === "true" ? null : point(el);
+        if (!el) return null;
+        return el.getAttribute("aria-checked") === "true" ? null : point(el);
       }
       if (action === "duration") {
         const el = radio(new RegExp(`^${dur}\\s*(giây|s|sec)`, "i")) || radio(String(dur));
-        return el?.getAttribute("aria-checked") === "true" ? null : point(el);
+        if (!el) return null;
+        return el.getAttribute("aria-checked") === "true" ? null : point(el);
       }
       if (action === "modelMenu") {
         const btn = find('button[aria-haspopup="menu"]', (el) => /^(Chọn nhóm mô hình|Select model family|Select model)$/i.test(el.getAttribute("aria-label") || ""));
@@ -2014,7 +2017,7 @@
         const modeRadio = radio(/video/i);
         const aspectRadio = radio(aspect);
         const durRadio = radio(new RegExp(`^${dur}\\s*(giây|s|sec)`, "i")) || radio(String(dur));
-        if (modeRadio?.getAttribute("aria-checked") !== "true") {
+        if (modeRadio && modeRadio.getAttribute("aria-checked") !== "true") {
           fail("Chưa chọn được chế độ Video trên Flow.");
         }
         if (aspectRadio && aspectRadio.getAttribute("aria-checked") !== "true") {
@@ -2274,20 +2277,41 @@
       if (projectId) {
         try {
           const sceneData = await callRpcInPage("Zzl0ze", [`projects/${projectId}`, null, null, null, [1]]);
-          const sceneVideoUrl = mediaIdToQuery ? null : findVideoUrl(sceneData);
-          if (sceneVideoUrl) {
+          const rawNodes = sceneData?.[1] || [];
+          let newestMediaId = null;
+          let newestTime = 0;
+          let newestNode = null;
+          for (const node of rawNodes) {
             try {
-              (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              const info = node?.[3];
+              const timeSec = info?.[1]?.[0] || 0;
+              const mid = info?.[4];
+              if (mid && timeSec > newestTime) {
+                newestTime = timeSec;
+                newestMediaId = mid;
+                newestNode = node;
+              }
             } catch {
             }
-            return {
-              ok: true,
-              video_url: sceneVideoUrl,
-              image_url: findImageUrl(sceneData),
-              media_id: mediaIdToQuery || null,
-              provider_model_id: activeModelId,
-              project_id: projectId
-            };
+          }
+          const isTargetNewest = Boolean(newestMediaId && (!mediaIdToQuery || mediaIdToQuery === newestMediaId));
+          if (isTargetNewest || !mediaIdToQuery) {
+            const nodeVideoUrl = newestNode ? findVideoUrl(newestNode) : null;
+            const sceneVideoUrl = nodeVideoUrl || findVideoUrl(sceneData);
+            if (sceneVideoUrl) {
+              try {
+                (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              } catch {
+              }
+              return {
+                ok: true,
+                video_url: sceneVideoUrl,
+                image_url: findImageUrl(sceneData),
+                media_id: mediaIdToQuery || newestMediaId,
+                provider_model_id: activeModelId,
+                project_id: projectId
+              };
+            }
           }
           const rawAssets = Array.isArray(sceneData?.[2]) ? sceneData[2] : [];
           for (const ast of rawAssets) {
@@ -2309,23 +2333,8 @@
               }
             }
           }
-          if (!mediaIdToQuery) {
-            const rawNodes = sceneData?.[1] || [];
-            let newestMediaId = null;
-            let newestTime = 0;
-            for (const node of rawNodes) {
-              try {
-                const info = node?.[3];
-                const timeSec = info?.[1]?.[0] || 0;
-                const mid = info?.[4];
-                if (mid && timeSec > newestTime) {
-                  newestTime = timeSec;
-                  newestMediaId = mid;
-                }
-              } catch {
-              }
-            }
-            if (newestMediaId) mediaIdToQuery = newestMediaId;
+          if (!mediaIdToQuery && newestMediaId) {
+            mediaIdToQuery = newestMediaId;
           }
         } catch {
         }
@@ -2865,7 +2874,7 @@
             project_id: flowRequest.project_id
           };
         }
-        if (Date.now() - pollStart > 15e3) {
+        if (Date.now() - pollStart > 7e3) {
           const fallbackInjected = await chrome.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
