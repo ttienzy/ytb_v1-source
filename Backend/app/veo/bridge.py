@@ -180,14 +180,6 @@ def request_flow_recovery(provider_model_id: str = "", project_id: str = "") -> 
         return None
 
 
-def request_extension_reload() -> bool:
-    """Yêu cầu extension tự nạp lại mã mới (chrome.runtime.reload())."""
-    try:
-        _captcha_pending.put_nowait({"reload": True, "created_at": time.time()})
-        return True
-    except Exception:
-        return False
-
 
 def request_create_project(name: str = "") -> str | None:
     """Yêu cầu Extension tự động tạo Project mới trên tab Google Flow."""
@@ -241,14 +233,6 @@ def wait_switch_result(request_id: str, timeout: float = 12.0) -> dict[str, Any]
         time.sleep(0.3)
     return None
 
-
-def request_extension_reload() -> bool:
-    """Yêu cầu Extension reload qua chrome.runtime.reload()."""
-    try:
-        _captcha_pending.put_nowait({"reload": True})
-        return True
-    except Exception:
-        return False
 
 
 def request_generate_image(image_request: dict[str, Any]) -> str | None:
@@ -379,12 +363,13 @@ def request_refresh(reason: str = "user_refresh", clear_cache: bool = True) -> N
         })
 
 
-def request_extension_reload() -> None:
+def request_extension_reload() -> bool:
     """Yêu cầu Extension tự gọi chrome.runtime.reload() qua hàng đợi poll."""
     try:
-        _captcha_pending.put_nowait({"reload": True})
+        _captcha_pending.put_nowait({"reload": True, "created_at": time.time()})
+        return True
     except Exception:
-        pass
+        return False
 
 
 def request_tab_reload(target_project_id: str = "") -> None:
