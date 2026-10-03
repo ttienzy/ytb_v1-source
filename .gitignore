@@ -78,3 +78,11 @@ Backend/_debug_*.png
 
 linux.sh
 samples/
+
+# Local Flow captures, diagnostics and paid live-test artifacts
+*.har.*
+/flow.google*.com
+/Backend/scratch/
+/Backend/uploads/
+/Backend/job_result.txt
+/Backend/test_render_clip.py

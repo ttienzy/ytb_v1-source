@@ -58,6 +58,15 @@ from app.workflow.config import (
 
 logger = logging.getLogger("workflow.service")
 
+from app.workflow.export_media import probe_media, render_audio, require_media_file
+import shutil
+
+
+class GeminiAttachmentError(RuntimeError):
+    """Raised when workflow image attachment validation or upload to Gemini fails."""
+    pass
+
+
 PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "gemini_product_analysis.txt"
 GEMINI_PROMPT_DATA_FILE = DATA_DIR / "gemini_product_analysis.txt"
 
@@ -127,9 +136,14 @@ def reset_system_gemini_prompt() -> str:
 
 def _parse_image_data(img_str: str, index: int = 0) -> tuple[bytes, str, str]:
     """Parse base64 data URL, workflow asset URL hoặc đường dẫn file cục bộ thành (bytes, filename, mime_type)."""
+    if not img_str or not img_str.strip():
+        raise GeminiAttachmentError(f"Image attachment {index + 1} is empty")
+
+    s = img_str.strip()
+
     # 1. Base64 Data URL: data:image/jpeg;base64,....
-    if img_str.startswith("data:image/"):
-        match = re.match(r"data:(image\/[a-zA-Z0-9\-\+\.]+);base64,(.+)", img_str)
+    if s.startswith("data:image/"):
+        match = re.match(r"^data:(image\/[a-zA-Z0-9\-\+\.]+);base64,(.+)$", s)
         if match:
             mime = match.group(1)
             b64_data = match.group(2)
@@ -137,22 +151,30 @@ def _parse_image_data(img_str: str, index: int = 0) -> tuple[bytes, str, str]:
             if ext == "jpeg":
                 ext = "jpg"
             filename = f"product_{index + 1}.{ext}"
-            return base64.b64decode(b64_data), filename, mime
+            try:
+                decoded = base64.b64decode(b64_data, validate=True)
+                if not decoded:
+                    raise GeminiAttachmentError(f"Empty data decoded from attachment {index + 1}")
+                return decoded, filename, mime
+            except Exception as e:
+                raise GeminiAttachmentError(f"Invalid base64 in attachment {index + 1}: {e}") from e
+        raise GeminiAttachmentError(f"Invalid data URL format in attachment {index + 1}")
 
     # 2. Workflow Asset URL: /api/workflow/assets/{asset_id} hoặc http://.../api/workflow/assets/{asset_id}
-    asset_match = re.search(r"/api/workflow/assets/([a-zA-Z0-9_-]+)", img_str)
+    asset_match = re.search(r"/api/workflow/assets/([a-zA-Z0-9_-]+)", s)
     if asset_match:
         asset_id = asset_match.group(1)
         asset_p = get_workflow_asset_path(asset_id)
         if asset_p and asset_p.exists() and asset_p.is_file():
             mime = "image/jpeg" if asset_p.suffix.lower() in [".jpg", ".jpeg"] else "image/png"
             return asset_p.read_bytes(), asset_p.name, mime
+        raise GeminiAttachmentError(f"Asset file not found for ID: {asset_id}")
 
     # 3. File path cục bộ (tuyệt đối hoặc tương đối)
-    p = Path(img_str)
+    p = Path(s)
     if not (p.exists() and p.is_file()):
         for candidate_dir in [DATA_DIR, DATA_DIR / "media" / "veo_images", WORKFLOW_ASSETS_DIR]:
-            test_p = candidate_dir / img_str
+            test_p = candidate_dir / s
             if test_p.exists() and test_p.is_file():
                 p = test_p
                 break
@@ -162,10 +184,12 @@ def _parse_image_data(img_str: str, index: int = 0) -> tuple[bytes, str, str]:
 
     # Fallback nếu là chuỗi base64 thuần
     try:
-        decoded = base64.b64decode(img_str)
+        decoded = base64.b64decode(s, validate=True)
+        if not decoded:
+            raise GeminiAttachmentError(f"Empty base64 data for image {index + 1}")
         return decoded, f"product_{index + 1}.jpg", "image/jpeg"
     except Exception:
-        raise ValueError(f"Không thể nhận diện định dạng ảnh đầu vào: {img_str[:50]}...")
+        raise GeminiAttachmentError(f"Không thể nhận diện hoặc tìm thấy file ảnh đầu vào: {s[:50]}...")
 
 
 def _parse_stream_frames(raw: str) -> list[Any]:
@@ -278,6 +302,8 @@ def execute_gemini_analysis(
                 try:
                     _auto_refresh_cookies()
                     return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_9router=fallback_to_9router)
+                except GeminiAttachmentError:
+                    raise
                 except Exception as refresh_err:
                     logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
             if fallback_to_9router:
@@ -289,17 +315,17 @@ def execute_gemini_analysis(
         # Upload ảnh
         attachments = []
         for i, img_data in enumerate(images):
-            if not img_data:
-                continue
+            img_bytes, filename, mime = _parse_image_data(img_data, i)
             try:
-                img_bytes, filename, mime = _parse_image_data(img_data, i)
                 gcs_path = _upload_file(client, img_bytes, filename, cookies, ua)
-                # Attachment structure cho image: [gcs_path, 1, None, mime]
-                attachments.append(
-                    [[gcs_path, 1, None, mime], filename, None, None, None, None, None, None, [0]]
-                )
             except Exception as e:
-                logger.warning(f"Lỗi khi upload ảnh {i}: {e}")
+                raise GeminiAttachmentError(f"attachment {i + 1} upload failed: {e}") from e
+            if not gcs_path:
+                raise GeminiAttachmentError(f"attachment {i + 1} upload failed")
+            # Attachment structure cho image: [gcs_path, 1, None, mime]
+            attachments.append(
+                [[gcs_path, 1, None, mime], filename, None, None, None, None, None, None, [0]]
+            )
 
         # Dựng f.req
         inner = copy.deepcopy(inner_template)
@@ -337,6 +363,8 @@ def execute_gemini_analysis(
                 try:
                     _auto_refresh_cookies()
                     return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_9router=fallback_to_9router)
+                except GeminiAttachmentError:
+                    raise
                 except Exception as refresh_err:
                     logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
             if fallback_to_9router:
@@ -982,9 +1010,9 @@ def execute_gpt_script_generation(
             f'}}\n\n'
             f"QUY TẮC BẮT BUỘC VỀ NGÔN NGỮ & ĐỘ DÀI:\n"
             f'1. Mảng "scripts" phải có CHÍNH XÁC {target_count} phần tử tương ứng {target_count} clip {clip_duration_seconds} giây.\n'
-            f'2. visual_direction: 100% TIẾNG ANH điện ảnh cho Google Veo. Tuyệt đối không để Veo tự nói lời thoại.\n'
+            f'2. visual_direction: 100% TIẾNG ANH điện ảnh cho Google Veo. Tuyệt đối không để Veo tự nói lời thoại và TUYỆT ĐỐI KHÔNG chứa chữ viết, typography hay watermark trên màn hình (clean cinematic footage, no text on screen).\n'
             f'3. voiceover: 100% TIẾNG VIỆT, đúng tone trong prompt người dùng, chuẩn xác {min_words}-{max_words} từ/phân cảnh.\n'
-            f'4. on_screen_text: Text tiếng Việt ngắn gọn 3-6 từ.'
+            f'4. on_screen_text: Gợi ý text tiếng Việt ngắn gọn (3-6 từ) phục vụ khâu hậu kỳ, không chèn vào visual_direction.'
         )
         filled_prompt = f"{filled_prompt}\n{auto_json_contract}"
 
@@ -1568,11 +1596,9 @@ def sync_voiceover_to_scenes(
                     str(out_synced),
                 ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if res.returncode == 0 and out_synced.exists() and out_synced.stat().st_size > 0:
-                synced_segment_paths.append(out_synced)
-            else:
-                logger.warning(f"[AudioSync] Không thể sync clip {i}, dùng bản audio gốc: {res.stderr}")
-                synced_segment_paths.append(a_path)
+            if res.returncode != 0 or not out_synced.exists() or out_synced.stat().st_size == 0:
+                raise RuntimeError(f"sync failed: {res.stderr}")
+            synced_segment_paths.append(out_synced)
 
         synced_combined = work_dir / "synced_combined_vo.wav"
         synced_combined.unlink(missing_ok=True)
@@ -1582,7 +1608,7 @@ def sync_voiceover_to_scenes(
                 logger.info(f"[AudioSync] Đồng bộ thành công {len(synced_segment_paths)} phân cảnh vào {synced_combined.name}")
                 return synced_combined
         except Exception as err:
-            logger.warning(f"[AudioSync] Lỗi khi ghép chuỗi synced segments: {err}")
+            raise RuntimeError(f"sync failed: {err}") from err
 
     # Fallback nếu chỉ có 1 file audio tổng duy nhất:
     total_vid_dur = sum(max(1.0, ffprobe_duration(p)) for p in scene_video_paths)
@@ -1599,8 +1625,9 @@ def sync_voiceover_to_scenes(
             str(fallback_synced),
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if res.returncode == 0 and fallback_synced.exists():
-            return fallback_synced
+        if res.returncode != 0 or not fallback_synced.exists() or fallback_synced.stat().st_size == 0:
+            raise RuntimeError(f"sync failed: {res.stderr}")
+        return fallback_synced
 
     return voiceover_audio_path
 
@@ -1619,12 +1646,51 @@ def concat_workflow_scenes(
     WORKFLOW_EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     job_id = str(uuid.uuid4())[:8]
 
+    # 1. Xác thực các file audio đầu vào trước khi tiến hành concat video
+    vo_p: Path | None = None
+    if voiceover_audio_path:
+        vo_str = voiceover_audio_path.strip()
+        vo_match = re.search(r"/api/workflow/voiceovers/([^/]+)/([^/?#]+)", vo_str)
+        if vo_match:
+            job_sub, fn = vo_match.groups()
+            cand_vo = VOICEOVER_DIR / job_sub / fn
+            if cand_vo.exists():
+                vo_p = cand_vo
+        if vo_p is None:
+            cand_vo = Path(vo_str)
+            if cand_vo.exists() and cand_vo.is_file():
+                vo_p = cand_vo
+            else:
+                vo_p = Path(vo_str)
+        require_media_file(vo_p, "Voiceover")
+
+    bgm_p: Path | None = None
+    if bgm_path:
+        cand_bgm = Path(bgm_path)
+        if cand_bgm.exists() and cand_bgm.is_file():
+            bgm_p = cand_bgm
+        else:
+            test_bgm = DATA_DIR / "media" / "bgm" / cand_bgm.name
+            if test_bgm.exists() and test_bgm.is_file():
+                bgm_p = test_bgm
+            else:
+                bgm_p = cand_bgm
+        require_media_file(bgm_p, "BGM")
+
+    resolved_bgm_paths: list[Path] = []
+    if bgm_track_ids:
+        from app.db import SessionLocal
+        from app.media.service import resolve_for_polish
+        with SessionLocal() as db:
+            b_paths, _ = resolve_for_polish(db, bgm_track_ids)
+            resolved_bgm_paths.extend(b_paths)
+    elif bgm_p:
+        resolved_bgm_paths.append(bgm_p)
+
     valid_paths: list[Path] = []
     for sp in scene_video_paths:
         p: Path | None = None
 
-        # 1. Hỗ trợ phân giải tự động nếu nhận URL preview dạng:
-        # /api/veo/history/{id}/file, /api/veo/outputs/{file}, /api/veo/stream/{file}, /api/workflow/exports/{file}
         veo_match = re.search(
             r"/api/(?:veo/(?:history/([^/]+)/file|outputs/([^/?#]+)|stream/([^/?#]+))|workflow/exports/([^/?#]+))",
             sp,
@@ -1643,7 +1709,6 @@ def concat_workflow_scenes(
                 except Exception as e:
                     logger.warning(f"Không thể phân giải extracted_id '{extracted_id}' từ URL: {e}")
 
-        # 2. Thử phân giải trực tiếp qua Veo service (nhận ID '00066213-f95' hoặc tên file '00066213-f95.mp4')
         if p is None:
             try:
                 from app.veo import service as veo_service
@@ -1658,7 +1723,6 @@ def concat_workflow_scenes(
             except Exception as e:
                 logger.warning(f"Không thể tra cứu qua veo_service cho '{sp}': {e}")
 
-        # 3. Thử tìm trực tiếp file path trên disk hoặc trong các thư mục media chuẩn
         if p is None:
             cand = Path(sp)
             if cand.exists() and cand.is_file():
@@ -1687,6 +1751,9 @@ def concat_workflow_scenes(
 
         valid_paths.append(p)
 
+    if not valid_paths:
+        raise ValueError("Danh sách phân cảnh rỗng.")
+
     # Chống Path Traversal: Lấy duy nhất tên file cơ bản và lọc bỏ ký tự nguy hiểm
     base_name = Path(output_filename).name if output_filename else f"workflow_final_{job_id}.mp4"
     if not base_name.endswith(".mp4"):
@@ -1694,152 +1761,74 @@ def concat_workflow_scenes(
     safe_name = re.sub(r"[^\w\-\.]", "_", base_name)
     out_file = (WORKFLOW_EXPORTS_DIR / safe_name).resolve()
 
-    # Kiểm tra đường dẫn đích bắt buộc phải nằm trong WORKFLOW_EXPORTS_DIR
     if not str(out_file).startswith(str(WORKFLOW_EXPORTS_DIR.resolve())):
         raise ValueError(f"Tên file export không hợp lệ (nguy cơ path traversal): {output_filename}")
 
     work_dir = WORKFLOW_EXPORTS_DIR / f"temp_{job_id}"
-    out_file.unlink(missing_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
 
-    final_path = concat_segments(valid_paths, out_file, work_dir)
-
-    def _has_audio_stream_local(p: Path) -> bool:
-        try:
-            probe = subprocess.run(
-                ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", str(p)],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=15,
-            )
-            return bool((probe.stdout or "").strip())
-        except Exception:
-            return False
-
-    # 1. Trộn Voiceover đồng bộ theo phân cảnh (loại bỏ hoàn toàn âm thanh gốc Veo)
-    if voiceover_audio_path:
-        vo_p: Path | None = None
-        vo_str = voiceover_audio_path.strip()
-        vo_match = re.search(r"/api/workflow/voiceovers/([^/]+)/([^/?#]+)", vo_str)
-        if vo_match:
-            job_sub, fn = vo_match.groups()
-            cand_vo = VOICEOVER_DIR / job_sub / fn
-            if cand_vo.exists():
-                vo_p = cand_vo
-        if vo_p is None:
-            cand_vo = Path(vo_str)
-            if cand_vo.exists() and cand_vo.is_file():
-                vo_p = cand_vo
-
-        if vo_p and vo_p.exists():
-            mixed_output = WORKFLOW_EXPORTS_DIR / f"mixed_{safe_name}"
-            try:
-                # Đồng bộ thời lượng voiceover cho từng clip (tránh tràn âm sang cảnh khác)
-                synced_vo = sync_voiceover_to_scenes(valid_paths, vo_p, work_dir)
-
-                # Thay thế hoàn toàn âm thanh: chỉ lấy video từ 0:v và audio đồng bộ từ synced_vo (1:a)
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-i", str(final_path),
-                    "-i", str(synced_vo),
-                    "-map", "0:v",
-                    "-map", "1:a",
-                    "-c:v", "copy",
-                    "-c:a", "aac",
-                    "-shortest",
-                    str(mixed_output),
-                ]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-                if res.returncode == 0 and mixed_output.exists():
-                    final_path.unlink(missing_ok=True)
-                    mixed_output.rename(final_path)
-            except Exception as vo_err:
-                logger.warning(f"[Export] Lỗi khi đồng bộ/trộn voiceover: {vo_err}")
-
-    # 2. Trộn BGM (Polish pass) nếu có cấu hình nhạc nền
-    resolved_bgm_paths: list[Path] = []
-    if bgm_track_ids:
-        try:
-            from app.db import SessionLocal
-            from app.media.service import resolve_for_polish
-            with SessionLocal() as db:
-                b_paths, _ = resolve_for_polish(db, bgm_track_ids)
-                resolved_bgm_paths.extend(b_paths)
-        except Exception as e:
-            logger.warning(f"[Export] Lỗi resolve BGM track IDs {bgm_track_ids}: {e}")
-    elif bgm_path:
-        cand_bgm = Path(bgm_path)
-        if cand_bgm.exists() and cand_bgm.is_file():
-            resolved_bgm_paths.append(cand_bgm)
-        else:
-            test_bgm = DATA_DIR / "media" / "bgm" / cand_bgm.name
-            if test_bgm.exists() and test_bgm.is_file():
-                resolved_bgm_paths.append(test_bgm)
-
-    if resolved_bgm_paths:
-        polished_output = WORKFLOW_EXPORTS_DIR / f"polished_{safe_name}"
-        polished_output.unlink(missing_ok=True)
-        try:
-            if _has_audio_stream_local(final_path):
-                from app.recap.ffmpeg import polish_final
-                polish_final(
-                    src=final_path,
-                    out=polished_output,
-                    bgm_paths=resolved_bgm_paths,
-                    volume=bgm_volume,
-                    work_dir=work_dir,
-                )
-            else:
-                # Video không có audio stream -> add trực tiếp BGM stream
-                bgm_input = resolved_bgm_paths[0]
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-i", str(final_path),
-                    "-stream_loop", "-1", "-i", str(bgm_input),
-                    "-filter_complex", f"[1:a]volume={bgm_volume:.3f}[aout]",
-                    "-map", "0:v", "-map", "[aout]",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                    "-shortest",
-                    str(polished_output),
-                ]
-                subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-
-            if polished_output.exists() and polished_output.stat().st_size > 0:
-                final_path.unlink(missing_ok=True)
-                polished_output.rename(final_path)
-        except Exception as bgm_err:
-            logger.warning(f"[Export] Lỗi khi hòa âm BGM (polish_final): {bgm_err}")
-
-    duration = 0.0
     try:
-        duration = ffprobe_duration(final_path)
-    except Exception as e:
-        logger.warning(f"Không đo được duration file hoàn chỉnh: {e}")
+        raw_concat = work_dir / f"concat_{job_id}.mp4"
+        final_video = concat_segments(valid_paths, raw_concat, work_dir / "concat_temp")
 
-    # Ghi nhận vào metadata history
-    now_iso = datetime.now(timezone.utc).isoformat()
-    history = _load_exports_metadata()
-    history[final_path.name] = {
-        "id": job_id,
-        "filename": final_path.name,
-        "duration_sec": duration,
-        "size_bytes": final_path.stat().st_size if final_path.exists() else 0,
-        "created_at": now_iso,
-        "scene_count": len(valid_paths),
-        "aspect_ratio": "9:16",
-        "resolution": "1080p",
-        "title": f"Video {len(valid_paths)} cảnh ({int(duration)}s)",
-    }
-    _save_exports_metadata(history)
+        vo_to_use: Path | None = None
+        if vo_p:
+            vo_to_use = sync_voiceover_to_scenes(valid_paths, vo_p, work_dir / "sync_vo")
 
-    return WorkflowExportResponse(
-        job_id=job_id,
-        final_video_url=f"/api/workflow/exports/{final_path.name}",
-        file_path=str(final_path.resolve()),
-        duration_sec=duration,
-        status="done",
-    )
+        rendered_output = work_dir / f"rendered_{safe_name}"
+        render_audio(
+            final_video,
+            rendered_output,
+            voiceover=vo_to_use,
+            bgm_paths=resolved_bgm_paths,
+            bgm_volume=bgm_volume,
+            mix_original_audio=mix_original_audio,
+            veo_ambient_volume=veo_ambient_volume,
+            work_dir=work_dir,
+        )
+
+        media = probe_media(rendered_output)
+        if media["width"] == 0 or media["height"] == 0:
+            raise RuntimeError(f"Video has invalid dimensions: {media['width']}x{media['height']}")
+
+        duration = media["duration"]
+
+        out_file.unlink(missing_ok=True)
+        shutil.move(str(rendered_output), str(out_file))
+
+        w, h = media["width"], media["height"]
+        if w and h:
+            ratio = w / h
+            aspect_ratio = "16:9" if abs(ratio - 16 / 9) < 0.05 else ("9:16" if abs(ratio - 9 / 16) < 0.05 else ("1:1" if abs(ratio - 1.0) < 0.05 else f"{w}:{h}"))
+        else:
+            aspect_ratio = "9:16"
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        history = _load_exports_metadata()
+        history[out_file.name] = {
+            "id": job_id,
+            "filename": out_file.name,
+            "duration_sec": duration,
+            "size_bytes": out_file.stat().st_size if out_file.exists() else 0,
+            "created_at": now_iso,
+            "scene_count": len(valid_paths),
+            "width": w,
+            "height": h,
+            "aspect_ratio": aspect_ratio,
+            "resolution": f"{w}x{h}",
+            "title": f"Video {len(valid_paths)} cảnh ({int(duration)}s)",
+        }
+        _save_exports_metadata(history)
+
+        return WorkflowExportResponse(
+            job_id=job_id,
+            final_video_url=f"/api/workflow/exports/{out_file.name}",
+            file_path=str(out_file.resolve()),
+            duration_sec=duration,
+            status="done",
+        )
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def extract_character_scene_profiles(
@@ -2182,10 +2171,12 @@ async def generate_voiceover_batch(
         for i, text in enumerate(scripts):
             wav_name = f"vo_{i}.wav"
             if wav_name not in zf.namelist():
-                logger.warning(f"[VO] Không tìm thấy {wav_name} trong zip TTS batch")
-                continue
+                raise RuntimeError(f"Missing voiceover audio file {wav_name} in TTS batch response")
 
             wav_data = zf.read(wav_name)
+            if not wav_data:
+                raise RuntimeError(f"Empty voiceover audio file {wav_name} in TTS batch response")
+
             wav_path = job_dir / wav_name
             wav_path.write_bytes(wav_data)
             wav_paths.append(wav_path)

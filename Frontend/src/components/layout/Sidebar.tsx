@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Menu,
   PanelLeftClose,
@@ -7,8 +7,9 @@ import {
   X,
   Copy,
   Check,
+  ChevronDown,
 } from 'lucide-react'
-import { navigation } from '../../shared/constants'
+import { navGroups } from '../../shared/constants'
 import qrImage from '../../assets/qr-vietqr-sepay.png'
 
 import type { PublisherDailySummary } from '../../features/monitor/types'
@@ -101,7 +102,6 @@ function DonationModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-
 export function Sidebar({
   activePage,
   setActivePage,
@@ -111,17 +111,47 @@ export function Sidebar({
 }: SidebarProps) {
   const [showDonation, setShowDonation] = useState(false)
 
-  // Check if Pippit or YouTube has unposted channels
-  const unpostedPippit = summary?.channels.some(
-    c => (c.platform === 'tiktok' || c.platform === 'facebook') && c.status === 'unposted'
-  )
-  const unpostedYoutube = summary?.channels.some(
-    c => c.platform === 'youtube' && c.status === 'unposted'
-  )
+  // Track dropdown open/closed state for groups
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    navGroups.forEach(g => {
+      initial[g.title] = true
+    })
+    return initial
+  })
+
+  // Automatically keep the group containing activePage open
+  useEffect(() => {
+    const parentGroup = navGroups.find(g =>
+      g.items.some(item => item.label === activePage)
+    )
+    if (parentGroup && !openGroups[parentGroup.title]) {
+      setOpenGroups(prev => ({ ...prev, [parentGroup.title]: true }))
+    }
+  }, [activePage])
+
+  const toggleGroup = (title: string) => {
+    setOpenGroups(prev => ({
+      ...prev,
+      [title]: !prev[title],
+    }))
+  }
+
+  // Count unposted channels per platform
+  const unpostedPippitCount =
+    summary?.channels.filter(
+      c => (c.platform === 'tiktok' || c.platform === 'facebook') && c.status === 'unposted'
+    ).length || 0
+
+  const unpostedYoutubeCount =
+    summary?.channels.filter(
+      c => c.platform === 'youtube' && c.status === 'unposted'
+    ).length || 0
 
   return (
     <>
       <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
+        {/* Brand Header */}
         <div className="brand-row">
           {collapsed ? (
             <button
@@ -150,46 +180,110 @@ export function Sidebar({
           )}
         </div>
 
+        {/* Grouped Navigation List with Dropdowns */}
         <nav className="nav-list">
-          {!collapsed && <span className="nav-label">Menu</span>}
-          {navigation.map(({ label, icon: Icon }) => {
-            const hasUnposted =
-              (label === 'Lên lịch Pippit' && unpostedPippit) ||
-              (label === 'Lên lịch Youtube' && unpostedYoutube)
+          {navGroups.map((group, groupIdx) => {
+            const isCollapsible = group.collapsible !== false
+            const isGroupOpen = collapsed ? true : (openGroups[group.title] ?? true)
+
+            // Check if this group contains unposted alerts
+            const groupUnpostedTotal = group.items.reduce((total, item) => {
+              if (item.label === 'Lên lịch Pippit') return total + unpostedPippitCount
+              if (item.label === 'Lên lịch Youtube') return total + unpostedYoutubeCount
+              return total
+            }, 0)
 
             return (
-              <button
-                type="button"
-                key={label}
-                className={`nav-item ${activePage === label ? 'nav-item-active' : ''}`}
-                onClick={() => setActivePage(label)}
-                style={{ position: 'relative' }}
-                title={collapsed ? label : undefined}
-              >
-                <Icon size={16} style={{ flexShrink: 0 }} />
-                <span className={collapsed ? 'sr-only' : ''}>{label}</span>
-                {hasUnposted && (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      right: collapsed ? 8 : 10,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      backgroundColor: '#e11d48',
-                      boxShadow: activePage === label ? '0 0 0 2px #fff' : '0 0 0 2px #f1f5f9',
-                    }}
-                    title="Có kênh chưa đăng bài hôm nay"
-                  />
+              <div key={group.title || groupIdx} className="nav-group">
+                {!collapsed && (
+                  isCollapsible ? (
+                    <button
+                      type="button"
+                      className="nav-group-header"
+                      onClick={() => toggleGroup(group.title)}
+                      title={isGroupOpen ? `Thu gọn nhóm ${group.title}` : `Mở rộng nhóm ${group.title}`}
+                    >
+                      <span className="nav-group-title">
+                        {group.title}
+                        {!isGroupOpen && groupUnpostedTotal > 0 && (
+                          <span className="sidebar-group-badge-count">{groupUnpostedTotal}</span>
+                        )}
+                      </span>
+                      <ChevronDown
+                        size={13}
+                        className={`nav-group-chevron ${isGroupOpen ? '' : 'closed'}`}
+                      />
+                    </button>
+                  ) : (
+                    <div className="nav-group-header nav-group-header-static">
+                      <span className="nav-group-title">{group.title}</span>
+                    </div>
+                  )
                 )}
-              </button>
+
+                {/* Sub-items list */}
+                {(isGroupOpen || collapsed) && (
+                  <div className="nav-group-items">
+                    {group.items.map(({ label, icon: Icon, badge, badgeVariant }) => {
+                      const unpostedCount =
+                        label === 'Lên lịch Pippit'
+                          ? unpostedPippitCount
+                          : label === 'Lên lịch Youtube'
+                          ? unpostedYoutubeCount
+                          : 0
+                      const hasUnposted = unpostedCount > 0
+                      const isActive = activePage === label
+
+                      return (
+                        <button
+                          type="button"
+                          key={label}
+                          className={`nav-item ${isActive ? 'nav-item-active' : ''}`}
+                          onClick={() => setActivePage(label)}
+                          title={
+                            collapsed
+                              ? `${label}${hasUnposted ? ` (${unpostedCount} kênh chưa đăng)` : ''}`
+                              : undefined
+                          }
+                        >
+                          <div className="nav-icon-wrap">
+                            <Icon size={16} />
+                          </div>
+                          {!collapsed && (
+                            <>
+                              <span className="nav-item-text">{label}</span>
+                              {badge && (
+                                <span className={`sidebar-badge sidebar-badge-${badgeVariant || 'pro'}`}>
+                                  {badge}
+                                </span>
+                              )}
+                              {hasUnposted && (
+                                <span
+                                  className="sidebar-badge-count"
+                                  title={`${unpostedCount} kênh chưa đăng bài hôm nay`}
+                                >
+                                  {unpostedCount}
+                                </span>
+                              )}
+                            </>
+                          )}
+                          {collapsed && hasUnposted && (
+                            <span
+                              className="sidebar-dot-count"
+                              title={`${unpostedCount} kênh chưa đăng bài hôm nay`}
+                            />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             )
           })}
         </nav>
 
-        {/* Donation Footer */}
+        {/* Sidebar Footer with Donation Only (Version/status removed) */}
         <div className="sidebar-footer">
           <button
             type="button"

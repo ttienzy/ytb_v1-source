@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<style>
+  button, [role="radio"] { padding: 12px; margin: 4px; }
+  [contenteditable] { border: 1px solid gray; min-height: 80px; width: 500px; }
+</style>
+<body>
+  <button aria-label="fixture@example.invalid">fixture@example.invalid</button><span>100 credits</span>
+  <button onclick="history.pushState({}, '', '/u/1/project/created-project')">New project</button>
+  <button class="settings-trigger-button" onclick="drawer.hidden = !drawer.hidden">Omni 1.1 Flash</button>
+  <div id="drawer" hidden>
+    <div data-group="mode">
+      <button role="radio" aria-checked="true">Video</button>
+      <button role="radio" aria-checked="false">Image</button>
+    </div>
+    <div data-group="aspect">
+      <button role="radio" aria-checked="true">9:16</button>
+      <button role="radio" aria-checked="false">16:9</button>
+    </div>
+    <button role="radio" aria-checked="true">720p</button>
+    <button role="radio" aria-checked="true">6 sec</button>
+    <button role="radio" aria-checked="true">x1</button>
+    <button aria-haspopup="menu" aria-label="Select model" onclick="models.hidden = !models.hidden">Omni 1.1 Flash</button>
+    <div id="models" hidden>
+      <button role="menuitem" onclick="selectModel(this)">Omni 1.1 Flash</button>
+      <button role="menuitem" onclick="selectModel(this)">Nano Banana Pro</button>
+    </div>
+  </div>
+  <div id="prompt" contenteditable="true"></div>
+  <button aria-label="Generate" onclick="generate(event)">Generate</button>
+  <script>
+    window.WIZ_global_data = { SNlM0e: 'fixture-csrf', FdrFJe: 'fixture-session', cfb2h: 'fixture-build' };
+    window.fixtureSubmissions = [];
+    document.querySelectorAll('[data-group] button').forEach(button => button.onclick = () => {
+      button.parentElement.querySelectorAll('button').forEach(sibling => sibling.setAttribute('aria-checked', String(sibling === button)));
+    });
+    function selectModel(button) {
+      document.querySelector('.settings-trigger-button').textContent = button.textContent;
+      document.querySelector('[aria-label="Select model"]').textContent = button.textContent;
+      models.hidden = true;
+    }
+    async function generate(event) {
+      const text = document.getElementById('prompt').innerText;
+      const isImage = document.querySelector('[data-group="mode"] [aria-checked="true"]').textContent === 'Image';
+      const rpc = isImage ? 'ogiZ0b' : 'YhhmEf';
+      window.fixtureSubmissions.push({ rpc, prompt: text, trusted: event.isTrusted });
+      const item = [];
+      item[3] = 123; item[4] = 3; item[5] = 'GEM_PIX_2';
+      item[7] = [null, null, null, null, null, 'project-test'];
+      item[8] = [[[text]]];
+      const payload = isImage ? [null, [item]] : [[text]];
+      await fetch('/_/AiSandboxAngularFrontend/data/batchexecute?rpcids=' + rpc, {
+        method: 'POST', body: new URLSearchParams({ 'f.req': JSON.stringify([[[rpc, JSON.stringify(payload), null, 'generic']]]) }),
+      });
+    }
+  </script>
+  <script src="https://www.google.com/recaptcha/enterprise.js?render=fixture-site-key"></script>
+</body>
+</html>

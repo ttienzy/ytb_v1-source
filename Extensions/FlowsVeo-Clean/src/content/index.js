@@ -310,6 +310,9 @@
 
   // Tự động mở nhẹ menu avatar để lấy credits nếu trang chưa render
   async function probeAvatarCredits(force = false) {
+    if (Number(document.documentElement.getAttribute('data-flowsveo-motion-until')) > Date.now()) return;
+    if (Number(document.documentElement.getAttribute('data-flowsveo-video-until')) > Date.now()) return;
+    if (Number(document.documentElement.getAttribute('data-flowsveo-image-until')) > Date.now()) return;
     if (isProbing || (!force && lastKnownCredits !== null && lastKnownCredits > 20)) return;
     isProbing = true;
     try {

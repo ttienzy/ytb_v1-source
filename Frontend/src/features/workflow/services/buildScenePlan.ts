@@ -81,23 +81,17 @@ export function getFullScriptContent(s?: SalesScript): string {
   const onScreen = s.onScreenText || (s as any).on_screen_text
 
   // Nếu có visual_direction (tiếng Anh) — dùng làm prompt chính cho Veo
-  if (visual) {
+  if (visual && visual.trim()) {
     // visual_direction đã chứa cinematic direction
     // KHÔNG ghép voiceover vào prompt Veo — voice sẽ được lồng riêng bằng VieNeu-TTS
-    const parts: string[] = [visual]
-    if (onScreen) {
-      parts.push(`On-screen text overlay: "${onScreen}"`)
-    }
-    return parts.join('\n\n')
+    // TUYỆT ĐỐI KHÔNG ghép on_screen_text vào prompt Veo — tránh AI Veo tự vẽ/in chữ lên video
+    return visual.trim()
   }
 
-  // Fallback: ghép các phần như cũ
+  // Fallback: ghép các phần kịch bản khi không có visual_direction (tuyệt đối không đưa onScreen vào prompt Veo)
   const parts: string[] = []
   if (voice) {
     parts.push(`Lời thoại: ${voice}`)
-  }
-  if (onScreen) {
-    parts.push(`Chữ trên màn hình: ${onScreen}`)
   }
   if (parts.length > 0) {
     if (s.cta) parts.push(`CTA: ${s.cta}`)
@@ -218,7 +212,6 @@ export function splitScriptToScenes(params: {
 
     scene3Prompt = [
       script.cta ? `Kêu gọi hành động (CTA): ${script.cta}` : '',
-      scriptOnScreen ? `Chữ trên màn hình: ${scriptOnScreen}` : '',
     ].filter(Boolean).join('\n\n')
   } else {
     const visual = scriptVisual ? `Hình ảnh: ${scriptVisual}\n` : ''

@@ -84,7 +84,7 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
 
   return (
     <div
-      className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
+      className={`wf-node-card wf-node-products ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
       style={{ width: 350 }}
     >
       {isStartNode && (
@@ -144,9 +144,9 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
           <span
             className="wf-node-badge"
             style={{
-              background: imageCount > 0 ? '#ecfdf5' : '#f1f5f9',
-              color: imageCount > 0 ? '#065f46' : '#64748b',
-              border: imageCount > 0 ? '1px solid #d1fae5' : '1px solid #e2e8f0',
+              background: imageCount > 0 ? '#ecfdf5' : '#f0fdfa',
+              color: imageCount > 0 ? '#065f46' : '#0d9488',
+              border: imageCount > 0 ? '1px solid #d1fae5' : '1px solid #99f6e4',
             }}
           >
             {imageCount}/3 Ảnh
@@ -253,14 +253,14 @@ export function ProductAssetsNode({ data, selected }: ProductAssetsNodeProps) {
                         width: 26,
                         height: 26,
                         borderRadius: '50%',
-                        background: '#eff6ff',
+                        background: '#f0fdfa',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         marginBottom: 4,
                       }}
                     >
-                      <Upload size={13} color="#2563eb" />
+                      <Upload size={13} color="#0d9488" />
                     </div>
                     <div className="wf-asset-slot-label">{slotLabels[idx]}</div>
                     <div className="wf-asset-slot-sub">Kéo thả / Chọn</div>

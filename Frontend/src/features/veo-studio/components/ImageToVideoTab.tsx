@@ -17,7 +17,8 @@ import {
 } from 'lucide-react'
 import type { VeoCapabilities, VeoImageItem, VeoJobRequest, VeoProject, VeoJobOut, VideoTask } from '../types'
 import * as api from '../services/veoApi'
-import { ConcurrencySelector } from './ConcurrencySelector'
+import { waitForFrameJob } from '../services/waitForFrameJob'
+import { ingredientPrompt } from '../services/ingredientPrompt'
 import { VariationSelector } from './VariationSelector'
 import { ActiveVideoTasksQueue } from './ActiveVideoTasksQueue'
 
@@ -64,7 +65,6 @@ export function ImageToVideoTab({
   const [profileId, setProfileId] = useState('')
   const [prompt, setPrompt] = useState(initialPrompt || '')
   const [variationCount, setVariationCount] = useState<number>(1)
-  const [concurrency, setConcurrency] = useState<number>(2)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // ─── Frames Mode (Tối đa 2 ảnh: Frame đầu & Frame cuối) ───
@@ -109,7 +109,9 @@ export function ImageToVideoTab({
 
 
   // Lọc profiles theo chế độ đầu vào hiện tại
-  const profiles = (capabilities?.profiles || []).filter((p) => p.input_mode === inputMode)
+  const profiles = (capabilities?.profiles || []).filter((p) => p.input_mode === inputMode
+    && ((p.model_display_name === 'Omni 1.1 Flash' && p.resolution === '720p' && p.num_outputs === 1
+      && (inputMode !== 'frames' || !endFrame || p.duration_seconds >= 6))))
   const selectedProfile = profiles.find((p) => p.id === profileId) || profiles[0]
 
   useEffect(() => {
@@ -242,6 +244,21 @@ export function ImageToVideoTab({
   const applySlotImage = (target: SlotTarget, data: ImageSlotData) => {
     if (target === 'first_frame') {
       setFirstFrame(data)
+      // Tự động phân tích tỉ lệ ảnh đầu để đồng bộ tỉ lệ video (16:9 hoặc 9:16)
+      if (typeof window !== 'undefined' && data.preview) {
+        const probe = new window.Image()
+        probe.onload = () => {
+          if (probe.naturalWidth && probe.naturalHeight) {
+            const detectedAspect = probe.naturalHeight > probe.naturalWidth ? '9:16' : '16:9'
+            selectProfile(
+              (p) =>
+                p.model_display_name === (selectedProfile?.model_display_name || 'Omni 1.1 Flash') &&
+                p.aspect_ratio === detectedAspect,
+            )
+          }
+        }
+        probe.src = data.preview
+      }
     } else if (target === 'end_frame') {
       if (!firstFrame) {
         alert('⚠️ Vui lòng chọn Khung hình bắt đầu (Frame 1) trước khi chọn Khung hình kết thúc.')
@@ -362,24 +379,34 @@ export function ImageToVideoTab({
       if (ingredientSlots.scene) ingredientPaths.push(ingredientSlots.scene.path)
       if (ingredientSlots.style) ingredientPaths.push(ingredientSlots.style.path)
       if (ingredientPaths.length > 0) {
-        imagePath = ingredientPaths[0] // fallback
         baseModeLabel = `Thành phần (${ingredientPaths.length} ảnh)`
       } else {
-        effectiveInputMode = 'text_to_video'
-        baseModeLabel = 'Thành phần (chỉ Prompt)'
+        alert('Vui lòng chọn từ 1 đến 3 ảnh thành phần.')
+        return
       }
     }
 
+    let submittedPrompt = prompt.trim()
+    if (inputMode === 'ingredients') {
+      try {
+        submittedPrompt = ingredientPrompt(prompt, {
+          subject: !!ingredientSlots.subject, scene: !!ingredientSlots.scene, style: !!ingredientSlots.style,
+        })
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'Kiểm tra ảnh tham chiếu trong prompt.')
+        return
+      }
+    }
     setIsSubmitting(true)
     const totalVariants = variationCount
 
     const variantTasks: { index: number; taskId: string }[] = []
     for (let i = 1; i <= totalVariants; i++) {
-      const taskId = `img2vid-${Date.now()}-${i}`
+      const taskId = `img2vid-${crypto.randomUUID()}-${i}`
       const newTask: VideoTask = {
         id: taskId,
         type: 'video',
-        prompt: prompt.trim(),
+        prompt: submittedPrompt,
         modelName: selectedProfile.model_display_name,
         aspectRatio: selectedProfile.aspect_ratio,
         duration: selectedProfile.duration_seconds,
@@ -395,7 +422,8 @@ export function ImageToVideoTab({
     }
 
     const queue = [...variantTasks]
-    const effectiveConcurrency = Math.min(concurrency, totalVariants)
+    const isNativeUiMode = effectiveInputMode === 'frames' || effectiveInputMode === 'ingredients'
+    const effectiveConcurrency = 1
 
     const worker = async () => {
       while (queue.length > 0) {
@@ -411,7 +439,8 @@ export function ImageToVideoTab({
           const seed = Math.floor(Math.random() * 2147483647)
           const job = await onSubmit({
             project_id: activeProject.id,
-            prompt: prompt.trim(),
+            idempotency_key: item.taskId,
+            prompt: submittedPrompt,
             model_display_name: selectedProfile.model_display_name,
             input_mode: effectiveInputMode,
             aspect_ratio: selectedProfile.aspect_ratio,
@@ -427,12 +456,28 @@ export function ImageToVideoTab({
           if (job?.job_id) {
             handleUpdateTask(item.taskId, {
               jobId: job.job_id,
-              status: 'captcha',
+              status: isNativeUiMode ? 'generating' : 'captcha',
               statusText: job.current_step || (totalVariants > 1 ? `Biến thể ${item.index} đang render...` : 'Đang xử lý reCAPTCHA...'),
               jobOut: job,
             })
-            if (!onRegisterTask) {
+            if (!onRegisterTask && !isNativeUiMode) {
               pollJob(item.taskId, job.job_id)
+            }
+            if (isNativeUiMode) {
+              const result = await waitForFrameJob(job.job_id, {
+                getJob: api.getJobStatus,
+                timeoutMs: effectiveInputMode === 'ingredients' ? 1110_000 : 810_000,
+                onProgress: (result) => handleUpdateTask(item.taskId, {
+                  status: result.status as VideoTask['status'],
+                  statusText: result.current_step || 'Đang tạo video trên Flow...',
+                  jobOut: result,
+                }),
+                onConnectionLost: () => handleUpdateTask(item.taskId, {
+                  statusText: 'Tạm mất kết nối; đang kiểm tra lại tác vụ hiện tại...',
+                }),
+              })
+              handleUpdateTask(item.taskId, { status: 'completed', statusText: 'Video đã tải về máy', jobOut: result })
+              onVideoDone?.()
             }
           } else {
             handleUpdateTask(item.taskId, {
@@ -440,6 +485,7 @@ export function ImageToVideoTab({
               statusText: 'Không nhận được job_id từ server',
               error: 'Flow bridge không phản hồi',
             })
+            if (isNativeUiMode) throw new Error('Không nhận được job_id; kiểm tra tác vụ trước khi tạo lại.')
           }
         } catch (err: any) {
           handleUpdateTask(item.taskId, {
@@ -447,6 +493,11 @@ export function ImageToVideoTab({
             statusText: 'Lỗi gửi biến thể',
             error: err.message || 'Lỗi kết nối',
           })
+          if (effectiveInputMode === 'frames') {
+            for (const pending of queue.splice(0)) {
+              handleUpdateTask(pending.taskId, { status: 'error', statusText: 'Chưa gửi', error: 'Dừng các biến thể còn lại vì lượt trước chưa hoàn tất.' })
+            }
+          }
         }
 
         // Delay an toàn 1.5s giữa các lần xin token reCAPTCHA
@@ -500,6 +551,11 @@ export function ImageToVideoTab({
         onChange={(e) => handleFileUpload(e.target.files?.[0])}
       />
 
+      {inputMode === 'frames' && (
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          Ảnh đầu–cuối được đưa lên tab Flow để tạo video. Giữ Chrome mở và không sửa prompt trên Flow trong lúc chạy. Các biến thể được tạo lần lượt.
+        </p>
+      )}
       {/* Mode toggle: frames vs ingredients */}
       <div className="veo-ref-mode-header">
         <label className="veo-label" style={{ marginBottom: 0 }}>Chế độ đầu vào</label>
@@ -672,6 +728,27 @@ export function ImageToVideoTab({
               )}
             </div>
           </div>
+
+          {/* Status banner for frames mode */}
+          {firstFrame && (
+            <div className={`veo-frames-status-banner ${endFrame ? 'interpolation' : 'start-only'}`}>
+              {endFrame ? (
+                <>
+                  <Sparkles size={14} className="veo-banner-icon" />
+                  <span>
+                    <strong>Nội suy 2 khung hình (Start → End):</strong> Video dài {selectedProfile?.duration_seconds || 6}s sẽ chuyển tiếp liền mạch từ Frame 1 sang Frame 2 với Omni 1.1 Flash.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Zap size={14} className="veo-banner-icon" />
+                  <span>
+                    <strong>Chuyển động từ Frame đầu:</strong> Video sẽ tự động sinh chuyển động tiếp nối từ Frame 1 theo mô tả prompt.
+                  </span>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -685,7 +762,7 @@ export function ImageToVideoTab({
               <span className="veo-ingr-badge">{ingredientCount}/3</span>
             </div>
             <span className="veo-ingr-help">
-              Google Flow kết hợp tối đa 3 thành phần. Mỗi ô đều là tùy chọn: nạp từ 1 đến 3 ảnh bất kỳ (không bắt buộc phải đủ cả 3).
+              Chọn từ 1 đến 3 ảnh. Các nhãn giúp sắp xếp tham chiếu; hãy mô tả rõ vai trò và cách kết hợp từng ảnh trong prompt.
             </span>
           </div>
 
@@ -881,6 +958,66 @@ export function ImageToVideoTab({
         <label className="veo-label" style={{ marginBottom: 0 }}>
           {inputMode === 'frames' ? 'Mô tả chuyển động (Motion Prompt)' : 'Mô tả cảnh với thành phần'}
         </label>
+        {inputMode === 'frames' && (
+          <div className="veo-prompt-shortcuts">
+            <span className="veo-shortcut-label">Gợi ý prompt:</span>
+            {endFrame ? (
+              <>
+                <button
+                  type="button"
+                  className="veo-shortcut-btn"
+                  onClick={() =>
+                    setPrompt(
+                      'Bắt đầu chính xác từ Frame 1, camera lướt tới xuyên qua không gian và kết thúc khớp chuẩn với bố cục Frame 2. Chuyển cảnh mượt mà, ánh sáng tự nhiên.',
+                    )
+                  }
+                  title="Prompt chuyển cảnh mượt mà giữa 2 khung hình"
+                >
+                  ✨ Start → End
+                </button>
+                <button
+                  type="button"
+                  className="veo-shortcut-btn"
+                  onClick={() =>
+                    setPrompt(
+                      'Camera xoay góc chậm từ Frame 1 biến đổi dần sang Frame 2, giữ nguyên nhận diện nhân vật và chi tiết bối cảnh.',
+                    )
+                  }
+                  title="Prompt xoay góc camera biến đổi"
+                >
+                  🔄 Xoay góc biến đổi
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="veo-shortcut-btn"
+                  onClick={() =>
+                    setPrompt(
+                      'Camera từ từ phóng to (zoom in) vào chủ thể, chuyển động tự nhiên với ánh sáng điện ảnh mượt mà.',
+                    )
+                  }
+                  title="Prompt phóng to chủ thể từ frame đầu"
+                >
+                  🔍 Zoom in
+                </button>
+                <button
+                  type="button"
+                  className="veo-shortcut-btn"
+                  onClick={() =>
+                    setPrompt(
+                      'Góc quay điện ảnh tracking shot lướt ngang mượt mà, gió thổi làm lay động chi tiết, ánh sáng ban mai lấp lánh.',
+                    )
+                  }
+                  title="Prompt góc quay tracking shot"
+                >
+                  🎥 Tracking shot
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {inputMode === 'ingredients' && (
           <div className="veo-prompt-shortcuts">
             <span className="veo-shortcut-label">Chèn nhanh:</span>
@@ -943,7 +1080,7 @@ export function ImageToVideoTab({
             {modelNames.map((modelName) => {
               const repProfile =
                 profiles.find(
-                  (p) => p.model_display_name === modelName && p.resolution === '720p',
+                  (p) => p.model_display_name === modelName && p.resolution === '720p' && p.num_outputs === 1,
                 ) || profiles.find((p) => p.model_display_name === modelName)
               const cost = repProfile?.credit_cost != null ? `${repProfile.credit_cost} credits` : '—'
               return (
@@ -1034,13 +1171,7 @@ export function ImageToVideoTab({
               onChange={setVariationCount}
               disabled={isSubmitting}
             />
-            {variationCount > 1 && (
-              <ConcurrencySelector
-                concurrency={concurrency}
-                onChange={setConcurrency}
-                disabled={isSubmitting}
-              />
-            )}
+
           </div>
 
           {/* Status bar */}
@@ -1062,7 +1193,7 @@ export function ImageToVideoTab({
           !activeProject ||
           !selectedProfile ||
           isSubmitting ||
-          (inputMode === 'frames' && !firstFrame)
+          (inputMode === 'frames' ? !firstFrame : ingredientCount === 0)
         }
       >
         <Sparkles size={16} />

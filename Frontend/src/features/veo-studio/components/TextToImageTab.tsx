@@ -100,6 +100,43 @@ function RatioIcon({ ratio }: { ratio: ImageAspectRatio }) {
   }
 }
 
+export function parseBatchPrompts(rawText: string): string[] {
+  const lines = rawText.split('\n')
+  const prompts: string[] = []
+  let current = ''
+
+  // Match patterns like: "1. Prompt", "1) Prompt", "[1] Prompt", "Cảnh 1: Prompt", "Scene 1: ...", "- Prompt", "* Prompt", "• Prompt"
+  const itemHeaderRegex = /^(\d+[\.\)]|\[\d+\]|(?:cảnh|scene)\s*\d+[:.]?|[-*•])\s*(.+)/i
+  const hasAnyHeader = lines.some((l) => itemHeaderRegex.test(l.trim()))
+
+  if (hasAnyHeader) {
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (!line) continue
+      const match = line.match(itemHeaderRegex)
+      if (match) {
+        if (current.trim()) prompts.push(current.trim())
+        current = match[2]
+      } else {
+        if (current) {
+          current += ' ' + line
+        } else {
+          current = line
+        }
+      }
+    }
+    if (current.trim()) prompts.push(current.trim())
+  } else {
+    // If no numbered/bullet headers, treat each non-empty line as an independent prompt
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (line) prompts.push(line)
+    }
+  }
+
+  return prompts
+}
+
 export function TextToImageTab({
   activeProject,
   onSendToVideo,
@@ -119,12 +156,22 @@ export function TextToImageTab({
   const [mode, setMode] = useState<'single' | 'batch'>('single')
   const [prompt, setPrompt] = useState('')
   const [batchText, setBatchText] = useState('')
+  const [customSeed, setCustomSeed] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+
+  const handleReusePrompt = (text: string) => {
+    setPrompt(text)
+    setMode('single')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setSuccessMessage('Đã nạp prompt lên ô nhập.')
+    setTimeout(() => setSuccessMessage(''), 2500)
+  }
 
   // Active background generation tasks (Preserved across tab switches)
   const [localTasks, setLocalTasks] = useState<StudioTask[]>([])
   const tasksToDisplay = studioTasks || localTasks
+  const imageGenerationActive = tasksToDisplay.some((task) => task.type === 'image' && task.status === 'generating')
 
   const handleRegisterTask = (task: StudioTask) => {
     if (onRegisterTask) {
@@ -209,6 +256,7 @@ export function TextToImageTab({
 
   // Handle single generation (Non-blocking async task)
   const handleGenerateSingle = () => {
+    if (imageGenerationActive) return
     const text = prompt.trim()
     if (!text) {
       setErrorMessage('Vui lòng nhập mô tả hình ảnh (prompt)')
@@ -223,7 +271,7 @@ export function TextToImageTab({
     const taskModelName = currentModel.name
     const taskRatio = aspectRatio
     const taskModelKey = selectedModelKey
-    const baseSeed = Math.floor(Math.random() * 1000000000)
+    const parsedSeed = customSeed.trim() ? parseInt(customSeed.trim(), 10) : undefined
 
     const newTask: ImageTask = {
       id: taskId,
@@ -234,66 +282,49 @@ export function TextToImageTab({
       total,
       completedCount: 0,
       status: 'generating',
-      statusText: total > 1 ? `Đang tạo biến thể 1/${total}...` : 'Đang gửi yêu cầu sinh ảnh qua Google Flow...',
+      statusText: total > 1
+        ? `Đang tạo ${total} biến thể đồng thời trên Google Flow...`
+        : 'Đang gửi yêu cầu sinh ảnh qua Google Flow...',
       createdAt: Date.now(),
     }
 
     // Đẩy task vào hàng đợi
     handleRegisterTask(newTask)
 
-    // Chạy ngầm hoàn toàn - KHÔNG disable textarea hay nút bấm
     ;(async () => {
-      let successCount = 0
-      const errors: string[] = []
-      const allGeneratedImages: VeoImageItem[] = []
-
-      for (let i = 0; i < total; i++) {
-        if (i > 0) {
-          handleUpdateTask(taskId, {
-            statusText: `Đang tạo biến thể ${i + 1}/${total}...`,
-          })
-        }
-
-        const req: VeoImageGenerateRequest = {
-          prompt: text,
-          model_key: taskModelKey,
-          model_display_name: taskModelName,
-          aspect_ratio: taskRatio,
-          count: 1,
-          seed: baseSeed + i,
-          project_id: activeProject?.id,
-        }
-
-        try {
-          const res = await api.generateImages(req)
-          if (res.ok && res.images.length > 0) {
-            successCount += res.images.length
-            allGeneratedImages.push(...res.images)
-            setImages((prev) => [...res.images, ...prev])
-            handleUpdateTask(taskId, { completedCount: successCount, imageItems: allGeneratedImages })
-          } else if (res.error) {
-            errors.push(`Biến thể #${i + 1}: ${res.error}`)
-          }
-        } catch (itemErr: any) {
-          errors.push(`Biến thể #${i + 1}: ${itemErr.message || 'Lỗi kết nối'}`)
-        }
+      const req: VeoImageGenerateRequest = {
+        prompt: text,
+        model_key: taskModelKey,
+        model_display_name: taskModelName,
+        aspect_ratio: taskRatio,
+        count: total,
+        seed: parsedSeed != null && !isNaN(parsedSeed) ? parsedSeed : undefined,
+        project_id: activeProject?.id,
       }
 
-      if (successCount > 0) {
-        handleUpdateTask(taskId, {
-          status: 'completed',
-          completedCount: successCount,
-          statusText: `Đã tạo xong ${successCount}/${total} ảnh thành công!`,
-          imageItems: allGeneratedImages,
-        })
-        setTimeout(() => {
-          handleRemoveTask(taskId)
-        }, 8000)
-      } else {
+      try {
+        const res = await api.generateImages(req)
+        if (res.ok && res.images.length > 0) {
+          setImages((prev) => [...res.images, ...prev])
+          handleUpdateTask(taskId, {
+            status: 'completed',
+            completedCount: res.images.length,
+            statusText: `Đã tạo xong ${res.images.length}/${total} ảnh thành công!`,
+            imageItems: res.images,
+          })
+          setTimeout(() => handleRemoveTask(taskId), 8000)
+        } else {
+          handleUpdateTask(taskId, {
+            status: 'error',
+            statusText: 'Tạo ảnh thất bại',
+            error: res.error || 'Không nhận được ảnh từ Google Flow',
+          })
+        }
+      } catch (itemErr: any) {
         handleUpdateTask(taskId, {
           status: 'error',
           statusText: 'Tạo ảnh thất bại',
-          error: errors.join('; ') || 'Không nhận được ảnh từ Google Flow',
+          error: itemErr.message || 'Lỗi kết nối tới Backend',
         })
       }
     })()
@@ -301,34 +332,16 @@ export function TextToImageTab({
 
   // Handle batch generation (Non-blocking async task)
   const handleGenerateBatch = () => {
+    if (imageGenerationActive) return
     if (!batchText.trim()) {
-      setErrorMessage('Vui lòng nhập danh sách kịch bản ảnh theo số thứ tự (1., 2., ...)')
+      setErrorMessage('Vui lòng nhập danh sách kịch bản ảnh (mỗi cảnh một dòng hoặc đánh số 1., 2., ...)')
       return
     }
 
-    const lines = batchText.split('\n')
-    const prompts: string[] = []
-    let current = ''
-
-    for (const rawLine of lines) {
-      const line = rawLine.trim()
-      if (!line) continue
-      const match = line.match(/^(\d+)[\.\)]\s*(.+)/)
-      if (match) {
-        if (current) prompts.push(current)
-        current = match[2]
-      } else {
-        if (current) {
-          current += ' ' + line
-        } else {
-          current = line
-        }
-      }
-    }
-    if (current) prompts.push(current)
+    const prompts = parseBatchPrompts(batchText)
 
     if (prompts.length === 0) {
-      setErrorMessage('Không nhận diện được prompt hợp lệ. Hãy bắt đầu mỗi cảnh bằng số thứ tự như "1. ", "2. "')
+      setErrorMessage('Không nhận diện được cảnh hợp lệ trong kịch bản. Hãy nhập ít nhất 1 cảnh.')
       return
     }
 
@@ -337,66 +350,86 @@ export function TextToImageTab({
 
     const taskId = `batch-${Date.now()}`
     const totalPrompts = prompts.length
+    const totalImages = totalPrompts * variationCount
     const taskModelName = currentModel.name
     const taskRatio = aspectRatio
     const taskModelKey = selectedModelKey
+    const parsedSeed = customSeed.trim() ? parseInt(customSeed.trim(), 10) : undefined
 
     const newTask: ImageTask = {
       id: taskId,
       type: 'image',
-      prompt: `[Kịch bản hàng loạt] ${totalPrompts} cảnh ảnh`,
+      prompt: `[Kịch bản hàng loạt] ${totalPrompts} cảnh ảnh (${totalImages} ảnh)`,
       modelName: taskModelName,
       aspectRatio: taskRatio,
-      total: totalPrompts,
+      total: totalImages,
       completedCount: 0,
       status: 'generating',
-      statusText: `Đang xử lý cảnh 1/${totalPrompts}...`,
+      statusText: `Đang chuẩn bị cảnh 1/${totalPrompts}...`,
       createdAt: Date.now(),
     }
 
     handleRegisterTask(newTask)
 
     ;(async () => {
-      let successCount = 0
+      let completedImages = 0
+      const batchErrors: string[] = []
       const allBatchImages: VeoImageItem[] = []
-      for (let i = 0; i < prompts.length; i++) {
+
+      for (let p = 0; p < prompts.length; p++) {
+        if (p > 0) {
+          handleUpdateTask(taskId, {
+            statusText: `Nghỉ ngắn chuẩn bị cảnh ${p + 1}/${totalPrompts}...`,
+          })
+          await new Promise((resolve) => setTimeout(resolve, 1500))
+        }
+
         handleUpdateTask(taskId, {
-          statusText: `Đang xử lý cảnh ${i + 1}/${totalPrompts}: "${prompts[i].slice(0, 35)}..."`,
+          statusText: `Đang xử lý cảnh ${p + 1}/${totalPrompts}: "${prompts[p].slice(0, 30)}..."`,
         })
+
         const req: VeoImageGenerateRequest = {
-          prompt: prompts[i],
+          prompt: prompts[p],
           model_key: taskModelKey,
           model_display_name: taskModelName,
           aspect_ratio: taskRatio,
           count: variationCount,
+          seed: parsedSeed != null && !isNaN(parsedSeed) ? parsedSeed + p * 10 : undefined,
           project_id: activeProject?.id,
         }
 
         try {
           const res = await api.generateImages(req)
           if (res.ok && res.images.length > 0) {
-            successCount += res.images.length
+            completedImages += res.images.length
             allBatchImages.push(...res.images)
             setImages((prev) => [...res.images, ...prev])
-            handleUpdateTask(taskId, { completedCount: i + 1, imageItems: allBatchImages })
+            handleUpdateTask(taskId, { completedCount: completedImages, imageItems: allBatchImages })
           }
-        } catch {
-          // ignore single item error in batch
+          if (res.error || !res.images.length) {
+            batchErrors.push(`Cảnh ${p + 1}: ${res.error || 'Flow không trả về ảnh'}`)
+            if (/PUBLIC_ERROR_UNUSUAL_ACTIVITY|FLOW_UI:|Timeout/.test(res.error || '')) break
+          }
+        } catch (error) {
+          batchErrors.push(`Cảnh ${p + 1}: ${error instanceof Error ? error.message : String(error)}`)
+          break
         }
       }
 
-      if (successCount > 0) {
+      if (completedImages > 0) {
         handleUpdateTask(taskId, {
           status: 'completed',
-          statusText: `Đã hoàn thành ${successCount} ảnh cho kịch bản hàng loạt!`,
+          completedCount: completedImages,
+          statusText: `Đã hoàn thành ${completedImages}/${totalImages} ảnh${batchErrors.length ? `; ${batchErrors.length} cảnh bị lỗi` : ' cho kịch bản hàng loạt!'}`,
+          error: batchErrors.length ? batchErrors.join('\n') : undefined,
           imageItems: allBatchImages,
         })
-        setTimeout(() => handleRemoveTask(taskId), 8000)
+        if (!batchErrors.length) setTimeout(() => handleRemoveTask(taskId), 8000)
       } else {
         handleUpdateTask(taskId, {
           status: 'error',
           statusText: 'Batch thất bại',
-          error: 'Không tạo được ảnh nào trong kịch bản',
+          error: batchErrors.join('\n') || 'Không tạo được ảnh nào trong kịch bản',
         })
       }
     })()
@@ -493,21 +526,62 @@ export function TextToImageTab({
 
         <div className="veo-ribbon-divider" />
 
-        {/* Output Count (1 to 4) */}
+        {/* Output Count (1, 2, 4 - native Flow support) */}
         <div className="veo-ribbon-group">
           <span className="veo-ribbon-label">BIẾN THỂ</span>
           <div className="veo-pill-group">
-            {[1, 2, 3, 4].map((cnt) => (
+            {[1, 2, 4].map((cnt) => (
               <button
                 key={cnt}
                 type="button"
                 className={`veo-pill-btn ${variationCount === cnt ? 'active' : ''}`}
                 onClick={() => setVariationCount(cnt)}
-                title={`Tạo đồng thời ${cnt} biến thể song song`}
+                title={`Tạo đồng thời ${cnt} biến thể trên Google Flow`}
               >
                 <span>{cnt}</span>
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="veo-ribbon-divider" />
+
+        {/* Custom Seed (Optional) */}
+        <div className="veo-ribbon-group">
+          <span className="veo-ribbon-label">SEED (TÙY CHỌN)</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="number"
+              className="veo-pill-btn"
+              placeholder="Ngẫu nhiên"
+              value={customSeed}
+              onChange={(e) => setCustomSeed(e.target.value)}
+              style={{
+                width: 90,
+                height: 28,
+                fontSize: 12,
+                textAlign: 'center',
+                padding: '0 4px',
+              }}
+              title="Nhập số Seed cố định hoặc để trống để tạo ngẫu nhiên"
+            />
+            {customSeed && (
+              <button
+                type="button"
+                onClick={() => setCustomSeed('')}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  color: 'var(--text-secondary)',
+                  padding: 2,
+                }}
+                title="Xóa seed (dùng ngẫu nhiên)"
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -544,6 +618,9 @@ export function TextToImageTab({
           </div>
         </div>
 
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-secondary)' }}>
+          Giữ Chrome mở và chờ tab Flow xử lý. Không sửa prompt hoặc bấm tạo thêm trên Flow trong lúc app đang tạo ảnh.
+        </p>
         {mode === 'single' ? (
           <div className="veo-image-input-wrap">
             <textarea
@@ -558,15 +635,15 @@ export function TextToImageTab({
                 <span className={`veo-engine-dot ${tasksToDisplay.some((t) => t.status === 'generating') ? 'busy' : 'online'}`} />
                 <span className="veo-engine-label">
                   {tasksToDisplay.some((t) => t.status === 'generating')
-                    ? `Đang chạy ${tasksToDisplay.filter((t) => t.status === 'generating').length} tác vụ tạo ảnh ngầm...`
-                    : 'Google Flow Image Engine • Sẵn sàng'}
+                    ? 'Đang tạo ảnh trên tab Flow…'
+                    : 'Tạo ảnh qua giao diện Google Flow'}
                 </span>
               </div>
               <button
                 type="button"
                 className="veo-btn-generate"
                 onClick={handleGenerateSingle}
-                disabled={!prompt.trim()}
+                disabled={!prompt.trim() || imageGenerationActive}
               >
                 <Sparkles size={14} />
                 <span>Tạo {variationCount} Biến Thể ({currentModel.name})</span>
@@ -583,12 +660,12 @@ export function TextToImageTab({
               rows={5}
             />
             <div className="veo-image-action-bar">
-              <span className="veo-helper-hint">Mỗi cảnh bắt đầu bằng số thứ tự (ví dụ: 1., 2., 3...)</span>
+              <span className="veo-helper-hint">Mỗi cảnh một dòng (đánh số 1., 2. hoặc gạch đầu dòng - )</span>
               <button
                 type="button"
                 className="veo-btn-generate"
                 onClick={handleGenerateBatch}
-                disabled={!batchText.trim()}
+                disabled={!batchText.trim() || imageGenerationActive}
               >
                 <Layers size={14} />
                 <span>Chạy Kịch Bản Hàng Loạt</span>
@@ -806,6 +883,15 @@ export function TextToImageTab({
                           <span>Chép prompt</span>
                         </>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      className="veo-card-action-btn"
+                      onClick={() => handleReusePrompt(item.prompt)}
+                      title="Nạp prompt này lên ô nhập"
+                    >
+                      <Sparkles size={12} />
+                      <span>Dùng lại</span>
                     </button>
                     {onSendToVideo && (
                       <button

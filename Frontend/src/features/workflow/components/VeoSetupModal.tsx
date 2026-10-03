@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   X,
   Clapperboard,
@@ -164,6 +165,25 @@ export function VeoSetupModal({
   const [newProjectName, setNewProjectName] = useState('')
   const [isSubmittingProject, setIsSubmittingProject] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const projectInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsCreatingProject(false)
+      setNewProjectName('')
+      setErrorMsg('')
+    }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (isCreatingProject) {
+      const timer = setTimeout(() => {
+        projectInputRef.current?.focus()
+        projectInputRef.current?.select()
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [isCreatingProject])
 
   // Profiles from capabilities
   const profiles = (capabilities?.profiles || []).filter((p) => p.input_mode === 'text_to_video')
@@ -246,12 +266,13 @@ export function VeoSetupModal({
 
   if (!isOpen) return null
 
-  return (
+  return createPortal(
     <div
+      className="nodrag nopan nowheel"
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 9999,
+        zIndex: 10000,
         background: 'rgba(15, 23, 42, 0.65)',
         backdropFilter: 'blur(6px)',
         display: 'flex',
@@ -262,6 +283,7 @@ export function VeoSetupModal({
       onClick={onClose}
     >
       <div
+        className="nodrag nopan nowheel"
         style={{
           width: '100%',
           maxWidth: 620,
@@ -276,6 +298,8 @@ export function VeoSetupModal({
           animation: 'wfModalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
         <div
@@ -424,12 +448,26 @@ export function VeoSetupModal({
 
             {/* Inline New Project Form */}
             {isCreatingProject && (
-              <form onSubmit={handleCreateNewProject} style={{ marginTop: 10, display: 'flex', gap: 6, paddingTop: 10, borderTop: '1px dashed #cbd5e1' }}>
+              <form
+                onSubmit={handleCreateNewProject}
+                style={{ marginTop: 10, display: 'flex', gap: 6, paddingTop: 10, borderTop: '1px dashed #cbd5e1' }}
+              >
                 <input
+                  ref={projectInputRef}
                   type="text"
+                  className="nodrag nopan"
                   placeholder="Nhập tên project mới (ví dụ: Video TikTok Weilaiya)..."
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation()
+                    if (e.key === 'Escape') {
+                      setIsCreatingProject(false)
+                      setNewProjectName('')
+                    }
+                  }}
                   style={{
                     flex: 1,
                     padding: '7px 10px',
@@ -437,6 +475,8 @@ export function VeoSetupModal({
                     border: '1px solid #818cf8',
                     fontSize: 12,
                     outline: 'none',
+                    background: '#ffffff',
+                    color: '#0f172a',
                   }}
                   autoFocus
                 />
@@ -444,21 +484,25 @@ export function VeoSetupModal({
                   type="submit"
                   disabled={isSubmittingProject || !newProjectName.trim()}
                   style={{
-                    padding: '7px 12px',
+                    padding: '7px 14px',
                     borderRadius: 6,
                     border: 'none',
-                    background: '#4f46e5',
+                    background: isSubmittingProject || !newProjectName.trim() ? '#94a3b8' : '#4f46e5',
                     color: '#ffffff',
                     fontSize: 11,
                     fontWeight: 600,
-                    cursor: 'pointer',
+                    cursor: isSubmittingProject || !newProjectName.trim() ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
                   }}
                 >
                   {isSubmittingProject ? 'Đang tạo...' : 'Tạo ngay'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsCreatingProject(false)}
+                  onClick={() => {
+                    setIsCreatingProject(false)
+                    setNewProjectName('')
+                  }}
                   style={{
                     padding: '7px 10px',
                     borderRadius: 6,
@@ -969,6 +1013,7 @@ export function VeoSetupModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

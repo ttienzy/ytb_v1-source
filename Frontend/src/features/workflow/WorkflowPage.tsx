@@ -256,7 +256,16 @@ function WorkflowCanvas() {
 
   // Delete a node by ID (and all its connected edges)
   const handleDeleteNode = useCallback((nodeId: string) => {
-    setNodes((nds) => nds.filter((n) => n.id !== nodeId))
+    setNodes((nds) => {
+      const remaining = nds.filter((n) => n.id !== nodeId)
+      setStartNodeId((currentStartId) => {
+        if (currentStartId === nodeId) {
+          return remaining.find((n) => n.type === 'productAssets')?.id || remaining[0]?.id || ''
+        }
+        return currentStartId
+      })
+      return remaining
+    })
     setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
   }, [])
 
@@ -275,13 +284,20 @@ function WorkflowCanvas() {
       if (!connection.source || !connection.target || !isValidWorkflowConnection(nodes, edges, connection)) {
         return
       }
+      const getSourceColor = (sourceId: string) => {
+        if (sourceId.includes('product')) return '#0d9488'
+        if (sourceId.includes('gemini')) return '#4f46e5'
+        if (sourceId.includes('character') || sourceId.includes('char')) return '#7c3aed'
+        if (sourceId.includes('gpt')) return '#d97706'
+        return '#6366f1'
+      }
       setEdges((eds) =>
         addEdge(
           {
             ...connection,
             type: 'removable',
             animated: true,
-            style: { stroke: '#6366f1', strokeWidth: 2.5, strokeDasharray: '4 4' },
+            style: { stroke: getSourceColor(connection.source), strokeWidth: 2.5, strokeDasharray: '4 4' },
             data: { onDeleteEdge: handleDeleteEdge },
           },
           eds
@@ -552,21 +568,6 @@ function WorkflowCanvas() {
 
       const flowConfig = (targetFlow?.data?.videoConfig as VeoVideoConfig) || veoVideoConfig
       const clipDuration = normalizeClipDuration(flowConfig.duration)
-      const collection = gptNode?.data?.scriptCollection as ScriptCollection | undefined
-      const outputIsStale = isScriptCollectionStale(collection, {
-        count: Number(gptNode?.data?.requestedCount || scripts.length),
-        batchSize: 8,
-        contentMode: (gptNode?.data?.contentMode || 'custom') as any,
-        storyMode: (gptNode?.data?.storyMode || 'sequential') as any,
-        platform: 'auto',
-        clipDurationSeconds: clipDuration,
-        promptTemplate: (gptNode?.data?.prompt as string) || '',
-        model: (gptNode?.data?.model as string) || getWorkflowConfig().defaultScriptModel,
-      })
-      if (outputIsStale) {
-        alert('⚠️ Cấu hình đã thay đổi sau lần sinh kịch bản. Vui lòng sinh lại kịch bản trước khi đồng bộ sang Google Flow.')
-        return nds
-      }
 
       const prodInput = resolveProductAssetsInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
       const charInput = resolveCharacterSceneInput({ nodes: nds, edges, targetNodeId: gptNode?.id || '' })
@@ -623,20 +624,6 @@ function WorkflowCanvas() {
       const targetDuration = normalizeClipDuration(
         (targetFlow?.data?.videoConfig as VeoVideoConfig | undefined)?.duration ?? veoVideoConfig.duration,
       )
-      const collection = gptNode?.data?.scriptCollection as ScriptCollection | undefined
-      if (isScriptCollectionStale(collection, {
-        count: Number(gptNode?.data?.requestedCount || scripts.length),
-        batchSize: 8,
-        contentMode: (gptNode?.data?.contentMode || 'custom') as any,
-        storyMode: (gptNode?.data?.storyMode || 'sequential') as any,
-        platform: 'auto',
-        clipDurationSeconds: targetDuration,
-        promptTemplate: (gptNode?.data?.prompt as string) || '',
-        model: (gptNode?.data?.model as string) || getWorkflowConfig().defaultScriptModel,
-      })) {
-        alert('⚠️ Cấu hình đã thay đổi sau lần sinh kịch bản. Vui lòng sinh lại trước khi nạp clip.')
-        return nds
-      }
 
       return nds.map((n) => {
         if (gptNode && n.id === gptNode.id) {
@@ -1044,8 +1031,8 @@ function WorkflowCanvas() {
       targetNodeId: nodeId,
     })
 
-    if (!geminiRes.ok && (!prodRes.ok || !prodRes.data || prodRes.data.rawImages.length === 0)) {
-      const errMsg = 'Khối ChatGPT cần kết nối với khối Gemini Vision đã phân tích hoặc khối Ảnh Sản Phẩm.'
+    if (!prodRes.ok || !prodRes.data || prodRes.data.rawImages.length === 0) {
+      const errMsg = 'Khối ChatGPT cần kết nối với khối Ảnh Sản Phẩm và tải lên ít nhất 1 ảnh.'
       setNodes((nds) =>
         nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isGenerating: false, scriptError: errMsg } } : n))
       )
@@ -1114,6 +1101,7 @@ function WorkflowCanvas() {
             count: targetCount,
             durations: clipDurations,
             aspectRatio: (targetFlowConfig?.aspectRatio || '9:16') as any,
+            storyMode: gptData.storyMode === 'independent' ? 'independent' : 'sequential',
           },
           assets: refAssets,
         })
@@ -1143,7 +1131,7 @@ function WorkflowCanvas() {
                 scenes: newClips,
                 scriptSourceStale: false,
                 activeSceneIndex: 0,
-                selectedGptScriptAngle: `${gptRes.scripts.length} kịch bản → ${gptRes.scripts.length} clip độc lập`,
+                selectedGptScriptAngle: `${gptRes.scripts.length} kịch bản → ${gptRes.scripts.length} clip ${gptData.storyMode === 'independent' ? 'độc lập' : 'liên hoàn'}`,
               },
             }
           }
@@ -1339,12 +1327,13 @@ function WorkflowCanvas() {
     const targetNode = nodes.find((n) => n.id === nodeId)
     const scenes = (targetNode?.data?.scenes as GeneratedSceneItem[]) || []
 
-    const validVideoPaths = scenes
+    const completedScenes = scenes.filter((s) => Boolean((s.outputFilePath || s.videoUrl)?.trim()))
+    const validVideoPaths = completedScenes
       .map((s) => s.outputFilePath || s.videoUrl)
       .filter((p): p is string => Boolean(p && p.trim()))
 
-    if (scenes.length < 2 || validVideoPaths.length !== scenes.length) {
-      alert('⚠️ Chưa thể ghép video! Cần ít nhất 2 clip và tất cả phân cảnh phải tạo thành công trước khi ghép.')
+    if (validVideoPaths.length < 2) {
+      alert('⚠️ Chưa thể ghép video! Cần ít nhất 2 clip đã tạo thành công trước khi ghép.')
       return
     }
     const stillCurrent = captureRevision(nodeId)
@@ -1361,6 +1350,13 @@ function WorkflowCanvas() {
       )
     }, 700)
 
+    const abortExport = () => {
+      clearInterval(interval)
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isExporting: false, exportProgress: 0 } } : n))
+      )
+    }
+
     try {
       const voiceEnabled = veoVideoConfig?.voiceEnabled !== false
       const incomingEdges = edges.filter((e) => e.target === nodeId)
@@ -1370,23 +1366,24 @@ function WorkflowCanvas() {
       let voiceoverAudioPath: string | undefined
 
       if (voiceEnabled) {
-        const voicePlan = buildVoiceoverPlan(scenes, voiceId, false, gptScripts)
+        const filterToCompleted = completedScenes.length >= 2 && completedScenes.length < scenes.length
+        const voicePlan = buildVoiceoverPlan(scenes, voiceId, filterToCompleted, gptScripts)
         voiceoverAudioPath = selectCachedVoiceoverPath(true, voicePlan.signature, targetNode?.data || {})
+        if (!voiceoverAudioPath) {
+          const voRes = await callGenerateVoiceover({
+            voiceId,
+            scripts: voicePlan.texts,
+            combineAll: true,
+          })
+          voiceoverAudioPath = voRes.combinedFilePath || voRes.combinedAudioUrl || undefined
           if (!voiceoverAudioPath) {
-            const voRes = await callGenerateVoiceover({
-              voiceId,
-              scripts: voicePlan.texts,
-              combineAll: true,
-            })
-            voiceoverAudioPath = voRes.combinedFilePath || voRes.combinedAudioUrl || undefined
-            if (!voiceoverAudioPath) {
-              throw new Error('Dịch vụ voiceover không trả về file âm thanh hợp lệ.')
-            }
-            if (!stillCurrent()) {
-              clearInterval(interval)
-              return
-            }
-            setNodes((nds) =>
+            throw new Error('Dịch vụ voiceover không trả về file âm thanh hợp lệ.')
+          }
+          if (!stillCurrent()) {
+            abortExport()
+            return
+          }
+          setNodes((nds) =>
             nds.map((n) =>
               n.id === nodeId
                 ? {
@@ -1409,7 +1406,7 @@ function WorkflowCanvas() {
       const mixOriginalAudio = veoVideoConfig?.keepVeoAmbient === true
       const veoAmbientVolume = mixOriginalAudio ? (veoVideoConfig?.veoAmbientVolume ?? 0.10) : 0
       if (!stillCurrent()) {
-        clearInterval(interval)
+        abortExport()
         return
       }
       let bgmTrackIds = veoVideoConfig?.bgmEnabled !== false ? (veoVideoConfig?.bgmTrackIds || []) : []
@@ -1439,7 +1436,7 @@ function WorkflowCanvas() {
         veoAmbientVolume
       )
       if (!stillCurrent()) {
-        clearInterval(interval)
+        abortExport()
         return
       }
       clearInterval(interval)
@@ -1461,11 +1458,8 @@ function WorkflowCanvas() {
         })
       )
     } catch (err: any) {
-      clearInterval(interval)
+      abortExport()
       console.error('Export video error:', err)
-      setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isExporting: false, exportProgress: 0 } } : n))
-      )
       alert(err?.message || 'Có lỗi xảy ra khi xuất video hoàn chỉnh bằng FFmpeg.')
     }
   }, [nodes, edges, veoVideoConfig, captureRevision])
@@ -1643,10 +1637,17 @@ function WorkflowCanvas() {
   // Real Workflow Execution using DAG traversal & Data Contracts
   const handleExecuteWorkflow = useCallback(async () => {
     if (isRunning) return
+    const activeStartNodeId = nodes.some((n) => n.id === startNodeId)
+      ? startNodeId
+      : (nodes.find((n) => n.type === 'productAssets')?.id || nodes[0]?.id)
+    if (!activeStartNodeId) {
+      alert('⚠️ Không tìm thấy khối khả dụng trên bảng làm việc để bắt đầu.')
+      return
+    }
     setIsRunning(true)
     try {
       await runRealWorkflow({
-        startNodeId,
+        startNodeId: activeStartNodeId,
         nodes,
         edges,
         callbacks: {
@@ -1660,7 +1661,9 @@ function WorkflowCanvas() {
             )
           },
           onError: (nodeId, errMsg) => {
-            alert(`Lỗi tại node [${nodeId}]: ${errMsg}`)
+            const targetNode = nodes.find((n) => n.id === nodeId)
+            const nodeTitle = (targetNode?.data?.title as string) || nodeId
+            alert(`⚠️ Lỗi tại khối [${nodeTitle}]:\n${errMsg}`)
           },
           onSuccess: () => {
             console.log('Workflow execution completed successfully.')
@@ -1754,7 +1757,11 @@ function WorkflowCanvas() {
         })
 
         const geminiRes = resolveGeminiAnalysisInput({ nodes, edges, targetNodeId: node.id })
-        const hasProductData = geminiRes.ok && !!geminiRes.data
+        const isGeminiConnected = edges.some(
+          (edge) => edge.target === node.id && nodes.some((n) => n.id === edge.source && n.type === 'geminiAnalysis')
+        )
+        const hasGeminiAnalysis = geminiRes.ok && !!geminiRes.data
+        const hasProductData = hasGeminiAnalysis || connectedProductImages.length > 0
         const productDataPreview =
           geminiRes.ok && geminiRes.data
             ? geminiRes.data.rawText || (geminiRes.data.features || []).join(', ') || ''
@@ -1774,6 +1781,8 @@ function WorkflowCanvas() {
             connectedImages: connectedProductImages,
             hasProductData,
             productDataPreview,
+            isGeminiConnected,
+            hasGeminiAnalysis,
             clipDurationSeconds,
             isScriptOutputStale,
             availablePresets: promptPresets,
@@ -1795,7 +1804,9 @@ function WorkflowCanvas() {
                         ...n,
                         data: {
                           ...n.data,
-                          requestedCount: cfg.count ?? n.data?.requestedCount,
+                          requestedCount: typeof cfg.count === 'number' && !isNaN(cfg.count)
+                            ? Math.max(1, Math.min(20, Math.round(cfg.count)))
+                            : n.data?.requestedCount,
                           batchSize: cfg.batchSize ?? n.data?.batchSize,
                           contentMode: cfg.contentMode ?? n.data?.contentMode,
                           platform: cfg.platform ?? n.data?.platform,
@@ -1987,8 +1998,8 @@ function WorkflowCanvas() {
     }))
   }, [edges, handleDeleteEdge])
 
-  const startNode = nodes.find((n) => n.id === startNodeId)
-  const rawTitle = (startNode?.data?.title as string) || 'Gemini'
+  const currentStartNode = nodes.find((n) => n.id === startNodeId) || nodes[0]
+  const rawTitle = (currentStartNode?.data?.title as string) || 'Khởi Đầu'
   const startNodeTitle = rawTitle.includes('•')
     ? rawTitle.split('•')[0].trim()
     : rawTitle.replace(/\s*\(.*\)/, '').trim()

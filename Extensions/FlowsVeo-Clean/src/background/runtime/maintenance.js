@@ -41,7 +41,12 @@ export async function clearTrackingCookiesAndRefresh() {
       await chrome.cookies.remove({ url, name: c.name });
     }
     const tabId = await findLabsTab();
-    if (tabId) await chrome.tabs.reload(tabId);
+    if (tabId) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!tab?.url || !/\/project\//.test(tab.url)) {
+        await chrome.tabs.reload(tabId);
+      }
+    }
   } catch { }
 }
 
@@ -51,6 +56,8 @@ export async function refreshLabsTab() {
   const tabId = await findLabsTab();
   if (!tabId) return;
   try {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab?.url && /\/project\//.test(tab.url)) return;
     await chrome.tabs.reload(tabId);
     await sleep(3_000);
     await warmUpRecaptcha(tabId);

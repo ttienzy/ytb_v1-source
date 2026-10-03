@@ -23,6 +23,15 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       const isIngredients = req.input_mode === 'ingredients';
       const isVideoEdit = req.input_mode === 'video_edit';
       if (req.provider_model_id && (!isFrames || !req.provider_model_id.includes('_t2v_')) && (!isIngredients || !req.provider_model_id.includes('_t2v_'))) {
+        if (req.provider_model_id.startsWith('abra_r2v_')) {
+          const m = req.provider_model_id.match(/abra_r2v_(\d+)s/);
+          if (m) {
+            const pDur = Number(m[1]);
+            // HAR 30/09: abra_r2v_ hỗ trợ [4,6,8,10]s - thêm 8s
+            const valid = [4, 6, 8, 10].includes(pDur) ? pDur : (pDur >= 8 ? 8 : 6);
+            return `abra_r2v_${valid}s`;
+          }
+        }
         return req.provider_model_id;
       }
       const modelName = (req.model_display_name || '').toLowerCase();
@@ -32,12 +41,16 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
         return req.resolution === '360p' ? 'abra_edit_360p' : 'abra_edit';
       }
       if (isIngredients) {
-        return `abra_r2v_${dur}s`;
+        // HAR 30/09: ingredients dùng nprQif với abra_r2v_, 8s là mặc định mới
+        const validR2vDur = [4, 6, 8, 10].includes(dur) ? dur : (dur >= 8 ? 8 : 6);
+        return `abra_r2v_${validR2vDur}s`;
       }
       if (isFrames) {
-        return (req.image_base64 && req.end_image_base64)
-          ? 'omni_flash_i2v_10s_first_last'
-          : `abra_r2v_${dur}s`;
+        if (req.image_base64 && req.end_image_base64) {
+          const frameDur = dur >= 10 ? 10 : 8;
+          return `omni_flash_i2v_${frameDur}s_first_last`;
+        }
+        return `abra_r2v_${[4, 6, 8, 10].includes(dur) ? dur : (dur >= 8 ? 8 : 6)}s`;
       }
       if (modelName.includes('omni') || modelName.includes('flash')) {
         return `abra_t2v_${dur}s`;
@@ -53,6 +66,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
 
     let modelId = resolveModelId(flowRequest);
 
+    // HAR 30/09/2026: Flow đã bỏ /u/X/ prefix khỏi URL - hỗ trợ cả 2 format
     let route = location.pathname.match(/^\/(u\/\d+)\/project\/([^/?#]+)/);
     let accountPath = route ? `/${route[1]}` : '';
     let projectId = route ? route[2] : null;
@@ -61,6 +75,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       const match2 = location.pathname.match(/\/project\/([^/?#]+)/);
       if (match2) {
         projectId = match2[1];
+        // HAR mới: URL dạng /project/... không có /u/X/ → accountPath = ''
         const uMatch = location.pathname.match(/\/(u\/\d+)/);
         accountPath = uMatch ? `/${uMatch[1]}` : '';
       }
@@ -82,6 +97,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
     if (location.hostname !== 'flow.google.com' || !projectId) {
       throw new Error('Vui lòng mở một Dự án (Project) trên tab Google Flow trước khi bấm Tạo video');
     }
+    // HAR 30/09: source-path không có /u/X/ prefix nữa → sourcePath = /project/...
     const sourcePath = `${accountPath}/project/${projectId}`;
     const wiz = window.WIZ_global_data || {};
     const csrfToken = wiz.SNlM0e;
@@ -89,6 +105,11 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
     const buildLabel = wiz.cfb2h;
     if (!csrfToken || !sessionId || !buildLabel) {
       throw new Error('Flow page session config is incomplete; reload the project');
+    }
+    // Guard: sessionId phải là số nguyên lớn hợp lệ (HAR thật ~7.7e18).
+    const sidNum = Number(sessionId);
+    if (Number.isFinite(sidNum) && Math.abs(sidNum) < 1e6 && Math.abs(sidNum) > 0) {
+      throw new Error(`Flow session ID không hợp lệ (sid=${sidNum}); trang chưa load xong WIZ_global_data — cần reload`);
     }
 
     function findRpcEnvelope(node, rpcId) {
@@ -102,6 +123,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
     }
 
     function parseRpcResponse(text, rpcId) {
+      let rpcError = null;
       for (const line of text.split(/\r?\n/)) {
         const trimmed = line.trim();
         if (!trimmed.startsWith('[')) continue;
@@ -109,10 +131,21 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
           const parsed = JSON.parse(trimmed);
           const payload = findRpcEnvelope(parsed, rpcId);
           if (payload !== null) return JSON.parse(payload);
+
+          // Trích xuất chi tiết lỗi từ envelope nếu có
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              if (Array.isArray(item) && item[0] === 'wrb.fr' && item[1] === rpcId) {
+                rpcError = `Flow RPC envelope error: ${JSON.stringify(item.slice(2))}`;
+              } else if (Array.isArray(item) && item[0] === 'er') {
+                rpcError = `Flow server error (er): ${JSON.stringify(item)}`;
+              }
+            }
+          }
         } catch { }
       }
       const preview = (typeof text === 'string' ? text.replace(/\s+/g, ' ').slice(0, 300) : '');
-      throw new Error(`Flow RPC ${rpcId} returned no usable payload. Response: ${preview}`);
+      throw new Error(rpcError || `Flow RPC ${rpcId} returned no usable payload. Response: ${preview}`);
     }
 
     async function callRpc(rpcId, payload) {
@@ -130,7 +163,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
         at: String(csrfToken),
       });
       const base = location.origin || 'https://flow.google.com';
-      const endpoint = `${base}${accountPath}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`;
+      const endpoint = `${base}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`;
       let text = null;
       try {
         const response = await fetch(endpoint, {
@@ -187,23 +220,11 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       if (typeof node === 'string') {
         if (node.startsWith('https://flow-content.google/')) {
           const lower = node.toLowerCase();
-          if (
-            lower.includes('/video') ||
-            lower.includes('/media') ||
-            lower.includes('/download') ||
-            lower.includes('.mp4') ||
-            lower.includes('signature=') ||
-            lower.includes('expires=') ||
-            lower.includes('expire=') ||
-            lower.includes('token=') ||
-            lower.includes('download=')
-          ) {
+          if (lower.includes('/image/') || lower.includes('/image?')) return null;
+          if (/\.(?:jpg|jpeg|png|webp|gif|avif)(?:$|[?#])/.test(lower)) return null;
+          if (lower.includes('/video/') || lower.includes('.mp4') || lower.includes('/media/') || lower.includes('download=1')) {
             return node;
           }
-          try {
-            const u = new URL(node);
-            if (u.pathname.split('/').filter(Boolean).length >= 2) return node;
-          } catch { }
         }
         return null;
       }
@@ -256,6 +277,54 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
     const mediaCache = (typeof window !== 'undefined' ? window : globalThis).__FLOW_MEDIA_CACHE__ ||
       ((typeof window !== 'undefined' ? window : globalThis).__FLOW_MEDIA_CACHE__ = new Map());
 
+    function computeFlowCropCoords(imgWidth, imgHeight, isPortrait) {
+      const w = Number(imgWidth) || 0;
+      const h = Number(imgHeight) || 0;
+      if (!w || !h) {
+        return isPortrait ? [null, 0.341796875, 1, 0.658203125] : [null, null, 1, 1];
+      }
+      const imgRatio = w / h;
+      const targetRatio = isPortrait ? (9 / 16) : (16 / 9);
+
+      // Chuẩn hóa ảnh 16:9 (ratio 1.7 ~ 1.85, như 1376x768, 1920x1080)
+      if (imgRatio >= 1.7 && imgRatio <= 1.85) {
+        if (isPortrait) {
+          return [null, 0.341796875, 1, 0.658203125];
+        }
+        if (w === 1376 && h === 768) {
+          return [null, 0.0038759689922481244, 1, 0.9961240310077519];
+        }
+        return [null, null, 1, 1];
+      }
+      // Chuẩn hóa ảnh 9:16 (ratio 0.54 ~ 0.58, như 768x1376, 1080x1920)
+      if (imgRatio >= 0.54 && imgRatio <= 0.58) {
+        if (isPortrait) {
+          if (w === 768 && h === 1376) {
+            return [0.0038759689922481244, null, 0.9961240310077519, 1];
+          }
+          return [null, null, 1, 1];
+        }
+        return [0.341796875, null, 0.658203125, 1];
+      }
+      // Chuẩn hóa ảnh vuông 1:1 (ratio 0.95 ~ 1.05)
+      if (imgRatio >= 0.95 && imgRatio <= 1.05) {
+        return isPortrait ? [null, 0.21875, 1, 0.78125] : [0.21875, null, 0.78125, 1];
+      }
+      // Nếu tỷ lệ ảnh đã khớp tỷ lệ video mục tiêu
+      if (Math.abs(imgRatio - targetRatio) < 0.05) {
+        return [null, null, 1, 1];
+      }
+      if (imgRatio > targetRatio) {
+        const cropW = targetRatio / imgRatio;
+        const left = (1 - cropW) / 2;
+        return [null, left, 1, left + cropW];
+      } else {
+        const cropH = imgRatio / targetRatio;
+        const top = (1 - cropH) / 2;
+        return [top, null, top + cropH, 1];
+      }
+    }
+
     async function uploadImageToFlow(base64Data, mimeType, filename) {
       if (!base64Data) return null;
       const rawBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
@@ -266,7 +335,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       try {
         const headerProto = [
           null, 22, null, null, null, projectId, null, null, null, null,
-          captchaToken ? [captchaToken, 1] : null,
+          null,
         ];
         const maseQPayload = [
           headerProto,
@@ -280,18 +349,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
           filename || 'frame.png',
         ];
 
-        let resp = null;
-        try {
-          resp = await callRpc('maseQ', maseQPayload);
-        } catch (rpcErr) {
-          // Retry without captcha slot if rejected
-          if (headerProto[10]) {
-            headerProto[10] = null;
-            resp = await callRpc('maseQ', maseQPayload);
-          } else {
-            throw rpcErr;
-          }
-        }
+        const resp = await callRpc('maseQ', maseQPayload);
 
         function findMediaIdInResponse(node) {
           if (!node) return null;
@@ -326,8 +384,8 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       }
     }
 
-    let startFrameMediaId = null;
-    let endFrameMediaId = null;
+    let startFrameMediaId = flowRequest?.start_frame_media_id || null;
+    let endFrameMediaId = flowRequest?.end_frame_media_id || null;
     const ingredientMediaIds = Array.isArray(flowRequest?.ingredient_media_ids)
       ? flowRequest.ingredient_media_ids
           .filter((id) => typeof id === 'string' && id.trim())
@@ -346,14 +404,14 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
     }
 
     if (isFrames) {
-      if (flowRequest.image_base64) {
+      if (!startFrameMediaId && flowRequest.image_base64) {
         startFrameMediaId = await uploadImageToFlow(
           flowRequest.image_base64,
           flowRequest.image_mime,
           flowRequest.image_name || 'start_frame.png'
         );
       }
-      if (flowRequest.end_image_base64) {
+      if (!endFrameMediaId && flowRequest.end_image_base64) {
         endFrameMediaId = await uploadImageToFlow(
           flowRequest.end_image_base64,
           flowRequest.end_image_mime,
@@ -364,7 +422,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
         if (endFrameMediaId) {
           throw new Error('Chế độ Khung hình yêu cầu phải có Khung hình bắt đầu (Start Frame) khi sử dụng Khung hình kết thúc (End Frame)');
         }
-        logActivity('warn', 'Không có khung hình trong request frames, tự động tạo video từ prompt (text_to_video)');
+        console.warn('[FlowPage] Không có khung hình trong request frames, tự động tạo video từ prompt (text_to_video)');
         isFrames = false;
         modelId = modelId.replace('_i2v_', '_t2v_').replace('_first_last', '').replace('_first', '');
       }
@@ -391,22 +449,25 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
         }
       }
       if (isIngredients && ingredientMediaIds.length === 0) {
-        logActivity('warn', 'Không có ảnh tham chiếu trong request ingredients, tự động tạo video từ prompt (text_to_video)');
+        console.warn('[FlowPage] Không có ảnh tham chiếu trong request ingredients, tự động tạo video từ prompt (text_to_video)');
         isIngredients = false;
         modelId = modelId.replace('_r2v_', '_t2v_');
       }
     }
 
     const isSingleFrame = isFrames && Boolean(startFrameMediaId) && !endFrameMediaId;
+    // HAR 30/09/2026: MZZa6b đã bị xóa khỏi Flow.
+    // Ingredients/SingleFrame giờ dùng nprQif (cùng RPC với frames) với ref slots thay cho MZZa6b.
+    // YhhmEf = text-to-video | nprQif = frames + ingredients/singleFrame | jIps6 = video_edit
     const rpcId = isVideoEdit
       ? 'jIps6'
-      : (isIngredients || isSingleFrame ? 'MZZa6b' : (isFrames ? 'nprQif' : 'YhhmEf'));
+      : (isFrames || isIngredients || isSingleFrame ? 'nprQif' : 'YhhmEf');
 
     const requestUuidA = (crypto.randomUUID ? crypto.randomUUID() : 'AD722819-13F6-46E3-A074-9CA0266A4FE0').toUpperCase();
     const requestUuidB = (crypto.randomUUID ? crypto.randomUUID() : '4C8832DC-AD37-4C11-859E-DCFD4FB4903E').toUpperCase();
     const sceneUuid = (crypto.randomUUID ? crypto.randomUUID() : '154922EC-9CE9-4413-A9C0-B2664F7FFB7B').toUpperCase();
-    // Google Flow Aspect Ratio Enum: 2 = 16:9 (Landscape), 1 = 9:16 (Portrait)
-    const aspectEnum = flowRequest?.aspect_ratio === '16:9' ? 2 : 1;
+    const isPortrait = flowRequest?.aspect_ratio === '9:16';
+    const numOutputs = Math.max(1, Math.min(2, Number(flowRequest?.num_outputs) || 1));
     let startSlot = null;
     let endSlot = null;
 
@@ -425,7 +486,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
         sourceVideo,
         [null, null, [[[flowRequest.prompt.trim()]]]],
         modelId,
-        aspectEnum,
+        numOutputs,
         destination,
       ];
       if (ingredientMediaIds.length > 0) {
@@ -442,34 +503,43 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
         [sceneUuid, 2],
       ];
     } else if (isIngredients || isSingleFrame) {
-      // Chuẩn Google Flow HAR flow.google_2.har: MZZa6b nhận mảng reference slots [[null, id1], [null, id2]] ở index 1
-      const refSlots = isSingleFrame
-        ? [[null, startFrameMediaId]]
-        : ingredientMediaIds.map((id) => [null, id]);
-      const activeModelId = isSingleFrame ? (modelId.includes('_r2v_') ? modelId : `abra_r2v_${dur}s`) : modelId;
+      // HAR 30/09/2026: MZZa6b đã bị xóa. Ingredients/SingleFrame giờ dùng nprQif.
+      const primaryMediaId = isSingleFrame ? startFrameMediaId : ingredientMediaIds[0];
+      const cropCoordsIng = computeFlowCropCoords(flowRequest?.image_width, flowRequest?.image_height, isPortrait);
+      const validR2vDur = [4, 6, 8, 10].includes(dur) ? dur : (dur >= 8 ? 8 : 6);
+      const activeModelId = (isSingleFrame || isIngredients)
+        ? (modelId.includes('_r2v_') ? modelId : `abra_r2v_${validR2vDur}s`)
+        : modelId;
+      const extraIngIds = isIngredients && ingredientMediaIds.length > 1 ? ingredientMediaIds.slice(1) : [];
+      startSlot = primaryMediaId ? [null, primaryMediaId, null, null, null, cropCoordsIng] : null;
+      endSlot = (extraIngIds.length > 0)
+        ? [null, extraIngIds[0], null, null, null, cropCoordsIng]
+        : null;
       createPayload = [
         [[
           [null, null, [[[flowRequest.prompt.trim()]]]],
-          refSlots,
           activeModelId,
-          aspectEnum,
+          numOutputs,
           null,
+          startSlot,
+          endSlot,
           [null, null, null, null, requestUuidA, requestUuidB],
         ]],
         [null, 22, null, null, null, projectId, null, null, null, null, [captchaToken, 1]],
         [sceneUuid, 2],
       ];
     } else if (isFrames) {
-      // Chuẩn Google Flow HAR flow.google_1.har: nprQif nhận slot start/end ở index 4 và index 5 (dành cho chế độ 2 khung hình First & Last)
-      // 9:16 portrait dùng crop box [null, 0.341796875, 1, 0.658203125], 16:9 dùng [null, 0, 1, 1]
-      const cropCoords = aspectEnum === 1 ? [null, 0.341796875, 1, 0.658203125] : [null, 0, 1, 1];
-      startSlot = startFrameMediaId ? [null, startFrameMediaId, null, null, null, cropCoords] : null;
-      endSlot = endFrameMediaId ? [null, endFrameMediaId, null, null, null, cropCoords] : null;
+      // Tính crop coordinates chính xác theo kích thước ảnh thực tế và tỉ lệ video (16:9 / 9:16)
+      const startCrop = computeFlowCropCoords(flowRequest?.image_width, flowRequest?.image_height, isPortrait);
+      const endCrop = computeFlowCropCoords(flowRequest?.end_image_width, flowRequest?.end_image_height, isPortrait);
+
+      startSlot = startFrameMediaId ? [null, startFrameMediaId, null, null, null, startCrop] : null;
+      endSlot = endFrameMediaId ? [null, endFrameMediaId, null, null, null, endCrop] : null;
       createPayload = [
         [[
           [null, null, [[[flowRequest.prompt.trim()]]]],
           modelId,
-          aspectEnum,
+          numOutputs,
           null,
           startSlot,
           endSlot,
@@ -483,7 +553,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
         [[
           [null, null, [[[flowRequest.prompt.trim()]]]],
           modelId,
-          aspectEnum,
+          numOutputs,
           null,
           [null, null, null, null, requestUuidA, requestUuidB],
         ]],
@@ -492,22 +562,103 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       ];
     }
 
+    async function getFreshCaptchaToken() {
+      try {
+        const grecap = (typeof window !== 'undefined' ? window.grecaptcha : globalThis.grecaptcha);
+        if (grecap?.enterprise?.execute) {
+          let siteKey = '';
+          const el = typeof document !== 'undefined' ? document.querySelector('[data-sitekey]') : null;
+          if (el) siteKey = el.getAttribute('data-sitekey') || '';
+          if (!siteKey) {
+            const script = typeof document !== 'undefined' ? document.querySelector('script[src*="enterprise.js"]') : null;
+            const m = script?.src?.match(/[?&]render=([^&]+)/);
+            if (m && m[1] !== 'explicit') siteKey = m[1];
+          }
+          if (!siteKey) {
+            const cfg = typeof window !== 'undefined' ? window.___grecaptcha_cfg : globalThis.___grecaptcha_cfg;
+            if (cfg?.clients) {
+              for (const client of Object.values(cfg.clients)) {
+                if (client?.sitekey) { siteKey = client.sitekey; break; }
+                if (typeof client === 'object' && client !== null) {
+                  for (const item of Object.values(client)) {
+                    if (item?.sitekey) { siteKey = item.sitekey; break; }
+                  }
+                }
+                if (siteKey) break;
+              }
+            }
+          }
+          if (!siteKey) {
+            siteKey = '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV';
+          }
+          console.log('[FlowPage] Đang sinh reCAPTCHA token tươi với siteKey:', siteKey);
+          return await grecap.enterprise.execute(siteKey, { action: 'VIDEO_GENERATION' });
+        }
+      } catch (e) {
+        console.warn('[FlowPage] Error obtaining fresh reCAPTCHA token in page:', e);
+      }
+      return null;
+    }
+
+    if (ingredientMediaIds.length > 0 || startFrameMediaId) {
+      // Giãn cách cadence an toàn 4.5s sau khi upload ảnh để tránh WAF kích hoạt PUBLIC_ERROR_UNUSUAL_ACTIVITY
+      console.log('[FlowPage] Giữ cadence 4.5s sau khi xử lý nguyên liệu...');
+      await sleepInPage(4500);
+    }
+
+    // Luôn ưu tiên reCAPTCHA token tươi nhất vừa sinh trực tiếp trong context trang cho RPC tạo video
+    const freshTokenBeforeCreate = await getFreshCaptchaToken();
+    if (freshTokenBeforeCreate && Array.isArray(createPayload?.[1])) {
+      console.log('[FlowPage] Đã gắn fresh reCAPTCHA token vào payload tạo video');
+      createPayload[1][10] = [freshTokenBeforeCreate, 1];
+    }
+
+    try {
+      (typeof window !== 'undefined' ? window : globalThis).__LAST_FLOW_DEBUG__ = {
+        rpcId,
+        createPayload: JSON.parse(JSON.stringify(createPayload)),
+        flowRequest: { ...flowRequest, image_base64: Boolean(flowRequest?.image_base64), end_image_base64: Boolean(flowRequest?.end_image_base64) },
+        image_width: flowRequest?.image_width,
+        image_height: flowRequest?.image_height,
+      };
+    } catch {}
+
     let created = null;
     try {
       created = findMediaAsset(await callRpc(rpcId, createPayload));
     } catch (rpcErr) {
-      if (isSingleFrame) {
-        // Fallback thông minh cho MZZa6b nếu duration ban đầu gặp lỗi
-        const fallbackDurations = [10, 6, 4].filter((d) => `abra_r2v_${d}s` !== createPayload[0][0][2]);
+      try {
+        if ((typeof window !== 'undefined' ? window : globalThis).__LAST_FLOW_DEBUG__) {
+          (typeof window !== 'undefined' ? window : globalThis).__LAST_FLOW_DEBUG__.firstError = rpcErr.message;
+        }
+      } catch {}
+      if (rpcErr?.message && (rpcErr.message.includes('PUBLIC_ERROR_UNUSUAL_ACTIVITY') || rpcErr.message.includes('[7]'))) {
+        console.log('[FlowPage] Gặp PUBLIC_ERROR_UNUSUAL_ACTIVITY, giãn cách cadence 4.5s và lấy reCAPTCHA token mới...');
+        await sleepInPage(4500);
+        const retryToken = await getFreshCaptchaToken();
+        if (retryToken) {
+          if (Array.isArray(createPayload?.[1])) {
+            createPayload[1][10] = [retryToken, 1];
+          }
+          try {
+            created = findMediaAsset(await callRpc(rpcId, createPayload));
+          } catch (retryErr) {
+            console.warn('[FlowPage] Thử lại sau UNUSUAL_ACTIVITY thất bại:', retryErr);
+          }
+        }
+      }
+      if (!created && (isSingleFrame || isIngredients)) {
+        // HAR 30/09: ingredients/singleFrame dùng nprQif, fallback thử các durations khác nhau
+        const fallbackDurations = [8, 10, 6, 4].filter((d) => `abra_r2v_${d}s` !== createPayload[0][0][1]);
         let lastErr = rpcErr;
         for (const fbDur of fallbackDurations) {
           try {
-            console.log('[FlowPage] Thử lại MZZa6b cho 1 frame với duration:', fbDur);
-            createPayload[0][0][2] = `abra_r2v_${fbDur}s`;
+            console.log('[FlowPage] Fallback nprQif ingredients/singleFrame với duration:', fbDur);
+            createPayload[0][0][1] = `abra_r2v_${fbDur}s`;
             const fbResp = await callRpc(rpcId, createPayload);
             created = findMediaAsset(fbResp);
             if (created) {
-              console.log('[FlowPage] Fallback MZZa6b thành công với duration:', fbDur);
+              console.log('[FlowPage] Fallback ingredients thành công với duration:', fbDur);
               modelId = `abra_r2v_${fbDur}s`;
               break;
             }
@@ -515,41 +666,29 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
             lastErr = fbErr;
           }
         }
-        if (!created) throw lastErr;
-      } else if (isFrames) {
-        // Fallback thông minh cho nprQif (chế độ 2 khung hình: First & Last Frame)
-        const fallbackCandidates = [
-          { model: 'omni_flash_i2v_10s_first_last', end: endSlot, omitEnd: false },
-          { model: 'omni_flash_i2v_10s_first_last', end: null, omitEnd: true },
-          { model: 'omni_flash_i2v_10s_first', end: null, omitEnd: false },
-          { model: 'omni_flash_i2v_6s_first_last', end: endSlot, omitEnd: false },
-          { model: 'omni_flash_i2v_6s_first', end: null, omitEnd: false },
+        if (!created) {
+          const activeTok = freshTokenBeforeCreate || captchaToken;
+          const diag = `[Diag: pid=${projectId}, tokLen=${activeTok?.length || 0}, isFresh=${Boolean(freshTokenBeforeCreate)}, at=${csrfToken ? csrfToken.slice(0,6) : 'none'}, sid=${sessionId ? String(sessionId).slice(0,6) : 'none'}, bl=${buildLabel ? String(buildLabel).slice(0,10) : 'none'}]`;
+          throw new Error(`${lastErr?.message || lastErr} ${diag}`);
+        }
+      } else if (isFrames || isSingleFrame || isIngredients) {
+        // HAR flow.google_1.har / flow.google_2.har.com: omni_flash_i2v_8s hoặc 10s tùy theo duration
+        const fallbackCandidates = (isFrames && endSlot) ? [
+          { model: dur >= 10 ? 'omni_flash_i2v_10s_first_last' : 'omni_flash_i2v_8s_first_last', end: endSlot },
+          { model: dur >= 10 ? 'omni_flash_i2v_8s_first_last' : 'omni_flash_i2v_10s_first_last', end: endSlot },
+        ] : [
+          { model: 'abra_r2v_8s', end: endSlot },
+          { model: 'abra_r2v_10s', end: endSlot },
+          { model: 'abra_r2v_6s', end: endSlot },
+          { model: 'abra_r2v_4s', end: endSlot },
         ];
         let lastErr = rpcErr;
         for (const cand of fallbackCandidates) {
-          if (cand.model === modelId && !cand.omitEnd) continue;
+          if (cand.model === modelId) continue;
           try {
-            console.log('[FlowPage] Thử lại nprQif với candidate:', cand);
-            if (cand.omitEnd) {
-              createPayload[0][0] = [
-                createPayload[0][0][0],
-                cand.model,
-                aspectEnum,
-                null,
-                startSlot,
-                [null, null, null, null, requestUuidA, requestUuidB],
-              ];
-            } else {
-              createPayload[0][0] = [
-                createPayload[0][0][0],
-                cand.model,
-                aspectEnum,
-                null,
-                startSlot,
-                cand.end,
-                [null, null, null, null, requestUuidA, requestUuidB],
-              ];
-            }
+            console.log('[FlowPage] Thử lại nprQif với candidate:', cand.model);
+            createPayload[0][0][1] = cand.model;
+            createPayload[0][0][5] = cand.end;
             const fallbackResp = await callRpc(rpcId, createPayload);
             created = findMediaAsset(fallbackResp);
             if (created) {
@@ -559,10 +698,19 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
             }
           } catch (fbErr) {
             lastErr = fbErr;
+            try {
+              const dbg = (typeof window !== 'undefined' ? window : globalThis).__LAST_FLOW_DEBUG__;
+              if (dbg) {
+                if (!dbg.fallbackErrors) dbg.fallbackErrors = [];
+                dbg.fallbackErrors.push({ model: cand.model, err: fbErr.message });
+              }
+            } catch {}
           }
         }
         if (!created) {
-          throw lastErr;
+          const slot4Str = JSON.stringify(createPayload?.[0]?.[0]?.[4]);
+          const slot5Str = JSON.stringify(createPayload?.[0]?.[0]?.[5]);
+          throw new Error(`${lastErr?.message || lastErr} [Model: ${createPayload?.[0]?.[0]?.[1]}, slot4: ${slot4Str}, slot5: ${slot5Str}]`);
         }
       } else if (modelId.includes('_i2v_') && !isFrames && !isIngredients) {
         const fallbackModelId = modelId.replace('_i2v_', '_t2v_');
@@ -612,7 +760,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
           break;
         }
         const asset = findMediaAsset(pollResp);
-        // Trong Google Flow HAR thực tế: asset[5][8][0] là status (2 = generating, 3 = complete)
+        // Trong Google Flow HAR thực tế: asset[5][8][0] là status (6 = queued, 2 = generating, 3 = complete)
         // Fallback asset[5][0][8][0] cho mock test cũ
         const status = asset?.[5]?.[8]?.[0] ?? asset?.[5]?.[0]?.[8]?.[0];
         if (status === 3) {
@@ -623,7 +771,9 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
           imageUrl = finalAsset?.[5]?.[10] || finalAsset?.[5]?.[0]?.[10] || null;
           if (videoUrl) break;
         }
-        if (status !== 2 && status !== 1 && status !== 3 && status !== undefined && status !== null) {
+        // Các trạng thái đang xử lý hợp lệ: 6 (queued), 2 (rendering), 1 (started)
+        const isProcessing = (status === 6 || status === 2 || status === 1 || status === undefined || status === null);
+        if (!isProcessing && status !== 3) {
           let extraReason = '';
           try {
             const findStrings = (node) => {

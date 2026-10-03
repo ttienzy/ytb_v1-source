@@ -102,7 +102,7 @@ export const initialNodes: Node[] = [
 ]
 
 export const initialEdges: Edge[] = [
-  // 1. Products to Gemini Vision (Straight Down - "Phân tích")
+  // 1. Products to Gemini Vision (Straight Down - "Phân tích" - Teal)
   {
     id: 'edge-products-gemini',
     source: 'node-products',
@@ -111,10 +111,10 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-products',
     type: 'removable',
     animated: true,
-    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#0d9488', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
-  // 1b. Products to ChatGPT Script (Nạp ảnh sản phẩm trực tiếp vào GPT)
+  // 1b. Products to ChatGPT Script (Nạp ảnh sản phẩm trực tiếp vào GPT - Teal)
   {
     id: 'edge-products-gpt',
     source: 'node-products',
@@ -123,10 +123,10 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-products',
     type: 'removable',
     animated: true,
-    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#0d9488', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
-  // 2. Gemini Vision to ChatGPT Script (Horizontal Right)
+  // 2. Gemini Vision to ChatGPT Script (Horizontal Right - Indigo)
   {
     id: 'edge-gemini-gpt',
     source: 'node-gemini',
@@ -135,10 +135,10 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-gemini',
     type: 'removable',
     animated: true,
-    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#4f46e5', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
-  // 3. Character & Scene to ChatGPT Script (Vertical Down)
+  // 3. Character & Scene to ChatGPT Script (Vertical Down - Violet)
   {
     id: 'edge-charscene-gpt',
     source: 'node-character-scene',
@@ -147,10 +147,10 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-charscene',
     type: 'removable',
     animated: true,
-    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#7c3aed', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
-  // 4. Products to Flow Studio (Across Top to Flow)
+  // 4. Products to Flow Studio (Across Top to Flow - Teal)
   {
     id: 'edge-products-flow',
     source: 'node-products',
@@ -159,10 +159,10 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-assets',
     type: 'removable',
     animated: false,
-    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#0d9488', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
-  // 5. Character & Scene to Flow Studio (Across Top to Flow)
+  // 5. Character & Scene to Flow Studio (Across Top to Flow - Violet)
   {
     id: 'edge-charscene-flow',
     source: 'node-character-scene',
@@ -171,10 +171,10 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-assets',
     type: 'removable',
     animated: false,
-    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#7c3aed', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 
-  // 6. ChatGPT Script to Flow Studio (Script Stream)
+  // 6. ChatGPT Script to Flow Studio (Script Stream - Amber)
   {
     id: 'edge-gpt-flow',
     source: 'node-gpt',
@@ -183,6 +183,6 @@ export const initialEdges: Edge[] = [
     targetHandle: 'from-gpt',
     type: 'removable',
     animated: true,
-    style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '4 4' },
+    style: { stroke: '#d97706', strokeWidth: 2, strokeDasharray: '4 4' },
   },
 ]

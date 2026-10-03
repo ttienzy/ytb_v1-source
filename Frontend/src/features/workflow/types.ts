@@ -198,6 +198,8 @@ export interface GptScriptNodeData {
   isConnectedToImages?: boolean
   hasProductData?: boolean
   productDataPreview?: string
+  isGeminiConnected?: boolean
+  hasGeminiAnalysis?: boolean
   isGenerating?: boolean
   scriptError?: string | null
   isStartNode?: boolean
@@ -244,6 +246,7 @@ export interface GptScriptNodeData {
 }
 
 export interface VeoFlowStudioNodeData {
+  renderError?: string | null
   title?: string
   model?: string // 'Google Veo 3.0'
   scenes: GeneratedSceneItem[]

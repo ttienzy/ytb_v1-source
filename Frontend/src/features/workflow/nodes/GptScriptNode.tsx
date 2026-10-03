@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Handle, Position } from '@xyflow/react'
 import {
@@ -32,6 +32,7 @@ const CONTENT_MODE_OPTIONS = [
   { value: 'tutorial', label: 'Hướng dẫn' },
   { value: 'comparison', label: 'So sánh' },
   { value: 'unboxing', label: 'Unboxing' },
+  { value: 'mannequin', label: 'Ma-nơ-canh (Thời trang)' },
 ] as const
 
 function getPhaseStyle(phase?: string) {
@@ -69,7 +70,18 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   const [activeTab, setActiveTab] = useState<number>(0)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
-  const requestedCount = data.requestedCount ?? 3
+  const requestedCount = Math.max(1, Math.min(20, Number(data.requestedCount) || 3))
+  const [countInput, setCountInput] = useState<string>(String(requestedCount))
+
+  useEffect(() => {
+    setCountInput(String(requestedCount))
+  }, [requestedCount])
+
+  useEffect(() => {
+    if (activeTab >= salesScripts.length && salesScripts.length > 0) {
+      setActiveTab(salesScripts.length - 1)
+    }
+  }, [salesScripts.length, activeTab])
   const contentMode = data.contentMode ?? ''
   const storyMode = data.storyMode ?? 'sequential'
   const clipDurationSeconds = normalizeClipDuration(data.clipDurationSeconds)
@@ -109,14 +121,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   }
 
   const handleSelectPreset = (presetId: string) => {
-    const preset = availablePresets.find((p) => p.id === presetId)
-    if (preset) {
-      data.onSelectPreset?.(presetId)
-      data.onChangeScriptConfig?.({ contentMode: preset.content_mode })
-      if (preset.prompt) {
-        data.onChangePrompt?.(preset.prompt)
-      }
-    }
+    data.onSelectPreset?.(presetId)
   }
 
   const handleConfirmCreatePreset = async (e?: React.FormEvent) => {
@@ -188,7 +193,36 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
   }
 
   const handleCountChange = (count: number) => {
-    data.onChangeScriptConfig?.({ count: Math.min(200, Math.max(1, Math.round(count))) })
+    const clamped = Math.min(20, Math.max(1, Math.round(count)))
+    setCountInput(String(clamped))
+    data.onChangeScriptConfig?.({ count: clamped })
+  }
+
+  const handleCountInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    if (val === '' || /^\d+$/.test(val)) {
+      setCountInput(val)
+      const num = parseInt(val, 10)
+      if (!isNaN(num) && num >= 1 && num <= 20) {
+        data.onChangeScriptConfig?.({ count: num })
+      }
+    }
+  }
+
+  const handleCountInputBlur = () => {
+    const parsed = parseInt(countInput, 10)
+    const finalVal = isNaN(parsed) ? requestedCount : Math.min(20, Math.max(1, parsed))
+    setCountInput(String(finalVal))
+    if (finalVal !== requestedCount) {
+      data.onChangeScriptConfig?.({ count: finalVal })
+    }
+  }
+
+  const handleCountInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleCountInputBlur()
+      ;(e.target as HTMLInputElement).blur()
+    }
   }
 
   const safeTab = Math.min(Math.max(0, activeTab), Math.max(0, salesScripts.length - 1))
@@ -196,7 +230,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
 
   return (
     <div
-      className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
+      className={`wf-node-card wf-node-gpt ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
       style={{ width: 420 }}
     >
       {isStartNode && (
@@ -283,9 +317,9 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           <span
             className="wf-node-badge"
             style={{
-              background: salesScripts.length > 0 ? '#ecfdf5' : '#f1f5f9',
-              color: salesScripts.length > 0 ? '#065f46' : '#64748b',
-              border: salesScripts.length > 0 ? '1px solid #d1fae5' : '1px solid #e2e8f0',
+              background: salesScripts.length > 0 ? '#ecfdf5' : '#fffbeb',
+              color: salesScripts.length > 0 ? '#065f46' : '#d97706',
+              border: salesScripts.length > 0 ? '1px solid #d1fae5' : '1px solid #fde68a',
             }}
           >
             {salesScripts.length > 0 ? `${salesScripts.length} Kịch bản` : 'Chưa có'}
@@ -381,7 +415,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                background: hasProductData ? '#10b981' : '#f59e0b',
+                background: data.hasGeminiAnalysis ? '#10b981' : data.isGeminiConnected ? '#f59e0b' : validImages.length > 0 ? '#3b82f6' : '#94a3b8',
                 display: 'inline-block',
               }}
             />
@@ -389,10 +423,10 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
               style={{
                 fontSize: 9.5,
                 fontWeight: 600,
-                color: hasProductData ? '#059669' : '#d97706',
+                color: data.hasGeminiAnalysis ? '#059669' : data.isGeminiConnected ? '#d97706' : validImages.length > 0 ? '#2563eb' : '#94a3b8',
               }}
             >
-              {hasProductData ? 'Gemini: Đã phân tích' : 'Chờ Gemini'}
+              {data.hasGeminiAnalysis ? 'Gemini: Đã phân tích' : data.isGeminiConnected ? 'Chờ Gemini' : validImages.length > 0 ? 'Chế độ ảnh trực tiếp' : 'Chờ kết nối'}
             </span>
           </div>
         </div>
@@ -407,30 +441,118 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
             border: '1px solid #e2e8f0',
           }}
         >
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 600, color: '#64748b' }}>
-              Số kịch bản
-              <input
-                type="number"
-                min={1}
-                max={200}
-                value={requestedCount}
-                onChange={(event) => handleCountChange(Number(event.target.value) || 1)}
-                style={{
-                  height: 28,
-                  padding: '2px 6px',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  borderRadius: 5,
-                  border: '1px solid #cbd5e1',
-                  background: '#ffffff',
-                  color: '#1e293b',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 10, alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#475569' }}>
+                  Số kịch bản:
+                </span>
+                <span style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>
+                  {requestedCount} clip (~{requestedCount * clipDurationSeconds}s)
+                </span>
+              </div>
 
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 600, color: '#64748b' }}>
+              {/* Stepper + Input */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 5 }}>
+                <button
+                  type="button"
+                  onClick={() => handleCountChange(requestedCount - 1)}
+                  disabled={requestedCount <= 1}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 4,
+                    border: '1px solid #cbd5e1',
+                    background: requestedCount <= 1 ? '#f8fafc' : '#ffffff',
+                    color: requestedCount <= 1 ? '#cbd5e1' : '#334155',
+                    cursor: requestedCount <= 1 ? 'not-allowed' : 'pointer',
+                    fontWeight: 800,
+                    fontSize: 14,
+                    lineHeight: 1,
+                  }}
+                  title="Giảm 1 kịch bản"
+                >
+                  -
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={countInput}
+                  onChange={handleCountInputChange}
+                  onBlur={handleCountInputBlur}
+                  onKeyDown={handleCountInputKeyDown}
+                  style={{
+                    width: 44,
+                    height: 26,
+                    textAlign: 'center',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#0f172a',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCountChange(requestedCount + 1)}
+                  disabled={requestedCount >= 20}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 4,
+                    border: '1px solid #cbd5e1',
+                    background: requestedCount >= 20 ? '#f8fafc' : '#ffffff',
+                    color: requestedCount >= 20 ? '#cbd5e1' : '#334155',
+                    cursor: requestedCount >= 20 ? 'not-allowed' : 'pointer',
+                    fontWeight: 800,
+                    fontSize: 14,
+                    lineHeight: 1,
+                  }}
+                  title="Tăng 1 kịch bản"
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Quick Pills */}
+              <div style={{ display: 'flex', gap: 3 }}>
+                {[1, 2, 3, 4, 5].map((num) => {
+                  const isSelected = requestedCount === num
+                  return (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => handleCountChange(num)}
+                      style={{
+                        flex: 1,
+                        padding: '2px 0',
+                        fontSize: 9.5,
+                        fontWeight: isSelected ? 800 : 600,
+                        borderRadius: 3,
+                        border: isSelected ? '1px solid #4f46e5' : '1px solid #e2e8f0',
+                        background: isSelected ? '#4f46e5' : '#f8fafc',
+                        color: isSelected ? '#ffffff' : '#64748b',
+                        cursor: 'pointer',
+                        transition: 'all 0.1s ease',
+                      }}
+                      title={`Chọn nhanh ${num} kịch bản`}
+                    >
+                      {num}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, color: '#475569' }}>
               Chế độ kịch bản
               <select
                 value={storyMode}
@@ -450,6 +572,11 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                 <option value="sequential">Phim liên hoàn</option>
                 <option value="independent">Clip độc lập</option>
               </select>
+              <span style={{ fontSize: 8.5, color: '#64748b', marginTop: 2, lineHeight: 1.3, fontWeight: 400 }}>
+                {storyMode === 'sequential'
+                  ? 'Các clip tiếp nối camera liền mạch thành 1 phim.'
+                  : 'Mỗi clip là 1 góc quay độc lập để cắt dựng.'}
+              </span>
             </label>
           </div>
         </div>
@@ -874,7 +1001,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
           <div style={{ marginTop: 10, borderTop: '1px solid #e2e8f0', paddingTop: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: '#475569' }}>
-                Đã tạo ({salesScripts.length}/{requestedCount} kịch bản):
+                Đã tạo ({salesScripts.length} kịch bản):
               </span>
               {scriptCollection?.repaired && (
                 <span style={{ fontSize: 9, color: '#0369a1', background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: 4, padding: '1px 5px' }}>
@@ -882,6 +1009,23 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                 </span>
               )}
             </div>
+
+            {isScriptOutputStale && (
+              <div
+                style={{
+                  marginBottom: 6,
+                  padding: '5px 8px',
+                  background: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: 5,
+                  fontSize: 9.5,
+                  color: '#92400e',
+                  lineHeight: 1.35,
+                }}
+              >
+                ⚠️ <strong>Cấu hình vừa đổi:</strong> Bấm <em>Sinh Kịch Bản</em> để tạo mới, hoặc vẫn có thể đồng bộ {salesScripts.length} kịch bản hiện tại sang Flow.
+              </div>
+            )}
 
             {/* Dynamic Tabs */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
@@ -1056,7 +1200,6 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                       data.onPushToVeo?.(safeTab)
                     }
                   }}
-                  disabled={isScriptOutputStale}
                   style={{
                     marginTop: 6,
                     width: '100%',
@@ -1071,8 +1214,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 6,
-                    cursor: isScriptOutputStale ? 'not-allowed' : 'pointer',
-                    opacity: isScriptOutputStale ? 0.55 : 1,
+                    cursor: 'pointer',
                     transition: 'all 0.15s ease',
                   }}
                   title={`Đẩy ${salesScripts.length} kịch bản vào ${salesScripts.length} clip Google Flow độc lập`}
@@ -1081,12 +1223,11 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                   Đồng bộ {salesScripts.length} Kịch Bản → {salesScripts.length} Clip Flow
                 </button>
 
-                {/* Nạp thủ công kịch bản đang chọn vào clip đang mở */}
+                {/* Nạp riêng kịch bản đang chọn vào clip đang mở */}
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button
                     type="button"
                     onClick={() => data.onPushSingleToVeo?.(safeTab)}
-                    disabled={isScriptOutputStale}
                     style={{
                       flex: 1,
                       padding: '5px 8px',
@@ -1096,8 +1237,7 @@ export function GptScriptNode({ data, selected }: GptScriptNodeProps) {
                       color: '#475569',
                       fontSize: 10,
                       fontWeight: 600,
-                      cursor: isScriptOutputStale ? 'not-allowed' : 'pointer',
-                      opacity: isScriptOutputStale ? 0.55 : 1,
+                      cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',

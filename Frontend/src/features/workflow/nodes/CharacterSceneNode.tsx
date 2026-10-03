@@ -100,7 +100,7 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
 
   return (
     <div
-      className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
+      className={`wf-node-card wf-node-charscene ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
       style={{ width: 360 }}
     >
       {isStartNode && (
@@ -157,9 +157,9 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
           <span
             className="wf-node-badge"
             style={{
-              background: count > 0 ? '#ecfdf5' : '#f1f5f9',
-              color: count > 0 ? '#065f46' : '#64748b',
-              border: count > 0 ? '1px solid #d1fae5' : '1px solid #e2e8f0',
+              background: count > 0 ? '#ecfdf5' : '#faf5ff',
+              color: count > 0 ? '#065f46' : '#7c3aed',
+              border: count > 0 ? '1px solid #d1fae5' : '1px solid #ddd6fe',
             }}
           >
             {count}/2 Ảnh
@@ -363,14 +363,14 @@ export function CharacterSceneNode({ data, selected }: CharacterSceneNodeProps) 
                     width: 26,
                     height: 26,
                     borderRadius: '50%',
-                    background: '#f5f3ff',
+                    background: '#fdf2f8',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     marginBottom: 4,
                   }}
                 >
-                  <ImageIcon size={13} color="#7c3aed" />
+                  <ImageIcon size={13} color="#db2777" />
                 </div>
                 <div className="wf-asset-slot-label">Bối cảnh / Nền</div>
                 <div className="wf-asset-slot-sub">Kéo thả / Chọn</div>

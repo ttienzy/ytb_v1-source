@@ -1,6 +1,6 @@
 {
   "name": "creatorflow-ai",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "description": "CreatorFlow AI - AI Video Production & Multi-Channel Studio",
   "author": "ttienzy",
   "repository": {
@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/features/workflow/__tests__/*.test.ts src/features/workflow/__tests__/*.test.mjs",
     "test:voices": "node --experimental-strip-types --test src/features/voices/*.test.ts",
-    "package": "npm run build && electron-builder"
+    "package": "npm run build && electron-builder",
+    "test:veo": "node --experimental-strip-types --test src/features/veo-studio/services/*.test.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.6",

@@ -20,13 +20,14 @@ QUY TẮC BẮT BUỘC VỀ NGÔN NGỮ (BILINGUAL MANDATE):
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ chỉ thị giọng nói, lời thoại, narrator, voiceover hay dialogue vào visual_direction.
      Veo chỉ chịu trách nhiệm HÌNH ẢNH + ÂM THANH MÔI TRƯỜNG (ambient sound, SFX tự nhiên như tiếng bước chân, tiếng nước chảy, tiếng nhạc nền nhẹ).
      Lời thoại voiceover sẽ được lồng tiếng riêng bằng hệ thống VieNeu-TTS bên ngoài, KHÔNG để Veo tự nói.
+   - TUYỆT ĐỐI KHÔNG đưa chữ viết, watermark, subtitle, caption hay typography vào visual_direction (clean cinematic footage, no text on screen, no typography, no watermarks).
 
 2. voiceover BẮT BUỘC VIẾT BẰNG TIẾNG VIỆT:
    - Lời thoại thuần Việt 100%, câu từ sắc sảo, gãy gọn, giàu năng lượng, bắt tai theo phong cách sáng tạo nội dung TikTok hiện đại.
    - Độ dài tối ưu khoảng {{MIN_WORDS}}-{{MAX_WORDS}} từ. Không viết câu quá dài gây hụt hơi, ngắt nghỉ nhịp nhàng.
 
 3. on_screen_text:
-   - Câu text ngắn gọn tiếng Việt (3-6 từ) bắt mắt, nhấn mạnh điểm mấu chốt để người xem lướt không bật tiếng vẫn hiểu.
+   - Gợi ý câu text ngắn gọn tiếng Việt (3-6 từ) phục vụ khâu hậu kỳ chèn caption (ví dụ trên CapCut/Premiere). Đây là metadata hậu kỳ, tuyệt đối không chèn vào visual_direction.
 
 Định dạng đầu ra bắt buộc:
 - Chỉ trả về một JSON object hợp lệ duy nhất, không dùng Markdown (không viết ```json ```) và không viết lời giải thích nào khác ngoài JSON.

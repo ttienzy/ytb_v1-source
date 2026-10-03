@@ -24,6 +24,7 @@ export function classifyTier(creditData) {
 }
 
 export async function harvestSingleTab(tab) {
+  if (runtime.imageUiBusy || runtime.videoUiBusy) return null;
   ensureHarvestCfg();
   if (!tab?.id) return null;
   const hcfg = runtime.harvestCfg.h;
@@ -254,7 +255,7 @@ export async function harvestSingleTab(tab) {
     } catch { }
   } else {
     // 1. Thử nhờ content script probe nhẹ avatar nếu tab đang mở
-    if (tab?.id) {
+    if (tab?.id && !runtime.imageUiBusy && !runtime.videoUiBusy) {
       try {
         const probeRes = await chrome.tabs.sendMessage(tab.id, { type: 'PROBE_CREDITS' });
         if (probeRes?.credits && probeRes.credits > 0) {

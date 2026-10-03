@@ -25,6 +25,7 @@ export function registerAlarmEvents() {
     }
 
     if (alarm.name === 'watchdog') {
+      if (runtime.imageUiBusy || runtime.videoUiBusy) return;
       if (!runtime.polling) startPolling();
       if (!runtime.bridgeSecret) await fetchBridgeSecret();
       if (!runtime.harvestCfg || runtime.cfgIsFallback) await syncRemoteConfig();

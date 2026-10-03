@@ -282,14 +282,6 @@ async def upload_image(file: UploadFile = File(...)):
     }
 
 
-@router.post("/extension/reload")
-def reload_extension():
-    """Gửi yêu cầu Extension tự reload code service worker."""
-    from app.veo import bridge
-    bridge.request_extension_reload()
-    return {"ok": True, "message": "Extension reload requested"}
-
-
 @router.post("/tab/reload")
 def reload_tab(project_id: str | None = None):
     """Gửi yêu cầu Extension làm mới tab Google Flow để xóa cờ WAF."""
@@ -420,6 +412,7 @@ class VideoUploadRequest(BaseModel):
     video_mime: str = "video/mp4"
     video_filename: str = "reference_video.mp4"
     force_fresh: bool = False
+    native_ui: bool = False
 
 
 def _strip_audio_and_probe_duration(video_bytes: bytes, filename: str) -> tuple[bytes, float | None]:
@@ -490,14 +483,18 @@ def upload_video_reference(req: VideoUploadRequest):
 
     # 1. Giải mã base64 và tách bỏ audio track để chống lỗi PUBLIC_ERROR_AUDIO_FILTERED
     clean_base64 = req.video_base64
+    clean_bytes: bytes | None = None
     video_duration: float | None = None
     try:
-        raw_bytes = base64.b64decode(req.video_base64)
+        raw_bytes = base64.b64decode(req.video_base64, validate=True)
         clean_bytes, video_duration = _strip_audio_and_probe_duration(raw_bytes, req.video_filename)
         if len(clean_bytes) != len(raw_bytes):
             clean_base64 = base64.b64encode(clean_bytes).decode("ascii")
     except Exception as exc:
-        logger.warning("[UploadVideo] Could not decode/clean base64 video: %s", exc)
+        raise HTTPException(status_code=400, detail="Video upload body is invalid or the video could not be read.") from exc
+
+    if not clean_bytes:
+        raise HTTPException(status_code=400, detail="Video file is empty.")
 
     # 2. Kiểm tra cache deduplication trước khi gọi Extension
     video_hash = media_registry.compute_bytes_sha256(clean_base64.encode("utf-8"))
@@ -522,19 +519,44 @@ def upload_video_reference(req: VideoUploadRequest):
     if not ext.get("connected"):
         raise HTTPException(status_code=503, detail="Extension chưa kết nối. Hãy mở Chrome + Extension.")
 
-    req_id = bridge.request_video_upload(
-        project_id=req.project_id,
-        video_base64=clean_base64,
-        video_mime=req.video_mime,
-        video_filename=req.video_filename,
-        force_fresh=req.force_fresh,
-    )
+    upload_path: Path | None = None
+    if req.native_ui:
+        import uuid
+
+        upload_dir = _BASE_DIR / "Data" / "media" / "motion_uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = Path(req.video_filename).name
+        if not safe_name.lower().endswith(".mp4"):
+            safe_name = f"{Path(safe_name).stem or 'reference_video'}.mp4"
+        upload_path = upload_dir / f"{uuid.uuid4().hex}-{safe_name}"
+        upload_path.write_bytes(clean_bytes)
+        req_id = bridge.request_video_upload_ui(
+            project_id=req.project_id,
+            video_local_path=str(upload_path.resolve()),
+            video_filename=safe_name,
+            force_fresh=req.force_fresh,
+        )
+    else:
+        req_id = bridge.request_video_upload(
+            project_id=req.project_id,
+            video_base64=clean_base64,
+            video_mime=req.video_mime,
+            video_filename=req.video_filename,
+            force_fresh=req.force_fresh,
+        )
     if not req_id:
+        if upload_path:
+            upload_path.unlink(missing_ok=True)
         raise HTTPException(status_code=503, detail="Bridge queue đầy hoặc Extension chưa sẵn sàng.")
 
-    result = bridge.wait_video_upload_result(req_id, timeout=120.0)
+    try:
+        result = bridge.wait_video_upload_result(req_id, timeout=240.0 if req.native_ui else 120.0)
+    finally:
+        if upload_path:
+            upload_path.unlink(missing_ok=True)
     if not result:
-        raise HTTPException(status_code=504, detail="Timeout chờ Extension upload video (120s).")
+        timeout = 240 if req.native_ui else 120
+        raise HTTPException(status_code=504, detail=f"Timeout chờ Extension upload video ({timeout}s).")
 
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error") or "Upload video thất bại.")
@@ -547,7 +569,7 @@ def upload_video_reference(req: VideoUploadRequest):
         ref_dir.mkdir(parents=True, exist_ok=True)
         ref_file = ref_dir / local_ref_name
         if not ref_file.exists():
-            ref_file.write_bytes(raw_bytes if 'raw_bytes' in locals() else clean_bytes)
+            ref_file.write_bytes(clean_bytes)
     except Exception as save_err:
         logger.warning("[UploadVideo] Không thể lưu file veo_references: %s", save_err)
 

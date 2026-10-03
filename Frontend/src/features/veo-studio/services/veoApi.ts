@@ -153,7 +153,8 @@ export async function extractLastFrame(
   prompt?: string
   aspect_ratio?: string
 }> {
-  const cleanId = videoId.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || videoId
+  const streamId = videoId.match(/\/history\/([^/?#]+)\/file(?:[?#]|$)/)?.[1]
+  const cleanId = streamId ? decodeURIComponent(streamId) : videoId.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || videoId
   const resp = await fetch(`${BASE}/history/${encodeURIComponent(cleanId)}/extract-last-frame`, {
     method: 'POST',
   })
@@ -180,7 +181,7 @@ export async function uploadImage(
 export async function uploadVideoReference(
   file: File,
   flowProjectId: string,
-  options?: { forceFresh?: boolean },
+  options?: { forceFresh?: boolean; nativeUi?: boolean },
 ): Promise<{ ok: boolean; media_id: string; project_id: string; filename: string; cached?: boolean }> {
   const bytes = new Uint8Array(await file.arrayBuffer())
   let binary = ''
@@ -198,6 +199,7 @@ export async function uploadVideoReference(
       video_mime: file.type || 'video/mp4',
       video_filename: file.name,
       force_fresh: options?.forceFresh === true,
+      native_ui: options?.nativeUi === true,
     }),
   })
   if (!resp.ok) {

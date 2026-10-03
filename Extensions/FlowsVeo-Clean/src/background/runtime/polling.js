@@ -36,6 +36,7 @@ export async function startPolling() {
 
   let tick = 0;
   while (runtime.polling) {
+    if (runtime.imageUiBusy || runtime.videoUiBusy) { await sleep(POLL_INTERVAL_MS); continue; }
     // Re-sync remote config mỗi 5 ticks nếu chỉ có fallback
     if (runtime.cfgIsFallback && tick % 5 === 0) {
       if (!runtime.bridgeSecret) await fetchBridgeSecret();

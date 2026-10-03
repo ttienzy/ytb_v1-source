@@ -3,6 +3,7 @@ import type { Node, Edge } from '@xyflow/react'
 import type { ScriptGenerationConfig } from '../contracts'
 import type * as WorkflowApi from './workflowApi'
 import {
+  findConnectedSourceNodes,
   findSingleConnectedSourceNode,
   resolveGeminiAnalysisInput,
   resolveGptScriptsInput,
@@ -92,6 +93,14 @@ function requiredParent(context: RunContext, node: Node, type: 'geminiAnalysis' 
   return requireResult(findSingleConnectedSourceNode({ ...input(context, node), expectedSourceType: type }), node)
 }
 
+function optionalParent(context: RunContext, node: Node, type: 'geminiAnalysis' | 'gptScript'): Node | null {
+  const sources = findConnectedSourceNodes({ ...input(context, node), expectedSourceType: type })
+  if (sources.length > 1) {
+    throw new WorkflowGraphError(node.id, `Nhiều hơn 1 node nguồn kiểu ${type} kết nối vào node này.`)
+  }
+  return sources[0] || null
+}
+
 function providerFor(node: Node): 'gemini' | '9router' {
   const value = node.data.analysisProvider ?? node.data.providerUsed ?? 'gemini'
   if (value !== 'gemini' && value !== '9router') throw new WorkflowGraphError(node.id, `Unsupported analysis provider: ${value}`)
@@ -124,14 +133,20 @@ const handlers: Record<WorkflowStartType, NodeHandler> = {
   },
   gptScript: {
     preflight(context, node) {
-      const parent = requiredParent(context, node, 'geminiAnalysis')
-      if (!context.scheduled.has(parent.id)) requireResult(resolveGeminiAnalysisInput(input(context, node)), node)
-      requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
+      const geminiParent = optionalParent(context, node, 'geminiAnalysis')
+      if (geminiParent && !context.scheduled.has(geminiParent.id)) {
+        requireResult(resolveGeminiAnalysisInput(input(context, node)), node)
+      }
+      const assets = requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
+      if (!assets.rawImages || assets.rawImages.length === 0) {
+        throw new WorkflowGraphError(node.id, 'Cần kết nối với khối Ảnh Sản Phẩm và tải lên ít nhất 1 ảnh.')
+      }
       const config = scriptConfig(context, node)
-      if (!Number.isInteger(config.count) || config.count < 1) throw new WorkflowGraphError(node.id, 'Script count must be a positive integer')
+      if (!Number.isInteger(config.count) || config.count < 1) throw new WorkflowGraphError(node.id, 'Số lượng kịch bản yêu cầu phải là số nguyên dương.')
     },
     async execute(context, node) {
-      const productAnalysis = requireResult(resolveGeminiAnalysisInput(input(context, node)), node)
+      const geminiParent = optionalParent(context, node, 'geminiAnalysis')
+      const productAnalysis = geminiParent ? requireResult(resolveGeminiAnalysisInput(input(context, node)), node) : undefined
       const assets = requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
       context.patch(node, { isGenerating: true, scriptError: null })
       const result = await context.dependencies.callGptScriptGeneration({
@@ -159,7 +174,7 @@ const handlers: Record<WorkflowStartType, NodeHandler> = {
         const data = parent.data as Record<string, any>
         if (isScriptCollectionStale(data.scriptCollection, {
           ...scriptConfig(context, parent), promptTemplate: data.prompt || '', model: data.model || context.config.defaultScriptModel,
-        })) throw new WorkflowGraphError(node.id, 'GPT script collection is stale. Generate scripts again.')
+        })) throw new WorkflowGraphError(node.id, 'Kịch bản ChatGPT đã cũ so với cấu hình mới. Vui lòng bấm tạo lại kịch bản.')
       }
       requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
     },
@@ -186,7 +201,7 @@ const handlers: Record<WorkflowStartType, NodeHandler> = {
 function requiredProduct(context: RunContext, node: Node) {
   requireResult(findSingleConnectedSourceNode({ ...input(context, node), expectedSourceType: 'productAssets' }), node)
   const assets = requireResult(resolveWorkflowAssetsInput(input(context, node)), node)
-  if (!assets.rawImages.length) throw new WorkflowGraphError(node.id, 'Upload at least one product image before analysis.')
+  if (!assets.rawImages.length) throw new WorkflowGraphError(node.id, 'Vui lòng tải lên ít nhất 1 ảnh sản phẩm vào khối Ảnh Sản Phẩm trước khi chạy phân tích.')
   return assets
 }
 
@@ -199,7 +214,7 @@ export async function runRealWorkflow(params: {
   config?: Partial<WorkflowConfig>
 }): Promise<void> {
   const { startNodeId, edges, callbacks } = params
-  if (!params.nodes.some((node) => node.id === startNodeId)) throw new Error(`Start node not found: ${startNodeId}`)
+  if (!params.nodes.some((node) => node.id === startNodeId)) throw new Error(`Không tìm thấy node khởi đầu: ${startNodeId}`)
   const dependencies = { ...defaultDependencies, ...params.dependencies }
   const nodes = params.nodes.map((node) => ({ ...node, data: { ...node.data } }))
   let activeId = startNodeId
@@ -217,7 +232,7 @@ export async function runRealWorkflow(params: {
     for (const node of ordered) {
       activeId = node.id
       const handler = handlers[node.type as WorkflowStartType]
-      if (!handler) throw new WorkflowGraphError(node.id, `Unsupported workflow node type: ${node.type}`)
+      if (!handler) throw new WorkflowGraphError(node.id, `Khối quy trình không được hỗ trợ khởi chạy: ${node.type}`)
       handler.preflight(context, node)
     }
     for (const node of ordered) {

@@ -6,6 +6,7 @@ import {
   resolveGeminiAnalysisInput,
 } from '../services/graphResolver.ts'
 import { buildClipPlans, isScriptCollectionStale, splitScriptToScenes } from '../services/buildScenePlan.ts'
+import { runRealWorkflow } from '../services/workflowRunner.ts'
 import type { AssetRef, SalesScript, ScriptCollection } from '../contracts.ts'
 
 console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
@@ -314,6 +315,74 @@ console.log('🧪 Bắt đầu chạy Workflow Unit Tests...')
   assert.equal(fallbackPreset.id, 'custom_review', 'Nếu không có is_default thì fallback về preset đầu tiên, không hardcode')
 
   console.log('✅ TEST 8 PASSED: giải quyết thể loại mặc định động thành công')
+}
+
+// ─── TEST 9: runRealWorkflow chạy thành công từ ProductAssets -> GPT không cần GeminiAnalysis ───
+{
+  const mockNodes: Node[] = [
+    {
+      id: 'p',
+      type: 'productAssets',
+      position: { x: 0, y: 0 },
+      data: {
+        images: ['https://example.com/polo.jpg'],
+        assets: [{ id: 'a1', kind: 'product', previewUrl: '/assets/polo.jpg', backendPath: 'C:\\polo.jpg', uploadStatus: 'uploaded' }],
+      },
+    },
+    {
+      id: 'g',
+      type: 'gptScript',
+      position: { x: 200, y: 0 },
+      data: {
+        prompt: 'Fashion prompt',
+        requestedCount: 2,
+      },
+    },
+  ]
+  const mockEdges: Edge[] = [
+    { id: 'e-p-g', source: 'p', sourceHandle: 'to-gpt', target: 'g', targetHandle: 'from-products' },
+  ]
+
+  let completed = false
+  let gptPayloadCalled: any = null
+
+  await runRealWorkflow({
+    startNodeId: 'p',
+    nodes: mockNodes,
+    edges: mockEdges,
+    dependencies: {
+      callGptScriptGeneration: async (params) => {
+        gptPayloadCalled = params
+        return {
+          scripts: [
+            { id: 's1', phase: 'Establishing', angle: 'Orbit', title: 'Clip 1', content: '', visualDirection: 'Mannequin orbit' },
+            { id: 's2', phase: 'Macro', angle: 'Texture', title: 'Clip 2', content: '', visualDirection: 'Fabric texture' },
+          ],
+          rawText: '',
+          model: 'test-model',
+          collection: {
+            requestedCount: 2, actualCount: 2, items: [], contentMode: 'mannequin', platform: 'auto',
+            storyMode: 'sequential', batchSize: 8, clipDurationSeconds: 8, minWords: 0, maxWords: 0, repaired: false,
+            promptTemplate: '', requestedModel: '', generationModel: '',
+          },
+        }
+      },
+    },
+    callbacks: {
+      onNodeStateChange: () => {},
+      onError: (nodeId, err) => {
+        assert.fail(`Không được có lỗi: ${nodeId}: ${err}`)
+      },
+      onSuccess: () => {
+        completed = true
+      },
+    },
+  })
+
+  assert.equal(completed, true, 'Workflow phải hoàn thành thành công mà không đòi hỏi GeminiAnalysis')
+  assert.equal(gptPayloadCalled?.productAnalysis, undefined, 'productAnalysis phải là undefined khi không có Gemini')
+  assert.equal(gptPayloadCalled?.images.length, 1, 'Phải nhận đủ ảnh từ ProductAssets')
+  console.log('✅ TEST 9 PASSED: runRealWorkflow chạy thành công từ ProductAssets -> GPT không cần GeminiAnalysis')
 }
 
 console.log('🎉 TOÀN BỘ WORKFLOW FRONTEND UNIT TESTS ĐÃ HOÀN TẤT VÀ VƯỢT QUA!')

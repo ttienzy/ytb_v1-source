@@ -7,6 +7,8 @@ import { startStandaloneBridge } from '../tests/helpers/standalone-bridge.mjs';
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(root, '.local/browsers');
 const { chromium } = await import('playwright');
 const fixture = await startStandaloneBridge();
+const flowHtml = await readFile(path.join(root, 'tests/fixtures/flow-smoke.html'), 'utf8');
+const videoMediaId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 await mkdir(path.join(root, '.local/browser-profiles'), { recursive: true });
 const profile = await mkdtemp(path.join(root, '.local/browser-profiles/smoke-'));
 const extension = path.join(root, 'dist/release');
@@ -24,7 +26,7 @@ async function waitFor(predicate, label, timeout = 20000) {
   throw new Error('Timed out: ' + label);
 }
 function asset(status, videoUrl = null) {
-  const item = ['fixture-media', null, null, 'CAE', null, []];
+  const item = [videoMediaId, null, null, 'CAE', null, []];
   const progress = []; progress[8] = [status]; progress[10] = 'https://flow-content.google/preview.jpg'; item[5][0] = progress;
   if (videoUrl) { const video = []; video[8] = videoUrl; item[5][2] = [video]; }
   return item;
@@ -42,21 +44,16 @@ try {
     const url = new URL(route.request().url());
     if (url.hostname === '127.0.0.1' && url.port === String(fixture.port)) return route.continue();
     if (url.hostname === 'flow.google.com' && route.request().isNavigationRequest()) {
-      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="en"><body>
-        <button aria-label="fixture@example.invalid">fixture@example.invalid</button><span>100 credits</span>
-        <button onclick="history.pushState({},'', '/u/1/project/created-project')">New project</button>
-        <script>window.WIZ_global_data={SNlM0e:'fixture-csrf',FdrFJe:'fixture-session',cfb2h:'fixture-build'};</script>
-        <script src="https://www.google.com/recaptcha/enterprise.js?render=fixture-site-key"></script>
-        </body></html>` });
+      return route.fulfill({ contentType: 'text/html', body: flowHtml });
     }
     if (url.hostname === 'www.google.com' && url.pathname === '/recaptcha/enterprise.js') {
       return route.fulfill({ contentType: 'application/javascript', body: "window.grecaptcha={enterprise:{ready:cb=>cb(),execute:async()=> 'fixture-captcha'}};" });
     }
     if (url.hostname === 'flow.google.com' && url.searchParams.has('rpcids')) {
       const rpc = url.searchParams.get('rpcids'); rpcCalls.push(rpc);
-      const responses = { YhhmEf: [asset(2)], nprQif: [asset(2)], MZZa6b: [asset(2)], jIps6: [asset(2)],
+      const responses = { Zzl0ze: [], YhhmEf: [asset(2)], nprQif: [asset(2)], MZZa6b: [asset(2)], jIps6: [asset(2)],
         jwpduf: [asset(3)], as29s: [asset(3, 'https://flow-content.google/fixture-result.mp4?Signature=fixture')],
-        ogiZ0b: [['fixture-image', 'https://flow-content.google/image/fixture-image.png']],
+        ogiZ0b: [[['fixture-image', null, null, null, null, null, [[null, 123, null, null, null, null, null, null, null, null, null, null, null, 'https://flow-content.google/image/fixture-image'], null, [1280, 720]]]]],
         maseQ: [['fixture-reference', 'project-test']] };
       if (!(rpc in responses)) throw new Error('Unexpected fixture RPC: ' + rpc);
       return route.fulfill({ contentType: 'application/json', body: ")]}'\n\n" + JSON.stringify(['wrb.fr', rpc, JSON.stringify(responses[rpc])]) + '\n' });
@@ -93,16 +90,18 @@ try {
   await waitFor(() => fixture.received.some(r => r.path === '/flow/response' && r.body.request_id === 'browser-video'), 'video result', 30000);
   const video = fixture.received.find(r => r.path === '/flow/response' && r.body.request_id === 'browser-video').body;
   assert.equal(video.error, null, JSON.stringify(video));
-  assert.equal(video.result.media_id, 'fixture-media');
+  assert.equal(video.result.media_id, videoMediaId);
+  assert.deepEqual(await flow.evaluate(() => window.fixtureSubmissions), [{ rpc: 'YhhmEf', prompt: 'fixture video', trusted: true }]);
   assert.ok(rpcCalls.includes('YhhmEf') && rpcCalls.includes('as29s'));
-  report.checks.push('video dispatch, CAPTCHA and result correlation on minified release');
+  report.checks.push('native video controls, trusted submit and result correlation on minified release');
 
-  fixture.jobs.push({ action: 'IMAGE_GENERATION', request_id: 'browser-image', image_request: { prompt: 'fixture image', project_id: 'project-test', aspect_ratio: '16:9' } });
+  fixture.jobs.push({ action: 'IMAGE_GENERATION', request_id: 'browser-image', image_request: { prompt: 'fixture image', project_id: 'project-test', aspect_ratio: '16:9', model_key: 'GEM_PIX_2' } });
   await waitFor(() => fixture.received.some(r => r.path === '/flow/image-response'), 'image result');
   const img = fixture.received.find(r => r.path === '/flow/image-response').body;
   assert.equal(img.error, null, JSON.stringify(img));
   assert.equal(img.result.images.length, 1);
-  report.checks.push('image generation and response');
+  assert.deepEqual(await flow.evaluate(() => window.fixtureSubmissions.at(-1)), { rpc: 'ogiZ0b', prompt: 'fixture image', trusted: true });
+  report.checks.push('native image controls, trusted submit and response');
 
   fixture.jobs.push({ action: 'UPLOAD_VIDEO', request_id: 'browser-upload', project_id: 'project-test', video_base64: Buffer.from('fixture-video').toString('base64'), mime_type: 'video/mp4', filename: 'fixture.mp4' });
   await waitFor(() => fixture.received.some(r => r.path === '/flow/video-upload-response'), 'upload result');

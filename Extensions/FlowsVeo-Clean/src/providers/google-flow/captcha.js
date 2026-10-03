@@ -14,13 +14,13 @@ export async function checkRecaptchaReady(tabId) {
   return { available: state.available, error: state.error, keySource: state.keySource };
 }
 
-export async function solveRecaptcha(request) {
+export async function solveRecaptcha(request, pinnedTabId = null) {
   ensureHarvestCfg();
   if (!runtime.harvestCfg.c) return { token: null, error: 'Captcha config not loaded' };
 
   // Tìm hoặc mở tab (ưu tiên đúng project của request)
   const targetPid = request?.target_project_id || request?.image_request?.project_id || request?.flow_request?.project_id || request?.project_id || null;
-  let tabId = await findLabsTab(targetPid);
+  let tabId = pinnedTabId ?? await findLabsTab(targetPid);
   const deadline = Date.now() + 15_000;
   while (!tabId && Date.now() < deadline) {
     tabId = await openLabsTab();
@@ -38,7 +38,7 @@ export async function solveRecaptcha(request) {
   } catch { }
 
   const page = await warmUpRecaptcha(tabId);
-  const siteKey = request.site_key || request.recaptcha_ent_key || page.siteKey || '';
+  const siteKey = request.site_key || request.recaptcha_ent_key || page.siteKey || '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV';
   logActivity('info', `Captcha preflight: tab=${tabId} module=${!!page.moduleReady} keySource=${page.keySource || 'none'}`);
   if (!page.moduleReady) return { token: null, error: page.error };
 
@@ -87,7 +87,7 @@ export async function solveRecaptcha(request) {
     });
     const res = results?.[0]?.result;
     if (res?.token) {
-      logActivity('info', `solveRecaptcha success: tokenLen=${res.token.length} prefix=${res.token.slice(0, 20)}...`);
+      logActivity('info', `solveRecaptcha success: tokenLen=${res.token.length}`);
     } else if (res?.error) {
       logActivity('warn', `solveRecaptcha error: ${res.error}`);
     }

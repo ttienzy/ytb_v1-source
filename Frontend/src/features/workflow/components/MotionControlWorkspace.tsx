@@ -980,7 +980,7 @@ export function MotionControlWorkspace({
       if (motionAsset.file && (forceFreshAssets || !motionMediaId)) {
         currentStage = 'reference_upload'
         setRunningStageText(`Đang tải mới video mẫu (${motionAsset.fileName}) vào project của lượt này...`)
-        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: forceFreshAssets })
+        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: forceFreshAssets, nativeUi: true })
         motionMediaId = uploadRes.media_id
         setMotionAsset((prev) => ({ ...prev, mediaId: uploadRes.media_id, mediaProjectId: flowProjectId }))
       }
@@ -1087,12 +1087,12 @@ export function MotionControlWorkspace({
         let outputFile: string | null = null
         let variantError: MotionRunError | null = null
 
-        for (let pollCount = 1; pollCount <= 120; pollCount += 1) {
+        for (let pollCount = 1; pollCount <= 240; pollCount += 1) {
           await new Promise((resolve) => setTimeout(resolve, 2500))
           const status = await getJobStatus(jobRes.job_id)
           if (!status) continue
 
-          const stepDetail = status.current_step || `Google Flow: ${status.status} (${pollCount}/120)`
+          const stepDetail = status.current_step || `Google Flow: ${status.status} (${pollCount}/240)`
           setRunningStageText(`${stagePrefix}${stepDetail}`)
           setVariantSlots((prev) => {
             const next = [...prev]
@@ -1265,7 +1265,7 @@ export function MotionControlWorkspace({
       if (!motionMediaId && motionAsset.file) {
         currentStage = 'reference_upload'
         setRunningStageText(`Đang tải video mẫu (${motionAsset.fileName}) vào project...`)
-        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: false })
+        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: false, nativeUi: true })
         motionMediaId = uploadRes.media_id
         setMotionAsset((prev) => ({ ...prev, mediaId: uploadRes.media_id, mediaProjectId: flowProjectId }))
       }
@@ -1311,12 +1311,12 @@ export function MotionControlWorkspace({
       currentStage = 'generation'
       let outputFile: string | null = null
 
-      for (let pollCount = 1; pollCount <= 120; pollCount += 1) {
+      for (let pollCount = 1; pollCount <= 240; pollCount += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2500))
         const status = await getJobStatus(jobRes.job_id)
         if (!status) continue
 
-        const stepDetail = status.current_step || `Google Flow: ${status.status} (${pollCount}/120)`
+        const stepDetail = status.current_step || `Google Flow: ${status.status} (${pollCount}/240)`
         setRunningStageText(`[Thử lại #${variantIndex}] ${stepDetail}`)
         setVariantSlots((prev) => {
           const next = [...prev]

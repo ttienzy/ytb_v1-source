@@ -698,7 +698,22 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         if not request.image_path and not request.end_image_path:
             raise ValueError("Chế độ Khung hình (Frames): Vui lòng chọn ít nhất Khung hình bắt đầu (Start Frame).")
 
+    # Validate & đồng bộ hóa chế độ Thành phần (Ingredients) theo chuẩn Google Flow UI
+    if getattr(request.input_mode, "value", str(request.input_mode)) == "ingredients":
+        if not request.ingredient_image_paths and request.image_path:
+            request.ingredient_image_paths = [request.image_path]
+            if request.end_image_path:
+                request.ingredient_image_paths.append(request.end_image_path)
+        if request.ingredient_media_ids or not 1 <= len(request.ingredient_image_paths or []) <= 3:
+            raise ValueError("Ingredients yêu cầu 1–3 file ảnh; hãy chọn ảnh từ máy hoặc thư viện app.")
+        request.image_path = None
+        request.end_image_path = None
+
     if getattr(request.input_mode, "value", str(request.input_mode)) == "video_edit":
+        if not request.ingredient_image_paths and request.image_path:
+            request.ingredient_image_paths = [request.image_path]
+        request.image_path = None
+        request.end_image_path = None
         if not (request.reference_video_id or "").strip():
             raise ValueError("Video edit mode requires an uploaded reference_video_id")
         end_seconds = request.reference_video_end_seconds or request.reference_video_start_seconds + 10
@@ -771,6 +786,12 @@ def _process_job(job_id: str) -> None:
     if not job:
         return
 
+    import random
+    # Jitter delay để tránh nhiều job kích hoạt Flow API cùng lúc, giảm nguy cơ PUBLIC_ERROR_UNUSUAL_ACTIVITY
+    startup_jitter = random.uniform(2.0, 6.0)
+    logger.info("Job %s: startup jitter delay %.1fs", job_id, startup_jitter)
+    time.sleep(startup_jitter)
+
     try:
         # Step 1: Check Bridge & Extension
         _update_job(job, JobStatus.CAPTCHA, "Đang chờ giải reCAPTCHA...")
@@ -799,18 +820,23 @@ def _process_job(job_id: str) -> None:
             _update_job(job, JobStatus.ERROR, error="Không thể tạo yêu cầu CAPTCHA (queue đầy hoặc Extension đang bận)")
             return
 
-        # Step 3: Wait for token
-        result = bridge.wait_captcha_result(request_id, timeout=30.0)
-        if not result or not result.get("token"):
-            error_msg = result.get("error", "Timeout") if result else "Timeout chờ token reCAPTCHA"
-            _update_job(job, JobStatus.ERROR, error=f"Giải reCAPTCHA thất bại: {error_msg}")
-            return
-
-        captcha_token = result["token"]
-        logger.info("Job %s: reCAPTCHA token received", job_id)
-
-        _update_job(job, JobStatus.GENERATING, "Flow đã nhận token; đang tạo video...")
-        flow_envelope = bridge.wait_flow_result(request_id, timeout=630.0)
+        is_native_ui_mode = job.get("input_mode") in ("frames", "ingredients", "video_edit")
+        if not is_native_ui_mode:
+            result = bridge.wait_captcha_result(request_id, timeout=30.0)
+            if not result or not result.get("token"):
+                error_msg = result.get("error", "Timeout") if result else "Timeout chờ token reCAPTCHA"
+                _update_job(job, JobStatus.ERROR, error=f"Giải reCAPTCHA thất bại: {error_msg}")
+                return
+            _update_job(job, JobStatus.GENERATING, "Flow đã nhận token; đang tạo video...")
+        else:
+            step_msg = (
+                "Đang đưa video & ảnh tham chiếu lên Flow..."
+                if job.get("input_mode") == "video_edit"
+                else "Đang đưa ảnh lên Flow và tạo video..."
+            )
+            _update_job(job, JobStatus.GENERATING, step_msg)
+        flow_timeout = 1080.0 if job.get("input_mode") in ("ingredients", "video_edit") else (780.0 if job.get("input_mode") == "frames" else 630.0)
+        flow_envelope = bridge.wait_flow_result(request_id, timeout=flow_timeout)
         if not flow_envelope:
             _update_job(job, JobStatus.ERROR, error="Timeout chờ kết quả Google Flow")
             return
@@ -844,86 +870,6 @@ def _process_job(job_id: str) -> None:
 
     except Exception as e:
         logger.exception("Job %s failed: %s", job_id, e)
-    _save_jobs()
-
-    # Start async processing
-    thread = Thread(target=_process_job, args=(job_id,), daemon=True, name=f"veo-job-{job_id}")
-    thread.start()
-
-    return _job_to_out(job)
-
-
-def _process_job(job_id: str) -> None:
-    """Generate a verified Flow T2V variant through the logged-in Chrome tab."""
-    job = _jobs.get(job_id)
-    if not job:
-        return
-
-    try:
-        # Step 1: Check Bridge & Extension
-        _update_job(job, JobStatus.CAPTCHA, "Đang chờ giải reCAPTCHA...")
-        if not bridge.is_bridge_running():
-            _update_job(job, JobStatus.ERROR, error="Bridge Server không hoạt động")
-            return
-
-        ext = bridge.get_extension_info()
-        if not ext.get("connected"):
-            _update_job(job, JobStatus.ERROR, error="Extension chưa kết nối. Hãy nạp FlowsVeo-Clean vào Chrome và mở tab labs.google")
-            return
-
-        pool = bridge.get_credentials_pool()
-        if not pool:
-            _update_job(job, JobStatus.ERROR, error="Chưa có tài khoản Google Labs. Đăng nhập trên tab labs.google")
-            return
-
-        # Step 2: Request reCAPTCHA
-        flow_request = _build_verified_flow_request(job)
-        # The successful Flow HAR sends this exact Enterprise reCAPTCHA action.
-        request_id = bridge.request_captcha(
-            action="VIDEO_GENERATION",
-            flow_request=flow_request,
-        )
-        if not request_id:
-            _update_job(job, JobStatus.ERROR, error="Không thể tạo yêu cầu CAPTCHA (queue đầy hoặc Extension đang bận)")
-            return
-
-        # Step 3: Wait for token
-        result = bridge.wait_captcha_result(request_id, timeout=30.0)
-        if not result or not result.get("token"):
-            error_msg = result.get("error", "Timeout") if result else "Timeout chờ token reCAPTCHA"
-            _update_job(job, JobStatus.ERROR, error=f"Giải reCAPTCHA thất bại: {error_msg}")
-            return
-
-        captcha_token = result["token"]
-        logger.info("Job %s: reCAPTCHA token received", job_id)
-
-        _update_job(job, JobStatus.GENERATING, "Flow đã nhận token; đang tạo video...")
-        flow_envelope = bridge.wait_flow_result(request_id, timeout=630.0)
-        if not flow_envelope:
-            _update_job(job, JobStatus.ERROR, error="Timeout chờ kết quả Google Flow")
-            return
-        if flow_envelope.get("error"):
-            _update_job(job, JobStatus.ERROR, error=f"Google Flow: {flow_envelope['error']}")
-            return
-        flow_result = flow_envelope.get("result") or {}
-        if not flow_result.get("ok") or not flow_result.get("video_url"):
-            _update_job(
-                job, JobStatus.ERROR,
-                error=f"Google Flow không trả video: {flow_result.get('error') or 'response không hợp lệ'}",
-            )
-            return
-
-        _update_job(job, JobStatus.DOWNLOADING, "Đang tải video từ Flow...")
-        output_path = _download_flow_video(job, flow_result)
-        job["output_files"] = [output_path.name]
-        job["provider_media_id"] = flow_result.get("media_id")
-        job["provider_model_id"] = flow_result.get("provider_model_id")
-        _update_job(job, JobStatus.DONE, "Hoàn tất — video đã lưu vào máy")
-        if job.get("project_id"):
-            _increment_project_video_count(job["project_id"])
-
-    except Exception as e:
-        logger.exception("Job %s failed: %s", job_id, e)
         _update_job(job, JobStatus.ERROR, error=f"Lỗi không xác định: {str(e)}")
 
 
@@ -932,6 +878,8 @@ def _encode_image_file(path_str: str | None) -> dict[str, Any] | None:
     if not path_str:
         return None
     p = Path(path_str)
+    if not p.is_absolute() and (_BASE_DIR / p).is_file():
+        p = _BASE_DIR / p
     if not p.is_file() and p.parent == Path("."):
         for candidate_dir in (_VEO_UPLOADS_DIR, _VEO_IMAGES_DIR, _VEO_DATA_DIR):
             candidate = candidate_dir / p.name
@@ -947,11 +895,22 @@ def _encode_image_file(path_str: str | None) -> dict[str, Any] | None:
         mime, _ = mimetypes.guess_type(str(p))
         if not mime:
             mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+        width, height = None, None
+        try:
+            import io
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as img:
+                width, height = img.size
+        except Exception:
+            pass
         return {
             "base64": base64.b64encode(data).decode("utf-8"),
             "mime": mime,
             "filename": p.name,
+            "local_path": str(p.resolve()),
             "size": len(data),
+            "width": width,
+            "height": height,
         }
     except Exception as e:
         raise ValueError(f"Cannot read image file {path_str}: {e}") from e
@@ -959,7 +918,7 @@ def _encode_image_file(path_str: str | None) -> dict[str, Any] | None:
 
 def _resolve_provider_model_id(job: dict[str, Any]) -> str:
     """Xác định mã model ID gửi tới Google Flow theo model, thời lượng, tỉ lệ và input mode."""
-    model_name = (job.get("model_display_name") or "").lower()
+    model_name = (job.get("model_display_name") or "Omni 1.1 Flash").lower()
     dur = int(job.get("duration_seconds") or 6)
     aspect = job.get("aspect_ratio") or "16:9"
     is_portrait = (aspect == "9:16")
@@ -970,17 +929,21 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
     if input_mode == "video_edit":
         return "abra_edit_360p" if (job.get("resolution") or "720p").lower() == "360p" else "abra_edit"
 
+    if is_frames:
+        has_start = bool(job.get("image_path"))
+        has_end = bool(job.get("end_image_path"))
+        if has_start and has_end:
+            # Google Flow chỉ hỗ trợ 8s hoặc 10s cho 2 frames interpolation (HAR flow.google_1.har / flow.google_2.har.com)
+            frame_dur = 10 if dur >= 10 else (8 if dur >= 8 else 6)
+            return f"omni_flash_i2v_{frame_dur}s_first_last"
+        r2v_dur = dur if dur in (4, 6, 8, 10) else (8 if dur >= 8 else 6)
+        return f"abra_i2v_{r2v_dur}s"
+
     if "omni" in model_name or "flash" in model_name:
         dur_mapped = dur if dur in (4, 6, 8, 10) else 6
         if is_ingredients:
-            return f"abra_r2v_{dur_mapped}s"
-        if is_frames:
-            has_start = bool(job.get("image_path"))
-            has_end = bool(job.get("end_image_path"))
-            if has_start and has_end:
-                return "omni_flash_i2v_10s_first_last"
-            dur_mapped = dur if dur in (4, 6, 8, 10) else 6
-            return f"abra_r2v_{dur_mapped}s"
+            r2v_dur = dur if dur in (4, 6, 8, 10) else (8 if dur >= 8 else 6)
+            return f"abra_r2v_{r2v_dur}s"
         return f"abra_t2v_{dur_mapped}s"
 
     if "quality" in model_name:
@@ -994,9 +957,6 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
         return "veo_3_1_t2v_fast_portrait" if is_portrait else "veo_3_1_t2v_fast"
 
     # Default: Veo 3.1 - Lite / Fallback
-    if is_ingredients:
-        dur_mapped = dur if dur in (4, 6, 8, 10) else 6
-        return f"abra_r2v_{dur_mapped}s"
     return "veo_3_1_i2v_lite" if is_frames else "veo_3_1_t2v_lite"
 
 
@@ -1009,6 +969,11 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     mode = job.get("input_mode") or "text_to_video"
     if mode not in ("text_to_video", "frames", "ingredients", "video_edit"):
         raise ValueError(f"Unsupported input_mode: {mode}")
+    if mode in ("frames", "ingredients"):
+        if model_name != "Omni 1.1 Flash" or res != "720p" or int(job.get("num_outputs") or 1) != 1:
+            raise ValueError(f"Chế độ {mode} hiện hỗ trợ Omni 1.1 Flash, 720p, một video mỗi lượt.")
+        if mode == "frames" and job.get("end_image_path") and dur not in (6, 8, 10):
+            raise ValueError("Hai khung hình đầu–cuối yêu cầu thời lượng 6, 8 hoặc 10 giây.")
     provider_model_id = _resolve_provider_model_id(job)
     force_fresh_assets = bool(job.get("force_fresh_assets"))
 
@@ -1022,14 +987,28 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         if str(media_id).strip()
     ]
 
+    if mode == "ingredients":
+        paths = job.get("ingredient_image_paths") or []
+        if not paths and job.get("image_path"):
+            paths = [job["image_path"]]
+            if job.get("end_image_path"):
+                paths.append(job["end_image_path"])
+            job["ingredient_image_paths"] = paths
+        if ingredient_media_ids or not 1 <= len(paths) <= 3:
+            raise ValueError("Ingredients yêu cầu 1–3 file ảnh, không dùng Start/End Frame hoặc mã ảnh rời.")
+    elif mode == "video_edit":
+        if not job.get("ingredient_image_paths") and job.get("image_path"):
+            job["ingredient_image_paths"] = [job["image_path"]]
+
     # Deduplication cho ingredient_image_paths:
     # Nếu ảnh đã từng upload lên project này, lấy thẳng media_id, bỏ qua encode base64
     ingredient_data_list = []
+    ingredient_inputs = [{"media_id": mid} for mid in ingredient_media_ids]
     for ipath in (job.get("ingredient_image_paths") or []):
         cached_mid = None
         try:
             p = Path(ipath)
-            if p.is_file() and target_project_id and not force_fresh_assets:
+            if mode != "ingredients" and p.is_file() and target_project_id and not force_fresh_assets:
                 ihash = media_registry.compute_file_sha256(p)
                 cached_mid = media_registry.get_cached_media_id(target_project_id, ihash)
         except Exception as e:
@@ -1038,6 +1017,7 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         if cached_mid:
             if cached_mid not in ingredient_media_ids:
                 ingredient_media_ids.append(cached_mid)
+            ingredient_inputs.append({"media_id": cached_mid})
             logger.info(
                 "[Deduplication] Tái sử dụng media_id=%s cho ảnh nguyên liệu %s (bỏ qua upload base64)",
                 cached_mid,
@@ -1049,28 +1029,10 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         if not enc:
             raise ValueError("Ingredient image path is required")
         ingredient_data_list.append(enc)
+        ingredient_inputs.append({"local_path": enc["local_path"], "filename": enc["filename"]})
 
-    start_frame_data = _encode_image_file(job.get("image_path"))
-    end_frame_data = _encode_image_file(job.get("end_image_path"))
-
-    # Deduplication cho start_frame khi ở mode ingredients:
-    if mode == "ingredients" and job.get("image_path") and target_project_id and not force_fresh_assets:
-        try:
-            sp = Path(job["image_path"])
-            if sp.is_file():
-                shash = media_registry.compute_file_sha256(sp)
-                cached_sf = media_registry.get_cached_media_id(target_project_id, shash)
-                if cached_sf:
-                    if cached_sf not in ingredient_media_ids:
-                        ingredient_media_ids.append(cached_sf)
-                    logger.info(
-                        "[Deduplication] Tái sử dụng media_id=%s cho ảnh chính %s (bỏ qua upload base64)",
-                        cached_sf,
-                        sp.name,
-                    )
-                    start_frame_data = None  # Không cần tải lên lại
-        except Exception as e:
-            logger.debug("Không thể tra cứu start_frame registry: %s", e)
+    start_frame_data = _encode_image_file(job.get("image_path")) if mode not in ("ingredients", "video_edit") else None
+    end_frame_data = _encode_image_file(job.get("end_image_path")) if mode not in ("ingredients", "video_edit") else None
 
     # Deduplication cho reference_video_id:
     reference_video_id = str(job.get("reference_video_id") or "").strip()
@@ -1098,8 +1060,9 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         else reference_video_start_seconds + 10
     )
 
-    if mode == "ingredients" and not ingredient_data_list and start_frame_data:
+    if mode in ("ingredients", "video_edit") and not ingredient_inputs and not ingredient_data_list and start_frame_data:
         ingredient_data_list.append(start_frame_data)
+        ingredient_inputs.append({"local_path": start_frame_data["local_path"], "filename": start_frame_data["filename"]})
 
     if mode == "ingredients" and not ingredient_data_list and not ingredient_media_ids:
         raise ValueError("Ingredients mode requires at least one readable image or uploaded media ID")
@@ -1123,9 +1086,13 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
                     reference_video_end_seconds, actual_dur, actual_dur,
                 )
                 reference_video_end_seconds = actual_dur
+        reference_video_filename = (media_info.get("filename") if media_info else None) or (Path(job.get("reference_video_path", "")).name if job.get("reference_video_path") else None)
     elif mode == "frames":
+        reference_video_filename = None
         if not start_frame_data:
             raise ValueError("Frames mode requires a readable Start Frame before an End Frame")
+    else:
+        reference_video_filename = None
 
     logger.info(
         "Chuẩn bị Flow request cho job %s: mode=%s, model=%s, provider_model_id=%s, duration=%ds, aspect=%s, has_start_frame=%s, has_end_frame=%s, num_ingredients=%d",
@@ -1146,7 +1113,11 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         "input_mode": mode,
         "model_display_name": model_name,
         "provider_model_id": provider_model_id,
-        "duration_seconds": dur,
+        "duration_seconds": (
+            (10 if dur >= 10 else (8 if dur >= 8 else 6))
+            if provider_model_id.startswith("omni_flash_i2v_")
+            else (dur)
+        ),
         "resolution": res,
         "aspect_ratio": aspect,
         "num_outputs": job.get("num_outputs") or 1,
@@ -1154,24 +1125,34 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         "end_image_path": job.get("end_image_path"),
         "ingredient_image_paths": job.get("ingredient_image_paths") or [],
         "ingredient_media_ids": ingredient_media_ids,
+        "ingredient_inputs": ingredient_inputs,
         "reference_video_id": reference_video_id or None,
+        "reference_video_filename": reference_video_filename,
         "reference_video_start_seconds": reference_video_start_seconds,
         "reference_video_end_seconds": reference_video_end_seconds,
         "force_fresh_assets": force_fresh_assets,
-        # Base64 encoded payload cho Extension tải lên Google Flow
+        # Base64 encoded payload cho Extension tải lên Google Flow kèm kích thước pixel
         "image_base64": start_frame_data["base64"] if start_frame_data else None,
         "image_mime": start_frame_data["mime"] if start_frame_data else None,
         "image_name": start_frame_data["filename"] if start_frame_data else None,
+        "image_width": start_frame_data.get("width") if start_frame_data else None,
+        "image_height": start_frame_data.get("height") if start_frame_data else None,
         "end_image_base64": end_frame_data["base64"] if end_frame_data else None,
         "end_image_mime": end_frame_data["mime"] if end_frame_data else None,
         "end_image_name": end_frame_data["filename"] if end_frame_data else None,
-        "ingredient_images": ingredient_data_list,
+        "image_local_path": start_frame_data["local_path"] if start_frame_data else None,
+        "end_image_local_path": end_frame_data["local_path"] if end_frame_data else None,
+        "end_image_width": end_frame_data.get("width") if end_frame_data else None,
+        "end_image_height": end_frame_data.get("height") if end_frame_data else None,
+        "ingredient_images": ([{k: v for k, v in image.items() if k != "base64"} for image in ingredient_data_list]
+                              if mode == "ingredients" else ingredient_data_list),
     }
 
 
 def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any]) -> Path:
     """Download a signed result URL to an atomic local file and write metadata."""
     url = str(flow_result.get("video_url") or "")
+    logger.info("Downloading video for job %s, media=%s", job.get("job_id"), flow_result.get("media_id"))
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname != "flow-content.google":
         raise ValueError("Flow trả URL video không thuộc flow-content.google")
@@ -1220,6 +1201,9 @@ def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any]) -> Pa
         "width": media_width,
         "height": media_height,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "ingredient_image_paths": job.get("ingredient_image_paths") or [],
+        "generation_diagnostics": {k: v for k, v in (flow_result.get("diagnostics") or {}).items()
+                                   if k in ("adapter", "rpc", "ingredient_media_ids", "start_media_id", "end_media_id", "scene_id", "prompt_verified")},
         "reference_video_id": job.get("reference_video_id"),
         "reference_video_start_seconds": job.get("reference_video_start_seconds", 0),
         "reference_video_end_seconds": job.get("reference_video_end_seconds"),
@@ -1377,6 +1361,16 @@ def _classify_job_error(error: str, previous_status: str | None = None) -> dict[
             "error_hint": "Giữ tab Google Flow mở, kiểm tra phiên đăng nhập và thử lại.",
             "error_retryable": True,
         }
+    if "flow_ui:" in message and any(control in message for control in (
+        "flow control not found:", "flow control was not found:",
+        "flow control is covered:", "flow control is disabled:",
+    )):
+        return {
+            "error_code": "FLOW_UI_CONTROL_MISSING",
+            "error_stage": "generation",
+            "error_hint": "Tải lại tab Google Flow, kiểm tra extension đã cập nhật rồi thử lại.",
+            "error_retryable": True,
+        }
     if "not found" in message or "không tìm thấy" in message or "empty" in message or "rỗng" in message:
         return {
             "error_code": "REFERENCE_INVALID",
@@ -1470,6 +1464,12 @@ def _update_job(job: dict, status: JobStatus, step: str = "", error: str | None 
 
 
 def _job_to_out(job: dict, deduplicated: bool = False) -> VeoJobOut:
+    # Old jobs saved missing browser controls as invalid reference files.
+    # Correct their API metadata without changing the historical job record.
+    if job.get("status") == "error" and job.get("error_code") in (None, "REFERENCE_INVALID"):
+        metadata = _classify_job_error(str(job.get("error_message") or ""))
+        if metadata["error_code"] == "FLOW_UI_CONTROL_MISSING":
+            job = {**job, **metadata}
     return VeoJobOut(
         job_id=job["job_id"],
         project_id=job.get("project_id"),
@@ -1592,7 +1592,7 @@ def extract_last_frame(video_id: str) -> dict:
 
     clean_id = Path(video_id).stem
     _VEO_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    img_id = f"frame_{clean_id}"
+    img_id = f"frame_final_{clean_id}"
     out_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
 
     # Đọc metadata sidecar nếu có
@@ -1604,42 +1604,26 @@ def extract_last_frame(video_id: str) -> dict:
         except Exception:
             pass
 
-    # Nếu file ảnh chưa có hoặc rỗng thì chạy FFmpeg để cắt
-    if not (out_file.exists() and out_file.stat().st_size > 0):
-        # 1. Thử seek từ cuối video bằng -sseof -0.08
-        cmd = [
-            "ffmpeg", "-y",
-            "-sseof", "-0.08",
-            "-i", str(path),
-            "-frames:v", "1",
-            "-q:v", "2",
-            str(out_file),
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
-
-        # 2. Nếu -sseof không thành công, thử fallback bằng timestamp duration
-        if not (out_file.exists() and out_file.stat().st_size > 0):
-            dur = float(meta.get("duration_seconds") or 0.0)
-            if dur <= 0:
-                try:
-                    from app.recap.ffmpeg import ffprobe_duration
-                    dur = ffprobe_duration(path)
-                except Exception:
-                    dur = 0.0
-            seek_time = max(0.0, dur - 0.08)
-            fallback_cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(seek_time),
-                "-i", str(path),
-                "-frames:v", "1",
-                "-q:v", "2",
-                str(out_file),
-            ]
-            proc = subprocess.run(fallback_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
-
-        if not (out_file.exists() and out_file.stat().st_size > 0):
-            err_msg = (proc.stderr or "")[-300:]
-            raise RuntimeError(f"FFmpeg không thể trích xuất frame cuối từ video '{video_id}': {err_msg}")
+    # Decode the tail and overwrite one temporary image for every decoded frame.
+    # -frames:v 1 after an approximate seek returns an earlier frame, not the last.
+    if not (out_file.exists() and out_file.stat().st_size > 0
+            and out_file.stat().st_mtime_ns >= path.stat().st_mtime_ns):
+        temp_file = out_file.with_name(f"{out_file.stem}.{uuid.uuid4().hex}.tmp.jpg")
+        try:
+            for seek_args in (["-sseof", "-1"], []):
+                cmd = ["ffmpeg", "-y", *seek_args, "-i", str(path),
+                       "-map", "0:v:0", "-an", "-vsync", "0", "-q:v", "2",
+                       "-update", "1", str(temp_file)]
+                proc = subprocess.run(cmd, capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", timeout=60)
+                if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
+                    temp_file.replace(out_file)
+                    break
+                temp_file.unlink(missing_ok=True)
+            else:
+                raise RuntimeError(f"FFmpeg không thể trích xuất frame cuối từ video '{video_id}': {(proc.stderr or '')[-300:]}")
+        finally:
+            temp_file.unlink(missing_ok=True)
 
     prompt = meta.get("prompt") or ""
     aspect_ratio = meta.get("aspect_ratio") or "9:16"
@@ -1778,11 +1762,16 @@ def _model_to_image_item(img: VeoImage) -> VeoImageItem:
 def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
     """Sinh ảnh từ prompt thông qua Google Flow Nano Banana (RPC ogiZ0b).
 
-    Tách N biến thể thành N request riêng biệt qua bridge, mỗi cái được
-    Extension giải reCAPTCHA độc lập → tránh lỗi PUBLIC_ERROR_UNUSUAL_ACTIVITY
-    do reuse token. Hỗ trợ partial success (2/3 ảnh ok vẫn trả về).
+    Tách N biến thể thành N request qua bridge, mỗi request dùng CAPTCHA mới.
+    HAR cũng hỗ trợ nhiều ảnh trong một RPC; gửi tuần tự giữ tiến độ hiện tại.
+    Hỗ trợ partial success (2/3 ảnh ok vẫn trả về).
     """
     init_db()
+
+    if not bridge.is_bridge_running():
+        return VeoImageGenerateResponse(ok=False, error="Bridge Server không hoạt động")
+    if not bridge.get_extension_info().get("connected"):
+        return VeoImageGenerateResponse(ok=False, error="Extension chưa kết nối. Hãy mở Chrome và nạp FlowsVeo-Clean")
 
     target_flow_pid = ""
     project_db_id = ""
@@ -1799,58 +1788,72 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
             target_flow_pid = p.flow_project_id
             project_db_id = p.id
 
-    count = min(max(req.count, 1), 4)
+    if not target_flow_pid:
+        return VeoImageGenerateResponse(ok=False, error="Không tìm thấy project Flow. Hãy chọn hoặc tạo project trước khi tạo ảnh")
+
+    target_count = min(max(req.count, 1), 4)
     # Scene UUID dùng chung cho tất cả biến thể (giống Flow gốc)
     shared_scene_uuid = str(uuid.uuid4()).upper()
 
     raw_images: list[dict] = []
     errors: list[str] = []
 
-    for i in range(count):
-        if i > 0:
-            # Google Flow safe cadence: giãn cách 3.5s - 4.5s giữa các biến thể kèm jitter để tránh WAF trigger PUBLIC_ERROR_UNUSUAL_ACTIVITY
-            import random, time as _t
-            cadence_delay = random.uniform(3.5, 4.5)
-            logger.info("Image variation cadence delay: %.2fs (variation #%d)", cadence_delay, i + 1)
-            _t.sleep(cadence_delay)
+    # 1. Native parallel generation attempt on Flow (e.g. x2, x4 in a single submit)
+    flow_request = {
+        "prompt": req.prompt.strip(),
+        "aspect_ratio": req.aspect_ratio or "16:9",
+        "model_key": req.model_key or "GEM_PIX_2",
+        "model_display_name": req.model_display_name or "Nano Banana Pro",
+        "count": target_count,
+        "seed": req.seed,
+        "project_id": target_flow_pid,
+        "reference_image_ids": req.reference_image_ids or [],
+        "scene_uuid": shared_scene_uuid,
+    }
 
-        variation_seed = (req.seed + i) if req.seed else None
-        flow_request = {
-            "prompt": req.prompt.strip(),
-            "aspect_ratio": req.aspect_ratio or "16:9",
-            "model_key": req.model_key or "GEM_PIX_2",
-            "model_display_name": req.model_display_name or "Nano Banana Pro",
-            "count": 1,  # Luôn 1 — mỗi request tạo 1 ảnh duy nhất
-            "seed": variation_seed,
-            "project_id": target_flow_pid,
-            "reference_image_ids": req.reference_image_ids or [],
-            "scene_uuid": shared_scene_uuid,
-        }
+    req_id = bridge.request_generate_image(flow_request)
+    if not req_id:
+        return VeoImageGenerateResponse(ok=False, error="Bridge chưa sẵn sàng hoặc hàng đợi đầy")
 
-        req_id = bridge.request_generate_image(flow_request)
-        if not req_id:
-            errors.append(f"Biến thể #{i + 1}: Bridge chưa sẵn sàng hoặc hàng đợi đầy")
-            continue
+    bridge_res = bridge.wait_image_result(req_id, timeout=180.0)
+    if not bridge_res:
+        return VeoImageGenerateResponse(ok=False, error="Timeout chờ Extension sinh ảnh (180s)")
 
-        bridge_res = bridge.wait_image_result(req_id, timeout=180.0)
-        if not bridge_res:
-            errors.append(f"Biến thể #{i + 1}: Timeout chờ Extension (180s)")
-            continue
+    if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
+        err = (
+            bridge_res.get("error")
+            or (bridge_res.get("result") and bridge_res["result"].get("error"))
+            or "Lỗi không xác định"
+        )
+        return VeoImageGenerateResponse(ok=False, error=str(err))
 
-        if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
-            err = (
-                bridge_res.get("error")
-                or (bridge_res.get("result") and bridge_res["result"].get("error"))
-                or "Lỗi không xác định"
-            )
-            logs = bridge_res.get("logs") or []
-            if logs:
-                logger.warning("Variation #%d failed with logs: %s", i + 1, logs)
-            errors.append(f"Biến thể #{i + 1}: {err}")
-            continue
+    first_batch_images = bridge_res["result"].get("images", [])
+    raw_images.extend(first_batch_images)
 
-        variation_images = bridge_res["result"].get("images", [])
-        raw_images.extend(variation_images)
+    # 2. Resilient fallback: If Flow generated fewer than requested, generate remaining sequentially
+    remaining = target_count - len(raw_images)
+    for i in range(remaining):
+        import random, time as _t
+        cadence_delay = random.uniform(1.2, 2.0)
+        logger.info("Generating remaining image %d/%d (delay: %.2fs)", len(raw_images) + 1, target_count, cadence_delay)
+        _t.sleep(cadence_delay)
+
+        sub_req = dict(flow_request)
+        sub_req["count"] = 1
+        sub_req["seed"] = (req.seed + len(raw_images)) if req.seed is not None else None
+
+        sub_id = bridge.request_generate_image(sub_req)
+        if not sub_id:
+            break
+        sub_res = bridge.wait_image_result(sub_id, timeout=180.0)
+        if sub_res and sub_res.get("result") and sub_res["result"].get("ok"):
+            raw_images.extend(sub_res["result"].get("images", []))
+        else:
+            if sub_res:
+                err = sub_res.get("error") or (sub_res.get("result") and sub_res["result"].get("error"))
+                if err:
+                    errors.append(str(err))
+            break
 
     if not raw_images:
         combined_err = "; ".join(errors) if errors else "Google Flow không trả về ảnh nào"
@@ -1895,10 +1898,10 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
     if errors:
         logger.warning(
             "Image generation partial success: %d/%d ok. Errors: %s",
-            len(created_items), count, "; ".join(errors),
+            len(created_items), target_count, "; ".join(errors),
         )
 
-    return VeoImageGenerateResponse(ok=True, images=created_items)
+    return VeoImageGenerateResponse(ok=True, images=created_items, error="; ".join(errors) if errors else None)
 
 
 def list_images(project_id: str | None = None) -> list[VeoImageItem]:

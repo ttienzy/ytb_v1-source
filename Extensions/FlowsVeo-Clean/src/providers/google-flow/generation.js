@@ -1,11 +1,33 @@
+import { generateIngredientsThroughUi } from './ingredients-ui.js';
+import { generateFramesThroughUi } from './frames-ui.js';
 import { logActivity } from '../../background/runtime/log.js';
 import { sleep } from '../../shared/time.js';
+import { generateImageThroughUi } from './image-ui.js';
+import { generateVideoThroughUi } from './video-ui.js';
+import { generateMotionVideoThroughUi } from './motion-ui.js';
 import { runImageGenerationInPage } from './page/image.js';
 import { recoverCurrentSceneInPage } from './page/recovery.js';
 import { runFlowGenerationInPage } from './page/video.js';
-import { ensureProjectTab, findLabsTab } from './tabs.js';
+import { ensureProjectTab, findLabsTab, waitForTabComplete } from './tabs.js';
+import { warmUpRecaptcha } from './recaptcha-probe.js';
 
 export async function generateFlowVideo(flowRequest, captchaToken) {
+  const hasDebugger = typeof chrome !== 'undefined' && Boolean(chrome?.debugger);
+  if (flowRequest?.input_mode === 'frames' || flowRequest?.input_mode === 'ingredients') {
+    if (!hasDebugger) return { ok: false, error: 'FLOW_UI: Reload FlowsVeo to enable native browser control for Frames/Ingredients.' };
+    const tabId = await ensureProjectTab(flowRequest.project_id, { flowOnly: true });
+    if (!tabId) return { ok: false, error: 'FLOW_UI: Không mở được project Flow.' };
+    return flowRequest.input_mode === 'ingredients'
+      ? generateIngredientsThroughUi(flowRequest, tabId)
+      : generateFramesThroughUi(flowRequest, tabId);
+  }
+  if (flowRequest?.input_mode === 'video_edit') {
+    if (!hasDebugger) return { ok: false, error: 'FLOW_UI: Reload FlowsVeo to enable native browser control for Motion Control.' };
+    const tabId = await ensureProjectTab(flowRequest.project_id, { flowOnly: true });
+    if (!tabId) return { ok: false, error: 'FLOW_UI: Không mở được project Flow cho Motion Control.' };
+    return generateMotionVideoThroughUi(flowRequest, tabId);
+  }
+
   // Pre-flight: Đảm bảo tab Chrome đang mở đúng project yêu cầu nếu flowRequest có project_id
   if (flowRequest?.project_id) {
     try {
@@ -16,6 +38,26 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
   }
   const tabId = await findLabsTab(flowRequest?.project_id);
   if (!tabId) return { ok: false, error: 'Open a Flow project in Chrome' };
+
+  // Focus tab Flow để tương tác UI mượt mà
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    if (t?.windowId) {
+      await chrome.windows.update(t.windowId, { focused: true }).catch(() => {});
+    }
+  } catch { }
+
+  const isFrames = flowRequest?.input_mode === 'frames';
+  const isIngredients = flowRequest?.input_mode === 'ingredients';
+  const isVideoEdit = flowRequest?.input_mode === 'video_edit';
+
+  if (!isFrames && !isIngredients && !isVideoEdit && hasDebugger) {
+    logActivity('info', `Running Video UI Automation on tab=${tabId}`);
+    return await generateVideoThroughUi(flowRequest, tabId);
+  }
+
+  logActivity('info', `Running In-Page RPC generation for ${flowRequest?.input_mode} on tab=${tabId}`);
 
   const recoverLostResult = async (originalError) => {
     // Khi executeScript bị ngắt (do Flow đổi router / DOM repaint / context reset),
@@ -65,6 +107,39 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
       args: [flowRequest, captchaToken],
     });
     const result = injected?.[0]?.result;
+
+    // Khi session ID không hợp lệ (WIZ_global_data chưa sẵn sàng), reload tab và retry 1 lần
+    if (result && !result.ok && result.error && /session ID không hợp lệ|session config is incomplete/i.test(result.error)) {
+      logActivity('warn', `Session stale on tab ${tabId}, reloading and retrying: ${result.error}`);
+      try {
+        await chrome.tabs.reload(tabId, { bypassCache: false });
+        await waitForTabComplete(tabId, 20000);
+        await sleep(3000); // Chờ WIZ_global_data được nạp đầy đủ
+        await warmUpRecaptcha(tabId, 6000);
+      } catch (reloadErr) {
+        logActivity('warn', `Tab reload failed: ${reloadErr.message}`);
+      }
+      // Retry lần 2 sau khi reload
+      try {
+        const retryInjected = await chrome.scripting.executeScript({
+          target: { tabId }, world: 'MAIN', func: runFlowGenerationInPage,
+          args: [flowRequest, captchaToken],
+        });
+        const retryResult = retryInjected?.[0]?.result;
+        if (retryResult) {
+          if (retryResult.ok || !/Flow page returned no result/i.test(retryResult.error || '')) return retryResult;
+          return recoverLostResult(retryResult.error);
+        }
+        return recoverLostResult('Flow page returned no result after session reload');
+      } catch (retryErr) {
+        const retryMsg = retryErr?.message || String(retryErr);
+        if (/context invalidated|frame was removed|execution context|no result/i.test(retryMsg)) {
+          return recoverLostResult(`Cannot execute Flow adapter after reload: ${retryMsg}`);
+        }
+        return { ok: false, error: `Cannot execute Flow adapter after reload: ${retryMsg}` };
+      }
+    }
+
     if (result) {
       if (result.ok || !/Flow page returned no result/i.test(result.error || '')) return result;
       return recoverLostResult(result.error);
@@ -79,29 +154,34 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
   }
 }
 
-export async function generateFlowImage(imageRequest, captchaToken) {
-  const tabId = await findLabsTab(imageRequest?.project_id);
+export async function generateFlowImage(imageRequest, captchaToken, pinnedTabId = null) {
+  const tabId = pinnedTabId ?? await findLabsTab(imageRequest?.project_id);
   if (!tabId) return { ok: false, error: 'Open a Flow project in Chrome' };
+
+  // 1. Kích hoạt và focus tab Flow để visibilityState = 'visible'
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    if (t?.windowId) {
+      await chrome.windows.update(t.windowId, { focused: true }).catch(() => {});
+    }
+  } catch { }
+
+  const hasDebugger = typeof chrome !== 'undefined' && Boolean(chrome?.debugger);
+  if (hasDebugger) {
+    logActivity('info', `Running Image UI Automation on tab=${tabId}`);
+    return await generateImageThroughUi(imageRequest, tabId);
+  }
+
+  logActivity('info', `Running In-Page Image generation on tab=${tabId}`);
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId }, world: 'MAIN', func: runImageGenerationInPage,
       args: [imageRequest, captchaToken],
     });
-    if (injected?.[0]?.result) {
-      return injected[0].result;
-    }
-    // Fallback retry sau 2s nếu tab vừa điều hướng hoặc context chưa sẵn sàng
-    await sleep(2000);
-    const retryInjected = await chrome.scripting.executeScript({
-      target: { tabId }, world: 'MAIN', func: runImageGenerationInPage,
-      args: [imageRequest, captchaToken],
-    });
-    if (retryInjected?.[0]?.result) {
-      return retryInjected[0].result;
-    }
-    return { ok: false, error: 'Flow page returned no image result (trang bị tải lại hoặc mất ngữ cảnh)' };
+    return injected?.[0]?.result || { ok: false, error: 'Image generation returned no result' };
   } catch (error) {
-    return { ok: false, error: `Cannot execute Flow Image adapter: ${error.message}` };
+    return { ok: false, error: `Cannot generate image: ${error.message}` };
   }
 }
 

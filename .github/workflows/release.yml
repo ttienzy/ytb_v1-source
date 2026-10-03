@@ -6,6 +6,14 @@ on:
       - 'v*' # Tự động kích hoạt khi push tag dạng v1.0.0, v1.0.1...
   workflow_dispatch: # Cho phép kích hoạt thủ công từ GitHub Actions UI
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   release:
     name: Build Windows Installer & Create GitHub Release
@@ -18,6 +26,21 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
+      - name: Validate Release Versions
+        id: version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = (Get-Content Frontend/package.json -Raw | ConvertFrom-Json).version
+          @('Frontend/package-lock.json', 'Extensions/FlowsVeo-Clean/package.json', 'Extensions/FlowsVeo-Clean/package-lock.json', 'Extensions/FlowsVeo-Clean/public/manifest.json') | ForEach-Object {
+            if ((Get-Content $_ -Raw | ConvertFrom-Json).version -ne $version) { throw "Version mismatch: $_" }
+          }
+          $releaseTag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $releaseTag) { throw "Tag must match $releaseTag" }
+          if (-not (Test-Path "docs/releases/$version.md")) { throw 'Release notes are missing' }
+          "tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -27,20 +50,27 @@ jobs:
             Backend/requirements.txt
             services/voice-service/uv.lock
 
+      - name: Install Backend Dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install --upgrade pip
+          pip install -r Backend/requirements.txt
+          pip install pytest pyyaml python-dotenv websockets
+
       - name: Cache Packaged Backend Executable
         id: cache-backend
         uses: actions/cache@v4
         with:
           path: Backend/dist/backend_server.exe
-          key: backend-bin-${{ runner.os }}-${{ hashFiles('Backend/requirements.txt', 'Backend/backend.spec', 'Backend/app/**', 'Backend/run_server.py') }}
+          key: backend-bin-${{ runner.os }}-${{ hashFiles('Backend/requirements.txt', 'Backend/backend.spec', 'Backend/app/**', 'Backend/run_server.py', 'Backend/prompts/**', 'Backend/resources/**') }}
 
       - name: Build Standalone Backend Executable
         if: steps.cache-backend.outputs.cache-hit != 'true'
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           cd Backend
-          python -m pip install --upgrade pip
-          if (Test-Path requirements.txt) { pip install -r requirements.txt }
-          pip install pyinstaller uvicorn fastapi httpx pydantic pydantic-settings sqlalchemy alembic yt-dlp youtube-transcript-api python-dotenv playwright pyyaml requests websockets
           python -m unittest tests.test_watermark_runtime -v
           pyinstaller --noconfirm backend.spec
           if (-not (Test-Path dist\backend_server.exe)) { throw 'backend_server.exe was not created' }
@@ -55,6 +85,8 @@ jobs:
       - name: Install Voice Service Dependencies & Build Executable
         if: steps.cache-voice.outputs.cache-hit != 'true'
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           cd services/voice-service
           python -m pip install uv==0.12.5
           uv sync --frozen --group build --group test --python 3.11
@@ -70,17 +102,46 @@ jobs:
           cache-dependency-path: |
             Frontend/package-lock.json
             Frontend/watermark-runtime/package-lock.json
+            Extensions/FlowsVeo-Clean/package-lock.json
 
       - name: Install Node Dependencies
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           cd Frontend
           npm ci
           npm run typecheck
           npm test
           npm run test:voices
+          npm run test:veo
+
+      - name: Test Veo and Workflow Backend
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress
+            $env:PATH += ';C:\ProgramData\chocolatey\bin'
+          }
+          ffmpeg -version
+          ffprobe -version
+          cd Backend
+          python -m pytest tests/veo tests/workflow tests/test_veo_capabilities.py tests/test_veo_bridge.py tests/test_ingredients_native.py tests/test_motion_reference_order.py tests/test_workflow_video_chain.py -q
+
+      - name: Verify and Package Flow Extension
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cd Extensions/FlowsVeo-Clean
+          npm ci
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.local/browsers'
+          npx playwright install chromium
+          npm run verify
 
       - name: Install and Smoke Test Watermark Runtime
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $env:PLAYWRIGHT_BROWSERS_PATH = '0'
           cd Frontend\watermark-runtime
           npm ci
@@ -89,6 +150,8 @@ jobs:
 
       - name: Verify Bundled FFmpeg
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $ffmpeg = (Resolve-Path Frontend\node_modules\ffmpeg-static\ffmpeg.exe).Path
           $license = Resolve-Path Frontend\node_modules\ffmpeg-static\LICENSE
           & $ffmpeg -version
@@ -102,6 +165,8 @@ jobs:
 
       - name: Smoke Test Packaged Voice Service
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $voiceExe = (Resolve-Path services\voice-service\dist\voice_server.exe).Path
           $env:APP_DATA_DIR = Join-Path $env:RUNNER_TEMP 'voice-smoke-data'
           $env:HF_HOME = Join-Path $env:RUNNER_TEMP 'voice-hf-cache'
@@ -147,6 +212,8 @@ jobs:
 
       - name: Build and Package Electron App
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           @(
             'Backend\dist\backend_server.exe',
             'services\voice-service\dist\voice_server.exe',
@@ -197,6 +264,8 @@ jobs:
           }
       - name: Smoke Test Packaged Backend Watermark Flow
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           .\.github\scripts\smoke-packaged-watermark.ps1 `
             -AppRoot 'Frontend\release\win-unpacked'
 
@@ -205,17 +274,15 @@ jobs:
         with:
           repository: ttienzy/ytb_v1
           token: ${{ secrets.RELEASES_TOKEN }}
-          name: CreatorFlow AI ${{ github.ref_name }}
-          body: |
-            CreatorFlow AI Release ${{ github.ref_name }}
-
-            - Nâng VieNeu-TTS lên 3.8.1, mặc định CPU fp32 và bổ sung profile int8/GPU/Nano
-            - Nghe thử giọng streaming, dừng/chuyển giọng và chèn biểu cảm trực tiếp
-            - Sửa metadata thời lượng, tối ưu batch và khôi phục giọng clone đã lưu
-            - Bổ sung kiểm thử TTS, streaming và tương thích giọng cũ
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: CreatorFlow AI ${{ steps.version.outputs.tag }}
+          body_path: docs/releases/${{ steps.version.outputs.version }}.md
           files: |
             Frontend/release/*.exe
             Frontend/release/latest.yml
+            Extensions/FlowsVeo-Clean/release/*.zip
+            Extensions/FlowsVeo-Clean/release/*.sha256
+          fail_on_unmatched_files: true
           generate_release_notes: false
           draft: false
           prerelease: false

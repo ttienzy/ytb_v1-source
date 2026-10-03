@@ -2,6 +2,7 @@ import React from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Sparkles, RotateCw, CheckCircle2, AlertCircle, Eye, Settings2, Columns2 } from 'lucide-react'
 import type { MotionOutputConfig, MotionRunError, MotionVariantSlot } from '../../types'
+import { normalizeMotionRunError } from '../../services/motionRunError'
 
 export interface MotionOutputNodeData {
   config: MotionOutputConfig
@@ -25,7 +26,12 @@ export interface MotionOutputNodeData {
 }
 
 export function MotionOutputNode({ data, selected }: NodeProps) {
-  const nodeData = data as unknown as MotionOutputNodeData
+  const rawData = data as unknown as MotionOutputNodeData
+  const nodeData: MotionOutputNodeData = {
+    ...rawData,
+    runError: normalizeMotionRunError(rawData.runError),
+    variants: rawData.variants?.map(slot => ({ ...slot, error: normalizeMotionRunError(slot.error) })),
+  }
   const config = nodeData.config || {
     aspectRatio: '9:16',
     durationSeconds: 10,

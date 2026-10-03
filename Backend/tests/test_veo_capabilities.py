@@ -80,7 +80,7 @@ class VeoCapabilitiesTests(unittest.TestCase):
             "input_mode": "frames",
             "image_path": "fake_start.png",
         }
-        self.assertEqual(service._resolve_provider_model_id(job), "abra_r2v_10s")
+        self.assertEqual(service._resolve_provider_model_id(job), "abra_i2v_10s")
 
         job_both = {
             "model_display_name": "Omni 1.1 Flash",
@@ -90,7 +90,11 @@ class VeoCapabilitiesTests(unittest.TestCase):
             "image_path": "fake_start.png",
             "end_image_path": "fake_end.png",
         }
-        self.assertEqual(service._resolve_provider_model_id(job_both), "omni_flash_i2v_10s_first_last")
+        self.assertEqual(service._resolve_provider_model_id(job_both), "omni_flash_i2v_6s_first_last")
+        job_both_8s = dict(job_both, duration_seconds=8)
+        self.assertEqual(service._resolve_provider_model_id(job_both_8s), "omni_flash_i2v_8s_first_last")
+        job_both_10s = dict(job_both, duration_seconds=10)
+        self.assertEqual(service._resolve_provider_model_id(job_both_10s), "omni_flash_i2v_10s_first_last")
 
         job_only_end = {
             "model_display_name": "Omni 1.1 Flash",
@@ -100,7 +104,7 @@ class VeoCapabilitiesTests(unittest.TestCase):
             "image_path": None,
             "end_image_path": "fake_end.png",
         }
-        self.assertEqual(service._resolve_provider_model_id(job_only_end), "abra_r2v_6s")
+        self.assertEqual(service._resolve_provider_model_id(job_only_end), "abra_i2v_6s")
 
     def test_submit_job_frames_mode_validations(self):
         from app.veo.schemas import VeoJobRequest, InputMode, AspectRatio
@@ -165,8 +169,9 @@ class VeoCapabilitiesTests(unittest.TestCase):
             }
             req = service._build_verified_flow_request(job)
             self.assertEqual(req["input_mode"], "frames")
-            self.assertEqual(req["provider_model_id"], "abra_r2v_10s")
+            self.assertEqual(req["provider_model_id"], "abra_i2v_10s")
             self.assertIsNotNone(req["image_base64"])
+            self.assertEqual(req["image_local_path"], str(Path(tmp_path).resolve()))
             self.assertEqual(req["image_mime"], "image/png")
             self.assertIsNone(req["end_image_base64"])
         finally:
@@ -180,6 +185,14 @@ class VeoCapabilitiesTests(unittest.TestCase):
             "input_mode": "ingredients",
         }
         self.assertEqual(service._resolve_provider_model_id(job), "abra_r2v_10s")
+
+        job_8s = {
+            "model_display_name": "Omni 1.1 Flash",
+            "duration_seconds": 8,
+            "aspect_ratio": "9:16",
+            "input_mode": "ingredients",
+        }
+        self.assertEqual(service._resolve_provider_model_id(job_8s), "abra_r2v_8s")
 
     def test_resolve_provider_model_id_video_edit_mode(self):
         job = {
@@ -226,7 +239,8 @@ class VeoCapabilitiesTests(unittest.TestCase):
             self.assertEqual(req["input_mode"], "ingredients")
             self.assertEqual(req["provider_model_id"], "abra_r2v_10s")
             self.assertEqual(len(req["ingredient_images"]), 3)
-            self.assertTrue(all("base64" in item for item in req["ingredient_images"]))
+            self.assertTrue(all("local_path" in item for item in req["ingredient_images"]))
+            self.assertTrue(all("base64" not in item for item in req["ingredient_images"]))
         finally:
             for p in tmp_files:
                 Path(p).unlink(missing_ok=True)

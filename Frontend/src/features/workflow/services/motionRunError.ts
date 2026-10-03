@@ -17,8 +17,11 @@ const STAGE_LABELS: Record<MotionRunStage, string> = {
 }
 
 const KNOWN_STAGES = new Set<MotionRunStage>(Object.keys(STAGE_LABELS) as MotionRunStage[])
+const FLOW_UI_HINT = 'Tải lại tab Google Flow, kiểm tra extension đã cập nhật rồi thử lại.'
+const isFlowControlError = (message: string) => /flow_ui:.*flow control (?:was )?(?:not found|is covered|is disabled):/i.test(message)
 
 const ERROR_TITLES: Record<string, string> = {
+  FLOW_UI_CONTROL_MISSING: 'Không thao tác được trên Google Flow',
   BRIDGE_OFFLINE: 'Backend Bridge chưa hoạt động',
   EXTENSION_DISCONNECTED: 'Extension Flow đã mất kết nối',
   FLOW_AUTH_REQUIRED: 'Phiên đăng nhập Flow chưa sẵn sàng',
@@ -64,6 +67,7 @@ function normalizeStage(stage: string | null | undefined, fallback: MotionRunSta
 }
 
 function codeFromMessage(message: string, stage: MotionRunStage): string {
+  if (isFlowControlError(message)) return 'FLOW_UI_CONTROL_MISSING'
   const normalized = message.toLowerCase()
   if (normalized.includes('bridge server')) return 'BRIDGE_OFFLINE'
   if (normalized.includes('extension') && (normalized.includes('chưa kết nối') || normalized.includes('mất kết nối'))) {
@@ -93,15 +97,25 @@ export function motionRunErrorFromUnknown(
 ): MotionRunError {
   const message = error instanceof Error ? error.message : String(error || 'Không có thông tin lỗi từ hệ thống.')
   const code = codeFromMessage(message, fallbackStage)
+  const stage = code === 'FLOW_UI_CONTROL_MISSING' ? 'generation' : fallbackStage
   return {
     code,
-    stage: fallbackStage,
-    stageLabel: motionStageLabel(fallbackStage),
+    stage,
+    stageLabel: motionStageLabel(stage),
     title: ERROR_TITLES[code] || ERROR_TITLES.UNKNOWN_ERROR,
     message,
-    hint: DEFAULT_HINTS[fallbackStage] || DEFAULT_HINTS.unknown!,
+    hint: code === 'FLOW_UI_CONTROL_MISSING' ? FLOW_UI_HINT : DEFAULT_HINTS[stage] || DEFAULT_HINTS.unknown!,
     retryable: true,
     jobId,
+  }
+}
+
+export function normalizeMotionRunError(error: MotionRunError | null | undefined): MotionRunError | null {
+  if (!error) return null
+  if (!isFlowControlError(error.message)) return error
+  return {
+    ...error,
+    ...motionRunErrorFromUnknown(error.message, 'generation', error.jobId),
   }
 }
 
@@ -109,17 +123,20 @@ export function motionRunErrorFromJob(
   job: VeoJobOut,
   fallbackStage: MotionRunStage = 'generation',
 ): MotionRunError {
-  const stage = normalizeStage(job.error_stage, fallbackStage)
+  let stage = normalizeStage(job.error_stage, fallbackStage)
   const message = job.error_message || job.current_step || 'Google Flow không cung cấp chi tiết lỗi.'
   const fallback = motionRunErrorFromUnknown(message, stage, job.job_id)
-  const code = job.error_code || fallback.code
+  // Older jobs misclassified missing browser controls as invalid files.
+  const uiControlError = fallback.code === 'FLOW_UI_CONTROL_MISSING'
+  if (uiControlError) stage = 'generation'
+  const code = uiControlError ? fallback.code : job.error_code || fallback.code
   return {
     ...fallback,
     code,
     stage,
     stageLabel: motionStageLabel(stage),
     title: ERROR_TITLES[code] || fallback.title,
-    hint: job.error_hint || fallback.hint,
+    hint: uiControlError ? fallback.hint : job.error_hint || fallback.hint,
     retryable: job.error_retryable ?? true,
     jobId: job.job_id,
   }

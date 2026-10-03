@@ -62,7 +62,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
 
   return (
     <div
-      className={`wf-node-card ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
+      className={`wf-node-card wf-node-gemini ${selected ? 'selected' : ''} ${isStartNode ? 'is-start-node' : ''} ${isOrphan ? 'is-orphan' : ''}`}
       style={{ width: 380 }}
     >
       {/* Start Node Top Banner */}
@@ -139,9 +139,9 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
           <span
             className="wf-node-badge"
             style={{
-              background: data.providerUsed === '9router' ? '#f1f5f9' : res ? '#ecfdf5' : '#f1f5f9',
-              color: data.providerUsed === '9router' ? '#334155' : res ? '#065f46' : '#64748b',
-              border: data.providerUsed === '9router' ? '1px solid #e2e8f0' : res ? '1px solid #d1fae5' : '1px solid #e2e8f0',
+              background: data.providerUsed === '9router' ? '#f5f3ff' : res ? '#ecfdf5' : '#eef2ff',
+              color: data.providerUsed === '9router' ? '#6d28d9' : res ? '#065f46' : '#4338ca',
+              border: data.providerUsed === '9router' ? '1px solid #ddd6fe' : res ? '1px solid #d1fae5' : '1px solid #c7d2fe',
             }}
           >
             {data.providerUsed === '9router' ? 'GPT-5.5' : res ? 'Gemini' : isConnected ? 'Đã nối dây' : 'Vision AI'}
@@ -513,14 +513,14 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                 width: 32,
                 height: 32,
                 borderRadius: '50%',
-                background: '#f1f5f9',
-                border: '1px solid #e2e8f0',
+                background: '#eef2ff',
+                border: '1px solid #c7d2fe',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Link2Off size={16} color="#64748b" />
+              <Link2Off size={16} color="#6366f1" />
             </div>
             <div>
               <strong style={{ color: '#0f172a' }}>Chưa có dây nối nạp ảnh</strong>

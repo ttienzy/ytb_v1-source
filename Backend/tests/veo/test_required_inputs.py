@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -202,6 +203,7 @@ def test_worker_revalidates_before_provider_dispatch(monkeypatch):
 @pytest.mark.parametrize(
     "message,previous_status,expected_code,expected_stage",
     [
+        ("Google Flow: FLOW_UI: Flow control not found: requested asset in picker", "generating", "FLOW_UI_CONTROL_MISSING", "generation"),
         ("Bridge Server không hoạt động", "captcha", "BRIDGE_OFFLINE", "connection"),
         ("Extension chưa kết nối", "captcha", "EXTENSION_DISCONNECTED", "connection"),
         ("Giải reCAPTCHA thất bại: Timeout", "captcha", "CAPTCHA_FAILED", "captcha"),
@@ -218,3 +220,56 @@ def test_job_errors_include_stable_ui_metadata(message, previous_status, expecte
     assert details["error_stage"] == expected_stage
     assert details["error_hint"]
     assert details["error_retryable"] is True
+
+
+def test_job_api_corrects_legacy_picker_error_without_rewriting_history(monkeypatch):
+    legacy = {
+        "job_id": "92dcf37f-f20", "status": "error",
+        "error_message": "Google Flow: FLOW_UI: Flow control not found: requested asset in picker",
+        "error_code": "REFERENCE_INVALID", "error_stage": "reference_upload",
+        "error_hint": "Choose the file again.", "error_retryable": True,
+        "updated_at": "2026-10-03T02:34:44.685659+00:00",
+    }
+    snapshot = dict(legacy)
+    monkeypatch.setattr(service, "_jobs", {legacy["job_id"]: legacy})
+    save = Mock()
+    monkeypatch.setattr(service, "_save_jobs", save)
+    for output in [service.get_job(legacy["job_id"]), *service.get_all_jobs()]:
+        assert output.error_code == "FLOW_UI_CONTROL_MISSING"
+        assert output.error_stage == "generation"
+        assert output.error_message == legacy["error_message"]
+        assert output.error_hint != legacy["error_hint"]
+        assert output.updated_at == legacy["updated_at"]
+    assert legacy == snapshot
+    save.assert_not_called()
+
+
+def test_video_edit_is_treated_as_native_ui_mode_without_captcha_wait(monkeypatch):
+    job = {
+        "job_id": "test_motion",
+        "prompt": "Dance along with reference",
+        "input_mode": "video_edit",
+        "reference_video_id": "b2f66204-99b7-4548-a4ae-f0e52d1c8836",
+        "reference_video_start_seconds": 0,
+        "reference_video_end_seconds": 8,
+        "ingredient_image_paths": [],
+        "ingredient_media_ids": [],
+    }
+    monkeypatch.setattr(service, "_jobs", {"test_motion": job})
+    monkeypatch.setattr(service, "_save_jobs", Mock())
+    monkeypatch.setattr(service.bridge, "is_bridge_running", lambda: True)
+    monkeypatch.setattr(service.bridge, "get_extension_info", lambda: {"connected": True})
+    monkeypatch.setattr(service.bridge, "get_credentials_pool", lambda: ["test"])
+    monkeypatch.setattr(service.bridge, "request_captcha", Mock(return_value="req-123"))
+
+    wait_captcha = Mock()
+    monkeypatch.setattr(service.bridge, "wait_captcha_result", wait_captcha)
+    wait_flow = Mock(return_value={"ok": True, "result": {"ok": True, "video_url": "https://flow-content.google/video.mp4", "media_id": "out-123"}})
+    monkeypatch.setattr(service.bridge, "wait_flow_result", wait_flow)
+    monkeypatch.setattr(service, "_download_flow_video", Mock(return_value=Path("test_motion.mp4")))
+
+    service._process_job("test_motion")
+
+    wait_captcha.assert_not_called()
+    wait_flow.assert_called_once_with("req-123", timeout=1080.0)
+    assert job["status"] == "done"

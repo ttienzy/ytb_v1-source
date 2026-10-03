@@ -233,6 +233,15 @@ def wait_switch_result(request_id: str, timeout: float = 12.0) -> dict[str, Any]
     return None
 
 
+def request_extension_reload() -> bool:
+    """Yêu cầu Extension reload qua chrome.runtime.reload()."""
+    try:
+        _captcha_pending.put_nowait({"reload": True})
+        return True
+    except Exception:
+        return False
+
+
 def request_generate_image(image_request: dict[str, Any]) -> str | None:
     """Yêu cầu Extension sinh ảnh trên Google Flow thông qua RPC ogiZ0b."""
     request_id = secrets.token_hex(16)
@@ -276,6 +285,29 @@ def request_video_upload(
             "project_id": project_id,
             "video_base64": video_base64,
             "video_mime": video_mime,
+            "video_filename": video_filename,
+            "force_fresh": force_fresh,
+            "created_at": time.time(),
+        })
+        return request_id
+    except Exception:
+        return None
+
+
+def request_video_upload_ui(
+    project_id: str,
+    video_local_path: str,
+    video_filename: str = "reference_video.mp4",
+    force_fresh: bool = False,
+) -> str | None:
+    """Ask the extension to upload a reference video through Flow's native file picker."""
+    request_id = secrets.token_hex(16)
+    try:
+        _captcha_pending.put_nowait({
+            "request_id": request_id,
+            "action": "UPLOAD_VIDEO_UI",
+            "project_id": project_id,
+            "video_local_path": video_local_path,
             "video_filename": video_filename,
             "force_fresh": force_fresh,
             "created_at": time.time(),
@@ -574,10 +606,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             request_id = data.get("request_id", "")
             if request_id:
+                logs = data.get("logs")
+                if logs:
+                    logger.info("Flow response logs for %s: %s", request_id, json.dumps(logs, ensure_ascii=False))
                 with _bridge_lock:
                     _flow_results[request_id] = {
                         "result": data.get("result"),
                         "error": data.get("error"),
+                        "logs": logs,
                         "received_at": time.time(),
                     }
             self._send_json({"ok": True})

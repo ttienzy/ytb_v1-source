@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from 'electron'
 import type { AppUpdater } from 'electron-updater'
 import { basename, delimiter, join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -252,6 +252,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     show: false,
+    autoHideMenuBar: true,
     ...(appIcon ? { icon: appIcon } : {}),
     webPreferences: {
       preload: getPreloadPath(),
@@ -260,6 +261,9 @@ function createWindow() {
       nodeIntegration: false,
     },
   })
+
+  // Ẩn thanh menu ứng dụng (File, Edit, View, Window, Help)
+  mainWindow.removeMenu()
 
   if (appIcon) {
     try {
@@ -665,6 +669,7 @@ ipcMain.handle('updater:quit-and-install', () => {
 })
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null)
   await startProductionBackend()
   setupAutoUpdater()
   createWindow()

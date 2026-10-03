@@ -72,7 +72,7 @@ export function waitForTabComplete(tabId, timeoutMs = 20000) {
   });
 }
 
-export async function ensureProjectTab(targetProjectId) {
+export async function ensureProjectTab(targetProjectId, { flowOnly = false } = {}) {
   if (!targetProjectId) return null;
   ensureHarvestCfg();
   const tabs = await findAllLabsTabs();
@@ -80,8 +80,8 @@ export async function ensureProjectTab(targetProjectId) {
   const isMatchProject = (t) => {
     try {
       const u = new URL(t.url);
-      return (u.hostname === 'flow.google.com' || u.hostname === 'labs.google')
-        && u.pathname.includes(`/project/${targetProjectId}`);
+      return (u.hostname === 'flow.google.com' || (!flowOnly && u.hostname === 'labs.google'))
+        && u.pathname.match(/\/project\/([^/]+)/)?.[1] === targetProjectId;
     } catch { return false; }
   };
 
@@ -112,7 +112,9 @@ export async function ensureProjectTab(targetProjectId) {
     } catch { }
   }
 
-  const destinationUrl = `${targetOrigin}/project/${targetProjectId}`;
+  const destinationUrl = flowOnly
+    ? `https://flow.google.com${accountPrefix}/project/${encodeURIComponent(targetProjectId)}`
+    : `${targetOrigin}/project/${targetProjectId}`;
 
   // ĐẶC BIỆT: Để TRÁNH XUNG ĐỘT với video đang chạy trên tab khác:
   // Nếu chosenTab đang mở một project khác (/project/...), KHÔNG ghi đè URL của tab đó
@@ -126,7 +128,7 @@ export async function ensureProjectTab(targetProjectId) {
         await chrome.windows.update(chosenTab.windowId, { focused: true }).catch(() => {});
       }
       await waitForTabComplete(chosenTab.id, 15000);
-      await sleep(1500);
+      await sleep(3500); // Ch? WIZ_global_data n?p d?y d? sau khi di?u hu?ng
       await warmUpRecaptcha(chosenTab.id, 8000);
       return chosenTab.id;
     } catch (e) {
@@ -142,7 +144,7 @@ export async function ensureProjectTab(targetProjectId) {
       await chrome.windows.update(newTab.windowId, { focused: true }).catch(() => {});
     }
     await waitForTabComplete(newTab.id, 20000);
-    await sleep(2000);
+    await sleep(3500); // Ch? WIZ_global_data n?p d?y d? sau khi m? tab m?i
     await warmUpRecaptcha(newTab.id, 8000);
     return newTab.id;
   } catch (e) {

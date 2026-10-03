@@ -28,6 +28,8 @@ export const runtime = {
   autoClearCacheSeconds: 300,
   autoClearCacheTimer: null,
   activeGenerationCount: 0,
+  imageUiBusy: false,
+  videoUiBusy: false,
   heartbeatTimer: null,
   activityLog: [],
   captchaFreshLockUntil: 0,

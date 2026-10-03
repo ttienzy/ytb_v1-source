@@ -47,49 +47,59 @@ interface RenderApi {
   getVideoStreamUrl: (path: string) => string
 }
 
+/** A workflow clip has exactly one output; reference images never become frames implicitly. */
+export function buildWorkflowVideoRequest(params: RenderSceneJobParams): VeoJobRequest {
+  const { scene, project, videoConfig } = params
+  const assets = params.referenceAssets ?? scene.referenceAssets ?? []
+  if (!scene.prompt.trim()) throw new Error(`Clip #${scene.sceneNumber} chưa có prompt.`)
+  if (scene.sceneNumber > 1 && scene.chainFromPrevious !== false && !scene.startFramePath) {
+    throw new Error(`Clip #${scene.sceneNumber} cần frame cuối của clip trước làm Start Frame.`)
+  }
+  const usesFrame = !!scene.startFramePath
+  if (!usesFrame && assets.some(asset => asset.uploadStatus !== 'uploaded' || !asset.backendPath?.trim())) {
+    throw new Error('Ảnh tham chiếu chưa tải xong hoặc tải thất bại. Hãy tải lại ảnh trước khi render.')
+  }
+  const paths = usesFrame ? [] : [...new Set(assets.map(asset => asset.backendPath!.trim()))]
+  if (paths.length > 3) throw new Error('Ingredients chỉ nhận tối đa 3 ảnh. Hãy giữ tổng ảnh sản phẩm, nhân vật và bối cảnh không quá 3 ảnh trước khi render.')
+  const mode = usesFrame ? 'frames' : paths.length ? 'ingredients' : 'text_to_video'
+  if (!videoConfig.model || !videoConfig.resolution) throw new Error('Chưa chọn cấu hình Veo hợp lệ.')
+  if (videoConfig.variations !== 1) throw new Error('Chuỗi video yêu cầu 1 biến thể mỗi clip. Hãy chọn 1 biến thể trong Cấu hình Veo.')
+  if (mode !== 'text_to_video' && (videoConfig.model !== 'Omni 1.1 Flash' || videoConfig.resolution !== '720p')) {
+    throw new Error('Ingredients và nối frame hiện hỗ trợ Omni 1.1 Flash, 720p. Hãy cập nhật Cấu hình Veo.')
+  }
+  if (![4, 6, 8, 10].includes(scene.durationSec)) throw new Error('Thời lượng clip phải là 4, 6, 8 hoặc 10 giây.')
+  if (!['16:9', '9:16'].includes(videoConfig.aspectRatio)) throw new Error('Chọn tỉ lệ 16:9 hoặc 9:16 cho video.')
+  return {
+    project_id: project.id, prompt: scene.prompt.trim(), model_display_name: videoConfig.model,
+    input_mode: mode, image_path: usesFrame ? scene.startFramePath : null, end_image_path: null,
+    ingredient_image_paths: paths, aspect_ratio: videoConfig.aspectRatio,
+    duration_seconds: scene.durationSec, resolution: videoConfig.resolution, num_outputs: 1,
+  }
+}
+
 /** Injectable transport and policy keep lifecycle tests independent of the provider. */
 export class RenderJobController {
   private readonly controller = new AbortController()
   private readonly api?: RenderApi
   private readonly policy: PollingPolicy
 
-  constructor(api?: RenderApi, policy = getWorkflowConfig().polling) {
+  constructor(api?: RenderApi, policy?: PollingPolicy) {
     this.api = api
-    this.policy = policy
+    this.policy = policy ?? { ...getWorkflowConfig().polling, timeoutMs: Math.max(getWorkflowConfig().polling.timeoutMs, 1110000) }
   }
 
   public cancel() { this.controller.abort() }
 
   public async renderScene(params: RenderSceneJobParams): Promise<RenderJobResult> {
-    const { scene, project, videoConfig, onProgress, onSubmitted } = params
-    const assets = params.referenceAssets ?? scene.referenceAssets ?? []
+    const { scene, onProgress, onSubmitted } = params
     let jobId = scene.jobId || undefined
     try {
       const api = this.api ?? await import('../../veo-studio/services/veoApi')
       if (this.controller.signal.aborted) throw new Error('Đã dừng theo dõi job.')
-      if (!scene.prompt.trim()) throw new Error(`Clip #${scene.sceneNumber} chưa có prompt.`)
-      if (assets.some(asset => asset.uploadStatus !== 'uploaded' || !asset.backendPath?.trim())) {
-        throw new Error('Ảnh tham chiếu chưa tải xong hoặc tải thất bại. Hãy tải lại ảnh trước khi render.')
-      }
-      const ingredientPaths = [...new Set(assets.map(asset => asset.backendPath!))]
-      if (!scene.startFramePath && ingredientPaths.length > 3) {
-        throw new Error('Veo chỉ nhận tối đa 3 ảnh tham chiếu. Hãy chọn lại ảnh sản phẩm, nhân vật và bối cảnh.')
-      }
-      if (!videoConfig.model || !videoConfig.resolution) throw new Error('Chưa chọn cấu hình Veo hợp lệ.')
       if (!jobId) {
+        const request = buildWorkflowVideoRequest(params)
         onProgress?.(15, 'Đang gửi yêu cầu render...')
-        const job = await api.submitJob({
-          project_id: project.id,
-          prompt: scene.prompt.trim(),
-          model_display_name: videoConfig.model,
-          input_mode: scene.startFramePath ? 'frames' : ingredientPaths.length ? 'ingredients' : 'text_to_video',
-          image_path: scene.startFramePath || null,
-          ingredient_image_paths: scene.startFramePath ? [] : ingredientPaths,
-          aspect_ratio: videoConfig.aspectRatio,
-          duration_seconds: scene.durationSec,
-          resolution: videoConfig.resolution,
-          num_outputs: videoConfig.variations,
-        })
+        const job = await api.submitJob(request)
         jobId = job.job_id
         onSubmitted?.(jobId)
       }

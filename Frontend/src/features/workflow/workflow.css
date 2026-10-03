@@ -168,32 +168,32 @@
   }
 }
 
-/* Custom Node Base Card - Light Theme */
+/* Custom Node Base Card - Modern Clean System */
 .wf-node-card {
   background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 6px 16px -2px rgba(15, 23, 42, 0.04);
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 24px -4px rgba(15, 23, 42, 0.05);
   color: #1e293b;
   font-size: 13px;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: visible;
   position: relative;
 }
 
 .wf-node-card:hover {
   border-color: #cbd5e1;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05), 0 10px 24px -3px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06), 0 14px 28px -4px rgba(15, 23, 42, 0.08);
 }
 
 .wf-node-card.selected {
   border-color: #4f46e5 !important;
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25), 0 8px 24px -4px rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 0 0 2.5px rgba(79, 70, 229, 0.25), 0 12px 28px -4px rgba(79, 70, 229, 0.12) !important;
 }
 
 .wf-node-card.is-start-node {
-  border-color: #0f172a !important;
-  box-shadow: 0 0 0 1.5px #0f172a, 0 8px 24px -4px rgba(15, 23, 42, 0.08) !important;
+  border-color: #1e1b4b !important;
+  box-shadow: 0 0 0 2px #312e81, 0 12px 30px -4px rgba(30, 27, 75, 0.15) !important;
 }
 
 .wf-node-card.is-orphan {
@@ -206,35 +206,43 @@
   opacity: 1;
 }
 
+/* Root Trigger Start Banner */
 .wf-start-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #0f172a;
+  background: linear-gradient(90deg, #0f172a 0%, #1e1b4b 60%, #312e81 100%);
   color: #ffffff;
-  padding: 4px 12px;
+  padding: 5px 12px;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  border-top-left-radius: 11px;
-  border-top-right-radius: 11px;
+  letter-spacing: 0.03em;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .wf-start-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #10b981;
-  box-shadow: 0 0 6px #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: wf-dot-pulse 2s infinite ease-in-out;
+}
+
+@keyframes wf-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
 }
 
 .wf-orphan-badge {
-  background: #f1f5f9;
-  color: #64748b;
-  border: 1px solid #e2e8f0;
+  background: #fff1f2;
+  color: #e11d48;
+  border: 1px solid #fecdd3;
   font-size: 9px;
   font-weight: 700;
-  padding: 1px 6px;
+  padding: 1.5px 6px;
   border-radius: 4px;
 }
 
@@ -260,9 +268,9 @@
 }
 
 .wf-node-star-btn.is-active {
-  background: #f1f5f9;
-  border-color: #e2e8f0;
-  color: #f59e0b;
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #d97706;
 }
 
 /* Node Header */
@@ -270,7 +278,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 11px 14px;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
   border-top-left-radius: 12px;
@@ -280,34 +288,181 @@
 .wf-node-title-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .wf-node-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
   color: #334155;
   font-size: 14px;
   flex-shrink: 0;
+  transition: transform 0.15s ease;
 }
 
-.wf-icon-purple,
-.wf-icon-blue,
-.wf-icon-emerald,
+.wf-node-card:hover .wf-node-icon {
+  transform: scale(1.04);
+}
+
+/* ─── Semantic Node Color Themes ────────────────────────────── */
+/* 1. Products Node (Teal / Emerald) */
+.wf-node-products {
+  border-color: #99f6e4;
+}
+.wf-node-products:hover {
+  border-color: #14b8a6;
+  box-shadow: 0 4px 14px rgba(13, 148, 136, 0.12), 0 14px 28px -4px rgba(15, 23, 42, 0.08);
+}
+.wf-node-products .wf-node-header {
+  background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);
+  border-bottom: 1px solid #ccfbf1;
+}
+.wf-node-products .wf-node-icon {
+  background: #ccfbf1;
+  color: #0d9488;
+  border: 1px solid #99f6e4;
+}
+.wf-node-products .wf-handle {
+  background: #0d9488 !important;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.25) !important;
+}
+
+/* 2. Gemini Analysis Node (Indigo / AI Sparkle) */
+.wf-node-gemini {
+  border-color: #c7d2fe;
+}
+.wf-node-gemini:hover {
+  border-color: #818cf8;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.12), 0 14px 28px -4px rgba(15, 23, 42, 0.08);
+}
+.wf-node-gemini .wf-node-header {
+  background: linear-gradient(180deg, #eef2ff 0%, #ffffff 100%);
+  border-bottom: 1px solid #e0e7ff;
+}
+.wf-node-gemini .wf-node-icon {
+  background: #e0e7ff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+}
+.wf-node-gemini .wf-handle {
+  background: #4f46e5 !important;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25) !important;
+}
+
+/* 3. Character & Scene Node (Violet / Model Studio) */
+.wf-node-charscene {
+  border-color: #ddd6fe;
+}
+.wf-node-charscene:hover {
+  border-color: #a78bfa;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.12), 0 14px 28px -4px rgba(15, 23, 42, 0.08);
+}
+.wf-node-charscene .wf-node-header {
+  background: linear-gradient(180deg, #faf5ff 0%, #ffffff 100%);
+  border-bottom: 1px solid #ede9fe;
+}
+.wf-node-charscene .wf-node-icon {
+  background: #ede9fe;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
+}
+.wf-node-charscene .wf-handle {
+  background: #7c3aed !important;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25) !important;
+}
+
+/* 4. ChatGPT Script Node (Amber / Creative Copy) */
+.wf-node-gpt {
+  border-color: #fde68a;
+}
+.wf-node-gpt:hover {
+  border-color: #f59e0b;
+  box-shadow: 0 4px 14px rgba(217, 119, 6, 0.12), 0 14px 28px -4px rgba(15, 23, 42, 0.08);
+}
+.wf-node-gpt .wf-node-header {
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+  border-bottom: 1px solid #fef3c7;
+}
+.wf-node-gpt .wf-node-icon {
+  background: #fef3c7;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+.wf-node-gpt .wf-handle {
+  background: #d97706 !important;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.25) !important;
+}
+
+/* 5. Veo Flow Studio Node (Electric Multi-Clip Director) */
+.wf-veo-studio-card {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04), 0 12px 28px -4px rgba(15, 23, 42, 0.07);
+}
+.wf-veo-studio-card:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.09), 0 18px 36px -6px rgba(15, 23, 42, 0.08);
+}
+.wf-veo-studio-card .wf-node-header {
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  border-bottom: 1px solid #e2e8f0;
+}
+.wf-veo-studio-card .wf-node-icon {
+  background: linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%);
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+}
+.wf-veo-studio-card #from-assets.wf-handle {
+  background: #0d9488 !important;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.25) !important;
+}
+.wf-veo-studio-card #from-gpt.wf-handle {
+  background: #d97706 !important;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.25) !important;
+}
+.wf-veo-studio-card #video-output.wf-handle {
+  background: #6366f1 !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3) !important;
+}
+
+/* ─── Color Chips & Icons ───────────────────────────────────── */
+.wf-icon-purple {
+  background: #ede9fe !important;
+  color: #7c3aed !important;
+  border: 1px solid #ddd6fe !important;
+}
+
+.wf-icon-blue {
+  background: #e0e7ff !important;
+  color: #4f46e5 !important;
+  border: 1px solid #c7d2fe !important;
+}
+
+.wf-icon-emerald {
+  background: #ccfbf1 !important;
+  color: #0d9488 !important;
+  border: 1px solid #99f6e4 !important;
+}
+
 .wf-icon-rose {
-  background: #f1f5f9;
-  color: #334155;
-  border: 1px solid #e2e8f0;
+  background: #ffe4e6 !important;
+  color: #e11d48 !important;
+  border: 1px solid #fecdd3 !important;
+}
+
+.wf-icon-amber {
+  background: #fef3c7 !important;
+  color: #d97706 !important;
+  border: 1px solid #fde68a !important;
 }
 
 .wf-node-title {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
   color: #0f172a;
   letter-spacing: -0.01em;
@@ -321,16 +476,25 @@
   background: #f1f5f9;
   color: #475569;
   border: 1px solid #e2e8f0;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
 }
 
-.wf-badge-gpt,
-.wf-badge-veo,
+.wf-badge-gpt {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.wf-badge-veo {
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+}
+
 .wf-badge-assets {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #e2e8f0;
+  background: #f0fdfa;
+  color: #0f766e;
+  border: 1px solid #99f6e4;
 }
 
 /* Node Content Body */
@@ -343,20 +507,19 @@
 
 /* Custom Handles */
 .wf-handle {
-  width: 9px !important;
-  height: 9px !important;
+  width: 10px !important;
+  height: 10px !important;
   border-radius: 50% !important;
-  background: #64748b !important;
+  background: #6366f1 !important;
   border: 2px solid #ffffff !important;
-  box-shadow: 0 0 0 1px #cbd5e1 !important;
-  transition: transform 0.15s ease, background 0.15s ease;
+  box-shadow: 0 0 0 1.5px #cbd5e1 !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
   z-index: 10;
 }
 
 .wf-handle:hover {
-  transform: scale(1.3);
-  background: #0f172a !important;
-  box-shadow: 0 0 0 2px #94a3b8 !important;
+  transform: scale(1.45);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.35) !important;
 }
 
 .wf-handle-source {
@@ -365,6 +528,29 @@
 
 .wf-handle-target {
   left: -6px !important;
+}
+
+/* Primary Action Buttons */
+.wf-btn-primary {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid #4338ca !important;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.28) !important;
+  font-weight: 600;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.wf-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%) !important;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+.wf-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Asset Input Node Specifics */
@@ -1088,15 +1274,15 @@
 }
 
 .wf-clip-card:hover {
-  border-color: #cbd5e1;
+  border-color: #818cf8;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.12);
 }
 
 .wf-clip-card.active {
-  border-color: #0f172a;
-  background: #f8fafc;
-  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.05);
+  border-color: #4f46e5;
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25), 0 6px 16px rgba(79, 70, 229, 0.1);
 }
 
 /* Storyboard Handover Connector */

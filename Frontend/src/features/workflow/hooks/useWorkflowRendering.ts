@@ -4,7 +4,9 @@ import type { VeoProject } from '../../veo-studio/types'
 import * as veoApi from '../../veo-studio/services/veoApi'
 import type { GeneratedSceneItem, VeoVideoConfig } from '../types'
 import { RenderJobController } from '../services/renderJobService.ts'
-import { resolveRenderAssetsInput } from '../services/graphResolver'
+import { resolveWorkflowAssetsInput } from '../services/graphResolver'
+import { prepareChainedScene } from '../services/prepareChainedScene.ts'
+import { stopWorkflowRender } from '../services/workflowRenderState.ts'
 import { clearSceneOutput } from '../services/workflowState.ts'
 
 export function useWorkflowRendering(options: {
@@ -31,6 +33,8 @@ export function useWorkflowRendering(options: {
   const render = useCallback(async (nodeId: string, sceneIndex?: number) => {
     if (!options.ready || active.current.has(nodeId)) return
     active.current.set(nodeId, null)
+    options.setNodes(nodes => nodes.map(node => node.id === nodeId
+      ? { ...node, data: { ...node.data, renderError: null } } : node))
     const readNode = () => options.nodesRef.current.find(node => node.id === nodeId)
     const readScenes = () => (readNode()?.data.scenes as GeneratedSceneItem[]) || []
     const updateScene = (index: number, patch: Partial<GeneratedSceneItem>) => options.setNodes(nodes =>
@@ -40,7 +44,7 @@ export function useWorkflowRendering(options: {
     try {
       if (!options.project) throw new Error('Hãy chọn dự án trong Cấu hình Veo trước khi render.')
       if (readNode()?.data.scriptSourceStale) throw new Error('Đầu vào đã thay đổi. Hãy sinh và đồng bộ lại kịch bản trước khi render.')
-      const assets = resolveRenderAssetsInput({ nodes: options.nodesRef.current, edges: options.edges, targetNodeId: nodeId })
+      const assets = resolveWorkflowAssetsInput({ nodes: options.nodesRef.current, edges: options.edges, targetNodeId: nodeId })
       if (!assets.ok || !assets.data) throw new Error(assets.error || 'Ảnh tham chiếu chưa sẵn sàng.')
       const indices = sceneIndex === undefined ? readScenes().map((_, i) => i) : [sceneIndex]
       if (!indices.length) throw new Error('Chưa có clip để render.')
@@ -60,17 +64,10 @@ export function useWorkflowRendering(options: {
         if (sceneIndex === undefined && (scene.videoUrl || scene.outputFilePath)) continue
         if (!scene.prompt.trim()) throw new Error(`Clip #${index + 1} chưa có prompt.`)
         options.setNodes(nodes => nodes.map(node => node.id === nodeId ? { ...node, data: { ...node.data, activeSceneIndex: index } } : node))
-        if (index > 0 && scene.chainFromPrevious !== false && !scene.startFramePath && !scene.jobId) {
-          const previous = readScenes()[index - 1]
-          const previousPath = previous?.outputFilePath || previous?.videoUrl
-          if (!previousPath) throw new Error(`Hãy tạo clip #${index} trước để nối khung hình.`)
-          const frame = await veoApi.extractLastFrame(previousPath)
-          if (!mounted.current || !stillCurrent()) throw new Error('Đầu vào đã thay đổi trong lúc lấy khung hình.')
-          if (!frame.ok || !frame.file_path) throw new Error('Không trích xuất được khung hình nối tiếp. Hãy thử lại.')
-          updateScene(index, { startFramePath: frame.file_path, startFramePreviewUrl: veoApi.getImageFileUrl(frame.image_id) })
-          stillCurrent = options.captureRevision(nodeId)
-          scene = readScenes()[index]
-        }
+        scene = await prepareChainedScene(scene, index, readScenes()[index - 1], veoApi.extractLastFrame, veoApi.getImageFileUrl)
+        if (!mounted.current || !stillCurrent()) throw new Error('Đầu vào đã thay đổi trong lúc lấy khung hình.')
+        updateScene(index, { startFramePath: scene.startFramePath, startFramePreviewUrl: scene.startFramePreviewUrl, jobId: scene.jobId })
+        stillCurrent = options.captureRevision(nodeId)
         const controller = new RenderJobController()
         active.current.set(nodeId, controller)
         updateScene(index, { isRendering: true, renderProgress: 15, renderStep: 'Đang chuẩn bị render...', errorMessage: null })
@@ -89,7 +86,7 @@ export function useWorkflowRendering(options: {
         })
         if (!mounted.current || !stillCurrent()) throw new Error('Đầu vào đã thay đổi; kết quả cũ không được gắn vào clip mới.')
         updateScene(index, { isRendering: false, renderProgress: result.ok ? 100 : 0,
-          renderStep: result.ok ? 'Hoàn tất' : null,
+          renderStep: result.ok ? 'Hoàn tất' : null, renderStatus: result.ok ? 'done' : 'error',
           jobId: result.jobId || null, videoUrl: result.videoUrl || null,
           outputFilePath: result.outputFilePath || null, errorMessage: result.error || null })
         if (!result.ok) throw new Error(result.error)
@@ -97,7 +94,12 @@ export function useWorkflowRendering(options: {
         options.onCompleted()
       }
     } catch (error) {
-      if (mounted.current) alert(error instanceof Error ? error.message : 'Không thể render clip.')
+      if (mounted.current) {
+        const message = error instanceof Error ? error.message : 'Không thể render clip.'
+        // A blocking alert prevents React from painting the stopped state.
+        // Release every spinner owned by this node, including revision/extraction failures.
+        options.setNodes(nodes => nodes.map(node => node.id === nodeId ? stopWorkflowRender(node, message) : node))
+      }
     } finally {
       active.current.delete(nodeId)
     }

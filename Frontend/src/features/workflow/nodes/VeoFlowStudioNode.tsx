@@ -256,12 +256,18 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
         </div>
       </div>
 
+      {(data.renderError || currentScene.errorMessage) && (
+        <div role="alert" style={{ margin: '8px 12px', padding: '10px 12px', borderRadius: 8, background: '#fff1f2', color: '#be123c', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+          {data.renderError || currentScene.errorMessage}
+        </div>
+      )}
+
       {/* ─── 2. INPUT ASSET RIBBON ────────────────────────────────────────── */}
       <div className="wf-asset-ribbon">
         <div className="wf-asset-ribbon-left">
           <span style={{ fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Package size={12} color="#64748b" />
-            Nguyên liệu đầu vào:
+            Ảnh tham chiếu (tối đa 3):
           </span>
 
           {hasAnyRefImages ? (
@@ -359,15 +365,18 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ color: '#334155', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
             <Sparkles size={12} color="#64748b" />
-            {data.isSourceScriptStale
-              ? 'Kịch bản cũ (cần sinh lại)'
-              : data.selectedGptScriptAngle || 'Kịch bản ChatGPT'}
+            {data.isSourceScriptStale ? (
+              <span style={{ color: '#b45309', fontSize: 10, fontWeight: 700 }} title="GPT vừa đổi cấu hình (số clip/preset), có thể sinh lại hoặc dùng tiếp kịch bản này">
+                ⚠️ Cấu hình GPT đã đổi
+              </span>
+            ) : (
+              data.selectedGptScriptAngle || 'Kịch bản ChatGPT'
+            )}
           </span>
           {data.availableGptScripts && data.availableGptScripts.length > 0 && (
             <button
               type="button"
               onClick={() => data.onApplyAllGptScripts?.()}
-              disabled={data.isSourceScriptStale}
               style={{
                 fontSize: 10,
                 fontWeight: 700,
@@ -376,8 +385,7 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
                 border: '1px solid #cbd5e1',
                 background: '#f8fafc',
                 color: '#334155',
-                cursor: data.isSourceScriptStale ? 'not-allowed' : 'pointer',
-                opacity: data.isSourceScriptStale ? 0.55 : 1,
+                cursor: 'pointer',
               }}
               title="Đồng bộ lại toàn bộ kịch bản sang các clip"
             >
@@ -427,18 +435,18 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
               }}
               disabled={isRendering}
               style={{
-                padding: '3px 10px',
+                padding: '4px 11px',
                 fontSize: 10.5,
                 fontWeight: 600,
-                background: '#4f46e5',
+                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
                 border: '1px solid #4338ca',
                 color: '#ffffff',
                 cursor: isRendering ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
-                borderRadius: 5,
-                boxShadow: '0 1px 2px rgba(79, 70, 229, 0.2)',
+                gap: 5,
+                borderRadius: 6,
+                boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)',
               }}
               title={chainButtonTitle}
             >

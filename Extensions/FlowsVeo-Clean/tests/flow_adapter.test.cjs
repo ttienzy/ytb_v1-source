@@ -134,7 +134,7 @@ test('adapter dispatches 16:9 aspect ratio successfully', async () => {
   assert.equal(result.ok, true);
   assert.equal(h.calls.length, 3);
   const createPayload = JSON.parse(h.calls[0].outer[0][0][1]);
-  assert.equal(createPayload[0][0][2], 2);
+  assert.equal(createPayload[0][0][2], 1);
   assert.equal(createPayload[2][1], 2);
 });
 
@@ -167,7 +167,7 @@ test('adapter uploads frames and dispatches nprQif with frame media asset slots'
   assert.equal(h.calls[1].rpcId, 'maseQ');
   assert.equal(h.calls[2].rpcId, 'nprQif');
   const createPayload = JSON.parse(h.calls[2].outer[0][0][1]);
-  assert.equal(createPayload[0][0][1], 'omni_flash_i2v_10s_first_last');
+  assert.equal(createPayload[0][0][1], 'omni_flash_i2v_8s_first_last');
   const startSlot = createPayload[0][0][4];
   const endSlot = createPayload[0][0][5];
   assert.deepEqual(startSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
@@ -191,11 +191,11 @@ test('adapter uploads only start frame and dispatches MZZa6b with abra_r2v_6s', 
   assert.equal(result.ok, true);
   assert.equal(h.calls.length, 4); // 1 maseQ upload + 1 MZZa6b + 2 polling
   assert.equal(h.calls[0].rpcId, 'maseQ');
-  assert.equal(h.calls[1].rpcId, 'MZZa6b');
+  assert.equal(h.calls[1].rpcId, 'nprQif');
   const createPayload = JSON.parse(h.calls[1].outer[0][0][1]);
-  assert.equal(createPayload[0][0][2], 'abra_r2v_6s');
-  const refSlots = createPayload[0][0][1];
-  assert.deepEqual(refSlots, [[null, 'uploaded-frame-media-id']]);
+  assert.equal(createPayload[0][0][1], 'abra_r2v_6s');
+  const startSlot = createPayload[0][0][4];
+  assert.deepEqual(startSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
   assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép bơi lội');
 });
 
@@ -231,14 +231,13 @@ test('adapter uploads ingredient images and dispatches MZZa6b with reference ass
   assert.equal(h.calls.length, 5);
   assert.equal(h.calls[0].rpcId, 'maseQ');
   assert.equal(h.calls[1].rpcId, 'maseQ');
-  assert.equal(h.calls[2].rpcId, 'MZZa6b');
+  assert.equal(h.calls[2].rpcId, 'nprQif');
   const createPayload = JSON.parse(h.calls[2].outer[0][0][1]);
-  assert.equal(createPayload[0][0][2], 'abra_r2v_6s');
-  const refSlots = createPayload[0][0][1];
-  assert.deepEqual(refSlots, [
-    [null, 'uploaded-frame-media-id'],
-    [null, 'uploaded-frame-media-id'],
-  ]);
+  assert.equal(createPayload[0][0][1], 'abra_r2v_6s');
+  const startSlot = createPayload[0][0][4];
+  const endSlot = createPayload[0][0][5];
+  assert.deepEqual(startSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
+  assert.deepEqual(endSlot, [null, 'uploaded-frame-media-id', null, null, null, [null, 0.341796875, 1, 0.658203125]]);
   assert.equal(createPayload[0][0][0][2][0][0][0], 'cá chép hóa rồng');
 });
 

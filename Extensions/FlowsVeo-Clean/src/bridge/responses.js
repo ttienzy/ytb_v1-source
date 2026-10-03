@@ -70,7 +70,7 @@ export async function postImageResponse(requestId, result) {
       headers: authHeaders(),
       body: JSON.stringify({
         request_id: requestId,
-        result: result?.ok ? result : null,
+        result: result || null,
         error: result?.ok ? null : (result?.error || 'Unknown Image error'),
         logs: runtime.activityLog.slice(-10),
       }),
