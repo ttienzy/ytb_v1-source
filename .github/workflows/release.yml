@@ -31,9 +31,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          $version = (Get-Content Frontend/package.json -Raw | ConvertFrom-Json).version
+          $version = (Get-Content Frontend/package.json -Raw | ConvertFrom-Json -AsHashtable).version
           @('Frontend/package-lock.json', 'Extensions/FlowsVeo-Clean/package.json', 'Extensions/FlowsVeo-Clean/package-lock.json', 'Extensions/FlowsVeo-Clean/public/manifest.json') | ForEach-Object {
-            if ((Get-Content $_ -Raw | ConvertFrom-Json).version -ne $version) { throw "Version mismatch: $_" }
+            if ((Get-Content $_ -Raw | ConvertFrom-Json -AsHashtable).version -ne $version) { throw "Version mismatch: $_" }
           }
           $releaseTag = "v$version"
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $releaseTag) { throw "Tag must match $releaseTag" }
