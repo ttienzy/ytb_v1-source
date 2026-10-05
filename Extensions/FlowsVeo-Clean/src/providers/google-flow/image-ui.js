@@ -146,7 +146,12 @@ export async function generateImageThroughUi(request, tabId) {
     if (config?.needsConfig) {
       for (const action of ['openSettings', 'mode', 'aspect', 'count', 'modelMenu', 'model']) {
         const pt = await step(action);
-        if (pt) await click(pt);
+        if (pt) {
+          await click(pt);
+          if (action === 'openSettings' || action === 'modelMenu') {
+            await sleep(350);
+          }
+        }
       }
       await step('verify');
       const closePt = await step('closeSettings');

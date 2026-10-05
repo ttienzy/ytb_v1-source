@@ -17,7 +17,7 @@ interface Props {
   onRegisterTask?: (task: VideoTask) => void
   onUpdateTask?: (id: string, patch: Partial<VideoTask>) => void
   onRemoveTask?: (id: string) => void
-  onBatchVideoDone?: () => void
+  onBatchVideoDone?: (job?: VeoJobOut) => void
   onVideoDone?: () => void
   onPreviewJob?: (job: VeoJobOut) => void
 }
@@ -44,7 +44,6 @@ export function TextToVideoTab({
   const [prompt, setPrompt] = useState('')
   const [profileId, setProfileId] = useState('')
   const [variationCount, setVariationCount] = useState<number>(1)
-  const [singleConcurrency, setSingleConcurrency] = useState<number>(2)
   const [isSubmittingSingle, setIsSubmittingSingle] = useState(false)
 
   // Cấu hình đa luồng (Batch)
@@ -220,7 +219,7 @@ export function TextToVideoTab({
     }
 
     const queue = [...variantTasks]
-    const effectiveConcurrency = Math.min(singleConcurrency, totalVariants)
+    const effectiveConcurrency = 1
 
     const worker = async () => {
       while (queue.length > 0) {
@@ -301,7 +300,18 @@ export function TextToVideoTab({
   }
 
   const handleStartBatch = async () => {
-    if (!activeProject || !selectedProfile || scenes.length === 0) return
+    if (!activeProject) {
+      alert('Vui lòng chọn hoặc tạo một Project trước khi chạy kịch bản!')
+      return
+    }
+    if (!selectedProfile) {
+      alert('Vui lòng chọn cấu hình Model trước khi chạy kịch bản!')
+      return
+    }
+    if (scenes.length === 0) {
+      alert('Kịch bản chưa có phân cảnh nào để chạy. Hãy dán kịch bản hoặc bấm Tải mẫu kịch bản.')
+      return
+    }
 
     stopRequestedRef.current = false
     pausedRef.current = false
@@ -361,7 +371,7 @@ export function TextToVideoTab({
             progressStep: 'Hoàn tất',
             videoUrl: finalJob.output_files?.[0],
           })
-          onBatchVideoDone?.()
+          if (finalJob) onBatchVideoDone?.(finalJob)
         } else if (finalJob?.status === 'error') {
           updateScene(sceneId, {
             status: 'error',
@@ -684,20 +694,13 @@ export function TextToVideoTab({
                 ))}
               </div>
 
-              {/* Variations & Concurrency Ribbon */}
+              {/* Variations Ribbon */}
               <div className="veo-studio-ribbon single-ribbon">
                 <VariationSelector
                   value={variationCount}
                   onChange={setVariationCount}
                   disabled={isSubmittingSingle}
                 />
-                {variationCount > 1 && (
-                  <ConcurrencySelector
-                    concurrency={singleConcurrency}
-                    onChange={setSingleConcurrency}
-                    disabled={isSubmittingSingle}
-                  />
-                )}
               </div>
 
               {/* Status bar */}
@@ -822,6 +825,7 @@ export function TextToVideoTab({
             onScenesChange={setScenes}
             disabled={isBatchRunning}
             defaultDuration={selectedProfile.duration_seconds}
+            activeProject={activeProject}
             onPreviewScene={handlePreviewScene}
             onRetryScene={handleRetryScene}
           />
@@ -834,6 +838,7 @@ export function TextToVideoTab({
             isPaused={isBatchPaused}
             creditPerScene={selectedProfile.credit_cost}
             activeWorkers={activeWorkers}
+            activeProject={activeProject}
             onStart={handleStartBatch}
             onPause={handlePauseBatch}
             onResume={handleResumeBatch}

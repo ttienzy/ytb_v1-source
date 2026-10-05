@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import {
+  Download,
   FileText,
   Sparkles,
   Trash2,
@@ -12,15 +13,18 @@ import {
   Settings2,
   FileCode,
   Loader2,
+  Clock,
 } from 'lucide-react'
-import type { BatchSceneItem, ScriptParseOptions } from '../types'
+import type { BatchSceneItem, ScriptParseOptions, VeoProject } from '../types'
 import { parseScript, getSampleScript } from '../utils/scriptParser'
+import { getVideoStreamUrl } from '../services/veoApi'
 
 interface Props {
   scenes: BatchSceneItem[]
   onScenesChange: (scenes: BatchSceneItem[]) => void
   disabled?: boolean
   defaultDuration?: number
+  activeProject?: VeoProject | null
   onPreviewScene?: (scene: BatchSceneItem) => void
   onRetryScene?: (sceneId: string) => void
 }
@@ -30,6 +34,7 @@ export function BatchScriptEditor({
   onScenesChange,
   disabled,
   defaultDuration = 4,
+  activeProject,
   onPreviewScene,
   onRetryScene,
 }: Props) {
@@ -134,6 +139,15 @@ export function BatchScriptEditor({
           <label className="veo-label">
             <FileText size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 5 }} />
             Dán kịch bản phân cảnh
+            {activeProject ? (
+              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-primary, #6366f1)' }}>
+                (Project: <strong>{activeProject.name}</strong>)
+              </span>
+            ) : (
+              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: 'var(--color-danger, #ef4444)' }}>
+                (⚠️ Chưa chọn Project)
+              </span>
+            )}
           </label>
           <div className="veo-raw-script-actions">
             <button
@@ -305,7 +319,9 @@ export function BatchScriptEditor({
                         <span className="veo-status-tag idle">Sẵn sàng</span>
                       )}
                       {scene.status === 'queued' && (
-                        <span className="veo-status-tag queued">Đang chờ</span>
+                        <span className="veo-status-tag queued">
+                          <Clock size={11} /> Đang chờ luồng
+                        </span>
                       )}
                       {scene.status === 'running' && (
                         <span className="veo-status-tag running">
@@ -379,10 +395,65 @@ export function BatchScriptEditor({
                     />
                   </div>
 
+                  {/* Video thành phẩm hiển thị tức thì ngay khi cảnh này hoàn tất */}
+                  {isDone && scene.videoUrl && (
+                    <div style={{
+                      padding: '8px 12px',
+                      background: 'rgba(16, 185, 129, 0.06)',
+                      borderTop: '1px solid rgba(16, 185, 129, 0.2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <video
+                          src={getVideoStreamUrl(scene.videoUrl)}
+                          style={{ width: 80, height: 46, borderRadius: 4, objectFit: 'cover', background: '#000', cursor: 'pointer' }}
+                          muted
+                          onClick={() => onPreviewScene?.(scene)}
+                        />
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--color-success, #10b981)', fontWeight: 600 }}>
+                            ✓ Đã gửi về App!
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--color-text-muted, #94a3b8)' }}>
+                            {scene.videoUrl}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {onPreviewScene && (
+                          <button
+                            type="button"
+                            className="veo-text-action-btn"
+                            onClick={() => onPreviewScene(scene)}
+                            title="Xem video trên màn hình lớn"
+                          >
+                            <Play size={12} /> Xem
+                          </button>
+                        )}
+                        <a
+                          href={getVideoStreamUrl(scene.videoUrl)}
+                          download={scene.videoUrl}
+                          className="veo-text-action-btn"
+                          title="Tải video này về máy"
+                        >
+                          <Download size={12} /> Tải về
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Card Footer: hiển thị bước đang chạy hoặc lỗi */}
-                  {(scene.progressStep || scene.error) && (
+                  {(scene.progressStep || scene.error || scene.status === 'queued') && (
                     <div className="veo-scene-card-footer">
-                      {scene.progressStep && (
+                      {scene.status === 'queued' && (
+                        <span className="veo-scene-step-text" style={{ color: '#d97706' }}>
+                          ⏳ Đang trong hàng đợi (Tự động kích hoạt khi có luồng trống)...
+                        </span>
+                      )}
+                      {scene.status !== 'queued' && scene.progressStep && (
                         <span className="veo-scene-step-text">{scene.progressStep}</span>
                       )}
                       {scene.error && (

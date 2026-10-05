@@ -1,6 +1,7 @@
 import { videoUiStep } from './page/video-ui.js';
 import { sleep } from '../../shared/time.js';
 import { recoverCurrentSceneInPage } from './page/recovery.js';
+import { logActivity } from '../../background/runtime/log.js';
 
 export function matchVideoUiRequest(postData, expected, attachedFrameIds = null) {
   try {
@@ -10,30 +11,47 @@ export function matchVideoUiRequest(postData, expected, attachedFrameIds = null)
     for (const batch of batches) for (const rpc of batch) {
       if (rpc[0] !== 'YhhmEf' && rpc[0] !== 'nprQif') continue;
       const payload = JSON.parse(rpc[1]);
-      if (expected?.input_mode !== 'frames') return { rpcId: rpc[0], payload };
-      if (rpc[0] !== 'nprQif') continue;
-
       const item = payload?.[0]?.[0];
       const actualPrompt = item?.[0]?.[2];
       const promptMatches = (() => {
+        if (!expected?.prompt) return true;
         const values = [];
         const walk = (value) => {
-          if (typeof value === 'string') values.push(value);
+          if (typeof value === 'string') values.push(value.trim());
           else if (Array.isArray(value)) value.forEach(walk);
         };
         walk(actualPrompt);
-        return values.includes(String(expected.prompt || '').trim());
+        const expectedTrimmed = String(expected.prompt || '').trim();
+        return values.includes(expectedTrimmed);
       })();
+
+      const actualCount = Array.isArray(payload?.[0]) ? payload[0].length : 1;
+      const expectedCount = Number(expected?.num_outputs || expected?.count || 1);
+      const projectId = payload?.[1]?.[5] || null;
+
+      if (expected?.input_mode !== 'frames') {
+        const checks = [
+          [promptMatches, 'Prompt in the Flow request does not match the submitted job.'],
+          [!expected?.project_id || projectId === expected.project_id, 'Flow request project does not match the selected project.'],
+          [actualCount === expectedCount, `Flow output count (${actualCount}) does not match the app request (${expectedCount}).`],
+        ];
+        const mismatch = checks.find(([ok]) => !ok);
+        return mismatch
+          ? { rpcId: rpc[0], payload, error: mismatch[1] }
+          : { rpcId: rpc[0], payload };
+      }
+
+      if (rpc[0] !== 'nprQif') continue;
+
       const startId = item?.[4]?.[1] || null;
       const endId = item?.[5]?.[1] || null;
       const expectedStart = attachedFrameIds?.[0] || null;
       const expectedEnd = attachedFrameIds?.[1] || null;
-      const projectId = payload?.[1]?.[5] || null;
       const checks = [
         [promptMatches, 'Prompt in the Flow request does not match the submitted job.'],
-        [projectId === expected.project_id, 'Flow request project does not match the selected project.'],
+        [!expected?.project_id || projectId === expected.project_id, 'Flow request project does not match the selected project.'],
         [item?.[1] === expected.provider_model_id, 'Flow selected a different video model/duration than the app request.'],
-        [Number(item?.[2]) === Number(expected.num_outputs || 1), 'Flow output count does not match the app request.'],
+        [actualCount === expectedCount, `Flow output count (${actualCount}) does not match the app request (${expectedCount}).`],
         [startId === expectedStart, 'Flow start frame ID does not match the attached Start Frame.'],
         [endId === expectedEnd, 'Flow end frame ID does not match the attached End Frame.'],
       ];
@@ -330,9 +348,14 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
     // Kiểm tra cấu hình có cần mở drawer không
     const config = await step('checkConfig');
     if (config?.needsConfig) {
-      for (const action of ['openSettings', 'mode', 'aspect', 'resolution', 'duration', 'modelMenu', 'model']) {
+      for (const action of ['openSettings', 'mode', 'aspect', 'resolution', 'duration', 'count', 'modelMenu', 'model']) {
         const pt = await step(action);
-        if (pt) await click(pt);
+        if (pt) {
+          await click(pt);
+          if (action === 'openSettings' || action === 'modelMenu') {
+            await sleep(350);
+          }
+        }
       }
       await step('verify');
       const closePt = await step('closeSettings');
@@ -406,44 +429,36 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
     // Bước 2: Theo dõi quá trình render video trên Flow đến khi hoàn tất
     const pollStart = Date.now();
     const renderDeadline = Date.now() + 540_000; // 9 phút timeout
+    let pollIteration = 0;
+    let lastDebugLog = 0;
+
     while (Date.now() < renderDeadline) {
       await sleep(3_500);
+      pollIteration++;
 
       // Thăm dò trạng thái qua executeScript (jwpduf / as29s / DOM) với mediaId cụ thể
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
         func: recoverCurrentSceneInPage,
-        args: [flowRequest.provider_model_id || 'abra_t2v_6s', mediaId],
-      }).catch(() => null);
+        args: [flowRequest.provider_model_id || 'abra_t2v_6s', mediaId, flowRequest.project_id],
+      }).catch((err) => {
+        logActivity('warn', `recoverCurrentSceneInPage error: ${err.message}`);
+        return null;
+      });
       const pollResult = injected?.[0]?.result;
       if (pollResult && pollResult.ok && pollResult.video_url) {
-        return {
-          ok: true,
-          video_url: pollResult.video_url,
-          image_url: pollResult.image_url || null,
-          media_id: mediaId,
-          provider_model_id: flowRequest.provider_model_id || 'abra_t2v_6s',
-          project_id: flowRequest.project_id,
-        };
-      }
-
-      // Fallback: sau 7s nếu thăm dò theo mediaId chưa có kết quả,
-      // thử thăm dò toàn cảnh scene hiện tại (targetMediaId = null).
-      if (Date.now() - pollStart > 7_000) {
-        const fallbackInjected = await chrome.scripting.executeScript({
-          target: { tabId },
-          world: 'MAIN',
-          func: recoverCurrentSceneInPage,
-          args: [flowRequest.provider_model_id || 'abra_t2v_6s', null],
-        }).catch(() => null);
-        const fallbackResult = fallbackInjected?.[0]?.result;
-        if (fallbackResult && fallbackResult.ok && fallbackResult.video_url) {
+        // Guard: verify the recovered video belongs to THIS specific job's mediaId
+        if (pollResult.media_id && pollResult.media_id !== mediaId) {
+          logActivity('warn', `Poll returned video for media_id=${pollResult.media_id} but this job expects ${mediaId}; skipping stale/foreign result`);
+        } else {
+          const fallbackNote = pollResult._fallback ? ` [fallback=${pollResult._fallback}]` : '';
+          logActivity('info', `Video render completed on Flow: mediaId=${mediaId}${fallbackNote}`);
           return {
             ok: true,
-            video_url: fallbackResult.video_url,
-            image_url: fallbackResult.image_url || null,
-            media_id: fallbackResult.media_id || mediaId,
+            video_url: pollResult.video_url,
+            image_url: pollResult.image_url || null,
+            media_id: mediaId,
             provider_model_id: flowRequest.provider_model_id || 'abra_t2v_6s',
             project_id: flowRequest.project_id,
           };
@@ -452,6 +467,43 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
 
       if (pollResult?.terminal_error) {
         return { ok: false, error: `Google Flow từ chối render: ${pollResult.error}` };
+      }
+
+      // Diagnostic logging mỗi ~30s
+      const elapsed = Math.round((Date.now() - pollStart) / 1000);
+      if (elapsed - lastDebugLog >= 30) {
+        lastDebugLog = elapsed;
+        const d = pollResult?._debug;
+        if (d) {
+          logActivity('info', `Poll[${elapsed}s] mediaId=${mediaId?.slice(0,8)}… rpcReady=${d.rpcReady} zzl0ze=${d.zzl0ze} as29s=${d.as29s} jwpduf=${d.jwpduf} status=${d.jwpdufStatus} domVids=${d.domVideos}`);
+        } else {
+          logActivity('info', `Poll[${elapsed}s] mediaId=${mediaId?.slice(0,8)}… result=${pollResult ? pollResult.error?.slice(0,60) : 'null'}`);
+        }
+      }
+
+      // Broad recovery fallback: sau 150s không có kết quả, thử poll KHÔNG filter mediaId
+      // Chỉ chấp nhận nếu project chỉ có 1 video mới render gần đây
+      if (elapsed >= 150 && pollIteration % 10 === 0) {
+        try {
+          const broadInjected = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: 'MAIN',
+            func: recoverCurrentSceneInPage,
+            args: [flowRequest.provider_model_id || 'abra_t2v_6s', null, flowRequest.project_id],
+          }).catch(() => null);
+          const br = broadInjected?.[0]?.result;
+          if (br?.ok && br?.video_url) {
+            logActivity('info', `Broad recovery found video after ${elapsed}s: media_id=${br.media_id}, assigning to job mediaId=${mediaId}`);
+            return {
+              ok: true,
+              video_url: br.video_url,
+              image_url: br.image_url || null,
+              media_id: mediaId,
+              provider_model_id: flowRequest.provider_model_id || 'abra_t2v_6s',
+              project_id: flowRequest.project_id,
+            };
+          }
+        } catch { }
       }
     }
 

@@ -283,8 +283,8 @@ export function Sidebar({
           })}
         </nav>
 
-        {/* Sidebar Footer with Donation Only (Version/status removed) */}
-        <div className="sidebar-footer">
+        {/* Sidebar Footer - Donation disabled */}
+        {/* <div className="sidebar-footer">
           <button
             type="button"
             className={`donation-btn ${collapsed ? 'donation-btn-collapsed' : ''}`}
@@ -294,10 +294,10 @@ export function Sidebar({
             <Heart size={15} className="donation-btn-icon" />
             {!collapsed && <span>Ủng hộ tác giả</span>}
           </button>
-        </div>
+        </div> */}
       </aside>
 
-      {showDonation && <DonationModal onClose={() => setShowDonation(false)} />}
+      {/* {showDonation && <DonationModal onClose={() => setShowDonation(false)} />} */}
     </>
   )
 }

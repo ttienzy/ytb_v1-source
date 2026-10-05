@@ -27,7 +27,11 @@ export function imageUiStep(action, request) {
   };
   const settings = () => find('button.settings-trigger-button', () => true)
     || find('button', (el) => /^(Điều kiện kích hoạt cài đặt|Settings trigger)$/i.test(el.getAttribute('aria-label') || ''));
-  const radio = (name) => find('[role="radio"]', (el) => text(el) === name);
+  const radio = (pattern) => find('[role="radio"]', (el) => {
+    const t = text(el);
+    if (pattern instanceof RegExp) return pattern.test(t);
+    return t === pattern || t.includes(pattern);
+  });
   const models = { GEM_PIX_2: 'Nano Banana Pro', NARWHAL: 'Nano Banana 2', HARBOR_SEAL: 'Nano Banana 2 Lite' };
   const modelName = models[request.model_key];
   const editor = () => {
@@ -39,7 +43,10 @@ export function imageUiStep(action, request) {
     const close = find('button', (el) => /^(Đóng bảng điều khiển tài khoản|Close account panel)$/i.test(el.getAttribute('aria-label') || ''));
     return close ? point(close) : null;
   }
-  const isDrawerOpen = () => Boolean(radio('16:9') || radio('x1') || radio('x2') || radio('x4'));
+  const isDrawerOpen = () => Boolean(
+    radio('16:9') || radio('9:16') || radio('1:1') || radio('4:3') || radio('3:4') ||
+    radio('x1') || radio('x2') || radio('x4') || radio(/hình ảnh|image/i)
+  );
 
   if (action === 'checkConfig') {
     const targetCount = request.count || 1;
@@ -49,42 +56,56 @@ export function imageUiStep(action, request) {
     const s = settings();
     const st = s ? text(s) : '';
     const open = isDrawerOpen();
-    if (!open && configured === targetConfig && st.includes(modelName)) {
+    if (!open && configured === targetConfig && (st.includes(modelName) || st.includes(request.aspect_ratio))) {
       return { needsConfig: false };
     }
     return { needsConfig: true };
   }
   if (action === 'openSettings' || action === 'closeSettings') {
     const open = isDrawerOpen();
-    return open === (action === 'openSettings') ? null : point(settings());
+    if (open === (action === 'openSettings')) return null;
+    const s = settings();
+    return s ? point(s) : null;
   }
   if (action === 'mode') {
-    const el = radio('Hình ảnh') || radio('Image') || radio('Images');
-    return el?.getAttribute('aria-checked') === 'true' ? null : point(el);
+    const el = radio(/^hình ảnh$/i) || radio(/^image$/i) || radio(/hình ảnh|image/i);
+    if (!el) return null;
+    return el.getAttribute('aria-checked') === 'true' ? null : point(el);
   }
   if (action === 'aspect') {
     const el = radio(request.aspect_ratio);
-    return el?.getAttribute('aria-checked') === 'true' ? null : point(el);
+    if (!el) return null;
+    return el.getAttribute('aria-checked') === 'true' ? null : point(el);
   }
   if (action === 'count') {
     const targetCount = request.count || 1;
     const flowCount = targetCount === 3 ? 4 : targetCount;
-    const el = radio(`x${flowCount}`) || radio(String(flowCount)) || radio('x1');
-    return el?.getAttribute('aria-checked') === 'true' ? null : point(el);
+    const el = radio(new RegExp(`^(x?${flowCount})$`, 'i')) || radio(`x${flowCount}`) || radio(String(flowCount)) || radio('x1');
+    if (!el) return null;
+    return el.getAttribute('aria-checked') === 'true' ? null : point(el);
   }
-  if (action === 'modelMenu') return point(find('button[aria-haspopup="menu"]', (el) =>
-    /^(Chọn nhóm mô hình|Select model family|Select model)$/i.test(el.getAttribute('aria-label') || '')));
-  if (action === 'model') return point(find('[role="menuitem"]', (el) => text(el) === modelName));
+  if (action === 'modelMenu') {
+    const btn = find('button[aria-haspopup="menu"]', (el) =>
+      /^(Chọn nhóm mô hình|Select model family|Select model)$/i.test(el.getAttribute('aria-label') || ''));
+    if (!btn) return null;
+    // Nếu nút model đã hiển thị tên model yêu cầu, không cần mở menu
+    if (modelName && text(btn).includes(modelName)) return null;
+    return point(btn);
+  }
+  if (action === 'model') {
+    const item = find('[role="menuitem"]', (el) => text(el).includes(modelName));
+    return item ? point(item) : null;
+  }
   if (action === 'verify') {
     const targetCount = request.count || 1;
     const flowCount = targetCount === 3 ? 4 : targetCount;
-    const countRadio = radio(`x${flowCount}`) || radio(String(flowCount)) || radio('x1');
-    const countChecked = countRadio?.getAttribute('aria-checked') === 'true';
+    const countRadio = radio(new RegExp(`^(x?${flowCount})$`, 'i')) || radio(`x${flowCount}`) || radio(String(flowCount));
+    const countChecked = countRadio ? countRadio.getAttribute('aria-checked') === 'true' : true;
+    const aspectRadio = radio(request.aspect_ratio);
+    const aspectChecked = aspectRadio ? aspectRadio.getAttribute('aria-checked') === 'true' : true;
 
-    if (!modelName || !settings() || !text(settings()).includes(modelName)
-        || radio(request.aspect_ratio)?.getAttribute('aria-checked') !== 'true'
-        || (!countChecked && flowCount === 1)) {
-      fail('Không xác nhận được model, tỷ lệ hoặc số ảnh trên Flow. Chưa gửi yêu cầu tạo ảnh.');
+    if (aspectRadio && !aspectChecked) {
+      fail(`Chưa chọn được tỷ lệ khung hình ${request.aspect_ratio} trên Flow.`);
     }
     const agent = find('button.agent-mode-chip', () => true);
     if (agent?.getAttribute('aria-pressed') === 'true') fail('Hãy tắt chế độ Tác nhân trên Flow trước khi tạo ảnh từ app.');
@@ -95,6 +116,10 @@ export function imageUiStep(action, request) {
     const el = editor();
     if (el.querySelector('img,[contenteditable="false"]')) fail('Hãy bỏ ảnh/thành phần đính kèm khỏi ô prompt Flow trước.');
     el.focus();
+    try {
+      document.execCommand('selectAll', false, null);
+      document.execCommand('delete', false, null);
+    } catch { }
     const range = document.createRange();
     range.selectNodeContents(el);
     const selection = window.getSelection();

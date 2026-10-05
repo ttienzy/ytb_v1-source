@@ -1618,7 +1618,11 @@
         return { x, y };
       };
       const settings = () => find("button.settings-trigger-button", () => true) || find("button", (el) => /^(Điều kiện kích hoạt cài đặt|Settings trigger)$/i.test(el.getAttribute("aria-label") || ""));
-      const radio = (name) => find('[role="radio"]', (el) => text(el) === name);
+      const radio = (pattern) => find('[role="radio"]', (el) => {
+        const t = text(el);
+        if (pattern instanceof RegExp) return pattern.test(t);
+        return t === pattern || t.includes(pattern);
+      });
       const models = { GEM_PIX_2: "Nano Banana Pro", NARWHAL: "Nano Banana 2", HARBOR_SEAL: "Nano Banana 2 Lite" };
       const modelName = models[request.model_key];
       const editor = () => {
@@ -1630,7 +1634,9 @@
         const close = find("button", (el) => /^(Đóng bảng điều khiển tài khoản|Close account panel)$/i.test(el.getAttribute("aria-label") || ""));
         return close ? point(close) : null;
       }
-      const isDrawerOpen = () => Boolean(radio("16:9") || radio("x1") || radio("x2") || radio("x4"));
+      const isDrawerOpen = () => Boolean(
+        radio("16:9") || radio("9:16") || radio("1:1") || radio("4:3") || radio("3:4") || radio("x1") || radio("x2") || radio("x4") || radio(/hình ảnh|image/i)
+      );
       if (action === "checkConfig") {
         const targetCount = request.count || 1;
         const flowCount = targetCount === 3 ? 4 : targetCount;
@@ -1639,38 +1645,53 @@
         const s = settings();
         const st = s ? text(s) : "";
         const open = isDrawerOpen();
-        if (!open && configured === targetConfig && st.includes(modelName)) {
+        if (!open && configured === targetConfig && (st.includes(modelName) || st.includes(request.aspect_ratio))) {
           return { needsConfig: false };
         }
         return { needsConfig: true };
       }
       if (action === "openSettings" || action === "closeSettings") {
         const open = isDrawerOpen();
-        return open === (action === "openSettings") ? null : point(settings());
+        if (open === (action === "openSettings")) return null;
+        const s = settings();
+        return s ? point(s) : null;
       }
       if (action === "mode") {
-        const el = radio("Hình ảnh") || radio("Image") || radio("Images");
-        return el?.getAttribute("aria-checked") === "true" ? null : point(el);
+        const el = radio(/^hình ảnh$/i) || radio(/^image$/i) || radio(/hình ảnh|image/i);
+        if (!el) return null;
+        return el.getAttribute("aria-checked") === "true" ? null : point(el);
       }
       if (action === "aspect") {
         const el = radio(request.aspect_ratio);
-        return el?.getAttribute("aria-checked") === "true" ? null : point(el);
+        if (!el) return null;
+        return el.getAttribute("aria-checked") === "true" ? null : point(el);
       }
       if (action === "count") {
         const targetCount = request.count || 1;
         const flowCount = targetCount === 3 ? 4 : targetCount;
-        const el = radio(`x${flowCount}`) || radio(String(flowCount)) || radio("x1");
-        return el?.getAttribute("aria-checked") === "true" ? null : point(el);
+        const el = radio(new RegExp(`^(x?${flowCount})$`, "i")) || radio(`x${flowCount}`) || radio(String(flowCount)) || radio("x1");
+        if (!el) return null;
+        return el.getAttribute("aria-checked") === "true" ? null : point(el);
       }
-      if (action === "modelMenu") return point(find('button[aria-haspopup="menu"]', (el) => /^(Chọn nhóm mô hình|Select model family|Select model)$/i.test(el.getAttribute("aria-label") || "")));
-      if (action === "model") return point(find('[role="menuitem"]', (el) => text(el) === modelName));
+      if (action === "modelMenu") {
+        const btn = find('button[aria-haspopup="menu"]', (el) => /^(Chọn nhóm mô hình|Select model family|Select model)$/i.test(el.getAttribute("aria-label") || ""));
+        if (!btn) return null;
+        if (modelName && text(btn).includes(modelName)) return null;
+        return point(btn);
+      }
+      if (action === "model") {
+        const item = find('[role="menuitem"]', (el) => text(el).includes(modelName));
+        return item ? point(item) : null;
+      }
       if (action === "verify") {
         const targetCount = request.count || 1;
         const flowCount = targetCount === 3 ? 4 : targetCount;
-        const countRadio = radio(`x${flowCount}`) || radio(String(flowCount)) || radio("x1");
-        const countChecked = countRadio?.getAttribute("aria-checked") === "true";
-        if (!modelName || !settings() || !text(settings()).includes(modelName) || radio(request.aspect_ratio)?.getAttribute("aria-checked") !== "true" || !countChecked && flowCount === 1) {
-          fail("Không xác nhận được model, tỷ lệ hoặc số ảnh trên Flow. Chưa gửi yêu cầu tạo ảnh.");
+        const countRadio = radio(new RegExp(`^(x?${flowCount})$`, "i")) || radio(`x${flowCount}`) || radio(String(flowCount));
+        const countChecked = countRadio ? countRadio.getAttribute("aria-checked") === "true" : true;
+        const aspectRadio = radio(request.aspect_ratio);
+        const aspectChecked = aspectRadio ? aspectRadio.getAttribute("aria-checked") === "true" : true;
+        if (aspectRadio && !aspectChecked) {
+          fail(`Chưa chọn được tỷ lệ khung hình ${request.aspect_ratio} trên Flow.`);
         }
         const agent = find("button.agent-mode-chip", () => true);
         if (agent?.getAttribute("aria-pressed") === "true") fail("Hãy tắt chế độ Tác nhân trên Flow trước khi tạo ảnh từ app.");
@@ -1681,6 +1702,11 @@
         const el = editor();
         if (el.querySelector('img,[contenteditable="false"]')) fail("Hãy bỏ ảnh/thành phần đính kèm khỏi ô prompt Flow trước.");
         el.focus();
+        try {
+          document.execCommand("selectAll", false, null);
+          document.execCommand("delete", false, null);
+        } catch {
+        }
         const range = document.createRange();
         range.selectNodeContents(el);
         const selection = window.getSelection();
@@ -1879,7 +1905,12 @@
       if (config?.needsConfig) {
         for (const action of ["openSettings", "mode", "aspect", "count", "modelMenu", "model"]) {
           const pt = await step(action);
-          if (pt) await click(pt);
+          if (pt) {
+            await click(pt);
+            if (action === "openSettings" || action === "modelMenu") {
+              await sleep(350);
+            }
+          }
         }
         await step("verify");
         const closePt = await step("closeSettings");
@@ -1960,17 +1991,19 @@
         if (pattern instanceof RegExp) return pattern.test(t);
         return t === pattern || t.includes(pattern);
       });
-      const isDrawerOpen = () => Boolean(radio(/video/i) || radio("16:9") || radio("9:16") || radio(/giây|sec/i));
+      const isDrawerOpen = () => Boolean(radio(/video/i) || radio("16:9") || radio("9:16") || radio(/giây|sec/i) || radio("x1") || radio("x2") || radio("x4"));
       const modelName = request.model_display_name || "Omni 1.1 Flash";
       const aspect = request.aspect_ratio || "16:9";
       const dur = Number(request.duration_seconds) || 6;
       const res = request.resolution || "720p";
+      const targetCount = Number(request.num_outputs || request.count || 1);
+      const flowCount = targetCount === 3 ? 4 : targetCount > 4 ? 4 : targetCount;
       if (action === "closeAccount") {
         const close = find("button", (el) => /^(Đóng bảng điều khiển tài khoản|Close account panel)$/i.test(el.getAttribute("aria-label") || ""));
         return close ? point(close) : null;
       }
       if (action === "checkConfig") {
-        const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}`;
+        const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}_x${flowCount}`;
         const configured = document.documentElement.getAttribute("data-flowsveo-video-configured");
         const s = settings();
         const st = s ? text(s) : "";
@@ -2003,6 +2036,11 @@
         if (!el) return null;
         return el.getAttribute("aria-checked") === "true" ? null : point(el);
       }
+      if (action === "count") {
+        const el = radio(new RegExp(`^(x?${flowCount})$`, "i")) || radio(`x${flowCount}`) || radio(String(flowCount)) || (flowCount !== 1 ? radio("x1") : null);
+        if (!el) return null;
+        return el.getAttribute("aria-checked") === "true" ? null : point(el);
+      }
       if (action === "modelMenu") {
         const btn = find('button[aria-haspopup="menu"]', (el) => /^(Chọn nhóm mô hình|Select model family|Select model)$/i.test(el.getAttribute("aria-label") || ""));
         if (!btn) return null;
@@ -2017,6 +2055,7 @@
         const modeRadio = radio(/video/i);
         const aspectRadio = radio(aspect);
         const durRadio = radio(new RegExp(`^${dur}\\s*(giây|s|sec)`, "i")) || radio(String(dur));
+        const countRadio = radio(new RegExp(`^(x?${flowCount})$`, "i")) || radio(`x${flowCount}`) || radio(String(flowCount));
         if (modeRadio && modeRadio.getAttribute("aria-checked") !== "true") {
           fail("Chưa chọn được chế độ Video trên Flow.");
         }
@@ -2026,9 +2065,12 @@
         if (durRadio && durRadio.getAttribute("aria-checked") !== "true") {
           fail(`Chưa chọn được thời lượng ${dur}s trên Flow.`);
         }
+        if (countRadio && countRadio.getAttribute("aria-checked") !== "true") {
+          fail(`Chưa chọn được số lượng video x${flowCount} trên Flow.`);
+        }
         const agent = find("button.agent-mode-chip", () => true);
         if (agent?.getAttribute("aria-pressed") === "true") fail("Hãy tắt chế độ Tác nhân trên Flow trước khi tạo video từ app.");
-        const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}`;
+        const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}_x${flowCount}`;
         document.documentElement.setAttribute("data-flowsveo-video-configured", targetConfig);
         return true;
       }
@@ -2116,7 +2158,7 @@
   }
 
   // src/providers/google-flow/page/recovery.js
-  async function recoverCurrentSceneInPage(providerModelId = "", targetMediaId = null) {
+  async function recoverCurrentSceneInPage(providerModelId = "", targetMediaId = null, explicitProjectId = null) {
     const sleepInPage = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     function isVideoCandidate(value) {
       if (typeof value !== "string" || !value.trim()) return false;
@@ -2146,7 +2188,7 @@
       if (pathname.startsWith("/image") || pathname.includes("/image/")) return false;
       if (/\.(?:jpg|jpeg|png|webp|gif|avif)(?:$|[?#])/.test(pathname)) return false;
       if (/(?:preview|thumbnail|poster|sprite)/.test(pathname)) return false;
-      return pathname.includes("/video") || /\.mp4(?:$|[?#])/i.test(pathname);
+      return true;
     }
     function findVideoUrl(node) {
       if (!node) return null;
@@ -2206,13 +2248,28 @@
       const activeModelId = activeGen?.modelId || providerModelId || "abra_t2v_6s";
       let route = location.pathname.match(/^\/(u\/\d+)\/project\/([^/?#]+)/);
       let accountPath = route ? `/${route[1]}` : "";
-      let projectId = route ? route[2] : null;
+      let projectId = explicitProjectId || (route ? route[2] : null);
       if (!projectId) {
         const match2 = location.pathname.match(/\/project\/([^/?#]+)/);
         if (match2) {
           projectId = match2[1];
           const uMatch = location.pathname.match(/\/(u\/\d+)/);
           accountPath = uMatch ? `/${uMatch[1]}` : "";
+        }
+      }
+      if (!projectId) {
+        const projLink = document.querySelector('a[href*="/project/"]');
+        if (projLink && projLink.href) {
+          try {
+            const urlObj = new URL(projLink.href);
+            const m = urlObj.pathname.match(/\/project\/([^/?#]+)/);
+            if (m) {
+              projectId = m[1];
+              const uM = urlObj.pathname.match(/\/(u\/\d+)/);
+              accountPath = uM ? `/${uM[1]}` : location.pathname.match(/\/(u\/\d+)/)?.[0] || "";
+            }
+          } catch {
+          }
         }
       }
       const wiz = window.WIZ_global_data || {};
@@ -2222,7 +2279,7 @@
       async function callRpcInPage(rpcId, payload) {
         if (!csrfToken || !sessionId || !buildLabel || !projectId) return null;
         try {
-          const sourcePath = `/project/${projectId}`;
+          const sourcePath = accountPath ? `${accountPath}/project/${projectId}` : `/project/${projectId}`;
           const query = new URLSearchParams({
             rpcids: rpcId,
             "source-path": sourcePath,
@@ -2278,6 +2335,7 @@
         try {
           const sceneData = await callRpcInPage("Zzl0ze", [`projects/${projectId}`, null, null, null, [1]]);
           const rawNodes = sceneData?.[1] || [];
+          let targetNode = null;
           let newestMediaId = null;
           let newestTime = 0;
           let newestNode = null;
@@ -2286,6 +2344,9 @@
               const info = node?.[3];
               const timeSec = info?.[1]?.[0] || 0;
               const mid = info?.[4];
+              if (mediaIdToQuery && (mid === mediaIdToQuery || JSON.stringify(node).includes(mediaIdToQuery))) {
+                targetNode = node;
+              }
               if (mid && timeSec > newestTime) {
                 newestTime = timeSec;
                 newestMediaId = mid;
@@ -2294,9 +2355,25 @@
             } catch {
             }
           }
-          const isTargetNewest = Boolean(newestMediaId && (!mediaIdToQuery || mediaIdToQuery === newestMediaId));
-          if (isTargetNewest || !mediaIdToQuery) {
-            const nodeVideoUrl = newestNode ? findVideoUrl(newestNode) : null;
+          if (mediaIdToQuery && targetNode) {
+            const targetVideoUrl = findVideoUrl(targetNode);
+            if (targetVideoUrl) {
+              try {
+                (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              } catch {
+              }
+              return {
+                ok: true,
+                video_url: targetVideoUrl,
+                image_url: findImageUrl(targetNode),
+                media_id: mediaIdToQuery,
+                provider_model_id: activeModelId,
+                project_id: projectId
+              };
+            }
+          }
+          if (!mediaIdToQuery && newestNode) {
+            const nodeVideoUrl = findVideoUrl(newestNode);
             const sceneVideoUrl = nodeVideoUrl || findVideoUrl(sceneData);
             if (sceneVideoUrl) {
               try {
@@ -2306,8 +2383,8 @@
               return {
                 ok: true,
                 video_url: sceneVideoUrl,
-                image_url: findImageUrl(sceneData),
-                media_id: mediaIdToQuery || newestMediaId,
+                image_url: (newestNode ? findImageUrl(newestNode) : null) || findImageUrl(sceneData),
+                media_id: newestMediaId,
                 provider_model_id: activeModelId,
                 project_id: projectId
               };
@@ -2315,8 +2392,8 @@
           }
           const rawAssets = Array.isArray(sceneData?.[2]) ? sceneData[2] : [];
           for (const ast of rawAssets) {
-            if (Array.isArray(ast) && (ast[3] === "CAE" || ast[3] === "CAM") && (!mediaIdToQuery || ast[0] === mediaIdToQuery)) {
-              const vUrl = findVideoUrl(ast);
+            if (Array.isArray(ast) && (ast[3] === "CAE" || ast[3] === "CAM") && (!mediaIdToQuery || ast[0] === mediaIdToQuery || JSON.stringify(ast).includes(mediaIdToQuery))) {
+              const vUrl = ast?.[7]?.[0]?.[8] || ast?.[5]?.[2]?.[0]?.[8] || findVideoUrl(ast);
               if (vUrl) {
                 try {
                   (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
@@ -2342,7 +2419,7 @@
       if (mediaIdToQuery) {
         try {
           const finalAsset = await callRpcInPage("as29s", [mediaIdToQuery]);
-          const asUrl = findVideoUrl(finalAsset);
+          const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
           if (asUrl) {
             try {
               (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
@@ -2351,7 +2428,7 @@
             return {
               ok: true,
               video_url: asUrl,
-              image_url: findImageUrl(finalAsset),
+              image_url: finalAsset?.[5]?.[10] || findImageUrl(finalAsset),
               media_id: mediaIdToQuery,
               provider_model_id: activeModelId,
               project_id: projectId
@@ -2380,7 +2457,7 @@
           const status = asset?.[5]?.[8]?.[0] ?? asset?.[5]?.[0]?.[8]?.[0];
           if (status === 3) {
             const finalAsset = await callRpcInPage("as29s", [mediaIdToQuery]);
-            const asUrl = findVideoUrl(finalAsset);
+            const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
             if (asUrl) {
               try {
                 (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
@@ -2389,14 +2466,14 @@
               return {
                 ok: true,
                 video_url: asUrl,
-                image_url: findImageUrl(finalAsset),
+                image_url: finalAsset?.[5]?.[10] || findImageUrl(finalAsset),
                 media_id: mediaIdToQuery,
                 provider_model_id: activeModelId,
                 project_id: projectId
               };
             }
           }
-          if (status !== 1 && status !== 2 && status !== 3 && status !== void 0 && status !== null) {
+          if (status !== 1 && status !== 2 && status !== 3 && status !== 6 && status !== void 0 && status !== null) {
             return {
               ok: false,
               terminal_error: true,
@@ -2406,67 +2483,138 @@
         } catch {
         }
       }
-      const candidates = [];
-      const videos = Array.from(document.querySelectorAll("video")).reverse();
-      for (const video of videos) {
-        if (video.currentSrc) candidates.push(video.currentSrc);
-        if (video.src) candidates.push(video.src);
-        for (const source of video.querySelectorAll("source")) {
-          if (source.src) candidates.push(source.src);
+      if (mediaIdToQuery) {
+        for (const video of document.querySelectorAll("video")) {
+          const src = video.currentSrc || video.src;
+          if (src && isLikelyFlowVideoUrl(src)) {
+            if (src.includes(mediaIdToQuery)) {
+              try {
+                (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              } catch {
+              }
+              return {
+                ok: true,
+                video_url: src,
+                media_id: mediaIdToQuery,
+                provider_model_id: activeModelId,
+                project_id: projectId
+              };
+            }
+            const card = video.closest("[data-id], [id], [data-node-id], .card, .node");
+            if (card && (card.id?.includes(mediaIdToQuery) || JSON.stringify(card.dataset || {}).includes(mediaIdToQuery))) {
+              try {
+                (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              } catch {
+              }
+              return {
+                ok: true,
+                video_url: src,
+                media_id: mediaIdToQuery,
+                provider_model_id: activeModelId,
+                project_id: projectId
+              };
+            }
+          }
+          for (const source of video.querySelectorAll("source")) {
+            if (source.src && isLikelyFlowVideoUrl(source.src) && source.src.includes(mediaIdToQuery)) {
+              try {
+                (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              } catch {
+              }
+              return {
+                ok: true,
+                video_url: source.src,
+                media_id: mediaIdToQuery,
+                provider_model_id: activeModelId,
+                project_id: projectId
+              };
+            }
+          }
         }
-      }
-      for (const element of document.querySelectorAll("a[href], [src], [data-src], [data-video-url], [data-url]")) {
-        for (const attr of ["href", "src", "data-src", "data-video-url", "data-url"]) {
-          const value = element.getAttribute?.(attr);
-          if (value) candidates.push(value);
-        }
-      }
-      try {
-        const resources = performance.getEntriesByType("resource").slice().reverse();
-        for (const entry of resources) if (entry.name) candidates.push(entry.name);
-      } catch {
-      }
-      const uniqueCandidates = [...new Set(candidates)];
-      const exactMatch = mediaIdToQuery ? uniqueCandidates.find((c) => isVideoCandidate(c) && c.includes(mediaIdToQuery)) : null;
-      const candidatesToProbe = mediaIdToQuery ? exactMatch ? [exactMatch] : [] : uniqueCandidates.filter(isVideoCandidate);
-      for (const candidate of candidatesToProbe) {
-        let url;
         try {
-          url = new URL(candidate, location.href);
+          if (typeof performance?.getEntriesByType === "function") {
+            const entries = performance.getEntriesByType("resource").slice().reverse();
+            for (const entry of entries) {
+              const n = entry.name || "";
+              if (isLikelyFlowVideoUrl(n) && n.includes(mediaIdToQuery)) {
+                try {
+                  (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+                } catch {
+                }
+                return {
+                  ok: true,
+                  video_url: n,
+                  media_id: mediaIdToQuery,
+                  provider_model_id: activeModelId,
+                  project_id: projectId
+                };
+              }
+            }
+          }
         } catch {
-          continue;
+        }
+      }
+      if (!mediaIdToQuery) {
+        const candidates = [];
+        const videos = Array.from(document.querySelectorAll("video")).reverse();
+        for (const video of videos) {
+          if (video.currentSrc) candidates.push(video.currentSrc);
+          if (video.src) candidates.push(video.src);
+          for (const source of video.querySelectorAll("source")) {
+            if (source.src) candidates.push(source.src);
+          }
+        }
+        for (const element of document.querySelectorAll("a[href], [src], [data-src], [data-video-url], [data-url]")) {
+          for (const attr of ["href", "src", "data-src", "data-video-url", "data-url"]) {
+            const value = element.getAttribute?.(attr);
+            if (value) candidates.push(value);
+          }
         }
         try {
-          const probe = await fetch(url.href, {
-            method: "GET",
-            credentials: "omit",
-            cache: "no-store",
-            headers: { Range: "bytes=0-1023" },
-            signal: AbortSignal.timeout(6e3)
-          });
-          const contentType = (probe.headers.get("Content-Type") || "").toLowerCase();
-          if (probe.ok && (contentType.startsWith("video/") || contentType === "application/octet-stream")) {
+          const resources = performance.getEntriesByType("resource").slice().reverse();
+          for (const entry of resources) if (entry.name) candidates.push(entry.name);
+        } catch {
+        }
+        const uniqueCandidates = [...new Set(candidates)].filter(isVideoCandidate);
+        for (const candidate of uniqueCandidates) {
+          let url;
+          try {
+            url = new URL(candidate, location.href);
+          } catch {
+            continue;
+          }
+          try {
+            const probe = await fetch(url.href, {
+              method: "GET",
+              credentials: "omit",
+              cache: "no-store",
+              headers: { Range: "bytes=0-1023" },
+              signal: AbortSignal.timeout(6e3)
+            });
+            const contentType = (probe.headers.get("Content-Type") || "").toLowerCase();
+            if (probe.ok && (contentType.startsWith("video/") || contentType === "application/octet-stream")) {
+              try {
+                await probe.body?.cancel();
+              } catch {
+              }
+              try {
+                (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              } catch {
+              }
+              return {
+                ok: true,
+                video_url: url.href,
+                media_id: null,
+                provider_model_id: activeModelId,
+                project_id: projectId
+              };
+            }
             try {
               await probe.body?.cancel();
             } catch {
             }
-            try {
-              (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
-            } catch {
-            }
-            return {
-              ok: true,
-              video_url: url.href,
-              media_id: mediaIdToQuery || null,
-              provider_model_id: activeModelId,
-              project_id: projectId
-            };
-          }
-          try {
-            await probe.body?.cancel();
           } catch {
           }
-        } catch {
         }
       }
       const isGenerating = Boolean(
@@ -2491,29 +2639,41 @@
       for (const batch of batches) for (const rpc of batch) {
         if (rpc[0] !== "YhhmEf" && rpc[0] !== "nprQif") continue;
         const payload = JSON.parse(rpc[1]);
-        if (expected?.input_mode !== "frames") return { rpcId: rpc[0], payload };
-        if (rpc[0] !== "nprQif") continue;
         const item = payload?.[0]?.[0];
         const actualPrompt = item?.[0]?.[2];
         const promptMatches = (() => {
+          if (!expected?.prompt) return true;
           const values = [];
           const walk = (value) => {
-            if (typeof value === "string") values.push(value);
+            if (typeof value === "string") values.push(value.trim());
             else if (Array.isArray(value)) value.forEach(walk);
           };
           walk(actualPrompt);
-          return values.includes(String(expected.prompt || "").trim());
+          const expectedTrimmed = String(expected.prompt || "").trim();
+          return values.includes(expectedTrimmed);
         })();
+        const actualCount = Array.isArray(payload?.[0]) ? payload[0].length : 1;
+        const expectedCount = Number(expected?.num_outputs || expected?.count || 1);
+        const projectId = payload?.[1]?.[5] || null;
+        if (expected?.input_mode !== "frames") {
+          const checks2 = [
+            [promptMatches, "Prompt in the Flow request does not match the submitted job."],
+            [!expected?.project_id || projectId === expected.project_id, "Flow request project does not match the selected project."],
+            [actualCount === expectedCount, `Flow output count (${actualCount}) does not match the app request (${expectedCount}).`]
+          ];
+          const mismatch2 = checks2.find(([ok]) => !ok);
+          return mismatch2 ? { rpcId: rpc[0], payload, error: mismatch2[1] } : { rpcId: rpc[0], payload };
+        }
+        if (rpc[0] !== "nprQif") continue;
         const startId = item?.[4]?.[1] || null;
         const endId = item?.[5]?.[1] || null;
         const expectedStart = attachedFrameIds?.[0] || null;
         const expectedEnd = attachedFrameIds?.[1] || null;
-        const projectId = payload?.[1]?.[5] || null;
         const checks = [
           [promptMatches, "Prompt in the Flow request does not match the submitted job."],
-          [projectId === expected.project_id, "Flow request project does not match the selected project."],
+          [!expected?.project_id || projectId === expected.project_id, "Flow request project does not match the selected project."],
           [item?.[1] === expected.provider_model_id, "Flow selected a different video model/duration than the app request."],
-          [Number(item?.[2]) === Number(expected.num_outputs || 1), "Flow output count does not match the app request."],
+          [actualCount === expectedCount, `Flow output count (${actualCount}) does not match the app request (${expectedCount}).`],
           [startId === expectedStart, "Flow start frame ID does not match the attached Start Frame."],
           [endId === expectedEnd, "Flow end frame ID does not match the attached End Frame."]
         ];
@@ -2794,9 +2954,14 @@
       await sleep(200);
       const config = await step("checkConfig");
       if (config?.needsConfig) {
-        for (const action of ["openSettings", "mode", "aspect", "resolution", "duration", "modelMenu", "model"]) {
+        for (const action of ["openSettings", "mode", "aspect", "resolution", "duration", "count", "modelMenu", "model"]) {
           const pt = await step(action);
-          if (pt) await click(pt);
+          if (pt) {
+            await click(pt);
+            if (action === "openSettings" || action === "modelMenu") {
+              await sleep(350);
+            }
+          }
         }
         await step("verify");
         const closePt = await step("closeSettings");
@@ -2861,10 +3026,14 @@
           target: { tabId },
           world: "MAIN",
           func: recoverCurrentSceneInPage,
-          args: [flowRequest.provider_model_id || "abra_t2v_6s", mediaId]
-        }).catch(() => null);
+          args: [flowRequest.provider_model_id || "abra_t2v_6s", mediaId, flowRequest.project_id]
+        }).catch((err) => {
+          logActivity("warn", `recoverCurrentSceneInPage error: ${err.message}`);
+          return null;
+        });
         const pollResult = injected?.[0]?.result;
         if (pollResult && pollResult.ok && pollResult.video_url) {
+          logActivity("info", `Video render completed on Flow: mediaId=${mediaId}`);
           return {
             ok: true,
             video_url: pollResult.video_url,
@@ -2873,25 +3042,6 @@
             provider_model_id: flowRequest.provider_model_id || "abra_t2v_6s",
             project_id: flowRequest.project_id
           };
-        }
-        if (Date.now() - pollStart > 7e3) {
-          const fallbackInjected = await chrome.scripting.executeScript({
-            target: { tabId },
-            world: "MAIN",
-            func: recoverCurrentSceneInPage,
-            args: [flowRequest.provider_model_id || "abra_t2v_6s", null]
-          }).catch(() => null);
-          const fallbackResult = fallbackInjected?.[0]?.result;
-          if (fallbackResult && fallbackResult.ok && fallbackResult.video_url) {
-            return {
-              ok: true,
-              video_url: fallbackResult.video_url,
-              image_url: fallbackResult.image_url || null,
-              media_id: fallbackResult.media_id || mediaId,
-              provider_model_id: flowRequest.provider_model_id || "abra_t2v_6s",
-              project_id: flowRequest.project_id
-            };
-          }
         }
         if (pollResult?.terminal_error) {
           return { ok: false, error: `Google Flow từ chối render: ${pollResult.error}` };
@@ -5125,7 +5275,7 @@
         target: { tabId },
         world: "MAIN",
         func: recoverCurrentSceneInPage,
-        args: [providerModelId]
+        args: [providerModelId, null, projectId]
       });
       return injected?.[0]?.result || { ok: false, error: "Flow scene returned no result" };
     } catch (error) {

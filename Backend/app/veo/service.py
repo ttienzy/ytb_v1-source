@@ -860,6 +860,20 @@ def _process_job(job_id: str) -> None:
             )
             return
 
+        returned_media_id = flow_result.get("media_id")
+        if returned_media_id:
+            with _jobs_lock:
+                for other_id, other_job in _jobs.items():
+                    if (
+                        other_id != job_id
+                        and other_job.get("status") == JobStatus.DONE.value
+                        and other_job.get("provider_media_id") == returned_media_id
+                    ):
+                        raise RuntimeError(
+                            f"Flow trả nhầm video (media_id={returned_media_id}) đã thuộc về job {other_id}. "
+                            "Đã từ chối nhận video trùng lặp."
+                        )
+
         _update_job(job, JobStatus.DOWNLOADING, "Đang tải video từ Flow...")
         output_path = _download_flow_video(job, flow_result)
         job["output_files"] = [output_path.name]
@@ -1276,6 +1290,18 @@ def _try_recover_completed_scene(job: dict[str, Any]) -> bool:
     result = envelope.get("result") or {}
     if not result.get("video_url"):
         return False
+
+    recovered_mid = result.get("media_id")
+    if recovered_mid:
+        with _jobs_lock:
+            for other_id, other_job in _jobs.items():
+                if (
+                    other_id != job.get("job_id")
+                    and other_job.get("status") == JobStatus.DONE.value
+                    and other_job.get("provider_media_id") == recovered_mid
+                ):
+                    logger.warning("Recovered media_id %s is already used by completed job %s; rejecting duplicate recovery.", recovered_mid, other_id)
+                    return False
 
     try:
         _update_job(job, JobStatus.DOWNLOADING, "Đang tải video đã hoàn tất từ Flow...")

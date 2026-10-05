@@ -191,7 +191,7 @@ export async function recoverCurrentSceneVideo(projectId = null, fallbackTabId =
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId }, world: 'MAIN', func: recoverCurrentSceneInPage,
-      args: [providerModelId],
+      args: [providerModelId, null, projectId],
     });
     return injected?.[0]?.result || { ok: false, error: 'Flow scene returned no result' };
   } catch (error) {

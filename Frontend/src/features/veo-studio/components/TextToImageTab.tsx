@@ -156,7 +156,6 @@ export function TextToImageTab({
   const [mode, setMode] = useState<'single' | 'batch'>('single')
   const [prompt, setPrompt] = useState('')
   const [batchText, setBatchText] = useState('')
-  const [customSeed, setCustomSeed] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
@@ -271,7 +270,6 @@ export function TextToImageTab({
     const taskModelName = currentModel.name
     const taskRatio = aspectRatio
     const taskModelKey = selectedModelKey
-    const parsedSeed = customSeed.trim() ? parseInt(customSeed.trim(), 10) : undefined
 
     const newTask: ImageTask = {
       id: taskId,
@@ -298,7 +296,6 @@ export function TextToImageTab({
         model_display_name: taskModelName,
         aspect_ratio: taskRatio,
         count: total,
-        seed: parsedSeed != null && !isNaN(parsedSeed) ? parsedSeed : undefined,
         project_id: activeProject?.id,
       }
 
@@ -354,7 +351,6 @@ export function TextToImageTab({
     const taskModelName = currentModel.name
     const taskRatio = aspectRatio
     const taskModelKey = selectedModelKey
-    const parsedSeed = customSeed.trim() ? parseInt(customSeed.trim(), 10) : undefined
 
     const newTask: ImageTask = {
       id: taskId,
@@ -394,7 +390,6 @@ export function TextToImageTab({
           model_display_name: taskModelName,
           aspect_ratio: taskRatio,
           count: variationCount,
-          seed: parsedSeed != null && !isNaN(parsedSeed) ? parsedSeed + p * 10 : undefined,
           project_id: activeProject?.id,
         }
 
@@ -541,47 +536,6 @@ export function TextToImageTab({
                 <span>{cnt}</span>
               </button>
             ))}
-          </div>
-        </div>
-
-        <div className="veo-ribbon-divider" />
-
-        {/* Custom Seed (Optional) */}
-        <div className="veo-ribbon-group">
-          <span className="veo-ribbon-label">SEED (TÙY CHỌN)</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              type="number"
-              className="veo-pill-btn"
-              placeholder="Ngẫu nhiên"
-              value={customSeed}
-              onChange={(e) => setCustomSeed(e.target.value)}
-              style={{
-                width: 90,
-                height: 28,
-                fontSize: 12,
-                textAlign: 'center',
-                padding: '0 4px',
-              }}
-              title="Nhập số Seed cố định hoặc để trống để tạo ngẫu nhiên"
-            />
-            {customSeed && (
-              <button
-                type="button"
-                onClick={() => setCustomSeed('')}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  color: 'var(--text-secondary)',
-                  padding: 2,
-                }}
-                title="Xóa seed (dùng ngẫu nhiên)"
-              >
-                ✕
-              </button>
-            )}
           </div>
         </div>
       </div>

@@ -36,12 +36,14 @@ export function videoUiStep(action, request) {
       return t === pattern || t.includes(pattern);
     });
 
-    const isDrawerOpen = () => Boolean(radio(/video/i) || radio('16:9') || radio('9:16') || radio(/giây|sec/i));
+    const isDrawerOpen = () => Boolean(radio(/video/i) || radio('16:9') || radio('9:16') || radio(/giây|sec/i) || radio('x1') || radio('x2') || radio('x4'));
 
     const modelName = request.model_display_name || 'Omni 1.1 Flash';
     const aspect = request.aspect_ratio || '16:9';
     const dur = Number(request.duration_seconds) || 6;
     const res = request.resolution || '720p';
+    const targetCount = Number(request.num_outputs || request.count || 1);
+    const flowCount = targetCount === 3 ? 4 : (targetCount > 4 ? 4 : targetCount);
 
     if (action === 'closeAccount') {
       const close = find('button', (el) => /^(Đóng bảng điều khiển tài khoản|Close account panel)$/i.test(el.getAttribute('aria-label') || ''));
@@ -49,7 +51,7 @@ export function videoUiStep(action, request) {
     }
 
     if (action === 'checkConfig') {
-      const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}`;
+      const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}_x${flowCount}`;
       const configured = document.documentElement.getAttribute('data-flowsveo-video-configured');
       const s = settings();
       const st = s ? text(s) : '';
@@ -89,6 +91,15 @@ export function videoUiStep(action, request) {
       return el.getAttribute('aria-checked') === 'true' ? null : point(el);
     }
 
+    if (action === 'count') {
+      const el = radio(new RegExp(`^(x?${flowCount})$`, 'i'))
+        || radio(`x${flowCount}`)
+        || radio(String(flowCount))
+        || (flowCount !== 1 ? radio('x1') : null);
+      if (!el) return null;
+      return el.getAttribute('aria-checked') === 'true' ? null : point(el);
+    }
+
     if (action === 'modelMenu') {
       const btn = find('button[aria-haspopup="menu"]', (el) =>
         /^(Chọn nhóm mô hình|Select model family|Select model)$/i.test(el.getAttribute('aria-label') || ''));
@@ -107,6 +118,7 @@ export function videoUiStep(action, request) {
       const modeRadio = radio(/video/i);
       const aspectRadio = radio(aspect);
       const durRadio = radio(new RegExp(`^${dur}\\s*(giây|s|sec)`, 'i')) || radio(String(dur));
+      const countRadio = radio(new RegExp(`^(x?${flowCount})$`, 'i')) || radio(`x${flowCount}`) || radio(String(flowCount));
 
       if (modeRadio && modeRadio.getAttribute('aria-checked') !== 'true') {
         fail('Chưa chọn được chế độ Video trên Flow.');
@@ -117,11 +129,14 @@ export function videoUiStep(action, request) {
       if (durRadio && durRadio.getAttribute('aria-checked') !== 'true') {
         fail(`Chưa chọn được thời lượng ${dur}s trên Flow.`);
       }
+      if (countRadio && countRadio.getAttribute('aria-checked') !== 'true') {
+        fail(`Chưa chọn được số lượng video x${flowCount} trên Flow.`);
+      }
 
       const agent = find('button.agent-mode-chip', () => true);
       if (agent?.getAttribute('aria-pressed') === 'true') fail('Hãy tắt chế độ Tác nhân trên Flow trước khi tạo video từ app.');
 
-      const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}`;
+      const targetConfig = `video_${modelName}_${aspect}_${dur}s_${res}_x${flowCount}`;
       document.documentElement.setAttribute('data-flowsveo-video-configured', targetConfig);
       return true;
     }

@@ -40,3 +40,32 @@ test('parseVideoUiCreateResponse extracts mediaId from CAE record for YhhmEf, ne
   assert.equal(result.projectId, projectId);
   assert.notEqual(result.mediaId, sceneId);
 });
+
+test('matchVideoUiRequest validates output count for YhhmEf text-to-video', async () => {
+  const { matchVideoUiRequest } = await api;
+  const buildPostData = (numOutputs) => {
+    const singleItem = [
+      [null, null, [[['cat']]]],
+      'abra_t2v_6s',
+      2, // aspect ratio 16:9
+    ];
+    const items = Array.from({ length: numOutputs }, () => singleItem);
+    const payload = [
+      items,
+      [null, 22, null, null, null, 'proj-1'],
+    ];
+    return `f.req=${encodeURIComponent(JSON.stringify([[["YhhmEf", JSON.stringify(payload), null, "generic"]]]))}`;
+  };
+
+  // Expected 1, received 1 -> match
+  const match1 = matchVideoUiRequest(buildPostData(1), { num_outputs: 1 });
+  assert.ok(match1);
+  assert.equal(match1.rpcId, 'YhhmEf');
+  assert.equal(match1.error, undefined);
+
+  // Expected 1, received 4 -> mismatch error
+  const mismatch = matchVideoUiRequest(buildPostData(4), { num_outputs: 1 });
+  assert.ok(mismatch);
+  assert.ok(mismatch.error && mismatch.error.includes('does not match the app request'));
+});
+

@@ -392,9 +392,10 @@ export function VeoStudioPage({ setActivePage }: Props) {
                     onRegisterTask={addStudioTask}
                     onUpdateTask={updateStudioTask}
                     onRemoveTask={removeStudioTask}
-                    onBatchVideoDone={() => {
+                    onBatchVideoDone={(job) => {
                       loadHistory()
                       loadProjects()
+                      if (job) setActiveJob(job)
                     }}
                     onVideoDone={() => {
                       loadHistory()

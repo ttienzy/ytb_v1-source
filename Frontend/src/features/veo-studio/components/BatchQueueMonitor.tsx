@@ -1,6 +1,6 @@
 import React from 'react'
 import { Play, Pause, Square, Sparkles, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
-import type { BatchSceneItem } from '../types'
+import type { BatchSceneItem, VeoProject } from '../types'
 
 interface Props {
   scenes: BatchSceneItem[]
@@ -9,6 +9,7 @@ interface Props {
   isPaused: boolean
   creditPerScene: number
   activeWorkers: { workerId: number; sceneNumber?: number; step?: string }[]
+  activeProject?: VeoProject | null
   onStart: () => void
   onPause: () => void
   onResume: () => void
@@ -23,6 +24,7 @@ export function BatchQueueMonitor({
   isPaused,
   creditPerScene,
   activeWorkers,
+  activeProject,
   onStart,
   onPause,
   onResume,
@@ -73,10 +75,14 @@ export function BatchQueueMonitor({
               type="button"
               className="veo-start-batch-btn"
               onClick={onStart}
-              disabled={disabled || total === 0}
+              disabled={disabled || total === 0 || !activeProject}
             >
               <Play size={15} />
-              <span>Chạy kịch bản ({total} mục · {concurrency} luồng)</span>
+              <span>
+                {!activeProject
+                  ? '⚠️ Chưa chọn Project'
+                  : `Chạy kịch bản (${total} mục · ${concurrency} luồng)`}
+              </span>
             </button>
           ) : (
             <div className="veo-running-actions">
@@ -160,6 +166,16 @@ export function BatchQueueMonitor({
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Hiển thị các cảnh đang chờ trong hàng đợi */}
+      {isRunning && scenes.some((s) => s.status === 'queued') && (
+        <div style={{ marginTop: '10px', fontSize: '11.5px', color: '#b45309', background: '#fffbeb', padding: '8px 12px', borderRadius: '6px', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span>⏳ <strong>Hàng đợi tiếp theo:</strong></span>
+          <span>
+            {scenes.filter((s) => s.status === 'queued').map((s) => `Cảnh #${s.sceneNumber}`).join(', ')} (sẽ tự động được cấp luồng ngay khi có cảnh hoàn tất)
+          </span>
         </div>
       )}
     </div>

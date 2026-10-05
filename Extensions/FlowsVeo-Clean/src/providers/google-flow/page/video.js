@@ -242,6 +242,37 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       return null;
     }
 
+    // Broader signed-URL fallback: accepts URLs containing the mediaId regardless of path format
+    function findSignedVideoUrl(node, targetMid) {
+      if (!node) return null;
+      if (typeof node === 'string' && node.startsWith('https://')) {
+        const lower = node.toLowerCase();
+        if (/\.(?:jpg|jpeg|png|webp|gif|avif|svg|css|js|woff|ttf)(?:$|[?#])/.test(lower)) return null;
+        if (/(?:preview|thumbnail|poster|sprite|favicon)/.test(lower)) return null;
+        if (targetMid && node.includes(targetMid)) return node;
+        try {
+          const u = new URL(node);
+          if (u.hostname === 'flow-content.google') {
+            const pn = u.pathname.toLowerCase();
+            if (!pn.startsWith('/image') && !pn.includes('/image/')) return node;
+          }
+        } catch { }
+        return null;
+      }
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = findSignedVideoUrl(child, targetMid);
+          if (found) return found;
+        }
+      } else if (typeof node === 'object' && node !== null) {
+        for (const v of Object.values(node)) {
+          const found = findSignedVideoUrl(v, targetMid);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
     function checkDomAndPerformanceForVideo(targetMediaId) {
       if (!targetMediaId) return null;
       // 1. Quét các thẻ video trong trang — bắt buộc URL phải chứa mediaId của job này
@@ -767,7 +798,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
           // Status 3 = Hoàn tất, gọi as29s lấy URL
           const finalAsset = await callRpc('as29s', [mediaId]);
           // Trong Google Flow HAR: finalAsset[7][0][8] chứa URL video có chữ ký
-          videoUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
+          videoUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset) || findSignedVideoUrl(finalAsset, mediaId);
           imageUrl = finalAsset?.[5]?.[10] || finalAsset?.[5]?.[0]?.[10] || null;
           if (videoUrl) break;
         }
@@ -807,7 +838,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       if (loopCount >= 7 && loopCount % 2 === 0) {
         try {
           const checkFinal = await callRpc('as29s', [mediaId]);
-          const asUrl = checkFinal?.[7]?.[0]?.[8] || checkFinal?.[5]?.[2]?.[0]?.[8] || findVideoUrl(checkFinal);
+          const asUrl = checkFinal?.[7]?.[0]?.[8] || checkFinal?.[5]?.[2]?.[0]?.[8] || findVideoUrl(checkFinal) || findSignedVideoUrl(checkFinal, mediaId);
           if (asUrl) {
             videoUrl = asUrl;
             imageUrl = checkFinal?.[5]?.[10] || checkFinal?.[5]?.[0]?.[10] || null;
