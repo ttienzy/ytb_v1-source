@@ -31,6 +31,7 @@ from app.publisher_monitor.router import router as monitor_router
 from app.stories.router import router as stories_router
 from app.veo.router import router as veo_router
 from app.ai.chatgpt.router import router as chatgpt_router
+from app.ai.muse.router import router as muse_router
 from app.workflow.router import router as workflow_router
 
 
@@ -41,6 +42,7 @@ app.include_router(health_router)
 app.include_router(gemini_router)
 app.include_router(workflow_router)
 app.include_router(chatgpt_router)
+app.include_router(muse_router)
 app.include_router(voices_router)
 app.include_router(media_router)
 app.include_router(video_router)

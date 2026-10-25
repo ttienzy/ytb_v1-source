@@ -17,6 +17,7 @@ const VoicesPage = lazy(() => import('./features/voices/VoicesPage').then(module
 const WatermarkPage = lazy(() => import('./features/watermark/WatermarkPage').then(module => ({ default: module.WatermarkPage })))
 const VideoPage = lazy(() => import('./features/video/VideoPage').then(module => ({ default: module.VideoPage })))
 const VeoStudioPage = lazy(() => import('./features/veo-studio/VeoStudioPage').then(module => ({ default: module.VeoStudioPage })))
+const MuseStudioPage = lazy(() => import('./features/muse-studio/MuseStudioPage').then(module => ({ default: module.MuseStudioPage })))
 const YouTubePublisherPage = lazy(() => import('./features/youtube-publisher/YouTubePublisherPage').then(module => ({ default: module.YouTubePublisherPage })))
 const WorkflowPage = lazy(() => import('./features/workflow/WorkflowPage').then(module => ({ default: module.WorkflowPage })))
 const HelpDrawer = lazy(() => import('./features/help/components/HelpDrawer').then(module => ({ default: module.HelpDrawer })))
@@ -197,6 +198,8 @@ export function App() {
             <VideoPage />
           ) : activePage === 'Veo Studio' ? (
             <VeoStudioPage setActivePage={setActivePage} />
+          ) : activePage === 'Muse Studio' ? (
+            <MuseStudioPage setActivePage={setActivePage} />
           ) : activePage === 'AI Workflow' ? (
             <WorkflowPage />
           ) : activePage === 'Lên lịch Pippit' ? (

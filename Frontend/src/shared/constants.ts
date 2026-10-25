@@ -11,6 +11,7 @@ import {
   PlaySquare,
   Video,
   Settings,
+  Sparkles,
   Tv,
   Workflow as WorkflowIcon,
 } from 'lucide-react'
@@ -45,6 +46,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { label: 'AI Workflow', icon: WorkflowIcon, badge: 'PRO', badgeVariant: 'pro' },
       { label: 'Veo Studio', icon: Clapperboard },
+      { label: 'Muse Studio', icon: Sparkles, badge: 'NEW', badgeVariant: 'new' },
       { label: 'Workflow', icon: PlaySquare },
     ],
   },

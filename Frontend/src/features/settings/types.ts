@@ -115,3 +115,38 @@ export type ChatGptTestResult = {
   available_models: string[]
   error?: string | null
 }
+
+export type MuseSettings = {
+  ok: boolean
+  is_connected: boolean
+  last_checked_at?: string | null
+  app_url: string
+  cdp_port: number
+  auto_download: boolean
+  download_dir: string
+  timeout_seconds: number
+  default_prompt_prefix: string
+  profile_dir: string
+}
+
+export type MuseStatus = {
+  is_connected: boolean
+  is_running: boolean
+  cdp_port: number
+  tab_title?: string | null
+  tab_url?: string | null
+  last_checked_at: string
+  message: string
+}
+
+export type MuseGenerateResult = {
+  ok: boolean
+  prompt: string
+  video_url?: string | null
+  local_path?: string | null
+  file_size?: number | null
+  error?: string | null
+  duration_seconds?: number | null
+  created_at: string
+}
+

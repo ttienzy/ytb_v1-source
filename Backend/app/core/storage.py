@@ -17,6 +17,16 @@ def default_config() -> dict:
             "is_connected": False,
             "last_checked_at": None,
         },
+        "muse": {
+            "app_url": "https://muse.ai/",
+            "is_connected": False,
+            "last_checked_at": None,
+            "cdp_port": 9225,
+            "auto_download": True,
+            "download_dir": str(settings.chrome_profile_dir.parent / "Downloads"),
+            "timeout_seconds": 120,
+            "default_prompt_prefix": "",
+        },
     }
 
 
@@ -33,6 +43,7 @@ def read_config() -> dict:
                 "mailtm": {**defaults["mailtm"], **config.get("mailtm", {})},
                 "pippit": {**defaults["pippit"], **config.get("pippit", {})},
                 "chatgpt_9router": {**defaults["chatgpt_9router"], **config.get("chatgpt_9router", {})},
+                "muse": {**defaults["muse"], **config.get("muse", {})},
             }
     except (OSError, json.JSONDecodeError):
         pass

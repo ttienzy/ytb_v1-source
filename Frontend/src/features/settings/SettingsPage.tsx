@@ -3,6 +3,7 @@ import {
   Bot,
   ChevronRight,
   Clapperboard,
+  Film,
   HardDrive,
   Mail,
   Send,
@@ -14,10 +15,11 @@ import { GoogleDriveSection } from './components/GoogleDriveSection'
 import { MailTmSection } from './components/MailTmSection'
 import { PippitSection } from './components/PippitSection'
 import { VeoSection } from './components/VeoSection'
+import { MuseSection } from './components/MuseSection'
 import { YouTubeBrandIcon, YouTubeSection } from './components/YouTubeSection'
 import { ContactSection } from './components/ContactSection'
 
-type TabKey = 'gemini_yt' | 'chatgpt' | 'mailtm' | 'pippit' | 'gdrive' | 'youtube' | 'veo' | 'contact'
+type TabKey = 'gemini_yt' | 'chatgpt' | 'mailtm' | 'pippit' | 'gdrive' | 'youtube' | 'veo' | 'muse' | 'contact'
 
 interface SettingsTabConfig {
   id: TabKey
@@ -31,6 +33,7 @@ export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('gemini_yt')
   const [hasGeminiCookie, setHasGeminiCookie] = useState(false)
   const [hasChatGptConnected, setHasChatGptConnected] = useState(false)
+  const [hasMuseConnected, setHasMuseConnected] = useState(false)
   const [pippitRefreshKey, setPippitRefreshKey] = useState(0)
 
   const tabs: SettingsTabConfig[] = [
@@ -77,6 +80,13 @@ export function SettingsPage() {
       label: 'Google Veo',
       desc: 'Tạo video AI (Veo 2 & 3)',
       icon: <Clapperboard size={16} />,
+    },
+    {
+      id: 'muse',
+      label: 'Muse AI (Meta)',
+      desc: 'Sinh video AI, Character & Ghép clip',
+      icon: <Film size={16} />,
+      hasStatus: hasMuseConnected,
     },
     {
       id: 'contact',
@@ -180,7 +190,14 @@ export function SettingsPage() {
           </div>
         )}
 
-        {/* Tab 7: Liên hệ tác giả & Telegram QR */}
+        {/* Tab 7: Muse AI (Meta) */}
+        {activeTab === 'muse' && (
+          <div className="tab-fade-in">
+            <MuseSection onStatusChange={setHasMuseConnected} />
+          </div>
+        )}
+
+        {/* Tab 8: Liên hệ tác giả & Telegram QR */}
         {activeTab === 'contact' && (
           <div className="tab-fade-in">
             <ContactSection />
