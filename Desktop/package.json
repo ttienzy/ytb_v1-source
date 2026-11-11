@@ -8,7 +8,11 @@
     "frontend": "set \"ELECTRON_RUN_AS_NODE=\" && npm --prefix ..\\Frontend run dev",
     "start": "node dev.js",
     "start:concurrently": "concurrently --kill-others-on-fail --names BACKEND,VOICE,FRONTEND --prefix-colors blue,magenta,green \"npm run backend\" \"npm run voice\" \"npm run frontend\"",
-    "start:core": "concurrently --kill-others-on-fail --names BACKEND,FRONTEND --prefix-colors blue,green \"npm run backend\" \"npm run frontend\""
+    "start:core": "concurrently --kill-others-on-fail --names BACKEND,FRONTEND --prefix-colors blue,green \"npm run backend\" \"npm run frontend\"",
+    "stop": "node dev.js --stop",
+    "start:stable": "node dev.js --no-reload",
+    "start:reuse": "node dev.js --reuse",
+    "test": "node --test dev.test.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 r"""
-test_cat_video.py — Script kiểm thử tự động tạo video "Cat" 6s và tải về máy.
+manual_test_cat_video.py — Script kiểm thử tự động tạo video "Cat" 6s và tải về máy.
 
 Cách chạy:
-    python test_cat_video.py
+    python manual_test_cat_video.py
 hoặc trong PowerShell:
-    & ".\Backend\.venv\Scripts\python.exe" test_cat_video.py
+    & ".\Backend\.venv\Scripts\python.exe" manual_test_cat_video.py
 """
 
 import os
