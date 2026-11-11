@@ -20,6 +20,7 @@ const VeoStudioPage = lazy(() => import('./features/veo-studio/VeoStudioPage').t
 const MuseStudioPage = lazy(() => import('./features/muse-studio/MuseStudioPage').then(module => ({ default: module.MuseStudioPage })))
 const YouTubePublisherPage = lazy(() => import('./features/youtube-publisher/YouTubePublisherPage').then(module => ({ default: module.YouTubePublisherPage })))
 const WorkflowPage = lazy(() => import('./features/workflow/WorkflowPage').then(module => ({ default: module.WorkflowPage })))
+const CampaignPage = lazy(() => import('./features/campaign/CampaignPage').then(module => ({ default: module.CampaignPage })))
 const HelpDrawer = lazy(() => import('./features/help/components/HelpDrawer').then(module => ({ default: module.HelpDrawer })))
 
 const PUBLISHER_PAGES = new Set(['Lên lịch Pippit', 'Lên lịch Youtube'])
@@ -202,6 +203,8 @@ export function App() {
             <MuseStudioPage setActivePage={setActivePage} />
           ) : activePage === 'AI Workflow' ? (
             <WorkflowPage />
+          ) : activePage === 'Chiến dịch AI' ? (
+            <CampaignPage />
           ) : activePage === 'Lên lịch Pippit' ? (
             <PublisherPage />
           ) : activePage === 'Lên lịch Youtube' ? (

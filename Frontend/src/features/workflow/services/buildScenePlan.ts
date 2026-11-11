@@ -64,8 +64,8 @@ export function isScriptCollectionStale(
     (current.maxWords !== undefined && collection.maxWords !== current.maxWords) ||
     collection.platform !== (current.platform || 'auto') ||
     collection.clipDurationSeconds !== normalizeClipDuration(current.clipDurationSeconds) ||
-    collection.promptTemplate !== (current.promptTemplate || '') ||
-    collection.requestedModel !== (current.model || getWorkflowConfig().defaultScriptModel)
+    collection.promptTemplate !== (current.promptTemplate || '')
+    // Model không còn so sánh: kịch bản luôn viết bằng tài khoản ChatGPT web (đã bỏ 9router), đổi nhà cung cấp không làm kịch bản cũ đi.
   )
 }
 

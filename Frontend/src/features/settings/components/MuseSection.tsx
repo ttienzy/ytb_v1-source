@@ -366,7 +366,7 @@ export function MuseSection({ onStatusChange }: MuseSectionProps) {
             }}
             title={settings.profile_dir}
           >
-            Backend/Data/ChromeProfile
+            {settings.profile_dir ? settings.profile_dir.replace(/^.*[\\\\/]Backend[\\\\/]Data[\\\\/]/, 'Backend/Data/') : 'Backend/Data/ChromeProfile_Muse'}
           </div>
           <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
             Lưu giữ đăng nhập vĩnh viễn

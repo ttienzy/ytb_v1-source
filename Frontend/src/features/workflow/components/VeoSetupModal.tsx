@@ -21,6 +21,7 @@ import type { GptSalesScriptItem, VeoVideoConfig } from '../types'
 import type { VeoCapabilities, VeoProject } from '../../veo-studio/types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from '../services/buildScenePlan'
 import { getWorkflowConfig } from '../services/workflowConfig'
+import { OMNI_12, clipCredit, durationOptionsFor, isOmni12 } from '../services/veoModelPolicy'
 
 interface VeoSetupModalProps {
   isOpen: boolean
@@ -187,8 +188,9 @@ export function VeoSetupModal({
 
   // Profiles from capabilities
   const profiles = (capabilities?.profiles || []).filter((p) => p.input_mode === 'text_to_video')
-  const modelNames = [...new Set(profiles.map((p) => p.model_display_name))]
-  const availableModels = modelNames.length > 0 ? modelNames : [model]
+  // AI Workflow chỉ dùng Omni 1.2 Flash (đi HTTP, nhận ảnh tham chiếu 3–15s). Omni 1.1 đã bỏ; Veo 3.1 không nhận ảnh tham chiếu ở đây.
+  const modelNames = [...new Set(profiles.map((p) => p.model_display_name))].filter((m) => m === OMNI_12)
+  const availableModels = modelNames.length > 0 ? modelNames : [OMNI_12]
   const modelProfiles = profiles.filter((profile) => profile.model_display_name === model)
   const aspectRatioOptions = [...new Set(modelProfiles.map((profile) => profile.aspect_ratio))]
   const resolutionOptions = [...new Set(
@@ -203,14 +205,15 @@ export function VeoSetupModal({
     profile.aspect_ratio === aspectRatio &&
     profile.resolution === resolution
   )
-  const durationOptions = [...new Set(matchingProfiles.map((profile) => profile.duration_seconds))].sort((a, b) => a - b)
+  // Omni 1.2: clip workflow có ảnh tham chiếu đi Ingredients (3–15s) -> thời lượng/giá lấy theo profile Ingredients.
+  const allProfiles = capabilities?.profiles || []
+  const durationOptions = durationOptionsFor(allProfiles, model, aspectRatio, resolution)
   const variationOptions = Array.from(
     { length: Math.max(1, capabilities?.max_outputs || 1) },
     (_, index) => index + 1,
   )
-  const selectedProfile = matchingProfiles.find((profile) => profile.duration_seconds === duration)
-    || profiles.find((profile) => profile.model_display_name === model)
-  const creditCost = selectedProfile?.credit_cost ?? 7
+  const clipPrice = clipCredit(allProfiles, model, aspectRatio, resolution, duration)
+  const creditCost = clipPrice.credit ?? matchingProfiles.find((profile) => profile.duration_seconds === duration)?.credit_cost ?? 7
 
   const handleModelChange = (nextModel: string) => {
     setModel(nextModel)
@@ -538,7 +541,7 @@ export function VeoSetupModal({
                     border: '1px solid #c7d2fe',
                   }}
                 >
-                  {creditCost} credits / lần tạo
+                  {clipPrice.verified ? '' : 'khoảng '}{creditCost} credits / clip
                 </span>
               </div>
               <select
@@ -558,7 +561,7 @@ export function VeoSetupModal({
               >
                 {availableModels.map((m) => (
                   <option key={m} value={m}>
-                    {m} ({creditCost} credits)
+                    {m}{m === OMNI_12 ? ' · nhanh (HTTP), 3–15 giây' : ''}
                   </option>
                 ))}
               </select>
@@ -610,14 +613,14 @@ export function VeoSetupModal({
               <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
                 Thời lượng mỗi clip
               </label>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(46px, 1fr))', gap: 6 }} data-testid="veo-duration-options">
                 {(durationOptions.length > 0 ? durationOptions : [duration]).map((d) => (
                   <button
                     key={d}
                     type="button"
                     onClick={() => setDuration(d)}
                     style={{
-                      flex: 1,
+
                       padding: '8px 0',
                       borderRadius: 8,
                       border: duration === d ? '2px solid #4f46e5' : '1px solid #e2e8f0',
@@ -633,6 +636,12 @@ export function VeoSetupModal({
                 ))}
               </div>
             </div>
+
+            <p data-testid="veo-model-hint" style={{ margin: '-4px 0 0', fontSize: 11, lineHeight: 1.5, color: '#64748b' }}>
+              {isOmni12(model)
+                ? 'Omni 1.2: clip có ảnh tham chiếu đi Ingredients (tối đa 3 ảnh). Clip nối tiếp dùng khung cuối của clip trước làm ảnh tham chiếu, nên giống clip trước nhưng không bắt đầu đúng khung đó. Từ giây 11, mỗi giây giá gấp đôi.'
+                : ''}
+            </p>
 
             {/* ĐỘ PHÂN GIẢI */}
             <div>

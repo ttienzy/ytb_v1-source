@@ -40,7 +40,7 @@ export interface ProductAnalysis {
   classifications?: ProductClassificationItem[]
   modelAttributes?: string
   sceneVibe?: string
-  providerUsed?: 'gemini' | '9router'
+  providerUsed?: 'gemini' | 'chatgpt' | '9router'
 }
 
 export interface ScriptGenerationConfig {

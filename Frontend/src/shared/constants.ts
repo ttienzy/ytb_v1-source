@@ -2,6 +2,7 @@ import {
   CalendarClock,
   BookOpen,
   Clapperboard,
+  Layers,
   Clock3,
   Compass,
   Eraser,
@@ -45,6 +46,7 @@ export const navGroups: NavGroup[] = [
     collapsible: true,
     items: [
       { label: 'AI Workflow', icon: WorkflowIcon, badge: 'PRO', badgeVariant: 'pro' },
+      { label: 'Chiến dịch AI', icon: Layers, badge: 'NEW', badgeVariant: 'new' },
       { label: 'Veo Studio', icon: Clapperboard },
       { label: 'Muse Studio', icon: Sparkles, badge: 'NEW', badgeVariant: 'new' },
       { label: 'Workflow', icon: PlaySquare },

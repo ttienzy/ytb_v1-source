@@ -1,9 +1,11 @@
 /**
- * Motion Prompt Builder Service
- * Chuẩn hóa mô hình prompt theo chuẩn Google Flow:
- * - Media đóng vai trò là "Nguyên liệu tham chiếu (Ingredients/References)".
- * - Prompt là "Chỉ dẫn sáng tạo (Creative Direction)" điều phối hành động, góc máy và phong cách.
- * - Tránh lặp lại mô tả ngoại hình đã có trong ảnh/video.
+ * Motion Prompt Builder (Omni 1.2 Flash, chỉnh video theo video mẫu).
+ *
+ * Theo hướng dẫn của Google cho Omni: mô tả ngắn, nói rõ cái gì lấy từ video mẫu, cái gì giữ nguyên, không ra lệnh quá chi tiết.
+ * Mẫu chính thức: "Apply the pose and motion from the input video to the character in this image."
+ * - Câu mở đầu được dựng theo ẢNH THẬT SỰ CÓ (nhân vật / bối cảnh), không bao giờ nhắc tới ảnh chưa nối.
+ * - Ảnh được gửi theo thứ tự nhân vật rồi bối cảnh, nên prompt gọi đúng "Image 1"/"Image 2".
+ * - Không dùng "Avoid:" (Omni không có ô negative): điều cần tránh thành một câu lệnh rõ ràng.
  */
 
 import type { MotionCreativeDirection } from '../types'
@@ -14,7 +16,7 @@ export interface PromptSectionItem {
   label: string
   content: string
   colorVar: string
-  sourceType: 'director' | 'motion' | 'camera' | 'style' | 'negative'
+  sourceType: 'director' | 'motion' | 'camera' | 'style' | 'negative' | 'reference'
 }
 
 export interface StructuredPromptResult {
@@ -24,23 +26,62 @@ export interface StructuredPromptResult {
   hasRequiredFields: boolean
 }
 
+/** Ảnh tham chiếu đang nối vào Motion Control (video mẫu luôn có, là "input video"). */
+export interface MotionReferenceRoles {
+  character?: boolean
+  scene?: boolean
+}
+
 export const DEFAULT_MOTION_PROMPT =
-  "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout. Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video. Natural biomechanics, fluid body movement, photorealistic cinematic lighting."
+  'Keep the movement natural and fluid, matching the timing and rhythm of the input video.'
 
 export const DEFAULT_MOTION_CREATIVE_DIRECTION: MotionCreativeDirection = {
-  creativeBrief: "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout.",
-  subjectAction: "Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video.",
-  cameraMovement: '',
-  sceneAtmosphere: 'Natural biomechanics, fluid body movement, photorealistic cinematic lighting.',
-  styleDirection: '',
+  creativeBrief: DEFAULT_MOTION_PROMPT,
+  subjectAction: '',
+  cameraMovement: 'Keep the camera path and framing of the input video.',
+  sceneAtmosphere: '',
+  styleDirection: 'Photorealistic, with lighting that matches the scene.',
   negativePrompt: '',
 }
 
-/**
- * Xây dựng danh sách các phân đoạn prompt có cấu trúc kèm nhãn nguồn trực quan
- */
+/** Mặc định cũ (Omni 1.1): bản nháp còn đúng nguyên văn này được coi là "chưa sửa" và chuyển sang mặc định mới. */
+export const LEGACY_DEFAULT_BRIEFS = [
+  "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout. Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video. Natural biomechanics, fluid body movement, photorealistic cinematic lighting.",
+  "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout.",
+]
+
+export function isLegacyDefaultBrief(brief: string | undefined | null): boolean {
+  const b = (brief || '').trim()
+  return !b || LEGACY_DEFAULT_BRIEFS.includes(b)
+}
+
+/** Ô chỉ đạo đã tự nói về vai trò ảnh (prompt cũ / người dùng tự viết) thì không chèn câu mở đầu tự sinh để tránh lặp. */
+const MENTIONS_ROLES = /\b(image reference|reference image|image 1|image 2|motion reference video|from (this|the) image)\b/i
+
+/** Câu mở đầu theo ảnh thật sự có. Ảnh gửi theo thứ tự: nhân vật (Image 1) rồi bối cảnh (Image 2 hoặc Image 1 nếu không có nhân vật). */
+export function referenceOpening(roles: MotionReferenceRoles = {}): string {
+  const { character, scene } = roles
+  if (character && scene) {
+    return 'Apply the pose and motion from the input video to the person in Image 1, placed in the setting shown in Image 2. '
+      + 'Keep the face, hairstyle and outfit from Image 1 unchanged.'
+  }
+  if (character) {
+    return 'Apply the pose and motion from the input video to the person in the image. '
+      + 'Keep the face, hairstyle and outfit from the image unchanged.'
+  }
+  if (scene) return 'Keep the people and their motion from the input video, and move them into the setting shown in the image.'
+  return 'Edit the input video, keeping its motion and timing.'
+}
+
+const sentence = (text: string) => {
+  const t = text.trim().replace(/\s+/g, ' ')
+  if (!t) return ''
+  return /[.!?]$/.test(t) ? t : `${t}.`
+}
+
 export function buildStructuredPrompt(
   creative?: Partial<MotionCreativeDirection>,
+  roles?: MotionReferenceRoles,
 ): StructuredPromptResult {
   const c = {
     creativeBrief: (creative?.creativeBrief || '').trim(),
@@ -50,108 +91,53 @@ export function buildStructuredPrompt(
     styleDirection: (creative?.styleDirection || '').trim(),
     negativePrompt: (creative?.negativePrompt || '').trim(),
   }
+  const anyText = Object.values(c).some(Boolean)
+  // roles === undefined: gọi kiểu cũ (không biết ảnh nào có) -> không tự sinh câu mở đầu.
+  const opening = roles && anyText && !MENTIONS_ROLES.test(Object.values(c).join(' ')) ? referenceOpening(roles) : ''
 
-  const sections: PromptSectionItem[] = []
-
-  // 1. Creative Brief (Chỉ đạo chính của đạo diễn)
-  if (c.creativeBrief) {
-    sections.push({
-      id: 'brief',
-      tag: 'Chỉ đạo chính',
-      label: 'Ý tưởng đạo diễn',
-      content: c.creativeBrief,
-      colorVar: 'var(--txt, #2F5BFF)',
-      sourceType: 'director',
-    })
-  }
-
-  // 2. Subject Action & Motion (Hành động & chuyển động nhân vật)
-  if (c.subjectAction) {
-    sections.push({
-      id: 'action',
-      tag: 'Chuyển động',
-      label: 'Hành động chủ thể',
-      content: c.subjectAction,
-      colorVar: 'var(--vid, #FF7A00)',
-      sourceType: 'motion',
-    })
-  }
-
-  // 3. Camera Movement (Góc quay & chuyển động máy quay)
-  if (c.cameraMovement) {
-    sections.push({
-      id: 'camera',
-      tag: 'Camera',
-      label: 'Góc máy & chuyển động',
-      content: c.cameraMovement,
-      colorVar: '#8B5CF6',
-      sourceType: 'camera',
-    })
-  }
-
-  // 4. Scene & Lighting (Bối cảnh & ánh sáng)
-  if (c.sceneAtmosphere) {
-    sections.push({
-      id: 'scene',
-      tag: 'Bối cảnh',
-      label: 'Không gian & Ánh sáng',
-      content: c.sceneAtmosphere,
-      colorVar: 'var(--img, #10B981)',
-      sourceType: 'director',
-    })
-  }
-
-  // 5. Look & Style (Phong cách hình ảnh)
-  if (c.styleDirection) {
-    sections.push({
-      id: 'style',
-      tag: 'Phong cách',
-      label: 'Thẩm mỹ & Điện ảnh',
-      content: c.styleDirection,
-      colorVar: '#EC4899',
-      sourceType: 'style',
-    })
-  }
-
-  // 6. Negative Prompt (Điều cần tránh)
-  if (c.negativePrompt) {
-    sections.push({
-      id: 'negative',
-      tag: 'Điều cần tránh',
-      label: 'Tránh (Negative)',
-      content: c.negativePrompt,
-      colorVar: '#EF4444',
-      sourceType: 'negative',
-    })
-  }
-
-  // Ghép thành chuỗi prompt chuẩn cho Veo / Google Flow
-  const textParts: string[] = []
-
-  const mainParts = [
-    c.creativeBrief,
-    c.subjectAction,
-    c.cameraMovement,
-    c.sceneAtmosphere,
-    c.styleDirection,
+  const defs: [keyof typeof c | 'opening', string, string, string, PromptSectionItem['sourceType']][] = [
+    ['opening', 'Vai trò tham chiếu', 'Lấy gì từ video mẫu và ảnh', '#0EA5E9', 'reference'],
+    ['creativeBrief', 'Chỉ đạo chính', 'Ý tưởng đạo diễn', 'var(--txt, #2F5BFF)', 'director'],
+    ['subjectAction', 'Chuyển động', 'Hành động chủ thể', 'var(--vid, #FF7A00)', 'motion'],
+    ['cameraMovement', 'Camera', 'Góc máy & chuyển động', '#8B5CF6', 'camera'],
+    ['sceneAtmosphere', 'Bối cảnh', 'Không gian & Ánh sáng', 'var(--img, #10B981)', 'director'],
+    ['styleDirection', 'Phong cách', 'Thẩm mỹ & Điện ảnh', '#EC4899', 'style'],
+    ['negativePrompt', 'Điều cần tránh', 'Không được thêm', '#EF4444', 'negative'],
   ]
-    .filter(Boolean)
-    .map((part) => part.replace(/\.+$/, ''))
+  const valueOf = (k: keyof typeof c | 'opening') => (k === 'opening' ? opening : c[k])
+  const ids: Record<string, string> = { opening: 'roles', creativeBrief: 'brief', subjectAction: 'action', cameraMovement: 'camera',
+    sceneAtmosphere: 'scene', styleDirection: 'style', negativePrompt: 'negative' }
 
-  if (mainParts.length > 0) {
-    textParts.push(mainParts.join('. ') + '.')
-  }
+  const sections: PromptSectionItem[] = defs
+    .filter(([k]) => valueOf(k))
+    .map(([k, tag, label, colorVar, sourceType]) => ({ id: ids[k], tag, label, content: valueOf(k), colorVar, sourceType }))
 
-  if (c.negativePrompt) {
-    textParts.push(`Avoid: ${c.negativePrompt}`)
-  }
-
-  const fullPrompt = textParts.join('\n\n').trim()
+  const parts = [opening, c.creativeBrief, c.subjectAction, c.cameraMovement, c.sceneAtmosphere, c.styleDirection].map(sentence).filter(Boolean)
+  const negative = c.negativePrompt.replace(/^(avoid|no|do not add|don't add)\s*:?\s*/i, '').replace(/[.]+$/, '')
+  if (negative) parts.push(`Do not add ${negative}.`)
+  const fullPrompt = parts.join(' ').trim()
 
   return {
     fullPrompt,
     sections,
     charCount: fullPrompt.length,
     hasRequiredFields: Boolean(c.creativeBrief || c.subjectAction),
+  }
+}
+
+const LEGACY_ACTION = 'Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video.'
+const LEGACY_SCENE = 'Natural biomechanics, fluid body movement, photorealistic cinematic lighting.'
+
+/** Bản nháp còn đúng mặc định cũ (Omni 1.1) -> mặc định mới; phần người dùng đã tự sửa được giữ nguyên. */
+export function migrateLegacyCreative(saved: Partial<MotionCreativeDirection>): MotionCreativeDirection {
+  const merged = { ...DEFAULT_MOTION_CREATIVE_DIRECTION, ...saved }
+  if (!isLegacyDefaultBrief(saved.creativeBrief)) return merged
+  return {
+    ...merged,
+    creativeBrief: DEFAULT_MOTION_CREATIVE_DIRECTION.creativeBrief,
+    subjectAction: saved.subjectAction?.trim() === LEGACY_ACTION ? DEFAULT_MOTION_CREATIVE_DIRECTION.subjectAction : merged.subjectAction,
+    sceneAtmosphere: saved.sceneAtmosphere?.trim() === LEGACY_SCENE ? DEFAULT_MOTION_CREATIVE_DIRECTION.sceneAtmosphere : merged.sceneAtmosphere,
+    cameraMovement: merged.cameraMovement || DEFAULT_MOTION_CREATIVE_DIRECTION.cameraMovement,
+    styleDirection: merged.styleDirection || DEFAULT_MOTION_CREATIVE_DIRECTION.styleDirection,
   }
 }

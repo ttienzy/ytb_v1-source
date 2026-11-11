@@ -9,7 +9,8 @@ import { prepareChainedScene } from '../services/prepareChainedScene.ts'
 import { reconcileWorkflowNodes } from '../services/workflowState.ts'
 import { buildClipPlans } from '../services/buildScenePlan.ts'
 
-const videoConfig: VeoVideoConfig = { model: 'Omni 1.1 Flash', aspectRatio: '9:16', duration: 10, resolution: '720p', variations: 1 }
+// AI Workflow chỉ dùng Omni 1.2 (Omni 1.1 đã bỏ 2026-11-11).
+const videoConfig: VeoVideoConfig = { model: 'Omni 1.2 Flash', aspectRatio: '9:16', duration: 10, resolution: '720p', variations: 1 }
 const project = { id: 'project-local' } as VeoProject
 const assets: AssetRef[] = ['product', 'model', 'scene'].map((kind, i) => ({
   id: `${i}`, kind: kind as AssetRef['kind'], previewUrl: `preview-${i}`, backendPath: `C:/images/${i}.jpg`, uploadStatus: 'uploaded',
@@ -19,7 +20,7 @@ const plan = (number = 1): ScenePlan => ({ sceneNumber: number, title: `Clip ${n
 const policy = { intervalMs: 1, timeoutMs: 500, requestTimeoutMs: 100, maxConsecutiveErrors: 2 }
 const request = (scene: ScenePlan, config = videoConfig) => buildWorkflowVideoRequest({ scene, project, videoConfig: config })
 
-test('GPT plans render Ingredients then two single-frame continuations through state reconciliation', async () => {
+test('GPT plans render three Ingredients clips; continuations use the previous last frame as first reference', async () => {
   const scenes = buildClipPlans({
     scripts: [1, 2, 3].map(i => ({ angle: 'sequence', title: `Clip ${i}`, content: `Prompt ${i}`, visualDirection: `Prompt ${i}` })),
     sceneConfig: { count: 3, durations: [10, 8, 6], aspectRatio: '9:16', storyMode: 'sequential' }, assets,
@@ -46,13 +47,13 @@ test('GPT plans render Ingredients then two single-frame continuations through s
     assert.equal(result.ok, true)
     update(i, { outputFilePath: result.outputFilePath, videoUrl: result.videoUrl })
   }
-  assert.deepEqual(sent.map(r => r.input_mode), ['ingredients', 'frames', 'frames'])
+  assert.deepEqual(sent.map(r => r.input_mode), ['ingredients', 'ingredients', 'ingredients'])
   assert.deepEqual(sent.map(r => r.prompt), ['Prompt 1', 'Prompt 2', 'Prompt 3'])
   assert.deepEqual(sent.map(r => r.duration_seconds), [10, 8, 6])
   assert.deepEqual(sent[0].ingredient_image_paths, assets.map(a => a.backendPath))
-  assert.deepEqual(sent.map(r => r.image_path), [null, 'C:/frames/1.jpg', 'C:/frames/2.jpg'])
-  assert.ok(sent.every(r => r.end_image_path === null && r.num_outputs === 1))
-  assert.deepEqual(sent.slice(1).map(r => r.ingredient_image_paths), [[], []])
+  assert.ok(sent.every(r => r.image_path === null && r.end_image_path === null && r.num_outputs === 1))
+  assert.deepEqual(sent.slice(1).map(r => r.ingredient_image_paths), [
+    ['C:/frames/1.jpg', 'C:/images/0.jpg', 'C:/images/1.jpg'], ['C:/frames/2.jpg', 'C:/images/0.jpg', 'C:/images/1.jpg']])
   assert.deepEqual(extracted, ['C:/videos/job-1.mp4', 'C:/videos/job-2.mp4'])
   assert.equal(read().filter(s => s.outputFilePath).length, 3)
 })
@@ -82,11 +83,14 @@ test('continued clip refreshes stale frame and ignores unused product upload sta
     { ...plan(), outputFilePath: 'new.mp4' }, async path => {
       assert.equal(path, 'new.mp4'); return { ok: true, file_path: 'new-last.jpg', image_id: 'last' }
     }, id => id)
-  assert.equal(request({ ...prepared, referenceAssets: [{ ...assets[0], uploadStatus: 'error' }] }).image_path, 'new-last.jpg')
+  assert.equal(request(prepared).ingredient_image_paths?.[0], 'new-last.jpg')
+  // ảnh sản phẩm tải lỗi mà vẫn cần gửi (chưa đủ 3 ảnh) -> phải tải lại, không âm thầm bỏ
+  assert.throws(() => request({ ...prepared, referenceAssets: [{ ...assets[0], uploadStatus: 'error' }] }), /chưa tải xong/)
 })
 
 test('validate reference count, upload state, model, resolution and variants before submitting', () => {
-  assert.throws(() => request({ ...plan(), referenceAssets: [...assets, { ...assets[0], backendPath: 'fourth.jpg' }] }), /tối đa 3/)
+  // Omni 1.2: quá 3 ảnh thì giữ mỗi loại một ảnh, bỏ ảnh thừa (không chặn)
+  assert.equal(request({ ...plan(), referenceAssets: [...assets, { ...assets[0], backendPath: 'fourth.jpg' }] }).ingredient_image_paths?.length, 3)
   assert.equal(request({ ...plan(), referenceAssets: [...assets, assets[0]] }).ingredient_image_paths?.length, 3)
   assert.throws(() => request({ ...plan(), referenceAssets: [{ ...assets[0], uploadStatus: 'uploading' }] }), /chưa tải xong/)
   for (const config of [{ ...videoConfig, model: 'Veo 3.1 Fast' }, { ...videoConfig, resolution: '1080p' }, { ...videoConfig, variations: 2 }]) {

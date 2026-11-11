@@ -5,7 +5,7 @@
  */
 
 import type { MotionOutputConfig, MotionCreativeDirection } from '../types'
-import { DEFAULT_MOTION_CREATIVE_DIRECTION } from './motionPromptBuilder.ts'
+import { DEFAULT_MOTION_CREATIVE_DIRECTION, migrateLegacyCreative } from './motionPromptBuilder.ts'
 import { saveMotionConfigApi } from './workflowApi.ts'
 
 export const MOTION_STORAGE_CONFIG_KEY = 'motion_control_config_v1'
@@ -48,7 +48,7 @@ export function loadStoredMotionConfig(): MotionOutputConfig {
       ...DEFAULT_MOTION_OUTPUT_CONFIG,
       ...parsed,
       aspectRatio: parsed.aspectRatio === '16:9' ? '16:9' : '9:16',
-      resolution: parsed.resolution === '360p' ? '360p' : '720p',
+      resolution: '720p',   // Omni 1.2 chỉnh video mới xác minh 720p (bản lưu cũ 360p của Omni 1.1 được chuyển lên 720p)
       durationSeconds: Number.isFinite(parsed.durationSeconds) ? parsed.durationSeconds : 10,
       projectMode: parsed.projectMode === 'new_per_run' ? 'new_per_run' : 'selected',
       freshAssets: parsed.freshAssets === true,
@@ -109,11 +109,7 @@ export function loadStoredCreativeDirection(): MotionCreativeDirection {
   try {
     const raw = storage.getItem(MOTION_STORAGE_CREATIVE_KEY)
     if (!raw) return { ...DEFAULT_MOTION_CREATIVE_DIRECTION }
-    const parsed = JSON.parse(raw)
-    return {
-      ...DEFAULT_MOTION_CREATIVE_DIRECTION,
-      ...parsed,
-    }
+    return migrateLegacyCreative(JSON.parse(raw))
   } catch (e) {
     console.warn('[MotionStorage] Lỗi đọc creative direction từ localStorage:', e)
     return { ...DEFAULT_MOTION_CREATIVE_DIRECTION }

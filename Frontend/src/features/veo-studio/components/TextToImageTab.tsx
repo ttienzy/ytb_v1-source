@@ -521,11 +521,11 @@ export function TextToImageTab({
 
         <div className="veo-ribbon-divider" />
 
-        {/* Output Count (1, 2, 4 - native Flow support) */}
+        {/* Output Count (Flow chỉ có x1/x2/x4; chọn 3 thì Flow tạo 4 và app giữ 3) */}
         <div className="veo-ribbon-group">
           <span className="veo-ribbon-label">BIẾN THỂ</span>
           <div className="veo-pill-group">
-            {[1, 2, 4].map((cnt) => (
+            {[1, 2, 3, 4].map((cnt) => (
               <button
                 key={cnt}
                 type="button"

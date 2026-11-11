@@ -22,9 +22,9 @@ export interface WorkflowConfig {
 
 const fallback: WorkflowConfig = {
   defaultClipDurationSeconds: 10,
-  defaultScriptModel: 'cx/gpt-5.5',
+  defaultScriptModel: 'ChatGPT web',
   defaultVoiceId: 'bf4bed06c671',
-  defaultVeoModel: 'Omni 1.1 Flash',
+  defaultVeoModel: 'Omni 1.2 Flash',
   defaultAspectRatio: '9:16',
   defaultResolution: '720p',
   defaultVariations: 1,

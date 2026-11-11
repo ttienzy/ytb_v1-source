@@ -38,6 +38,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
 
   const promptText = data.prompt ?? ''
   const res = data.analysisResult
+  const viaChatGpt = data.providerUsed === 'chatgpt' || data.providerUsed === '9router'
 
   const [isSavingPrompt, setIsSavingPrompt] = useState(false)
   const [saveNotification, setSaveNotification] = useState<string | null>(null)
@@ -139,12 +140,12 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
           <span
             className="wf-node-badge"
             style={{
-              background: data.providerUsed === '9router' ? '#f5f3ff' : res ? '#ecfdf5' : '#eef2ff',
-              color: data.providerUsed === '9router' ? '#6d28d9' : res ? '#065f46' : '#4338ca',
-              border: data.providerUsed === '9router' ? '1px solid #ddd6fe' : res ? '1px solid #d1fae5' : '1px solid #c7d2fe',
+              background: viaChatGpt ? '#f5f3ff' : res ? '#ecfdf5' : '#eef2ff',
+              color: viaChatGpt ? '#6d28d9' : res ? '#065f46' : '#4338ca',
+              border: viaChatGpt ? '1px solid #ddd6fe' : res ? '1px solid #d1fae5' : '1px solid #c7d2fe',
             }}
           >
-            {data.providerUsed === '9router' ? 'GPT-5.5' : res ? 'Gemini' : isConnected ? 'Đã nối dây' : 'Vision AI'}
+            {viaChatGpt ? 'ChatGPT' : res ? 'Gemini' : isConnected ? 'Đã nối dây' : 'Vision AI'}
           </span>
           <button
             type="button"
@@ -256,11 +257,11 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                 Làm mới Cookie (Fast)
               </button>
 
-              {data.onAnalyze9Router && (
+              {data.onAnalyzeChatGpt && (
                 <button
                   type="button"
                   className="wf-btn"
-                  onClick={() => data.onAnalyze9Router?.()}
+                  onClick={() => data.onAnalyzeChatGpt?.()}
                   disabled={isAnalyzing}
                   style={{
                     fontSize: 9.5,
@@ -275,10 +276,10 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                     gap: 4,
                     cursor: 'pointer',
                   }}
-                  title="Dùng 9Router Vision (GPT-5.5) thay thế mà không cần cookie Gemini"
+                  title="Phân tích bằng tài khoản ChatGPT (Cài đặt → Tài khoản ChatGPT), không cần cookie Gemini"
                 >
                   <Bot size={10} color="#16a34a" />
-                  Dùng 9Router AI
+                  Dùng ChatGPT
                 </button>
               )}
             </div>

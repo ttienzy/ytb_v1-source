@@ -3,6 +3,7 @@ import type { AssetRef, ScenePlan } from '../contracts'
 import type { VeoVideoConfig } from '../types'
 import { getWorkflowConfig, type PollingPolicy } from './workflowConfig.ts'
 import { pollJob } from './pollJob.ts'
+import { MAX_REFERENCES, OMNI_12, isOmni12, pickReferencePaths } from './veoModelPolicy.ts'
 
 export interface RenderSceneJobParams {
   scene: ScenePlan
@@ -47,6 +48,30 @@ interface RenderApi {
   getVideoStreamUrl: (path: string) => string
 }
 
+/** Omni 1.2 (HTTP): Ingredients 3–15 giây; clip nối tiếp lấy khung cuối clip trước làm ảnh tham chiếu đầu tiên. */
+function buildOmni12Request(params: RenderSceneJobParams, assets: AssetRef[]): VeoJobRequest {
+  const { scene, project, videoConfig } = params
+  // Ảnh sản phẩm/nhân vật chỉ bắt buộc đã tải lên nếu thật sự được gửi đi.
+  const refs = pickReferencePaths(scene.startFramePath, assets.filter(a => a.uploadStatus === 'uploaded' && a.backendPath?.trim()))
+  const pending = assets.some(a => a.uploadStatus !== 'uploaded' || !a.backendPath?.trim())
+  if (pending && refs.length < MAX_REFERENCES) {
+    throw new Error('Ảnh tham chiếu chưa tải xong hoặc tải thất bại. Hãy tải lại ảnh trước khi render.')
+  }
+  const mode = refs.length ? 'ingredients' : 'text_to_video'
+  if (mode === 'ingredients' && (scene.durationSec < 3 || scene.durationSec > 15)) {
+    throw new Error(`Omni 1.2 Ingredients nhận 3–15 giây (clip #${scene.sceneNumber} đang là ${scene.durationSec} giây).`)
+  }
+  if (mode === 'text_to_video' && scene.durationSec !== 10) {
+    throw new Error('Omni 1.2 không có ảnh tham chiếu chỉ tạo được clip 10 giây. Hãy nối ảnh sản phẩm/nhân vật hoặc chọn 10 giây.')
+  }
+  if (!['720p', '360p'].includes(videoConfig.resolution)) throw new Error('Omni 1.2 nhận 360p hoặc 720p.')
+  return {
+    project_id: project.id, prompt: scene.prompt.trim(), model_display_name: OMNI_12,
+    input_mode: mode, image_path: null, end_image_path: null, ingredient_image_paths: refs,
+    aspect_ratio: videoConfig.aspectRatio, duration_seconds: scene.durationSec, resolution: videoConfig.resolution, num_outputs: 1,
+  }
+}
+
 /** A workflow clip has exactly one output; reference images never become frames implicitly. */
 export function buildWorkflowVideoRequest(params: RenderSceneJobParams): VeoJobRequest {
   const { scene, project, videoConfig } = params
@@ -55,26 +80,11 @@ export function buildWorkflowVideoRequest(params: RenderSceneJobParams): VeoJobR
   if (scene.sceneNumber > 1 && scene.chainFromPrevious !== false && !scene.startFramePath) {
     throw new Error(`Clip #${scene.sceneNumber} cần frame cuối của clip trước làm Start Frame.`)
   }
-  const usesFrame = !!scene.startFramePath
-  if (!usesFrame && assets.some(asset => asset.uploadStatus !== 'uploaded' || !asset.backendPath?.trim())) {
-    throw new Error('Ảnh tham chiếu chưa tải xong hoặc tải thất bại. Hãy tải lại ảnh trước khi render.')
-  }
-  const paths = usesFrame ? [] : [...new Set(assets.map(asset => asset.backendPath!.trim()))]
-  if (paths.length > 3) throw new Error('Ingredients chỉ nhận tối đa 3 ảnh. Hãy giữ tổng ảnh sản phẩm, nhân vật và bối cảnh không quá 3 ảnh trước khi render.')
-  const mode = usesFrame ? 'frames' : paths.length ? 'ingredients' : 'text_to_video'
-  if (!videoConfig.model || !videoConfig.resolution) throw new Error('Chưa chọn cấu hình Veo hợp lệ.')
   if (videoConfig.variations !== 1) throw new Error('Chuỗi video yêu cầu 1 biến thể mỗi clip. Hãy chọn 1 biến thể trong Cấu hình Veo.')
-  if (mode !== 'text_to_video' && (videoConfig.model !== 'Omni 1.1 Flash' || videoConfig.resolution !== '720p')) {
-    throw new Error('Ingredients và nối frame hiện hỗ trợ Omni 1.1 Flash, 720p. Hãy cập nhật Cấu hình Veo.')
-  }
-  if (![4, 6, 8, 10].includes(scene.durationSec)) throw new Error('Thời lượng clip phải là 4, 6, 8 hoặc 10 giây.')
   if (!['16:9', '9:16'].includes(videoConfig.aspectRatio)) throw new Error('Chọn tỉ lệ 16:9 hoặc 9:16 cho video.')
-  return {
-    project_id: project.id, prompt: scene.prompt.trim(), model_display_name: videoConfig.model,
-    input_mode: mode, image_path: usesFrame ? scene.startFramePath : null, end_image_path: null,
-    ingredient_image_paths: paths, aspect_ratio: videoConfig.aspectRatio,
-    duration_seconds: scene.durationSec, resolution: videoConfig.resolution, num_outputs: 1,
-  }
+  if (isOmni12(videoConfig.model)) return buildOmni12Request(params, assets)
+  // Omni 1.1 đã bỏ khỏi AI Workflow; model khác không nhận ảnh tham chiếu/nối clip ở đây.
+  throw new Error(`AI Workflow chỉ tạo clip bằng Omni 1.2 Flash (đang chọn "${videoConfig.model || 'chưa chọn'}"). Mở Cấu hình Veo và chọn Omni 1.2 Flash.`)
 }
 
 /** Injectable transport and policy keep lifecycle tests independent of the provider. */

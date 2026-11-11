@@ -160,12 +160,12 @@ export async function fetchMotionDefaultPrompt(): Promise<string> {
 }
 
 /**
- * Gọi Gemini Web hoặc 9Router Vision phân tích sản phẩm từ danh sách ảnh và prompt
+ * Gọi Gemini Web hoặc tài khoản ChatGPT web phân tích sản phẩm từ danh sách ảnh và prompt
  */
 export async function callGeminiAnalysis(
   images: string[],
   prompt?: string,
-  provider: 'gemini' | '9router' = 'gemini',
+  provider: 'gemini' | 'chatgpt' = 'gemini',
 ): Promise<ProductAnalysis> {
   const res = await fetch(`${API_URL}/api/workflow/gemini/analyze`, {
     method: 'POST',

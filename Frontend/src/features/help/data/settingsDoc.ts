@@ -22,14 +22,14 @@ export const settingsDoc: SidebarDoc = {
     },
     {
       id: 'chatgpt',
-      label: '2. LLM Agent (9router / GPT)',
+      label: '2. Tài khoản ChatGPT (ảnh & kịch bản)',
       iconName: 'bot',
-      desc: 'Cấu hình mô hình ngôn ngữ lớn để sinh kịch bản bán hàng và kịch bản video.',
+      desc: 'Một nhóm tài khoản ChatGPT dùng chung cho tạo ảnh (Chiến dịch AI) và viết kịch bản, phân tích ảnh ở AI Workflow. Không cần cài thêm công cụ nào.',
       flowSteps: [
-        'Nhập 9router API Key hoặc OpenAI API Key',
-        'Chọn mô hình mong muốn (ví dụ: gpt-5.5 / gpt-4o)',
-        'Nhấn "Kiểm tra hoạt động"',
-        'Lưu cấu hình',
+        'Mở Cài đặt → Tài khoản ChatGPT',
+        'Bấm thêm tài khoản và đăng nhập ChatGPT trong cửa sổ hiện ra',
+        'Thêm 2 tài khoản trở lên để tự chuyển khi một tài khoản hết lượt',
+        'Tài khoản hết lượt tạo ảnh vẫn dùng được để viết kịch bản',
       ],
     },
     {

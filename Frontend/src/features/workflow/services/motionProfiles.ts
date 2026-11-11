@@ -1,7 +1,8 @@
 import type { VeoCapabilityProfile } from '../../veo-studio/types'
 import type { MotionOutputConfig } from '../types'
 
-export const MOTION_DURATION_OPTIONS = [4, 6, 8, 10] as const
+// Omni 1.2: đoạn chỉnh dài 3–10 giây (gói Google AI trả phí: tới 15 giây, chưa mở).
+export const MOTION_DURATION_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10] as const
 
 export function getVideoEditProfiles(profiles: VeoCapabilityProfile[]): VeoCapabilityProfile[] {
   return profiles.filter(
@@ -23,7 +24,7 @@ export function findMotionProfile(
 
 export function getMotionTrimDuration(startSeconds: number, endSeconds: number): number | null {
   const duration = endSeconds - startSeconds
-  if (startSeconds < 0 || !Number.isInteger(duration) || duration < 4 || duration > 10) return null
+  if (startSeconds < 0 || !Number.isInteger(duration) || duration < 3 || duration > 10) return null
   return duration
 }
 
@@ -67,10 +68,7 @@ export function getAvailableResolutions(
   }
 
   if (result.length === 0) {
-    return [
-      { resolution: '360p', title: 'Draft 360p', detail: 'Nhanh để thử chuyển động', creditCost: 40 },
-      { resolution: '720p', title: 'Standard 720p', detail: 'Chi tiết tốt hơn', creditCost: 40 },
-    ]
+    return [{ resolution: '720p', title: 'Standard 720p', detail: 'Omni 1.2', creditCost: 30 }]
   }
 
   return result.sort((a, b) => (a.resolution === '360p' ? -1 : 1))
@@ -85,13 +83,13 @@ export function getAvailableDurations(profiles?: VeoCapabilityProfile[]): number
       }
     }
     if (durs.size === 1 && durs.has(10)) {
-      return [4, 6, 8, 10]
+      return [...MOTION_DURATION_OPTIONS]
     }
     if (durs.size > 1) {
       return Array.from(durs).sort((a, b) => a - b)
     }
   }
-  return [4, 6, 8, 10]
+  return [...MOTION_DURATION_OPTIONS]
 }
 
 export function resolveBestProfile(

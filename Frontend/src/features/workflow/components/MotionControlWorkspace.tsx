@@ -27,6 +27,7 @@ import {
   RotateCw,
   Film,
   Sliders,
+  Layers,
 } from 'lucide-react'
 
 // Custom Nodes for Motion Control Studio
@@ -36,7 +37,7 @@ import { MotionPromptPreviewNode } from '../nodes/motion/MotionPromptPreviewNode
 import { MotionOutputNode } from '../nodes/motion/MotionOutputNode'
 
 // Services & Types
-import { buildStructuredPrompt, DEFAULT_MOTION_CREATIVE_DIRECTION } from '../services/motionPromptBuilder'
+import { buildStructuredPrompt, DEFAULT_MOTION_CREATIVE_DIRECTION, isLegacyDefaultBrief } from '../services/motionPromptBuilder'
 import { fetchMotionDefaultPrompt, fetchMotionPresets } from '../services/workflowApi'
 import {
   findMotionProfile,
@@ -50,6 +51,8 @@ import {
   loadStoredCreativeDirection,
   saveStoredCreativeDirection,
 } from '../services/motionStorage'
+import { LongMotionPanel } from './LongMotionPanel'
+import { needsLongMotion } from '../services/longMotionView'
 import { motionRunErrorFromJob, motionRunErrorFromUnknown } from '../services/motionRunError'
 import type {
   MotionReferenceAsset,
@@ -179,6 +182,13 @@ export function MotionControlWorkspace({
   const [isCreatingProject, setIsCreatingProject] = useState(false)
   const [lastRunProject, setLastRunProject] = useState<VeoProject | null>(null)
 
+  // applyProfile đọc chỉ đạo hiện tại qua ref để giữ hàm ổn định: nếu phụ thuộc creativeDirection,
+  // effect nạp dữ liệu bên dưới (deps [applyProfile]) sẽ chạy lại mỗi khi prompt đổi -> gọi API lặp vô hạn.
+  const creativeDirectionRef = useRef(creativeDirection)
+  useEffect(() => {
+    creativeDirectionRef.current = creativeDirection
+  }, [creativeDirection])
+
   const applyProfile = useCallback((profile: VeoCapabilityProfile) => {
     setSelectedProfileId(profile.id)
     setOutputConfig((previous) => {
@@ -192,10 +202,10 @@ export function MotionControlWorkspace({
         numOutputs: profile.num_outputs,
         creditCost: profile.credit_cost,
       }
-      saveStoredMotionConfig(next, creativeDirection)
+      saveStoredMotionConfig(next, creativeDirectionRef.current)
       return next
     })
-  }, [creativeDirection])
+  }, [])
 
   const handleCreateMotionProject = useCallback(async (name: string) => {
     const cleanName = name.trim()
@@ -256,7 +266,9 @@ export function MotionControlWorkspace({
         const defaultPrompt = await fetchMotionDefaultPrompt()
         if (!cancelled && defaultPrompt && defaultPrompt.trim()) {
           setCreativeDirection((prev) => {
-            if (!prev.creativeBrief || prev.creativeBrief === DEFAULT_MOTION_CREATIVE_DIRECTION.creativeBrief) {
+            // Đã đúng prompt của backend thì trả lại đúng object cũ, không tạo state mới.
+            if (prev.creativeBrief === defaultPrompt.trim()) return prev
+            if (isLegacyDefaultBrief(prev.creativeBrief) || prev.creativeBrief === DEFAULT_MOTION_CREATIVE_DIRECTION.creativeBrief) {
               return {
                 ...prev,
                 creativeBrief: defaultPrompt.trim(),
@@ -378,6 +390,7 @@ export function MotionControlWorkspace({
   // 4. Inspector Drawer State
   // -------------------------------------------------------------
   const [isInspectorOpen, setIsInspectorOpen] = useState(false)
+  const [isLongOpen, setIsLongOpen] = useState(false)
   const [selectedNodeType, setSelectedNodeType] = useState<'reference' | 'creative' | 'preview' | 'output' | null>('creative')
   const [activeRole, setActiveRole] = useState<'character' | 'motion' | 'scene'>('motion')
 
@@ -388,10 +401,26 @@ export function MotionControlWorkspace({
   const [customPromptText, setCustomPromptText] = useState('')
 
   const structuredPrompt = useMemo(() => {
-    return buildStructuredPrompt(creativeDirection)
-  }, [creativeDirection])
+    // Câu mở đầu của prompt dựng theo ảnh thật sự đang nối (không bao giờ nhắc tới ảnh chưa có).
+    return buildStructuredPrompt(creativeDirection, { character: characterAsset.filled, scene: sceneAsset.filled })
+  }, [creativeDirection, characterAsset.filled, sceneAsset.filled])
 
   const activePrompt = isCustomPrompt ? customPromptText : structuredPrompt.fullPrompt
+
+  /** Ảnh nhân vật rồi bối cảnh cho Motion dài: tải lên backend nếu chưa có (cùng cách với lượt chạy thường). */
+  const getLongMotionImagePaths = useCallback(async (): Promise<string[]> => {
+    const paths: string[] = []
+    for (const [asset, setAsset] of [[characterAsset, setCharacterAsset], [sceneAsset, setSceneAsset]] as const) {
+      let path = asset.backendPath
+      if (asset.filled && asset.file && !path) {
+        const uploaded = await uploadImage(asset.file)
+        path = uploaded.file_path
+        setAsset((prev) => ({ ...prev, backendPath: uploaded.file_path }))
+      }
+      if (path) paths.push(path)
+    }
+    return paths
+  }, [characterAsset, sceneAsset])
 
   const referencePromptConflict = useMemo(() => {
     if (!characterAsset.filled || !activePrompt.trim()) return null
@@ -424,7 +453,7 @@ export function MotionControlWorkspace({
     const trimStart = motionAsset.trimStartSec ?? 0
     const trimEnd = motionAsset.trimEndSec ?? outputConfig.durationSeconds
     if (getMotionTrimDuration(trimStart, trimEnd) === null) {
-      reasons.push('Đoạn video tham chiếu phải dài 4–10 giây và dùng mốc giây nguyên')
+      reasons.push('Đoạn video tham chiếu phải dài 3–10 giây và dùng mốc giây nguyên')
     }
     return reasons
   }, [activePrompt, motionAsset, outputConfig.durationSeconds, outputConfig.projectMode, profileError, referencePromptConflict, selectedProfile, selectedProject])
@@ -466,14 +495,15 @@ export function MotionControlWorkspace({
       tempVideo.onloadedmetadata = () => {
         const dur = tempVideo.duration
         if (Number.isFinite(dur) && dur > 0) {
-          if (dur < 4) {
-            showToast(`Cảnh báo: Video chỉ dài ${dur.toFixed(1)}s (yêu cầu tối thiểu 4s).`)
+          if (dur < 3) {
+            showToast(`Cảnh báo: Video chỉ dài ${dur.toFixed(1)}s (yêu cầu tối thiểu 3s).`)
           }
-          const safeEnd = Math.min(10, Math.max(4, Math.floor(dur)))
+          const safeEnd = Math.min(10, Math.max(3, Math.floor(dur)))
           setMotionAsset((prev) => ({
             ...prev,
             trimStartSec: 0,
             trimEndSec: safeEnd,
+            durationSec: dur,
           }))
           setOutputConfig((prev) => ({
             ...prev,
@@ -980,7 +1010,7 @@ export function MotionControlWorkspace({
       if (motionAsset.file && (forceFreshAssets || !motionMediaId)) {
         currentStage = 'reference_upload'
         setRunningStageText(`Đang tải mới video mẫu (${motionAsset.fileName}) vào project của lượt này...`)
-        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: forceFreshAssets, nativeUi: true })
+        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: forceFreshAssets, nativeUi: false })
         motionMediaId = uploadRes.media_id
         setMotionAsset((prev) => ({ ...prev, mediaId: uploadRes.media_id, mediaProjectId: flowProjectId }))
       }
@@ -1265,7 +1295,7 @@ export function MotionControlWorkspace({
       if (!motionMediaId && motionAsset.file) {
         currentStage = 'reference_upload'
         setRunningStageText(`Đang tải video mẫu (${motionAsset.fileName}) vào project...`)
-        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: false, nativeUi: true })
+        const uploadRes = await uploadVideoReference(motionAsset.file, flowProjectId, { forceFresh: false, nativeUi: false })
         motionMediaId = uploadRes.media_id
         setMotionAsset((prev) => ({ ...prev, mediaId: uploadRes.media_id, mediaProjectId: flowProjectId }))
       }
@@ -1523,6 +1553,18 @@ export function MotionControlWorkspace({
         </div>
 
         <div className="mf-subbar-right">
+          {motionAsset.file && needsLongMotion(motionAsset.durationSec) && (
+            <button
+              type="button"
+              className="mf-btn"
+              onClick={() => setIsLongOpen(true)}
+              title={`Video mẫu dài ${(motionAsset.durationSec ?? 0).toFixed(1)} giây: cắt thành nhiều đoạn, tạo lần lượt rồi ghép`}
+              data-testid="open-long-motion"
+            >
+              <Layers size={14} />
+              <span>Mở rộng video dài</span>
+            </button>
+          )}
           {onOpenLibrary && (
             <button
               type="button"
@@ -1740,6 +1782,17 @@ export function MotionControlWorkspace({
           )}
         </div>
       </div>
+
+      {isLongOpen && motionAsset.file && (
+        <LongMotionPanel
+          video={{ file: motionAsset.file, fileName: motionAsset.fileName, durationSec: motionAsset.durationSec ?? 0 }}
+          prompt={activePrompt}
+          aspectRatio={outputConfig.aspectRatio === '16:9' ? '16:9' : '9:16'}
+          getImagePaths={getLongMotionImagePaths}
+          onClose={() => setIsLongOpen(false)}
+          onToast={showToast}
+        />
+      )}
 
       {/* Floating Toast Notification */}
       <div className={`mf-toast ${toastMsg ? 'show' : ''}`} role="status">

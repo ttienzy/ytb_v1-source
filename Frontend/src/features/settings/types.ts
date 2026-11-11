@@ -96,26 +96,6 @@ export type PippitTask = {
   failed_reason: string
 }
 
-export type ChatGptState = {
-  endpoint: string
-  api_key_masked: string
-  has_api_key: boolean
-  default_model: string
-  is_connected: boolean
-  last_checked_at?: string | null
-  detected_local_secret?: string | null
-  available_models: string[]
-}
-
-export type ChatGptTestResult = {
-  ok: boolean
-  latency_ms: number
-  reply: string
-  models_count: number
-  available_models: string[]
-  error?: string | null
-}
-
 export type MuseSettings = {
   ok: boolean
   is_connected: boolean
@@ -149,4 +129,26 @@ export type MuseGenerateResult = {
   duration_seconds?: number | null
   created_at: string
 }
+
+export type ChatgptAccount = {
+  id: string
+  email?: string
+  hasSession: boolean
+  partition?: string
+  hasProfile: boolean
+  status: 'active' | 'exhausted' | 'error'
+  message?: string
+  addedAt?: number
+  lastUsed?: number
+  exhaustedAt?: number
+}
+
+export type ImageGenState = {
+  provider: 'chatgpt'
+  saved_at?: string | null
+  accounts: ChatgptAccount[]
+  active_accounts_count: number
+  total_accounts_count: number
+}
+
 

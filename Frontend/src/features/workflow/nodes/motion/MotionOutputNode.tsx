@@ -35,7 +35,7 @@ export function MotionOutputNode({ data, selected }: NodeProps) {
   const config = nodeData.config || {
     aspectRatio: '9:16',
     durationSeconds: 10,
-    resolution: '360p',
+    resolution: '720p',
     numOutputs: 1,
   }
 

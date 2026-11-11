@@ -328,7 +328,7 @@ export function ContactSection() {
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#475569' }}>
                   <Sparkles size={14} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
                   <span>
-                    <strong>Cấu hình API &amp; Dịch vụ:</strong> Trợ giúp kết nối Google Gemini, Veo Video Studio, YouTube OAuth &amp; 9Router GPT-5.5.
+                    <strong>Cấu hình API &amp; Dịch vụ:</strong> Trợ giúp kết nối Google Gemini, Veo Video Studio, YouTube OAuth &amp; tài khoản ChatGPT.
                   </span>
                 </div>
 

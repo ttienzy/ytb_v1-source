@@ -5,12 +5,13 @@ import {
   Clapperboard,
   Film,
   HardDrive,
+  ImageIcon,
   Mail,
   Send,
   Sparkles,
 } from 'lucide-react'
 import { GeminiSection } from './components/GeminiSection'
-import { ChatGptSection } from './components/ChatGptSection'
+import { ImageGenSection } from './components/ImageGenSection'
 import { GoogleDriveSection } from './components/GoogleDriveSection'
 import { MailTmSection } from './components/MailTmSection'
 import { PippitSection } from './components/PippitSection'
@@ -19,7 +20,7 @@ import { MuseSection } from './components/MuseSection'
 import { YouTubeBrandIcon, YouTubeSection } from './components/YouTubeSection'
 import { ContactSection } from './components/ContactSection'
 
-type TabKey = 'gemini_yt' | 'chatgpt' | 'mailtm' | 'pippit' | 'gdrive' | 'youtube' | 'veo' | 'muse' | 'contact'
+type TabKey = 'gemini_yt' | 'image_gen' | 'mailtm' | 'pippit' | 'gdrive' | 'youtube' | 'veo' | 'muse' | 'contact'
 
 interface SettingsTabConfig {
   id: TabKey
@@ -32,7 +33,7 @@ interface SettingsTabConfig {
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('gemini_yt')
   const [hasGeminiCookie, setHasGeminiCookie] = useState(false)
-  const [hasChatGptConnected, setHasChatGptConnected] = useState(false)
+  const [hasImageGenReady, setHasImageGenReady] = useState(false)
   const [hasMuseConnected, setHasMuseConnected] = useState(false)
   const [pippitRefreshKey, setPippitRefreshKey] = useState(0)
 
@@ -45,11 +46,11 @@ export function SettingsPage() {
       hasStatus: hasGeminiCookie,
     },
     {
-      id: 'chatgpt',
-      label: 'LLM Agent (9router)',
-      desc: 'GPT-5.5, Storyboard & Kịch bản',
-      icon: <Bot size={16} />,
-      hasStatus: hasChatGptConnected,
+      id: 'image_gen',
+      label: 'Tài khoản ChatGPT',
+      desc: 'Tạo ảnh & viết kịch bản AI',
+      icon: <ImageIcon size={16} />,
+      hasStatus: hasImageGenReady,
     },
     {
       id: 'mailtm',
@@ -146,10 +147,10 @@ export function SettingsPage() {
           <GeminiSection onCookieStatusChange={setHasGeminiCookie} />
         )}
 
-        {/* Tab: ChatGPT (9Router) */}
-        {activeTab === 'chatgpt' && (
+        {/* Tab: Tạo ảnh AI */}
+        {activeTab === 'image_gen' && (
           <div className="tab-fade-in">
-            <ChatGptSection onStatusChange={setHasChatGptConnected} />
+            <ImageGenSection onStatusChange={setHasImageGenReady} />
           </div>
         )}
 

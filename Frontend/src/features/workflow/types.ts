@@ -94,12 +94,12 @@ export interface GeminiAnalysisNodeData {
   isStartNode?: boolean
   isOrphan?: boolean
   analysisResult?: GeminiAnalysisResult | null
-  providerUsed?: 'gemini' | '9router'
+  providerUsed?: 'gemini' | 'chatgpt' | '9router'   // '9router': giá trị cũ còn lưu, hiểu là ChatGPT
   isRefreshingCookie?: boolean
   cookieValid?: boolean
   onAnalyze?: () => void
   onRefreshCookie?: () => void
-  onAnalyze9Router?: () => void
+  onAnalyzeChatGpt?: () => void
   onChangePrompt?: (prompt: string) => void
   onResetPrompt?: () => void
   onSaveDefaultPrompt?: (prompt: string) => Promise<void> | void
@@ -192,8 +192,8 @@ export interface PromptPresetItem {
 export interface GptScriptNodeData {
   title: string
   prompt?: string
-  model?: string // e.g. 'cx/gpt-5.5'
-  provider?: string // '9Router (Local)'
+  model?: string // nhãn nhà cung cấp, hiện là 'ChatGPT web'
+  provider?: string
   connectedImages?: (string | null)[]
   isConnectedToImages?: boolean
   hasProductData?: boolean
@@ -391,6 +391,8 @@ export interface MotionReferenceAsset {
   backendPath?: string
   trimStartSec?: number
   trimEndSec?: number
+  /** Thời lượng thật của video mẫu (giây), đọc khi nạp file. */
+  durationSec?: number
 }
 
 export interface MotionCreativeDirection {

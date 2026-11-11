@@ -1,0 +1,81 @@
+/* Motion video dài: modal đặt trên canvas Motion Control. Màu theo bảng của trang (tím #4F46E5, nền sáng). */
+.lm-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(15, 23, 42, .45); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.lm-modal { position: relative; width: min(920px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; background: #fff; color: #0f172a; border-radius: 14px; box-shadow: 0 24px 60px rgba(15, 23, 42, .35); overflow: hidden; }
+.lm-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+.lm-head-icon { width: 34px; height: 34px; border-radius: 9px; background: #eef2ff; color: #4f46e5; display: grid; place-items: center; flex: none; }
+.lm-head-text { flex: 1; min-width: 0; }
+.lm-head-text h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.lm-head-text p { margin: 2px 0 0; font-size: 12px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm-icon-btn { border: 0; background: transparent; color: #64748b; cursor: pointer; padding: 6px; border-radius: 8px; }
+.lm-icon-btn:hover { background: #f1f5f9; color: #0f172a; }
+.lm-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.lm-lead { margin: 0; font-size: 13px; line-height: 1.5; color: #334155; }
+.lm-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; padding: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }
+.lm-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lm-field small { font-size: 11.5px; line-height: 1.45; color: #64748b; }
+.lm-label { font-size: 12.5px; font-weight: 600; color: #0f172a; }
+.lm-check, .lm-radio { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.lm-check span { font-weight: 600; }
+.lm-radios { display: flex; flex-direction: column; gap: 5px; }
+.lm-select { width: 100%; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 12.5px; background: #fff; min-height: 0; }
+.lm-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.lm-sec-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
+.lm-muted { font-size: 12px; color: #64748b; }
+.lm-timeline { position: relative; height: 26px; border-radius: 8px; background: #f1f5f9; margin-bottom: 10px; overflow: hidden; }
+.lm-tl-seg { position: absolute; top: 3px; bottom: 3px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; overflow: hidden; }
+.lm-tl-0 { background: #6366f1; }
+.lm-tl-1 { background: #8b5cf6; opacity: .92; }
+.lm-tl-overlap { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, rgba(255,255,255,.5) 0 3px, rgba(255,255,255,.15) 3px 6px); }
+.lm-tl-seg span { position: relative; }
+.lm-segments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.lm-seg { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #fff; }
+.lm-seg-done { border-color: #bbf7d0; background: #f0fdf4; }
+.lm-seg-error { border-color: #fecaca; background: #fef2f2; }
+.lm-seg-generating, .lm-seg-uploading, .lm-seg-cutting, .lm-seg-submitting { border-color: #c7d2fe; background: #eef2ff; }
+.lm-seg-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lm-seg-num { width: 24px; height: 24px; border-radius: 50%; background: #e0e7ff; color: #4338ca; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+.lm-seg-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; font-size: 13px; }
+.lm-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm-seg-actions { display: flex; gap: 6px; }
+.lm-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; }
+.lm-badge-done { background: #dcfce7; color: #15803d; }
+.lm-badge-error { background: #fee2e2; color: #b91c1c; }
+.lm-badge-generating, .lm-badge-uploading, .lm-badge-cutting, .lm-badge-submitting { background: #e0e7ff; color: #4338ca; }
+.lm-badge-queued { background: #fef3c7; color: #a16207; }
+.lm-seg-errtext { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: #fff; border: 1px solid #fecaca; color: #991b1b; font: 12px/1.5 inherit; white-space: pre-wrap; word-break: break-word; }
+.lm-video { display: block; width: 100%; max-width: 260px; max-height: 360px; margin-top: 8px; border-radius: 8px; background: #000; }
+.lm-video-final { max-width: 300px; max-height: 420px; }
+.lm-alert { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+.lm-alert svg { flex: none; margin-top: 2px; }
+.lm-alert-warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.lm-alert-info { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+.lm-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid #e2e8f0; background: #fff; }
+.lm-foot-info { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: #64748b; }
+.lm-foot-info strong { color: #0f172a; font-size: 13px; }
+.lm-foot-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.lm-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #0f172a; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 0; }
+.lm-btn:hover:not(:disabled) { background: #f8fafc; }
+.lm-btn:disabled { opacity: .5; cursor: not-allowed; }
+.lm-btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 8px; }
+.lm-btn-primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+.lm-btn-primary:hover:not(:disabled) { background: #4338ca; }
+.lm-btn-danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+.lm-btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.lm-btn-ghost { border-color: transparent; color: #64748b; }
+.lm-menu { position: relative; }
+.lm-menu-pop { position: absolute; right: 0; bottom: calc(100% + 6px); min-width: 280px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 12px 30px rgba(15, 23, 42, .2); padding: 6px; z-index: 5; }
+.lm-menu-pop button { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: #0f172a; }
+.lm-menu-pop button:hover:not(:disabled) { background: #f1f5f9; }
+.lm-menu-pop button:disabled { opacity: .5; cursor: wait; }
+.lm-menu-pop svg { margin-top: 3px; color: #4f46e5; flex: none; }
+.lm-menu-pop b { display: block; font-size: 13px; }
+.lm-menu-pop small { display: block; font-size: 11.5px; color: #64748b; margin-top: 1px; }
+.lm-busy { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); background: #0f172a; color: #fff; padding: 5px 12px; border-radius: 999px; font-size: 12px; }
+.lm-spin { animation: lm-spin 1s linear infinite; }
+@keyframes lm-spin { to { transform: rotate(360deg); } }
+/* Style toàn cục của app đặt input rộng 100% / có padding: ép lại cho ô chọn nhỏ */
+.lm-modal input[type="checkbox"], .lm-modal input[type="radio"] { width: 16px; height: 16px; min-width: 16px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: #4f46e5; }
+.lm-modal select { min-height: 0; }
+.lm-check, .lm-radio { justify-content: flex-start; text-align: left; width: 100%; }
+.lm-check span, .lm-radio span { flex: 0 1 auto; text-align: left; }
+@media (max-width: 640px) { .lm-overlay { padding: 0; } .lm-modal { max-height: 100vh; border-radius: 0; } .lm-foot-actions { width: 100%; } }

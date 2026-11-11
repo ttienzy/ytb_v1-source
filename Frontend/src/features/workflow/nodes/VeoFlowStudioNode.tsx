@@ -1247,7 +1247,25 @@ export function VeoFlowStudioNode({ data, selected }: VeoFlowStudioNodeProps) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ fontSize: 10.5, color: '#64748b', fontWeight: 600 }}>Thời lượng:</span>
-                {(data.durationOptions && data.durationOptions.length > 0 ? data.durationOptions : [4, 6, 8, 10]).map(
+                {(() => {
+                  const opts = data.durationOptions && data.durationOptions.length > 0 ? data.durationOptions : [4, 6, 8, 10]
+                  // Omni 1.2 có 13 mức (3–15s): dùng ô chọn cho gọn; ít mức thì giữ nút bấm như cũ.
+                  if (opts.length <= 6) return null
+                  return (
+                    <select
+                      aria-label="Thời lượng clip"
+                      data-testid="scene-duration-select"
+                      className="nodrag"
+                      value={currentScene.durationSec}
+                      onChange={(e) => data.onUpdateSceneDuration?.(safeTab, Number(e.target.value))}
+                      style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 4px', borderRadius: 4, border: '1px solid #c7d2fe', color: '#4338ca', background: '#fff' }}
+                    >
+                      {!opts.includes(currentScene.durationSec) && <option value={currentScene.durationSec}>{currentScene.durationSec}s (không hợp lệ)</option>}
+                      {opts.map((sec) => <option key={sec} value={sec}>{sec}s{sec > 10 ? ' (giá x2 từ giây 11)' : ''}</option>)}
+                    </select>
+                  )
+                })()}
+                {(data.durationOptions && data.durationOptions.length > 0 ? data.durationOptions : [4, 6, 8, 10]).filter(() => !(data.durationOptions && data.durationOptions.length > 6)).map(
                   (sec) => (
                     <button
                       key={sec}

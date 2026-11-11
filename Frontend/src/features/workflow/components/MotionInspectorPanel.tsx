@@ -475,7 +475,7 @@ export function MotionInspectorPanel({
                       <span style={{ fontSize: '10.5px', color: '#64748B' }}>Kết thúc (giây)</span>
                       <input
                         type="number"
-                        min={4}
+                        min={3}
                         max={60}
                         step={1}
                         value={motion.trimEndSec ?? 10}
@@ -492,7 +492,7 @@ export function MotionInspectorPanel({
                     </div>
                   </div>
                   <small style={{ fontSize: '10.5px', color: '#64748B' }}>
-                    Flow dùng đoạn nguồn từ 4 đến tối đa 10 giây. Thời lượng đầu ra được tính từ đoạn trim này.
+                    Flow dùng đoạn nguồn từ 3 đến tối đa 10 giây. Thời lượng đầu ra được tính từ đoạn trim này.
                   </small>
                 </div>
               </div>

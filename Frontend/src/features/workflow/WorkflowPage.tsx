@@ -76,6 +76,7 @@ import {
 import { useWorkflowRendering } from './hooks/useWorkflowRendering.ts'
 import { runRealWorkflow } from './services/workflowRunner'
 import { getWorkflowConfig, loadWorkflowConfig } from './services/workflowConfig.ts'
+import { durationOptionsFor } from './services/veoModelPolicy.ts'
 import { useWorkflowState } from './hooks/useWorkflowState.ts'
 import { buildVoiceoverPlan, selectCachedVoiceoverPath } from './services/workflowAudio.ts'
 import { isValidWorkflowConnection } from './services/workflowGraph.ts'
@@ -890,8 +891,8 @@ function WorkflowCanvas() {
     })
   }, [])
 
-  // Trigger Gemini or 9Router Analysis directly via Backend API (Sử dụng graphResolver & workflowApi)
-  const handleAnalyzeGemini = useCallback(async (nodeId: string, provider: 'gemini' | '9router' = 'gemini') => {
+  // Phân tích bằng Gemini web hoặc tài khoản ChatGPT web qua Backend API (graphResolver & workflowApi)
+  const handleAnalyzeGemini = useCallback(async (nodeId: string, provider: 'gemini' | 'chatgpt' = 'gemini') => {
     if (!configReady || taskKeys.current.has(nodeId)) return
     const targetNode = nodes.find((n) => n.id === nodeId)
     const promptToSend = (targetNode?.data?.prompt as string) || ''
@@ -1729,7 +1730,7 @@ function WorkflowCanvas() {
             onResetSystemPrompt: () => handleResetGeminiSystemPrompt(node.id),
             onAnalyze: () => handleAnalyzeGemini(node.id, 'gemini'),
             onRefreshCookie: () => handleRefreshGeminiCookie(node.id),
-            onAnalyze9Router: () => handleAnalyzeGemini(node.id, '9router'),
+            onAnalyzeChatGpt: () => handleAnalyzeGemini(node.id, 'chatgpt'),
           },
         }
       }
@@ -1843,16 +1844,9 @@ function WorkflowCanvas() {
               model: (sourceGptNode.data?.model as string) || getWorkflowConfig().defaultScriptModel,
             })
           : false
-        const durationOptions = [...new Set(
-          (veoCapabilities?.profiles || [])
-            .filter((profile) =>
-              profile.input_mode === 'text_to_video' &&
-              profile.model_display_name === veoVideoConfig.model &&
-              profile.aspect_ratio === veoVideoConfig.aspectRatio &&
-              profile.resolution === veoVideoConfig.resolution
-            )
-            .map((profile) => profile.duration_seconds)
-        )].sort((a, b) => a - b)
+        // Omni 1.2: clip có ảnh tham chiếu đi Ingredients 3–15s; model khác giữ thời lượng tạo-từ-chữ như cũ.
+        const durationOptions = durationOptionsFor(veoCapabilities?.profiles || [], veoVideoConfig.model,
+          veoVideoConfig.aspectRatio, veoVideoConfig.resolution)
 
         const prodRes = resolveProductAssetsInput({ nodes, edges, targetNodeId: node.id })
         const prodNode = nodes.find(

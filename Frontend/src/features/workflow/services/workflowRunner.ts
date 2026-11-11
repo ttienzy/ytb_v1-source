@@ -101,9 +101,10 @@ function optionalParent(context: RunContext, node: Node, type: 'geminiAnalysis' 
   return sources[0] || null
 }
 
-function providerFor(node: Node): 'gemini' | '9router' {
+function providerFor(node: Node): 'gemini' | 'chatgpt' {
   const value = node.data.analysisProvider ?? node.data.providerUsed ?? 'gemini'
-  if (value !== 'gemini' && value !== '9router') throw new WorkflowGraphError(node.id, `Unsupported analysis provider: ${value}`)
+  if (value === '9router') return 'chatgpt'          // sơ đồ cũ đã lưu: 9router được thay bằng tài khoản ChatGPT web
+  if (value !== 'gemini' && value !== 'chatgpt') throw new WorkflowGraphError(node.id, `Unsupported analysis provider: ${value}`)
   return value
 }
 

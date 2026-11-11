@@ -33,7 +33,7 @@ export function SceneVideoNode({ data, selected }: SceneVideoNodeProps) {
               Cảnh #{data.sceneNumber}: {data.title || 'Phân cảnh'}
             </div>
             <div style={{ fontSize: 10, color: '#fb7185', fontWeight: 600 }}>
-              Google Veo 3.0 • Flow Engine
+              Google Flow · Omni
             </div>
           </div>
         </div>
