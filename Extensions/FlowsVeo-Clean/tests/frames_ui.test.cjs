@@ -60,3 +60,12 @@ test('workflow continuation uses eb1hJf with exact single-frame model and image'
  assert.throws(()=>matchFrameRequest(body,{...single,provider_model_id:'abra_r2v_10s'},[ids[0]]),/different frames/);
  assert.throws(()=>matchFrameRequest(body,single,['wrong-frame']),/different frames/);
 });
+test('start-frame-only response (eb1hJf) has a null asset type but is still accepted',async()=>{
+ const {parseFrameCreation}=await api;
+ const asset=(type)=>[ '33333333-3333-3333-3333-333333333333',req.project_id,'11111111-1111-1111-1111-111111111111',type,null,[123,req.prompt]];
+ const body=(assets)=>")]}'\n9\n"+JSON.stringify([['wrb.fr','eb1hJf',JSON.stringify([null,7,[['x']],assets]),null,null,null,'generic']]);
+ assert.deepEqual(parseFrameCreation(body([asset(null)]),'eb1hJf',req),{mediaId:'33333333-3333-3333-3333-333333333333',sceneId:'11111111-1111-1111-1111-111111111111'});
+ // still strict: two matching assets, or an unknown asset type, must not be guessed
+ assert.throws(()=>parseFrameCreation(body([asset(null),asset('CAE')]),'eb1hJf',req),/no unique/);
+ assert.throws(()=>parseFrameCreation(body([asset('XYZ')]),'eb1hJf',req),/no unique/);
+});

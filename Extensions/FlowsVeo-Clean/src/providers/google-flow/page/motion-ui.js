@@ -49,6 +49,12 @@ export function motionUiStep(action, req) {
       && el.getBoundingClientRect().height > 0 && window.getComputedStyle(el).visibility !== 'hidden';
     const norm = (value) => String(value || '').normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '').replace(/\u0111/gi, 'd').replace(/\s+/gu, ' ').trim().toLowerCase();
+    // Tên model khớp theo TỪNG TỪ: Flow ghi "Omni Flash 1.2" còn app gọi "Omni 1.2 Flash"; "1.2" vẫn phân biệt với "1.1".
+    const sameModel = (value) => {
+      const words = norm(req.model_display_name).split(' ').filter(Boolean);
+      const have = new Set(String(value || '').split(/\s+/));
+      return words.length > 0 && words.every((w) => have.has(w));
+    };
     const text = (el) => {
       const clone = el.cloneNode(true);
       clone.querySelectorAll('[aria-hidden="true"]').forEach((item) => item.remove());
@@ -175,12 +181,12 @@ export function motionUiStep(action, req) {
     }
     if (action === 'modelMenu') {
       const button = modelButton();
-      return button && text(button).includes(norm(req.model_display_name)) ? null : point(button);
+      return button && sameModel(text(button)) ? null : point(button);
     }
     if (action === 'model') {
       const button = modelButton();
-      if (button && text(button).includes(norm(req.model_display_name))) return null;
-      const option = find('[role="menuitem"]', (el) => text(el) === norm(req.model_display_name) || text(el).includes(norm(req.model_display_name)));
+      if (button && sameModel(text(button))) return null;
+      const option = find('[role="menuitem"]', (el) => sameModel(text(el)));
       return option ? point(option) : null;
     }
     if (action === 'verifySettings') {
@@ -199,7 +205,7 @@ export function motionUiStep(action, req) {
         labels.push(`Duration ${req.duration_seconds}s`);
       }
       const mismatches = labels.filter((_, i) => choices[i]?.getAttribute('aria-checked') !== 'true');
-      const modelOk = modelButton() && text(modelButton()).includes(norm(req.model_display_name));
+      const modelOk = modelButton() && sameModel(text(modelButton()));
       if (mismatches.length > 0 || !modelOk) {
         const diagParts = [];
         if (!modelOk) diagParts.push(`Model button not showing "${req.model_display_name}"`);

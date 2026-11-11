@@ -1,3 +1,4 @@
+import { ensureTabVisible } from './visibility.js';
 import { imageUiStep } from './page/image-ui.js';
 import { sleep } from '../../shared/time.js';
 
@@ -87,31 +88,80 @@ export async function generateImageThroughUi(request, tabId) {
   if (request.reference_image_ids?.length) return { ok: false, error: 'FLOW_UI: Luồng tạo ảnh qua giao diện hiện chưa hỗ trợ ảnh tham chiếu.' };
   if (!chrome.debugger) return { ok: false, error: 'FLOW_UI: Hãy tải lại extension FlowsVeo Clean để cấp quyền điều khiển tab Flow.' };
   const target = { tabId };
-  let attached = false, armed = false, settled = false, requestId = null, nativeRequest = null;
-  let timeout, resolveResult;
+  let attached = false, armed = false, settled = false, nativeRequest = null;
+  let timeout, resolveResult, graceTimer = null, recovering = false;
+  const tracked = new Set(); // các request ogiZ0b khớp prompt đang chờ response
   const result = new Promise((resolve) => { resolveResult = resolve; });
   const finish = (value) => { if (!settled) { settled = true; resolveResult(value); } };
   const fail = (message) => finish({ ok: false, error: `FLOW_UI: ${message}` });
   const command = (method, params = {}) => chrome.debugger.sendCommand(target, method, params);
+  const NET_GRACE_MS = 12_000;
+  // Response bị mất không có nghĩa Flow chưa tạo: ảnh có thể đã vào thư viện project.
+  const recoverFromGallery = async (reason) => {
+    if (settled || recovering || tracked.size) return;
+    recovering = true;
+    const wanted = Math.min(Math.max(request.count || 1, 1), 4);
+    const deadline = Date.now() + 45_000;
+    let found = [];
+    while (!settled && Date.now() < deadline) {
+      try { found = await step('newImages'); } catch { found = []; }
+      if (found.length >= wanted) break;
+      await sleep(3000);
+    }
+    if (settled) return;
+    if (!found.length) {
+      return fail(reason === 'timeout'
+        ? 'Hết thời gian chờ. Ảnh có thể vẫn đang tạo; kiểm tra Flow trước khi thử lại.'
+        : `Kết nối tạo ảnh bị ngắt (${reason}). Kiểm tra ảnh trong Flow trước khi thử lại.`);
+    }
+    finish({
+      ok: true,
+      project_id: request.project_id,
+      prompt: request.prompt,
+      images: found.slice(0, 4).map((asset) => ({
+        media_id: asset.media_id,
+        image_url: asset.image_url,
+        seed: null,
+        dimensions: null,
+        model_key: request.model_key,
+        aspect_ratio: request.aspect_ratio,
+      })),
+      diagnostics: { adapter: 'flow-ui-v1', trigger_method: 'gallery-recovery', rpc: 'ogiZ0b', count: found.length, recovered_after: reason },
+    });
+  };
   const onEvent = (source, method, params) => {
     if (source.tabId !== tabId || source.sessionId || settled || !armed) return;
-    if (method === 'Network.requestWillBeSent' && !requestId) {
+    if (method === 'Network.requestWillBeSent') {
       const req = params.request;
       if (!req?.url?.startsWith('https://flow.google.com/') || !req.url.includes('/data/batchexecute') || !req.postData) return;
       try {
         const match = matchImageUiRequest(req.postData, request);
-        if (match) { requestId = params.requestId; nativeRequest = match; }
+        if (match) {
+          tracked.add(params.requestId);
+          nativeRequest = nativeRequest || match;
+          if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; } // Flow tự gửi lại request
+        }
       } catch (error) { fail(error.message); }
-    } else if (params.requestId === requestId && requestId) {
-      if (method === 'Network.loadingFailed') fail('Kết nối tạo ảnh bị ngắt. Kiểm tra ảnh trong Flow trước khi thử lại.');
-      if (method === 'Network.responseReceived' && params.response.status !== 200) fail(`Flow trả HTTP ${params.response.status}. Kiểm tra tab Flow.`);
-      if (method === 'Network.loadingFinished') {
-        command('Network.getResponseBody', { requestId }).then((response) => {
-          const body = response.base64Encoded ? new TextDecoder().decode(Uint8Array.from(atob(response.body), (c) => c.charCodeAt(0))) : response.body;
-          try { finish(parseImageUiResponse(body, request, nativeRequest)); }
-          catch (error) { fail(error.message); }
-        }).catch(() => fail('Không đọc được kết quả tạo ảnh. Kiểm tra ảnh trong Flow trước khi thử lại.'));
+      return;
+    }
+    if (!tracked.has(params.requestId)) return;
+    if (method === 'Network.loadingFailed') {
+      tracked.delete(params.requestId);
+      const detail = `${params.errorText || 'lỗi mạng'}${params.canceled ? ', bị hủy' : ''}`;
+      if (!tracked.size) {
+        if (graceTimer) clearTimeout(graceTimer);
+        graceTimer = setTimeout(() => recoverFromGallery(detail), NET_GRACE_MS);
       }
+    } else if (method === 'Network.responseReceived' && params.response.status !== 200) {
+      fail(`Flow trả HTTP ${params.response.status}. Kiểm tra tab Flow.`);
+    } else if (method === 'Network.loadingFinished') {
+      const finishedId = params.requestId;
+      command('Network.getResponseBody', { requestId: finishedId }).then((response) => {
+        const body = response.base64Encoded ? new TextDecoder().decode(Uint8Array.from(atob(response.body), (c) => c.charCodeAt(0))) : response.body;
+        tracked.delete(finishedId);
+        try { finish(parseImageUiResponse(body, request, nativeRequest)); }
+        catch (error) { fail(error.message); }
+      }).catch(() => { tracked.delete(finishedId); recoverFromGallery('không đọc được response'); });
     }
   };
   const onDetach = (source) => { if (source.tabId === tabId) fail('Chrome ngắt điều khiển tab. Kiểm tra ảnh trong Flow trước khi thử lại.'); };
@@ -133,9 +183,10 @@ export async function generateImageThroughUi(request, tabId) {
   try {
     await chrome.debugger.attach(target, '1.3');
     attached = true;
+    await ensureTabVisible(tabId);
     chrome.debugger.onEvent.addListener(onEvent);
     chrome.debugger.onDetach.addListener(onDetach);
-    timeout = setTimeout(() => fail('Hết thời gian chờ. Ảnh có thể vẫn đang tạo; kiểm tra Flow trước khi thử lại.'), 130_000);
+    timeout = setTimeout(() => { tracked.clear(); recoverFromGallery('timeout'); }, 130_000);
     await command('Network.enable', { maxPostDataSize: 1024 * 1024, maxResourceBufferSize: 5 * 1024 * 1024, maxTotalBufferSize: 10 * 1024 * 1024 });
     await step('lock');
     await click(await step('closeAccount'));
@@ -176,6 +227,7 @@ export async function generateImageThroughUi(request, tabId) {
     if (!submitPoint) {
       submitPoint = await step('generate');
     }
+    request._before_ids = await step('snapshotImages').catch(() => []); // mốc để phục hồi nếu mất response
     armed = true;
     await click(submitPoint); // Exactly one submit. Never replay a failed/unknown generation.
     return await result;
@@ -185,6 +237,7 @@ export async function generateImageThroughUi(request, tabId) {
   } finally {
     settled = true;
     clearTimeout(timeout);
+    if (graceTimer) clearTimeout(graceTimer);
     chrome.debugger.onEvent.removeListener(onEvent);
     chrome.debugger.onDetach.removeListener(onDetach);
     await chrome.scripting.executeScript({ target, world: 'MAIN', func: imageUiStep, args: ['unlock', request] }).catch(() => {});

@@ -1,3 +1,5 @@
+import { createLostGenerationFinder } from './lost-generation.js';
+import { ensureTabVisible } from './visibility.js';
 import { videoUiStep } from './page/video-ui.js';
 import { sleep } from '../../shared/time.js';
 import { recoverCurrentSceneInPage } from './page/recovery.js';
@@ -106,6 +108,14 @@ export function parseVideoUiCreateResponse(body, expected = null) {
   const record = records.find((item) => !expected?.project_id || item[1] === expected.project_id);
   if (record) {
     return { mediaId: record[0], sceneId: record[2] || null, projectId: record[1] || null };
+  }
+
+  // Format từ ~2026-11 (HAR 2026-11-09): không còn cờ 'CAE'/'CAM'. Record media nằm ở payload[3][0] = [mediaId, projectId, sceneId, ...];
+  // payload[2][0][0] là id khác (scene/workflow), KHÔNG được dùng làm media id.
+  const modern = response.payload?.[3]?.[0];
+  if (Array.isArray(modern) && isUuid(modern[0]) && isUuid(modern[1])
+    && (!expected?.project_id || modern[1] === expected.project_id)) {
+    return { mediaId: modern[0], sceneId: modern[2] || null, projectId: modern[1] };
   }
 
   if (response.rpcId === 'nprQif') {
@@ -217,6 +227,23 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
   const command = (method, params = {}) => chrome.debugger.sendCommand(target, method, params);
 
   let capturedMediaId = null;
+  let findLost = null, recovering = false;
+  // Flow có thể tự hủy request tạo trong khi server vẫn tạo video: tìm lại theo prompt + thời điểm, không gửi lại.
+  const recoverLostGeneration = async (detail) => {
+    if (recovering || settled || !findLost) return;
+    recovering = true;
+    clearTimeout(timeout);
+    logActivity('warn', `Flow hủy request tạo video (${detail}) — không gửi lại, đi tìm video trên server`);
+    const deadline = Date.now() + 70_000;
+    try {
+      while (!settled && Date.now() < deadline) {
+        const found = await findLost();
+        if (found) { finish({ ok: true, media_id: found.mediaId }); return; }
+        await sleep(1000);
+      }
+    } catch (error) { fail(error.message); return; }
+    fail(`Kết nối tạo video bị ngắt (${detail}). Không tìm thấy video mới trên Flow; kiểm tra Flow trước khi thử lại.`);
+  };
 
   const onEvent = (source, method, params) => {
     if (source.tabId !== tabId || source.sessionId) return;
@@ -239,7 +266,7 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
         else if (match) requestId = params.requestId;
       } catch (error) { fail(error.message); }
     } else if (params.requestId === requestId && requestId) {
-      if (method === 'Network.loadingFailed') fail('Kết nối tạo video bị ngắt.');
+      if (method === 'Network.loadingFailed') recoverLostGeneration(`${params.errorText || 'lỗi mạng'}${params.canceled ? ', bị hủy' : ''}`);
       if (method === 'Network.responseReceived' && params.response.status !== 200) fail(`Flow trả HTTP ${params.response.status}.`);
       if (method === 'Network.loadingFinished') {
         command('Network.getResponseBody', { requestId }).then((response) => {
@@ -327,6 +354,7 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
   try {
     await chrome.debugger.attach(target, '1.3');
     attached = true;
+    await ensureTabVisible(tabId);
     chrome.debugger.onEvent.addListener(onEvent);
     chrome.debugger.onDetach.addListener(onDetach);
     timeout = setTimeout(() => fail('Timed out waiting for the Flow video request.'), isFrames ? 180_000 : 60_000);
@@ -399,6 +427,7 @@ export async function generateVideoThroughUi(flowRequest, tabId) {
       submitPoint = await step('generate');
     }
 
+    findLost = createLostGenerationFinder(tabId, flowRequest, Date.now());
     armed = true;
     // Click nút tạo video bằng hardware mouse event
     await click(submitPoint);

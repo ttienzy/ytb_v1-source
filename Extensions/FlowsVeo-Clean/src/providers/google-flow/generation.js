@@ -1,3 +1,4 @@
+import { ensureCleanComposer } from './composer.js';
 import { generateIngredientsThroughUi } from './ingredients-ui.js';
 import { generateFramesThroughUi } from './frames-ui.js';
 import { logActivity } from '../../background/runtime/log.js';
@@ -8,23 +9,30 @@ import { generateMotionVideoThroughUi } from './motion-ui.js';
 import { runImageGenerationInPage } from './page/image.js';
 import { recoverCurrentSceneInPage } from './page/recovery.js';
 import { runFlowGenerationInPage } from './page/video.js';
+import { canUseHttpVideo, runFlowHttpVideoInPage } from './page/video-http.js';
 import { ensureProjectTab, findLabsTab, waitForTabComplete } from './tabs.js';
 import { warmUpRecaptcha } from './recaptcha-probe.js';
 
 export async function generateFlowVideo(flowRequest, captchaToken) {
   const hasDebugger = typeof chrome !== 'undefined' && Boolean(chrome?.debugger);
-  if (flowRequest?.input_mode === 'frames' || flowRequest?.input_mode === 'ingredients') {
+  // Frames (i2v_fl) và Ingredients (r2v) của Omni 1.2 đi đường HTTP; giao diện chỉ hỗ trợ Omni 1.1.
+  const httpFrames = (flowRequest?.input_mode === 'frames' || flowRequest?.input_mode === 'ingredients') && canUseHttpVideo(flowRequest);
+  if ((flowRequest?.input_mode === 'frames' || flowRequest?.input_mode === 'ingredients') && !httpFrames) {
     if (!hasDebugger) return { ok: false, error: 'FLOW_UI: Reload FlowsVeo to enable native browser control for Frames/Ingredients.' };
     const tabId = await ensureProjectTab(flowRequest.project_id, { flowOnly: true });
     if (!tabId) return { ok: false, error: 'FLOW_UI: Không mở được project Flow.' };
+    await ensureCleanComposer(tabId);
     return flowRequest.input_mode === 'ingredients'
       ? generateIngredientsThroughUi(flowRequest, tabId)
       : generateFramesThroughUi(flowRequest, tabId);
   }
-  if (flowRequest?.input_mode === 'video_edit') {
+  // Motion Control (Omni 1.2 macaron_cookie_edit) đi HTTP jIps6 như các chế độ khác; giao diện chỉ còn cho tổ hợp chưa có HAR
+  // (vd. không có ảnh tham chiếu nào) hoặc khi backend ép transport='ui'.
+  if (flowRequest?.input_mode === 'video_edit' && !canUseHttpVideo(flowRequest)) {
     if (!hasDebugger) return { ok: false, error: 'FLOW_UI: Reload FlowsVeo to enable native browser control for Motion Control.' };
     const tabId = await ensureProjectTab(flowRequest.project_id, { flowOnly: true });
     if (!tabId) return { ok: false, error: 'FLOW_UI: Không mở được project Flow cho Motion Control.' };
+    await ensureCleanComposer(tabId);
     return generateMotionVideoThroughUi(flowRequest, tabId);
   }
 
@@ -52,12 +60,32 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
   const isIngredients = flowRequest?.input_mode === 'ingredients';
   const isVideoEdit = flowRequest?.input_mode === 'video_edit';
 
-  if (!isFrames && !isIngredients && !isVideoEdit && hasDebugger) {
+  // Đường HTTP thuần (không bấm UI): chỉ khi request yêu cầu transport='http' và đúng tổ hợp đã chứng minh.
+  const useHttp = canUseHttpVideo(flowRequest);
+  const generationFn = useHttp ? runFlowHttpVideoInPage : runFlowGenerationInPage;
+  // Luồng cũ có solveRecaptcha() chờ module reCAPTCHA sẵn sàng trước khi gửi; đường HTTP không giải token trước nên tự chờ ở đây.
+  // Nếu module chưa nạp, hàm in-page báo lỗi TRƯỚC khi gửi (submitted=false) và job rơi về đường giao diện.
+  if (useHttp) await warmUpRecaptcha(tabId, 8000).catch(() => null);
+
+  if (!isFrames && !isIngredients && !isVideoEdit && hasDebugger && !useHttp) {
+    await ensureCleanComposer(tabId);
     logActivity('info', `Running Video UI Automation on tab=${tabId}`);
     return await generateVideoThroughUi(flowRequest, tabId);
   }
 
-  logActivity('info', `Running In-Page RPC generation for ${flowRequest?.input_mode} on tab=${tabId}`);
+  // Chỉ fallback sang UI khi HTTP thất bại TRƯỚC khi Flow nhận job (submitted=false): tránh tạo trùng và trừ credit hai lần.
+  const fallbackToUiIfNotSubmitted = async (result, isRetry = false) => {
+    if (!useHttp || !result || result.ok || result.submitted !== false || !hasDebugger) return null;
+    // Giao diện không tạo được frames/ingredients của Omni 1.2 (generateVideoThroughUi là tạo video từ chữ, sẽ tốn credit mà mất ảnh tham chiếu): báo thẳng lỗi.
+    if (['frames', 'ingredients', 'video_edit'].includes(flowRequest?.input_mode)) return null;
+    // Session cũ: để nhánh reload tab + thử lại bên dưới xử lý trước
+    if (!isRetry && /session ID không hợp lệ|session config is incomplete/i.test(result.error || '')) return null;
+    logActivity('warn', `HTTP video path failed before submit (${result.error}); falling back to UI automation`);
+    await ensureCleanComposer(tabId);
+    return generateVideoThroughUi(flowRequest, tabId);
+  };
+
+  logActivity('info', `Running ${useHttp ? 'HTTP (no-UI)' : 'In-Page RPC'} generation for ${flowRequest?.input_mode} on tab=${tabId}`);
 
   const recoverLostResult = async (originalError) => {
     // Khi executeScript bị ngắt (do Flow đổi router / DOM repaint / context reset),
@@ -103,10 +131,12 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
 
   try {
     const injected = await chrome.scripting.executeScript({
-      target: { tabId }, world: 'MAIN', func: runFlowGenerationInPage,
+      target: { tabId }, world: 'MAIN', func: generationFn,
       args: [flowRequest, captchaToken],
     });
     const result = injected?.[0]?.result;
+    const uiFallback = await fallbackToUiIfNotSubmitted(result);
+    if (uiFallback) return uiFallback;
 
     // Khi session ID không hợp lệ (WIZ_global_data chưa sẵn sàng), reload tab và retry 1 lần
     if (result && !result.ok && result.error && /session ID không hợp lệ|session config is incomplete/i.test(result.error)) {
@@ -122,10 +152,12 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
       // Retry lần 2 sau khi reload
       try {
         const retryInjected = await chrome.scripting.executeScript({
-          target: { tabId }, world: 'MAIN', func: runFlowGenerationInPage,
+          target: { tabId }, world: 'MAIN', func: generationFn,
           args: [flowRequest, captchaToken],
         });
         const retryResult = retryInjected?.[0]?.result;
+        const retryUiFallback = await fallbackToUiIfNotSubmitted(retryResult, true);
+        if (retryUiFallback) return retryUiFallback;
         if (retryResult) {
           if (retryResult.ok || !/Flow page returned no result/i.test(retryResult.error || '')) return retryResult;
           return recoverLostResult(retryResult.error);
@@ -169,6 +201,7 @@ export async function generateFlowImage(imageRequest, captchaToken, pinnedTabId 
 
   const hasDebugger = typeof chrome !== 'undefined' && Boolean(chrome?.debugger);
   if (hasDebugger) {
+    await ensureCleanComposer(tabId);
     logActivity('info', `Running Image UI Automation on tab=${tabId}`);
     return await generateImageThroughUi(imageRequest, tabId);
   }

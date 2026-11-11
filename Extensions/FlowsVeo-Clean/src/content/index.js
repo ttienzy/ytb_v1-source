@@ -239,11 +239,11 @@
 
       // 1. Quét document.body innerText
       const bodyText = (document.body && document.body.innerText) || '';
-      const flowMatch = bodyText.match(/(\d+[\d,.]*)\s+Google\s+Flow\s+credits/i);
+      const flowMatch = bodyText.match(/(\d+[\d,.]*)\s+(?:Google\s+Flow\s+credits|tín\s*dụng\s+Google\s+Flow)/i);
       if (flowMatch) {
         foundCredits = parseInt(flowMatch[1].replace(/[,.]/g, ''), 10);
       } else {
-        const matches = [...bodyText.matchAll(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/gi)]
+        const matches = [...bodyText.matchAll(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/gi)]
           .map(m => parseInt(m[1].replace(/[,.]/g, ''), 10))
           .filter(n => !isNaN(n) && n > 0 && ![4, 5, 6, 7, 10, 12, 15, 20, 40, 100].includes(n));
         if (matches.length > 0) foundCredits = Math.max(...matches);
@@ -255,14 +255,14 @@
         let node;
         while ((node = walker.nextNode())) {
           const t = node.textContent || '';
-          if (/credits/i.test(t)) {
-            const m = t.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+          if (/credits|tín\s*dụng\s*Google\s*Flow/i.test(t)) {
+            const m = t.match(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/i);
             if (m) {
               foundCredits = parseInt(m[1].replace(/[,.]/g, ''), 10);
               break;
             }
             const pt = node.parentElement?.textContent || '';
-            const pm = pt.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+            const pm = pt.match(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/i);
             if (pm) {
               foundCredits = parseInt(pm[1].replace(/[,.]/g, ''), 10);
               break;
@@ -274,7 +274,7 @@
       // 3. Quét Shadow DOM
       if (foundCredits === null) {
         const fullDeep = extractDeepText(document.body);
-        const dm = fullDeep.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+        const dm = fullDeep.match(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/i);
         if (dm) foundCredits = parseInt(dm[1].replace(/[,.]/g, ''), 10);
       }
 
@@ -331,16 +331,29 @@
       });
 
       if (avatarBtn) {
-        avatarBtn.click();
-        await new Promise((r) => setTimeout(r, 450));
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const accountCloseBtn = () => {
+          const el = document.querySelector('button[aria-label="Đóng bảng điều khiển tài khoản" i], button[aria-label="Close account panel" i]');
+          return el && el.getBoundingClientRect().width > 0 ? el : null;
+        };
+        // Bảng đã mở sẵn thì không bấm avatar: bấm lần nữa sẽ đóng nó và đảo trạng thái.
+        const alreadyOpen = Boolean(accountCloseBtn());
+        if (!alreadyOpen) avatarBtn.click();
+        // Bảng tài khoản render chậm hơn khi tab bị che: chờ tới khi thấy số dư thay vì cố định 450ms.
+        for (let i = 0; i < 16; i++) {
+          await wait(150);
+          if (/tín\s*dụng\s+Google\s+Flow|Google\s+Flow\s+credits/i.test(document.body?.innerText || '')) break;
+        }
         scanCreditsAndAccount();
-        const closeBtn = document.querySelector(
-          'button[aria-label="Close" i], button[aria-label="Đóng" i], button[aria-label*="close" i], [aria-label*="Close dialog" i]'
-        );
-        if (closeBtn) {
-          closeBtn.click();
-        } else {
-          avatarBtn.click();
+        if (accountCloseBtn()) {
+          await wait(400); // bấm đóng trong lúc bảng còn chạy hiệu ứng mở sẽ bị bỏ qua
+          for (let i = 0; i < 4 && accountCloseBtn(); i++) {
+            accountCloseBtn().click();
+            await wait(500);
+          }
+        } else if (!alreadyOpen) {
+          const closeBtn = document.querySelector('button[aria-label="Close" i], button[aria-label="Đóng" i], button[aria-label*="close" i], [aria-label*="Close dialog" i]');
+          if (closeBtn) closeBtn.click(); else avatarBtn.click();
         }
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
       }

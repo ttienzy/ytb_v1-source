@@ -5,15 +5,17 @@ const { harness, until } = require('../helpers/runtime.cjs');
 function dispatcher(overrides = {}) {
   const h = harness([
     'src/background/jobs/dispatch.js','src/background/runtime/maintenance.js',
-    'src/providers/google-flow/page/video.js','src/providers/google-flow/page/image.js',
+    'src/providers/google-flow/page/video.js','src/providers/google-flow/page/video-http.js','src/providers/google-flow/page/image.js',
     'src/providers/google-flow/page/captcha.js','src/providers/google-flow/page/upload.js',
     'src/providers/google-flow/page/recovery.js',
     'src/background/runtime/alarms.js','src/background/runtime/polling.js','src/bridge/config.js',
   ], overrides);
   const pending = new Map();
+  h.executed = [];
   h.chrome.scripting.executeScript = async ({ func, args = [], target }) => {
     if (func === h.api.inspectRecaptchaInPage) return [{ result: { available: true, moduleReady: true, siteKey: 'fixture-site-key' } }];
-    if (func === h.api.runFlowGenerationInPage || func === h.api.runImageGenerationInPage) {
+    if (func === h.api.runFlowGenerationInPage || func === h.api.runFlowHttpVideoInPage || func === h.api.runImageGenerationInPage) {
+      h.executed.push(func === h.api.runFlowHttpVideoInPage ? 'http' : 'legacy');
       return new Promise(resolve => pending.set(args[0].prompt, { target, resolve: result => resolve([{ result }]) }));
     }
     if (func === h.api.runVideoUploadInPage) return [{ result: { ok: true, media_id: 'upload-media', project_id: args[0].project_id } }];
@@ -139,4 +141,48 @@ test('explicit recovery reports through flow response without a new CAPTCHA job'
   assert.equal(h.requests[0].path,'/flow/response');
   assert.equal(h.requests[0].body.request_id,'recover-only');
   assert.equal(h.requests[0].body.result.media_id,'recovered-media');
+});
+
+
+const httpRequest = (prompt, extra = {}) => ({
+  prompt, project_id: 'project-test', input_mode: 'text_to_video', transport: 'http', provider_model_id: 'macaron_cookie_t2v_10s',
+  resolution: '720p', aspect_ratio: '9:16', num_outputs: 1, http_no_captcha: true, ...extra,
+});
+
+test('HTTP job skips the redundant pre-solved captcha and still returns its result by request id', async () => {
+  const h = dispatcher();
+  await h.api.processCaptchaRequest({ request_id: 'http-a', flow_request: httpRequest('http-a') });
+  await until(() => h.pending.has('http-a'));
+  assert.deepEqual(h.executed, ['http']);
+  assert.equal(h.requests.some(r => r.path === '/captcha/response'), false, 'không được giải/đẩy token thừa');
+  assert.equal(h.api.runtime.activeGenerationCount, 1);
+  h.pending.get('http-a').resolve({ ok: true, media_id: 'media-http', transport: 'http' });
+  await until(() => h.api.runtime.activeGenerationCount === 0);
+  assert.deepEqual(h.requests.filter(r => r.path === '/flow/response').map(r => [r.body.request_id, r.body.result.media_id]), [['http-a', 'media-http']]);
+});
+
+test('HTTP job failure releases the counter and reports the error', async () => {
+  const h = dispatcher();
+  await h.api.processCaptchaRequest({ request_id: 'http-f', flow_request: httpRequest('http-f') });
+  await until(() => h.pending.has('http-f'));
+  h.pending.get('http-f').resolve({ ok: false, submitted: true, error: 'Flow render ended with status 4' });
+  await until(() => h.api.runtime.activeGenerationCount === 0);
+  assert.deepEqual(h.requests.find(r => r.path === '/flow/response').body, { request_id: 'http-f', result: null, error: 'Flow render ended with status 4' });
+});
+
+test('captcha is still pre-solved when the backend flag or the extension eligibility is missing (no backend hang)', async () => {
+  // [id, request, đường tạo video thực sự được dùng sau khi giải captcha]
+  for (const [id, req, expectedPath] of [
+    ['no-flag', httpRequest('no-flag', { http_no_captcha: false }), 'http'], // vẫn đủ điều kiện HTTP, chỉ tốn thêm một token
+    ['legacy-model', httpRequest('legacy-model', { provider_model_id: 'abra_t2v_6s' }), 'legacy'],
+    ['res-mismatch', httpRequest('res-mismatch', { resolution: '360p' }), 'legacy'],
+  ]) {
+    const h = dispatcher();
+    await h.api.processCaptchaRequest({ request_id: id, flow_request: req });
+    await until(() => h.pending.has(id));
+    assert.equal(h.requests.filter(r => r.path === '/captcha/response').length, 1, id);
+    assert.deepEqual(h.executed, [expectedPath], id);
+    h.pending.get(id).resolve({ ok: true, media_id: 'm' });
+    await until(() => h.api.runtime.activeGenerationCount === 0);
+  }
 });

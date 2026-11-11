@@ -1,3 +1,4 @@
+import { ensureTabVisible } from './visibility.js';
 import { videoUploadUiStep } from './page/video-upload-ui.js';
 import { sleep } from '../../shared/time.js';
 
@@ -30,6 +31,38 @@ export function parseUploadResult(body, expectedProjectId) {
     return null;
   };
   return walk(value);
+}
+
+const COVERED = /^A window is covering the Flow upload control/;
+const UPLOAD_MENU_ATTEMPTS = 3;
+
+async function pressEscape(command) {
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => {});
+  await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => {});
+}
+
+/**
+ * Open Flow's "+" menu and click its upload item. A leftover menu, dialog or overlay backdrop can cover
+ * either control: close it (backdrop click, then Escape) and reopen the menu from scratch.
+ * Only menus are opened here; nothing is uploaded or generated until the file chooser gets the file.
+ */
+export async function openUploadChooser({ step, click, pressEscape, wait = sleep, attempts = UPLOAD_MENU_ATTEMPTS }) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await click(await step('openPicker'));
+      await click(await step('upload'));
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!COVERED.test(error?.message || '')) throw error;
+      const backdrop = await step('dismissBackdrop').catch(() => null);
+      if (backdrop && !backdrop.error) await click(backdrop);
+      await pressEscape();
+      await wait(400);
+    }
+  }
+  throw lastError;
 }
 
 export async function uploadVideoToFlowThroughUi(request, tabId) {
@@ -121,6 +154,7 @@ export async function uploadVideoToFlowThroughUi(request, tabId) {
   try {
     await chrome.debugger.attach(target, '1.3');
     attached = true;
+    await ensureTabVisible(tabId);
     chrome.debugger.onEvent.addListener(onEvent);
     chrome.debugger.onDetach.addListener(onDetach);
     await command('Network.enable', { maxResourceBufferSize: 5 * 1024 * 1024, maxTotalBufferSize: 12 * 1024 * 1024 });
@@ -139,8 +173,7 @@ export async function uploadVideoToFlowThroughUi(request, tabId) {
         }, 15000),
       };
     });
-    await click(await step('openPicker'));
-    await click(await step('upload'));
+    await openUploadChooser({ step, click, pressEscape: () => pressEscape(command) });
     await chooserPromise;
 
     timeout = setTimeout(() => finish({

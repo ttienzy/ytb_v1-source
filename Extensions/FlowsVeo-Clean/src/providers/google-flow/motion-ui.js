@@ -1,3 +1,5 @@
+import { createLostGenerationFinder } from './lost-generation.js';
+import { ensureTabVisible } from './visibility.js';
 import { normalizeFlowPrompt } from './prompt-text.js';
 import { motionUiStep, readMotionAssetCatalog } from './page/motion-ui.js';
 import { pollFramesVideo } from './page/frames-ui.js';
@@ -6,6 +8,7 @@ import { sleep } from '../../shared/time.js';
 import { logActivity } from '../../background/runtime/log.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const MOTION_EDIT_MODELS = new Set(['macaron_cookie_edit', 'abra_edit', 'abra_edit_360p']);
 
 export function isMotionReferenceAttached(type, ids, mediaId, previousImageIds = []) {
   const expected = type === 'video' ? [mediaId] : [...previousImageIds, mediaId];
@@ -90,7 +93,8 @@ export function parseMotionCreation(body, expectedProjectId, expectedReq = null)
   const walk = (node) => {
     if (!Array.isArray(node)) return;
     const model = node?.[5]?.[6]?.[1]?.[0]?.[0];
-    const nativeEdit = node[3] == null && model === 'abra_edit' && Array.isArray(node[7]);
+    // Omni 1.2 (macaron_cookie_edit) và job cũ Omni 1.1 (abra_edit) trả cùng cấu trúc (HAR flow.google_video_motion.com).
+    const nativeEdit = node[3] == null && MOTION_EDIT_MODELS.has(model) && Array.isArray(node[7]);
     if (node.length >= 4 && UUID.test(String(node[0])) && node[1] === expectedProjectId && (node[3] === 'CAE' || nativeEdit)) {
       if (expectedReq && nativeEdit && (model !== expectedReq.provider_model_id
           || normalizeFlowPrompt(node?.[5]?.[1]) !== normalizeFlowPrompt(expectedReq.prompt))) {
@@ -143,6 +147,7 @@ export async function generateMotionVideoThroughUi(req, tabId) {
   let chooser = null;
   let upload = null;
   let created = null;
+  let lost = false;
   let failure = null;
   let submissionRpc = null;
   const mergeCatalog = (assets) => {
@@ -280,7 +285,10 @@ export async function generateMotionVideoThroughUi(req, tabId) {
     if (!info) return;
     if (method === 'Network.loadingFailed') {
       requestTypes.delete(params.requestId);
-      if (info.generation) fail('Flow stopped the Motion Control request. Check Flow before retrying.');
+      if (info.generation) {
+        lost = true;
+        logActivity('warn', `Flow hủy request Motion Control (${params.errorText || 'unknown'}) — không gửi lại, đi tìm video trên server`);
+      }
       return;
     }
     if (method === 'Network.responseReceived' && info.generation && params.response?.status >= 400) {
@@ -440,6 +448,7 @@ export async function generateMotionVideoThroughUi(req, tabId) {
     if (tab?.windowId) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
     await chrome.debugger.attach(target, '1.3');
     attached = true;
+    await ensureTabVisible(tabId);
     chrome.debugger.onEvent.addListener(onEvent);
     chrome.debugger.onDetach.addListener(onDetach);
     await command('Network.enable', { maxPostDataSize: 1024 * 1024, maxResourceBufferSize: 5 * 1024 * 1024, maxTotalBufferSize: 12 * 1024 * 1024 });
@@ -526,10 +535,14 @@ export async function generateMotionVideoThroughUi(req, tabId) {
     await sleep(350);
     const submitPoint = await step('generate', { expected_image_ids: expectedImageIds });
     await command('Fetch.enable', { patterns: [{ urlPattern: '*AiSandboxAngularFrontend/data/batchexecute*', requestStage: 'Request' }] });
+    const findLost = createLostGenerationFinder(tabId, req, Date.now());
     armed = true;
     await click(submitPoint);
 
-    await waitFor(() => created, 90000, 'Flow did not return a Motion Control video asset. Check Flow before retrying; no automatic resubmission.');
+    await waitFor(async () => {
+      if (!created && lost) created = await findLost();
+      return created;
+    }, 90000, 'Flow did not return a Motion Control video asset. Check Flow before retrying; no automatic resubmission.');
     closed = true;
     chrome.debugger.onEvent.removeListener(onEvent);
     chrome.debugger.onDetach.removeListener(onDetach);

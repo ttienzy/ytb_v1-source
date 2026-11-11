@@ -149,6 +149,22 @@ export function imageUiStep(action, request) {
     if (editor().innerText.trim() !== request.prompt.trim()) fail('Prompt trên Flow không khớp yêu cầu. Chưa tạo ảnh.');
     return point(find('button', (el) => /^(Bắt đầu tạo|Start generation|Generate|Start creating)$/i.test(el.getAttribute('aria-label') || '')));
   }
+  // Phục hồi khi response bị mất: ảnh mới xuất hiện trong thư viện project mà trước lượt tạo chưa có.
+  const galleryImages = () => {
+    const found = new Map();
+    for (const img of document.querySelectorAll('img')) {
+      for (const src of [img.currentSrc, img.src]) {
+        const m = String(src || '').match(/^https:\/\/flow-content\.google\/image\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[/?#]|$)/i);
+        if (m) found.set(m[1].toLowerCase(), src);
+      }
+    }
+    return found;
+  };
+  if (action === 'snapshotImages') return [...galleryImages().keys()];
+  if (action === 'newImages') {
+    const before = new Set((request._before_ids || []).map((id) => String(id).toLowerCase()));
+    return [...galleryImages()].filter(([id]) => !before.has(id)).map(([id, url]) => ({ media_id: id, image_url: url }));
+  }
   fail('Unknown Flow image UI step');
   } catch (error) {
     return { error: error?.message || 'Không đọc được giao diện Flow.' };

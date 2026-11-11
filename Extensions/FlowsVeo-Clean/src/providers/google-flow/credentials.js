@@ -117,7 +117,7 @@ export async function harvestSingleTab(tab) {
           }
 
           // C. Trích xuất Credits từ DOM (Khớp "801 Google Flow credits" hoặc "801 credits")
-          const creditsMatch = fullText.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+          const creditsMatch = fullText.match(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/i);
           if (creditsMatch) {
             domCredits = parseInt(creditsMatch[1].replace(/[,.]/g, ''), 10);
           }
@@ -127,8 +127,8 @@ export async function harvestSingleTab(tab) {
             const allElements = Array.from(document.querySelectorAll('div, span, p, h1, h2, h3, button, b, strong, [aria-label*="credit" i]'));
             for (const el of allElements) {
               const txt = el.textContent || '';
-              if (/credits/i.test(txt)) {
-                const m = txt.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+              if (/credits|tín\s*dụng\s*Google\s*Flow/i.test(txt)) {
+                const m = txt.match(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/i);
                 if (m) {
                   domCredits = parseInt(m[1].replace(/[,.]/g, ''), 10);
                   break;

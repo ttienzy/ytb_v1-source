@@ -3,6 +3,7 @@ import { FAIL_THRESHOLD, TOKENS_PER_SESSION } from '../../config/defaults.js';
 import { saveState } from '../../platform/storage.js';
 import { solveRecaptcha } from '../../providers/google-flow/captcha.js';
 import { generateFlowImage, generateFlowVideo, recoverCurrentSceneVideo } from '../../providers/google-flow/generation.js';
+import { canUseHttpVideo } from '../../providers/google-flow/page/video-http.js';
 import { handleCreateProject, handleSwitchProject } from '../../providers/google-flow/projects.js';
 import { ensureProjectTab, findLabsTab } from '../../providers/google-flow/tabs.js';
 import { uploadVideoToFlow } from '../../providers/google-flow/upload.js';
@@ -14,7 +15,8 @@ import { runtime } from '../runtime/state.js';
 
 export async function processCaptchaRequest(request) {
   // Native UI modes obtain session/CAPTCHA from Flow when Generate is clicked.
-  if (['frames', 'ingredients', 'video_edit'].includes(request.flow_request?.input_mode) && !request.flow_recovery) {
+  const httpEligible = Boolean(request.flow_request?.http_no_captcha) && canUseHttpVideo(request.flow_request);
+  if (['frames', 'ingredients', 'video_edit'].includes(request.flow_request?.input_mode) && !request.flow_recovery && !httpEligible) {
     if (runtime.activeGenerationCount > 0 || runtime.imageUiBusy || runtime.videoUiBusy) {
       await postFlowResponse(request.request_id, { ok: false, error: 'FLOW_UI: Flow đang xử lý tác vụ khác. Chờ tác vụ đó xong rồi thử lại.' });
       return;
@@ -139,6 +141,30 @@ export async function processCaptchaRequest(request) {
     await postFlowResponse(request.request_id, recovered);
     return;
   }
+  // Đường HTTP tự tạo token reCAPTCHA tươi trong trang ngay trước khi gửi => không giải trước một token thừa.
+  // Cần CẢ cờ của backend LẪN canUseHttpVideo(): nếu lệch nhau thì rơi về luồng cũ (giải captcha rồi dispatch) để backend
+  // không bị treo chờ token.
+  if (request.flow_request?.http_no_captcha && canUseHttpVideo(request.flow_request) && !request.flow_recovery) {
+    runtime.activeGenerationCount++;
+    logActivity('info', `Flow generation dispatched (HTTP, no pre-solved captcha): request=${request.request_id.slice(0, 8)}`);
+    (async () => {
+      try {
+        const flowResult = await generateFlowVideo(request.flow_request, null);
+        await postFlowResponse(request.request_id, flowResult);
+        logActivity(flowResult.ok ? 'info' : 'warn', flowResult.ok
+          ? `Flow generation completed: request=${request.request_id.slice(0, 8)}`
+          : `Flow generation failed: ${flowResult.error}`);
+      } catch (e) {
+        await postFlowResponse(request.request_id, { ok: false, error: e?.message || 'Flow generation error' });
+      } finally {
+        runtime.activeGenerationCount = Math.max(0, runtime.activeGenerationCount - 1);
+        // Vẫn tính 1 lượt/job cho bộ đếm vệ sinh cookie, nhưng sau khi xong để không làm mới tab giữa lúc đang render.
+        onCaptchaSuccess();
+      }
+    })();
+    return;
+  }
+
   let result = await solveRecaptcha(request);
   if (!result.token && result.error?.includes('not ready')) {
     await sleep(3_000);

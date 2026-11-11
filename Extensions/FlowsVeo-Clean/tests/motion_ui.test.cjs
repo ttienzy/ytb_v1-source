@@ -97,3 +97,20 @@ test('accepts the native Motion Control asset with null type and verified edit m
  metadata[6][1][0][0]='different-model';
  assert.throws(()=>parseMotionCreation(JSON.stringify([['wrb.fr','jIps6',JSON.stringify([null,7,[],[asset]])]]),project,req),/one video asset/);
 });
+
+test('Omni 1.2 Motion Control (macaron_cookie_edit) is accepted with the same shape as the HAR capture',async()=>{
+ const {parseMotionCreation,matchMotionRequest,MOTION_EDIT_MODELS}=await api;
+ assert.ok(MOTION_EDIT_MODELS.has('macaron_cookie_edit'));
+ const req12={...req,provider_model_id:'macaron_cookie_edit',reference_video_start_seconds:0,reference_video_end_seconds:8};
+ // Request đúng dạng HAR flow.google_video_motion.com: đoạn 0–240 khung (8 giây x 30), 1 ảnh tham chiếu.
+ const payload=[[[[null,video,0,240],[null,null,[[[prompt]]]],'macaron_cookie_edit',1,[null,null,null,null,'X','Y'],null,null,null,[[null,image1]]]],[null,22,null,null,null,project,null,null,null,null,['token',1]],['Z',2]];
+ const post=new URLSearchParams({'f.req':JSON.stringify([[['jIps6',JSON.stringify(payload),null,'generic']]])}).toString();
+ assert.deepEqual(matchMotionRequest(post,req12,[image1]),{rpc:'jIps6',reference_video_id:video,start_frame:0,end_frame:240,image_ids:[image1]});
+ // Phản hồi: model nằm ở metadata[6][1][0][0], loại asset null như Omni 1.1.
+ const id='44444444-4444-4444-8444-444444444444';
+ const metadata=[[1794395413,610000000],prompt,null,null,null,null,[null,[['macaron_cookie_edit',4,[10],null,1,1],[[null,4,image1]],[[null,null,null,video]]],[[null,null,[[[prompt]]]]],null,1],null,[3],1];
+ const asset=[id,project,'scene',null,null,metadata,null,[[null,0,null,null,null,null,null,prompt],[null,null,[10]],[id]]];
+ const body=JSON.stringify([['wrb.fr','jIps6',JSON.stringify([null,464,[],[asset]])]]);
+ assert.equal(parseMotionCreation(body,project,req12).mediaId,id);
+ assert.throws(()=>parseMotionCreation(body,project,{...req12,provider_model_id:'abra_edit'}),/different prompt or model/);
+});

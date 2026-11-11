@@ -1,3 +1,5 @@
+import { createLostGenerationFinder } from './lost-generation.js';
+import { ensureTabVisible } from './visibility.js';
 import { normalizeFlowPrompt } from './prompt-text.js';
 import { framesUiStep, pollFramesVideo } from './page/frames-ui.js';
 import { sleep } from '../../shared/time.js';
@@ -31,8 +33,13 @@ export function matchFrameRequest(body, req, ids) {
 
 export function parseFrameCreation(body, rpc, req) {
   const p=frameRpcPayload(body,rpc);
-  const assets=(Array.isArray(p?.[3])?p[3]:[]).filter(a=>a?.[3]==='CAE' && a[1]===req.project_id && normalizeFlowPrompt(a?.[5]?.[1])===normalizeFlowPrompt(req.prompt));
-  if(assets.length!==1 || !/^[0-9a-f-]{36}$/i.test(assets[0][0]))throw new Error('Flow response has no unique video asset for this prompt/project.');
+  const assets=(Array.isArray(p?.[3])?p[3]:[]).filter(a=>(['CAE','CAM','CAI'].includes(a?.[3]) || a?.[3]==null) && a[1]===req.project_id && normalizeFlowPrompt(a?.[5]?.[1])===normalizeFlowPrompt(req.prompt));
+  if(assets.length!==1 || !/^[0-9a-f-]{36}$/i.test(assets[0][0])){
+    // Chẩn đoán cấu trúc (không chứa token/nội dung): giúp biết Flow đổi dạng response hay từ chối thật.
+    const all=Array.isArray(p?.[3])?p[3]:[];
+    const per=all.slice(0,4).map(a=>`[type=${a?.[3]} proj=${a?.[1]===req.project_id} prompt=${normalizeFlowPrompt(a?.[5]?.[1])===normalizeFlowPrompt(req.prompt)} idOk=${/^[0-9a-f-]{36}$/i.test(a?.[0]||'')}]`).join('');
+    throw new Error(`Flow response has no unique video asset for this prompt/project. (${rpc}; payloadLen=${Array.isArray(p)?p.length:'n/a'}; p3=${all.length}; matched=${assets.length}; ${per})`);
+  }
   return {mediaId:assets[0][0],sceneId:assets[0][2]};
 }
 
@@ -43,7 +50,7 @@ export async function generateFramesThroughUi(req, tabId) {
   if(!chrome.debugger)return failResult('Reload the FlowsVeo extension to enable browser control.');
   const target={tabId}, ids=[], requestTypes=new Map();
   const {image_base64,end_image_base64,ingredient_images,...pageReq}=req;
-  let attached=false, closed=false, armed=false, created=null, failure=null, upload=null, chooser=null, submissionRpc=null;
+  let attached=false, closed=false, armed=false, created=null, failure=null, upload=null, chooser=null, submissionRpc=null, lost=null;
   const command=(name,params={})=>chrome.debugger.sendCommand(target,name,params);
   const step=async(action,extra={})=>{
     if(closed || failure)throw new Error(failure||'Flow control has stopped.');
@@ -74,7 +81,7 @@ export async function generateFramesThroughUi(req, tabId) {
       if(armed && !created && r.postData){try{const m=matchFrameRequest(r.postData,req,ids);if(m){requestTypes.set(p.requestId,{rpc:m.rpc,generation:true,actualModelId:m.actualModelId});submissionRpc=m.rpc;}}catch(e){failure=e.message;}}
     }
     const info=requestTypes.get(p.requestId);if(!info)return;
-    if(method==='Network.loadingFailed'){failure='Flow network request failed; check Flow before retrying.';requestTypes.delete(p.requestId);}
+    if(method==='Network.loadingFailed'){if(info.upload){logActivity('warn',`Flow upload request bị ngắt (${p.errorText||'unknown'}${p.canceled?', canceled':''}) — chờ request thử lại`);requestTypes.delete(p.requestId);return;}if(info.generation){lost={actualModelId:info.actualModelId};logActivity('warn',`Flow hủy request tạo video (${p.errorText||'unknown'}) — không gửi lại, đi tìm video trên server`);requestTypes.delete(p.requestId);return;}failure=`Flow network request failed (${info.rpc}${info.upload?' upload':''}${info.generation?' generation':''}: ${p.errorText||'unknown'}${p.canceled?', canceled':''}); check Flow before retrying.`;requestTypes.delete(p.requestId);}
     if(method==='Network.loadingFinished'){
       requestTypes.delete(p.requestId);
       command('Network.getResponseBody',{requestId:p.requestId}).then(r=>{
@@ -112,6 +119,7 @@ export async function generateFramesThroughUi(req, tabId) {
   };
   try{
     await chrome.debugger.attach(target,'1.3');attached=true;
+    await ensureTabVisible(tabId);
     chrome.debugger.onEvent.addListener(onEvent);chrome.debugger.onDetach.addListener(onDetach);
     await command('Network.enable',{maxPostDataSize:1048576,maxResourceBufferSize:5242880,maxTotalBufferSize:10485760});
     await command('Page.enable');await command('DOM.enable');await command('Page.setInterceptFileChooserDialog',{enabled:true});
@@ -134,8 +142,8 @@ export async function generateFramesThroughUi(req, tabId) {
     await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     await sleep(350);
-    const submit=await step('generate');armed=true;await click(submit);
-    await waitFor(()=>created,60000,'No matching generation result. Check Flow before retrying; no automatic resubmit.');
+    const submit=await step('generate');const findLost=createLostGenerationFinder(tabId,req,Date.now());armed=true;await click(submit);
+    await waitFor(async()=>{if(!created&&lost){const found=await findLost();if(found)created={...found,actualModelId:lost.actualModelId};}return created;},90000,'No matching generation result. Check Flow before retrying; no automatic resubmit.');
     closed=true;chrome.debugger.onEvent.removeListener(onEvent);chrome.debugger.onDetach.removeListener(onDetach);
     await command('Page.setInterceptFileChooserDialog',{enabled:false}).catch(()=>{});
     await chrome.debugger.detach(target);attached=false;

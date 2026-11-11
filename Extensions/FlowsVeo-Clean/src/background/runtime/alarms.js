@@ -41,6 +41,12 @@ export function registerAlarmEvents() {
           });
           if (r.status === 200) {
             const req = await r.json();
+            if (req?.reload) {
+              // Lệnh reload không có request_id; nếu bỏ qua ở đây thì lệnh bị mất vì vòng poll chính không thấy nó nữa.
+              logActivity('info', 'Remote reload requested by bridge (watchdog)');
+              chrome.runtime.reload();
+              return;
+            }
             if (req?.request_id) {
               await processCaptchaRequest(req);
             }

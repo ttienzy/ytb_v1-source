@@ -38,6 +38,7 @@ export async function runFlowGenerationInPage(flowRequest, captchaToken) {
       const isPortrait = req.aspect_ratio === '9:16';
 
       if (isVideoEdit) {
+        if (modelName.includes('1.2')) return 'macaron_cookie_edit';
         return req.resolution === '360p' ? 'abra_edit_360p' : 'abra_edit';
       }
       if (isIngredients) {

@@ -764,6 +764,222 @@
     }
   }
 
+  // src/providers/google-flow/composer.js
+  function inspectComposerInPage(clearPrompt) {
+    const visible = (e) => e && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
+    const chips = [...document.querySelectorAll(
+      '.base-prompt-box flow-image-ingredient-chip, button[aria-label*="Thành phần tạo hình ảnh"], button[aria-label*="image ingredient" i]'
+    )].filter(visible);
+    const attachments = chips.filter((chip) => {
+      if (chip.querySelector("button.empty-chip")) return false;
+      const img = chip.querySelector("img");
+      const src = img ? img.currentSrc || img.src || "" : "";
+      return Boolean(img && visible(img) && src && !src.includes("gstatic.com") && !src.includes("google.com/static") && !src.startsWith("data:image/svg"));
+    }).length;
+    const editors = [...document.querySelectorAll('[contenteditable="true"]')].filter(visible);
+    const editor = editors.length === 1 ? editors[0] : null;
+    const hadPrompt = Boolean(editor && editor.innerText.trim());
+    if (clearPrompt && hadPrompt) {
+      editor.focus();
+      try {
+        document.execCommand("selectAll", false, null);
+        document.execCommand("delete", false, null);
+      } catch {
+      }
+    }
+    return { attachments, hadPrompt };
+  }
+  async function ensureCleanComposer(tabId) {
+    try {
+      const run = (clearPrompt) => chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: inspectComposerInPage, args: [clearPrompt] }).then((r) => r?.[0]?.result);
+      const state = await run(false);
+      if (!state) return;
+      if (state.attachments > 0) {
+        logActivity("info", `Ô soạn Flow còn ${state.attachments} ảnh đính kèm từ lượt trước — tải lại tab để xóa nháp`);
+        await chrome.tabs.reload(tabId);
+        await waitForTabComplete(tabId, 2e4);
+        await sleep(3e3);
+        await warmUpRecaptcha(tabId, 6e3);
+        return;
+      }
+      if (state.hadPrompt) {
+        logActivity("info", "Ô soạn Flow còn prompt từ lượt trước — đã xóa");
+        await run(true);
+      }
+    } catch (error) {
+      logActivity("warn", `ensureCleanComposer: ${error?.message || error}`);
+    }
+  }
+
+  // src/providers/google-flow/lost-generation.js
+  async function findCreatedVideoInPage(projectId, prompt, submittedAtMs) {
+    try {
+      if (location.hostname !== "flow.google.com" || location.pathname.match(/\/project\/([^/]+)/)?.[1] !== projectId) {
+        return { terminal: true, error: "Flow tab changed project." };
+      }
+      const wiz = window.WIZ_global_data || {};
+      if (!wiz.SNlM0e || !wiz.FdrFJe || !wiz.cfb2h) return { pending: true };
+      const rpc = "Zzl0ze";
+      const query = new URLSearchParams({ rpcids: rpc, "source-path": `/project/${projectId}`, bl: String(wiz.cfb2h), "f.sid": String(wiz.FdrFJe), rt: "c", _reqid: String(Date.now() % 1e7) });
+      const form = new URLSearchParams({ "f.req": JSON.stringify([[[rpc, JSON.stringify([`projects/${projectId}`, null, null, null, [1]]), null, "generic"]]]), at: wiz.SNlM0e });
+      const res = await fetch(`${location.origin}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Same-Domain": "1" },
+        body: form,
+        signal: AbortSignal.timeout(12e3)
+      });
+      if (!res.ok) return { pending: true };
+      const serverMs = Date.parse(res.headers.get("date") || "");
+      const skewMs = Number.isFinite(serverMs) ? serverMs - Date.now() : 0;
+      const cutoffSec = (submittedAtMs + skewMs) / 1e3 - 10;
+      const unwrap = (node) => {
+        if (!Array.isArray(node)) return null;
+        if (node[0] === "wrb.fr" && node[1] === rpc && typeof node[2] === "string") return JSON.parse(node[2]);
+        for (const child of node) {
+          const found = unwrap(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      let payload = null;
+      for (const line of (await res.text()).split(/\r?\n/)) {
+        if (!line.trim().startsWith("[")) continue;
+        try {
+          payload = unwrap(JSON.parse(line));
+        } catch {
+          continue;
+        }
+        if (payload) break;
+      }
+      if (!payload) return { pending: true };
+      const clean = (value) => typeof value === "string" ? value.replace(/\s+/gu, " ").trim() : "";
+      const target = clean(prompt);
+      const deepSome = (node, test) => Array.isArray(node) ? node.some((child) => deepSome(child, test)) : test(node);
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const matches = /* @__PURE__ */ new Map();
+      const walk = (node) => {
+        if (!Array.isArray(node)) return;
+        const created = node[5]?.[0]?.[0];
+        if (uuid.test(String(node[0])) && node[1] === projectId && typeof created === "number" && created >= cutoffSec && deepSome(node[5], (value) => clean(value) === target) && deepSome(node[5], (value) => typeof value === "string" && /^(abra_|veo_|omni_flash|macaron_cookie_)/.test(value))) {
+          matches.set(node[0], { mediaId: node[0], sceneId: node[2] });
+          return;
+        }
+        node.forEach(walk);
+      };
+      walk(payload);
+      if (matches.size > 1) {
+        return { terminal: true, error: `Flow có ${matches.size} video mới cùng prompt; không đoán. Kiểm tra Flow trước khi thử lại.` };
+      }
+      return matches.size === 1 ? { found: [...matches.values()][0] } : { pending: true };
+    } catch {
+      return { pending: true };
+    }
+  }
+  var FIRST_LOOKUP_DELAY_MS = 4e3;
+  var LOOKUP_INTERVAL_MS = 6e3;
+  var MAX_LOOKUPS = 8;
+  function createLostGenerationFinder(tabId, request, submittedAtMs) {
+    let nextAt = 0;
+    let lookups = 0;
+    let busy = false;
+    return async () => {
+      if (!nextAt) nextAt = Date.now() + FIRST_LOOKUP_DELAY_MS;
+      if (busy || Date.now() < nextAt || lookups >= MAX_LOOKUPS) return null;
+      busy = true;
+      try {
+        lookups += 1;
+        const injected = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: findCreatedVideoInPage,
+          args: [request.project_id, request.prompt, submittedAtMs]
+        });
+        const value = injected?.[0]?.result;
+        if (value?.terminal) throw new Error(value.error);
+        if (value?.found) {
+          logActivity("info", `Tìm lại được video sau khi Flow hủy request: media=${value.found.mediaId} (lần tra ${lookups})`);
+          return value.found;
+        }
+        return null;
+      } finally {
+        nextAt = Date.now() + LOOKUP_INTERVAL_MS;
+        busy = false;
+      }
+    };
+  }
+
+  // src/providers/google-flow/visibility.js
+  var keepers = /* @__PURE__ */ new Map();
+  var KEEP_INTERVAL_MS = 3e3;
+  function stopKeeper(tabId) {
+    const timer = keepers.get(tabId);
+    if (timer) {
+      clearInterval(timer);
+      keepers.delete(tabId);
+    }
+  }
+  function startKeeper(tabId) {
+    if (keepers.has(tabId)) return;
+    const target = { tabId };
+    const timer = setInterval(async () => {
+      try {
+        const r = await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: "document.visibilityState", returnByValue: true });
+        if (r?.result?.value !== "visible") {
+          await chrome.debugger.sendCommand(target, "Page.bringToFront");
+          logActivity("info", `Tab Flow ${tabId} bị che giữa lúc tạo — đã kéo lên lại`);
+        }
+      } catch {
+        stopKeeper(tabId);
+      }
+    }, KEEP_INTERVAL_MS);
+    keepers.set(tabId, timer);
+  }
+  if (typeof chrome !== "undefined" && chrome.debugger?.onDetach?.addListener) {
+    chrome.debugger.onDetach.addListener((source) => stopKeeper(source.tabId));
+  }
+  async function ensureTabVisible(tabId, timeoutMs = 8e3) {
+    const target = { tabId };
+    const send = (method, params = {}) => chrome.debugger.sendCommand(target, method, params);
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab?.windowId) {
+        const win = await chrome.windows.get(tab.windowId).catch(() => null);
+        if (win?.state === "minimized") await chrome.windows.update(tab.windowId, { state: "normal" }).catch(() => {
+        });
+      }
+      await chrome.tabs.update(tabId, { active: true }).catch(() => {
+      });
+    } catch {
+    }
+    const deadline = Date.now() + timeoutMs;
+    let state = "unknown";
+    for (; ; ) {
+      try {
+        await send("Page.bringToFront");
+      } catch {
+      }
+      try {
+        await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      } catch {
+      }
+      try {
+        const r = await send("Runtime.evaluate", { expression: "document.visibilityState", returnByValue: true });
+        state = r?.result?.value || "unknown";
+      } catch {
+      }
+      if (state === "visible") {
+        startKeeper(tabId);
+        return true;
+      }
+      if (Date.now() >= deadline) break;
+      await sleep(400);
+    }
+    startKeeper(tabId);
+    logActivity("warn", `Tab Flow ${tabId} vẫn ở trạng thái ${state} sau ${timeoutMs}ms — thao tác UI có thể lỗi`);
+    return false;
+  }
+
   // src/providers/google-flow/prompt-text.js
   function normalizeFlowPrompt(value) {
     return typeof value === "string" ? value.replace(/\s+/gu, " ").trim() : "";
@@ -1143,8 +1359,12 @@
   }
   function parseFrameCreation(body, rpc, req) {
     const p = frameRpcPayload(body, rpc);
-    const assets = (Array.isArray(p?.[3]) ? p[3] : []).filter((a) => a?.[3] === "CAE" && a[1] === req.project_id && normalizeFlowPrompt(a?.[5]?.[1]) === normalizeFlowPrompt(req.prompt));
-    if (assets.length !== 1 || !/^[0-9a-f-]{36}$/i.test(assets[0][0])) throw new Error("Flow response has no unique video asset for this prompt/project.");
+    const assets = (Array.isArray(p?.[3]) ? p[3] : []).filter((a) => (["CAE", "CAM", "CAI"].includes(a?.[3]) || a?.[3] == null) && a[1] === req.project_id && normalizeFlowPrompt(a?.[5]?.[1]) === normalizeFlowPrompt(req.prompt));
+    if (assets.length !== 1 || !/^[0-9a-f-]{36}$/i.test(assets[0][0])) {
+      const all = Array.isArray(p?.[3]) ? p[3] : [];
+      const per = all.slice(0, 4).map((a) => `[type=${a?.[3]} proj=${a?.[1] === req.project_id} prompt=${normalizeFlowPrompt(a?.[5]?.[1]) === normalizeFlowPrompt(req.prompt)} idOk=${/^[0-9a-f-]{36}$/i.test(a?.[0] || "")}]`).join("");
+      throw new Error(`Flow response has no unique video asset for this prompt/project. (${rpc}; payloadLen=${Array.isArray(p) ? p.length : "n/a"}; p3=${all.length}; matched=${assets.length}; ${per})`);
+    }
     return { mediaId: assets[0][0], sceneId: assets[0][2] };
   }
   async function generateFramesThroughUi(req, tabId) {
@@ -1154,7 +1374,7 @@
     if (!chrome.debugger) return failResult("Reload the FlowsVeo extension to enable browser control.");
     const target = { tabId }, ids = [], requestTypes = /* @__PURE__ */ new Map();
     const { image_base64, end_image_base64, ingredient_images, ...pageReq } = req;
-    let attached = false, closed = false, armed = false, created = null, failure = null, upload = null, chooser = null, submissionRpc = null;
+    let attached = false, closed = false, armed = false, created = null, failure = null, upload = null, chooser = null, submissionRpc = null, lost = null;
     const command = (name, params = {}) => chrome.debugger.sendCommand(target, name, params);
     const step = async (action, extra = {}) => {
       if (closed || failure) throw new Error(failure || "Flow control has stopped.");
@@ -1226,7 +1446,18 @@
       const info = requestTypes.get(p.requestId);
       if (!info) return;
       if (method === "Network.loadingFailed") {
-        failure = "Flow network request failed; check Flow before retrying.";
+        if (info.upload) {
+          logActivity("warn", `Flow upload request bị ngắt (${p.errorText || "unknown"}${p.canceled ? ", canceled" : ""}) — chờ request thử lại`);
+          requestTypes.delete(p.requestId);
+          return;
+        }
+        if (info.generation) {
+          lost = { actualModelId: info.actualModelId };
+          logActivity("warn", `Flow hủy request tạo video (${p.errorText || "unknown"}) — không gửi lại, đi tìm video trên server`);
+          requestTypes.delete(p.requestId);
+          return;
+        }
+        failure = `Flow network request failed (${info.rpc}${info.upload ? " upload" : ""}${info.generation ? " generation" : ""}: ${p.errorText || "unknown"}${p.canceled ? ", canceled" : ""}); check Flow before retrying.`;
         requestTypes.delete(p.requestId);
       }
       if (method === "Network.loadingFinished") {
@@ -1286,6 +1517,7 @@
     try {
       await chrome.debugger.attach(target, "1.3");
       attached = true;
+      await ensureTabVisible(tabId);
       chrome.debugger.onEvent.addListener(onEvent);
       chrome.debugger.onDetach.addListener(onDetach);
       await command("Network.enable", { maxPostDataSize: 1048576, maxResourceBufferSize: 5242880, maxTotalBufferSize: 10485760 });
@@ -1315,9 +1547,16 @@
       await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       await sleep(350);
       const submit = await step("generate");
+      const findLost = createLostGenerationFinder(tabId, req, Date.now());
       armed = true;
       await click(submit);
-      await waitFor(() => created, 6e4, "No matching generation result. Check Flow before retrying; no automatic resubmit.");
+      await waitFor(async () => {
+        if (!created && lost) {
+          const found = await findLost();
+          if (found) created = { ...found, actualModelId: lost.actualModelId };
+        }
+        return created;
+      }, 9e4, "No matching generation result. Check Flow before retrying; no automatic resubmit.");
       closed = true;
       chrome.debugger.onEvent.removeListener(onEvent);
       chrome.debugger.onDetach.removeListener(onDetach);
@@ -1389,7 +1628,7 @@
     if (!chrome.debugger) return failResult("Reload the FlowsVeo extension to enable browser control.");
     const target = { tabId }, ids = [], keys = [], requestTypes = /* @__PURE__ */ new Map();
     const { image_base64, end_image_base64, ingredient_images, ...pageReq } = req;
-    let attached = false, closed = false, armed = false, created = null, failure = null, upload = null, chooser = null, submissionRpc = null;
+    let attached = false, closed = false, armed = false, created = null, failure = null, upload = null, chooser = null, submissionRpc = null, lost = null;
     const command = (name, params = {}) => chrome.debugger.sendCommand(target, name, params);
     const step = async (action, extra = {}) => {
       if (closed || failure) throw new Error(failure || "Flow control has stopped.");
@@ -1461,7 +1700,18 @@
       const info = requestTypes.get(p.requestId);
       if (!info) return;
       if (method === "Network.loadingFailed") {
-        failure = "Flow network request failed; check Flow before retrying.";
+        if (info.upload) {
+          logActivity("warn", `Flow upload request bị ngắt (${p.errorText || "unknown"}${p.canceled ? ", canceled" : ""}) — chờ request thử lại`);
+          requestTypes.delete(p.requestId);
+          return;
+        }
+        if (info.generation) {
+          lost = { actualModelId: info.actualModelId };
+          logActivity("warn", `Flow hủy request tạo video (${p.errorText || "unknown"}) — không gửi lại, đi tìm video trên server`);
+          requestTypes.delete(p.requestId);
+          return;
+        }
+        failure = `Flow network request failed (${info.rpc}${info.upload ? " upload" : ""}${info.generation ? " generation" : ""}: ${p.errorText || "unknown"}${p.canceled ? ", canceled" : ""}); check Flow before retrying.`;
         requestTypes.delete(p.requestId);
       }
       if (method === "Network.loadingFinished") {
@@ -1522,6 +1772,7 @@
     try {
       await chrome.debugger.attach(target, "1.3");
       attached = true;
+      await ensureTabVisible(tabId);
       chrome.debugger.onEvent.addListener(onEvent);
       chrome.debugger.onDetach.addListener(onDetach);
       await command("Network.enable", { maxPostDataSize: 1048576, maxResourceBufferSize: 5242880, maxTotalBufferSize: 10485760 });
@@ -1547,9 +1798,16 @@
       await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       await sleep(350);
       const submit = await step("generate", { expectedKeys: keys });
+      const findLost = createLostGenerationFinder(tabId, req, Date.now());
       armed = true;
       await click(submit);
-      await waitFor(() => created, 6e4, "No matching generation result. Check Flow before retrying; no automatic resubmit.");
+      await waitFor(async () => {
+        if (!created && lost) {
+          const found = await findLost();
+          if (found) created = { ...found, actualModelId: lost.actualModelId };
+        }
+        return created;
+      }, 9e4, "No matching generation result. Check Flow before retrying; no automatic resubmit.");
       closed = true;
       chrome.debugger.onEvent.removeListener(onEvent);
       chrome.debugger.onDetach.removeListener(onDetach);
@@ -1737,6 +1995,21 @@
         if (editor().innerText.trim() !== request.prompt.trim()) fail("Prompt trên Flow không khớp yêu cầu. Chưa tạo ảnh.");
         return point(find("button", (el) => /^(Bắt đầu tạo|Start generation|Generate|Start creating)$/i.test(el.getAttribute("aria-label") || "")));
       }
+      const galleryImages = () => {
+        const found = /* @__PURE__ */ new Map();
+        for (const img of document.querySelectorAll("img")) {
+          for (const src of [img.currentSrc, img.src]) {
+            const m = String(src || "").match(/^https:\/\/flow-content\.google\/image\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[/?#]|$)/i);
+            if (m) found.set(m[1].toLowerCase(), src);
+          }
+        }
+        return found;
+      };
+      if (action === "snapshotImages") return [...galleryImages().keys()];
+      if (action === "newImages") {
+        const before = new Set((request._before_ids || []).map((id) => String(id).toLowerCase()));
+        return [...galleryImages()].filter(([id]) => !before.has(id)).map(([id, url]) => ({ media_id: id, image_url: url }));
+      }
       fail("Unknown Flow image UI step");
     } catch (error) {
       return { error: error?.message || "Không đọc được giao diện Flow." };
@@ -1830,8 +2103,9 @@
     if (request.reference_image_ids?.length) return { ok: false, error: "FLOW_UI: Luồng tạo ảnh qua giao diện hiện chưa hỗ trợ ảnh tham chiếu." };
     if (!chrome.debugger) return { ok: false, error: "FLOW_UI: Hãy tải lại extension FlowsVeo Clean để cấp quyền điều khiển tab Flow." };
     const target = { tabId };
-    let attached = false, armed = false, settled = false, requestId = null, nativeRequest = null;
-    let timeout, resolveResult;
+    let attached = false, armed = false, settled = false, nativeRequest = null;
+    let timeout, resolveResult, graceTimer = null, recovering = false;
+    const tracked = /* @__PURE__ */ new Set();
     const result = new Promise((resolve) => {
       resolveResult = resolve;
     });
@@ -1843,33 +2117,85 @@
     };
     const fail = (message) => finish({ ok: false, error: `FLOW_UI: ${message}` });
     const command = (method, params = {}) => chrome.debugger.sendCommand(target, method, params);
+    const NET_GRACE_MS = 12e3;
+    const recoverFromGallery = async (reason) => {
+      if (settled || recovering || tracked.size) return;
+      recovering = true;
+      const wanted = Math.min(Math.max(request.count || 1, 1), 4);
+      const deadline = Date.now() + 45e3;
+      let found = [];
+      while (!settled && Date.now() < deadline) {
+        try {
+          found = await step("newImages");
+        } catch {
+          found = [];
+        }
+        if (found.length >= wanted) break;
+        await sleep(3e3);
+      }
+      if (settled) return;
+      if (!found.length) {
+        return fail(reason === "timeout" ? "Hết thời gian chờ. Ảnh có thể vẫn đang tạo; kiểm tra Flow trước khi thử lại." : `Kết nối tạo ảnh bị ngắt (${reason}). Kiểm tra ảnh trong Flow trước khi thử lại.`);
+      }
+      finish({
+        ok: true,
+        project_id: request.project_id,
+        prompt: request.prompt,
+        images: found.slice(0, 4).map((asset) => ({
+          media_id: asset.media_id,
+          image_url: asset.image_url,
+          seed: null,
+          dimensions: null,
+          model_key: request.model_key,
+          aspect_ratio: request.aspect_ratio
+        })),
+        diagnostics: { adapter: "flow-ui-v1", trigger_method: "gallery-recovery", rpc: "ogiZ0b", count: found.length, recovered_after: reason }
+      });
+    };
     const onEvent = (source, method, params) => {
       if (source.tabId !== tabId || source.sessionId || settled || !armed) return;
-      if (method === "Network.requestWillBeSent" && !requestId) {
+      if (method === "Network.requestWillBeSent") {
         const req = params.request;
         if (!req?.url?.startsWith("https://flow.google.com/") || !req.url.includes("/data/batchexecute") || !req.postData) return;
         try {
           const match = matchImageUiRequest(req.postData, request);
           if (match) {
-            requestId = params.requestId;
-            nativeRequest = match;
+            tracked.add(params.requestId);
+            nativeRequest = nativeRequest || match;
+            if (graceTimer) {
+              clearTimeout(graceTimer);
+              graceTimer = null;
+            }
           }
         } catch (error) {
           fail(error.message);
         }
-      } else if (params.requestId === requestId && requestId) {
-        if (method === "Network.loadingFailed") fail("Kết nối tạo ảnh bị ngắt. Kiểm tra ảnh trong Flow trước khi thử lại.");
-        if (method === "Network.responseReceived" && params.response.status !== 200) fail(`Flow trả HTTP ${params.response.status}. Kiểm tra tab Flow.`);
-        if (method === "Network.loadingFinished") {
-          command("Network.getResponseBody", { requestId }).then((response) => {
-            const body = response.base64Encoded ? new TextDecoder().decode(Uint8Array.from(atob(response.body), (c) => c.charCodeAt(0))) : response.body;
-            try {
-              finish(parseImageUiResponse(body, request, nativeRequest));
-            } catch (error) {
-              fail(error.message);
-            }
-          }).catch(() => fail("Không đọc được kết quả tạo ảnh. Kiểm tra ảnh trong Flow trước khi thử lại."));
+        return;
+      }
+      if (!tracked.has(params.requestId)) return;
+      if (method === "Network.loadingFailed") {
+        tracked.delete(params.requestId);
+        const detail = `${params.errorText || "lỗi mạng"}${params.canceled ? ", bị hủy" : ""}`;
+        if (!tracked.size) {
+          if (graceTimer) clearTimeout(graceTimer);
+          graceTimer = setTimeout(() => recoverFromGallery(detail), NET_GRACE_MS);
         }
+      } else if (method === "Network.responseReceived" && params.response.status !== 200) {
+        fail(`Flow trả HTTP ${params.response.status}. Kiểm tra tab Flow.`);
+      } else if (method === "Network.loadingFinished") {
+        const finishedId = params.requestId;
+        command("Network.getResponseBody", { requestId: finishedId }).then((response) => {
+          const body = response.base64Encoded ? new TextDecoder().decode(Uint8Array.from(atob(response.body), (c) => c.charCodeAt(0))) : response.body;
+          tracked.delete(finishedId);
+          try {
+            finish(parseImageUiResponse(body, request, nativeRequest));
+          } catch (error) {
+            fail(error.message);
+          }
+        }).catch(() => {
+          tracked.delete(finishedId);
+          recoverFromGallery("không đọc được response");
+        });
       }
     };
     const onDetach = (source) => {
@@ -1893,9 +2219,13 @@
     try {
       await chrome.debugger.attach(target, "1.3");
       attached = true;
+      await ensureTabVisible(tabId);
       chrome.debugger.onEvent.addListener(onEvent);
       chrome.debugger.onDetach.addListener(onDetach);
-      timeout = setTimeout(() => fail("Hết thời gian chờ. Ảnh có thể vẫn đang tạo; kiểm tra Flow trước khi thử lại."), 13e4);
+      timeout = setTimeout(() => {
+        tracked.clear();
+        recoverFromGallery("timeout");
+      }, 13e4);
       await command("Network.enable", { maxPostDataSize: 1024 * 1024, maxResourceBufferSize: 5 * 1024 * 1024, maxTotalBufferSize: 10 * 1024 * 1024 });
       await step("lock");
       await click(await step("closeAccount"));
@@ -1934,6 +2264,7 @@
       if (!submitPoint) {
         submitPoint = await step("generate");
       }
+      request._before_ids = await step("snapshotImages").catch(() => []);
       armed = true;
       await click(submitPoint);
       return await result;
@@ -1943,6 +2274,7 @@
     } finally {
       settled = true;
       clearTimeout(timeout);
+      if (graceTimer) clearTimeout(graceTimer);
       chrome.debugger.onEvent.removeListener(onEvent);
       chrome.debugger.onDetach.removeListener(onDetach);
       await chrome.scripting.executeScript({ target, world: "MAIN", func: imageUiStep, args: ["unlock", request] }).catch(() => {
@@ -2243,6 +2575,36 @@
       }
       return null;
     }
+    function findAnyGoogleVideoUrl(node, targetMid) {
+      if (!node) return null;
+      if (typeof node === "string" && node.startsWith("https://")) {
+        try {
+          const lower = node.toLowerCase();
+          if (/\.(?:jpg|jpeg|png|webp|gif|avif|svg|css|js|woff|ttf)(?:$|[?#])/.test(lower)) return null;
+          if (/(?:preview|thumbnail|poster|sprite|favicon)/.test(lower)) return null;
+          if (targetMid && node.includes(targetMid)) return node;
+          const u = new URL(node);
+          if (u.hostname === "flow-content.google") {
+            const pathname = u.pathname.toLowerCase();
+            if (!pathname.startsWith("/image") && !pathname.includes("/image/")) return node;
+          }
+        } catch {
+        }
+        return null;
+      }
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = findAnyGoogleVideoUrl(child, targetMid);
+          if (found) return found;
+        }
+      } else if (typeof node === "object" && node !== null) {
+        for (const v of Object.values(node)) {
+          const found = findAnyGoogleVideoUrl(v, targetMid);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
     try {
       const activeGen = (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__;
       const activeModelId = activeGen?.modelId || providerModelId || "abra_t2v_6s";
@@ -2276,6 +2638,18 @@
       const csrfToken = wiz.SNlM0e;
       const sessionId = wiz.FdrFJe;
       const buildLabel = wiz.cfb2h;
+      const _debug = {
+        rpcReady: Boolean(csrfToken && sessionId && buildLabel && projectId),
+        projectId: projectId || null,
+        mediaId: null,
+        // set later
+        zzl0ze: null,
+        // 'ok' | 'empty' | 'null' | 'error'
+        as29s: null,
+        jwpduf: null,
+        jwpdufStatus: null,
+        domVideos: 0
+      };
       async function callRpcInPage(rpcId, payload) {
         if (!csrfToken || !sessionId || !buildLabel || !projectId) return null;
         try {
@@ -2331,9 +2705,11 @@
         return null;
       }
       let mediaIdToQuery = targetMediaId || activeGen?.mediaId || null;
+      _debug.mediaId = mediaIdToQuery;
       if (projectId) {
         try {
           const sceneData = await callRpcInPage("Zzl0ze", [`projects/${projectId}`, null, null, null, [1]]);
+          _debug.zzl0ze = sceneData ? Array.isArray(sceneData?.[1]) && sceneData[1].length > 0 ? "ok" : "empty" : "null";
           const rawNodes = sceneData?.[1] || [];
           let targetNode = null;
           let newestMediaId = null;
@@ -2344,7 +2720,7 @@
               const info = node?.[3];
               const timeSec = info?.[1]?.[0] || 0;
               const mid = info?.[4];
-              if (mediaIdToQuery && (mid === mediaIdToQuery || JSON.stringify(node).includes(mediaIdToQuery))) {
+              if (mediaIdToQuery && mid === mediaIdToQuery) {
                 targetNode = node;
               }
               if (mid && timeSec > newestTime) {
@@ -2392,7 +2768,7 @@
           }
           const rawAssets = Array.isArray(sceneData?.[2]) ? sceneData[2] : [];
           for (const ast of rawAssets) {
-            if (Array.isArray(ast) && (ast[3] === "CAE" || ast[3] === "CAM") && (!mediaIdToQuery || ast[0] === mediaIdToQuery || JSON.stringify(ast).includes(mediaIdToQuery))) {
+            if (Array.isArray(ast) && (ast[3] === "CAE" || ast[3] === "CAM") && (!mediaIdToQuery || ast[0] === mediaIdToQuery)) {
               const vUrl = ast?.[7]?.[0]?.[8] || ast?.[5]?.[2]?.[0]?.[8] || findVideoUrl(ast);
               if (vUrl) {
                 try {
@@ -2419,7 +2795,8 @@
       if (mediaIdToQuery) {
         try {
           const finalAsset = await callRpcInPage("as29s", [mediaIdToQuery]);
-          const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
+          _debug.as29s = finalAsset ? "data" : "null";
+          const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset) || findAnyGoogleVideoUrl(finalAsset, mediaIdToQuery);
           if (asUrl) {
             try {
               (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
@@ -2438,6 +2815,7 @@
         }
         try {
           const pollResp = await callRpcInPage("jwpduf", [null, null, [[mediaIdToQuery]]]);
+          _debug.jwpduf = pollResp ? "data" : "null";
           const pollUrl = findVideoUrl(pollResp);
           if (pollUrl) {
             try {
@@ -2455,9 +2833,10 @@
           }
           const asset = findMediaAsset(pollResp);
           const status = asset?.[5]?.[8]?.[0] ?? asset?.[5]?.[0]?.[8]?.[0];
+          _debug.jwpdufStatus = status ?? null;
           if (status === 3) {
             const finalAsset = await callRpcInPage("as29s", [mediaIdToQuery]);
-            const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
+            const asUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset) || findAnyGoogleVideoUrl(finalAsset, mediaIdToQuery);
             if (asUrl) {
               try {
                 (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
@@ -2617,13 +2996,41 @@
           }
         }
       }
+      if (mediaIdToQuery) {
+        try {
+          const allVideos = Array.from(document.querySelectorAll("video")).filter((v) => {
+            const src = v.currentSrc || v.src;
+            return src && src.startsWith("https://") && !v.paused && v.readyState >= 2;
+          });
+          _debug.domVideos = allVideos.length;
+          if (allVideos.length === 1) {
+            const src = allVideos[0].currentSrc || allVideos[0].src;
+            if (isLikelyFlowVideoUrl(src) || isVideoCandidate(src)) {
+              try {
+                (typeof window !== "undefined" ? window : globalThis).__FLOW_ACTIVE_GENERATION__ = null;
+              } catch {
+              }
+              return {
+                ok: true,
+                video_url: src,
+                media_id: mediaIdToQuery,
+                provider_model_id: activeModelId,
+                project_id: projectId,
+                _fallback: "single_playing_video"
+              };
+            }
+          }
+        } catch {
+        }
+      }
       const isGenerating = Boolean(
         document.querySelector('[role="progressbar"], [aria-label*="generating" i], [aria-label*="creating" i], .generating, [data-is-generating="true"]')
       );
       return {
         ok: false,
         is_generating: isGenerating,
-        error: isGenerating ? "Flow is still rendering video in scene" : "No completed Flow video URL found in the open scene"
+        error: isGenerating ? "Flow is still rendering video in scene" : "No completed Flow video URL found in the open scene",
+        _debug
       };
     } catch (error) {
       return { ok: false, error: error?.message || String(error) };
@@ -2722,6 +3129,10 @@
     const record = records.find((item) => !expected?.project_id || item[1] === expected.project_id);
     if (record) {
       return { mediaId: record[0], sceneId: record[2] || null, projectId: record[1] || null };
+    }
+    const modern = response.payload?.[3]?.[0];
+    if (Array.isArray(modern) && isUuid(modern[0]) && isUuid(modern[1]) && (!expected?.project_id || modern[1] === expected.project_id)) {
+      return { mediaId: modern[0], sceneId: modern[2] || null, projectId: modern[1] };
     }
     if (response.rpcId === "nprQif") {
       throw new Error("Flow response contains no video asset record for the selected project.");
@@ -2828,6 +3239,28 @@
     const fail = (message) => finish({ ok: false, error: `FLOW_UI: ${message}` });
     const command = (method, params = {}) => chrome.debugger.sendCommand(target, method, params);
     let capturedMediaId = null;
+    let findLost = null, recovering = false;
+    const recoverLostGeneration = async (detail) => {
+      if (recovering || settled || !findLost) return;
+      recovering = true;
+      clearTimeout(timeout);
+      logActivity("warn", `Flow hủy request tạo video (${detail}) — không gửi lại, đi tìm video trên server`);
+      const deadline = Date.now() + 7e4;
+      try {
+        while (!settled && Date.now() < deadline) {
+          const found = await findLost();
+          if (found) {
+            finish({ ok: true, media_id: found.mediaId });
+            return;
+          }
+          await sleep(1e3);
+        }
+      } catch (error) {
+        fail(error.message);
+        return;
+      }
+      fail(`Kết nối tạo video bị ngắt (${detail}). Không tìm thấy video mới trên Flow; kiểm tra Flow trước khi thử lại.`);
+    };
     const onEvent = (source, method, params) => {
       if (source.tabId !== tabId || source.sessionId) return;
       if (method === "Page.fileChooserOpened" && pendingChooser) {
@@ -2849,7 +3282,7 @@
           fail(error.message);
         }
       } else if (params.requestId === requestId && requestId) {
-        if (method === "Network.loadingFailed") fail("Kết nối tạo video bị ngắt.");
+        if (method === "Network.loadingFailed") recoverLostGeneration(`${params.errorText || "lỗi mạng"}${params.canceled ? ", bị hủy" : ""}`);
         if (method === "Network.responseReceived" && params.response.status !== 200) fail(`Flow trả HTTP ${params.response.status}.`);
         if (method === "Network.loadingFinished") {
           command("Network.getResponseBody", { requestId }).then((response) => {
@@ -2938,6 +3371,7 @@
     try {
       await chrome.debugger.attach(target, "1.3");
       attached = true;
+      await ensureTabVisible(tabId);
       chrome.debugger.onEvent.addListener(onEvent);
       chrome.debugger.onDetach.addListener(onDetach);
       timeout = setTimeout(() => fail("Timed out waiting for the Flow video request."), isFrames ? 18e4 : 6e4);
@@ -2998,6 +3432,7 @@
       if (!submitPoint) {
         submitPoint = await step("generate");
       }
+      findLost = createLostGenerationFinder(tabId, flowRequest, Date.now());
       armed = true;
       await click(submitPoint);
       const createResult = await result;
@@ -3020,8 +3455,11 @@
       }
       const pollStart = Date.now();
       const renderDeadline = Date.now() + 54e4;
+      let pollIteration = 0;
+      let lastDebugLog = 0;
       while (Date.now() < renderDeadline) {
         await sleep(3500);
+        pollIteration++;
         const injected = await chrome.scripting.executeScript({
           target: { tabId },
           world: "MAIN",
@@ -3033,18 +3471,56 @@
         });
         const pollResult = injected?.[0]?.result;
         if (pollResult && pollResult.ok && pollResult.video_url) {
-          logActivity("info", `Video render completed on Flow: mediaId=${mediaId}`);
-          return {
-            ok: true,
-            video_url: pollResult.video_url,
-            image_url: pollResult.image_url || null,
-            media_id: mediaId,
-            provider_model_id: flowRequest.provider_model_id || "abra_t2v_6s",
-            project_id: flowRequest.project_id
-          };
+          if (pollResult.media_id && pollResult.media_id !== mediaId) {
+            logActivity("warn", `Poll returned video for media_id=${pollResult.media_id} but this job expects ${mediaId}; skipping stale/foreign result`);
+          } else {
+            const fallbackNote = pollResult._fallback ? ` [fallback=${pollResult._fallback}]` : "";
+            logActivity("info", `Video render completed on Flow: mediaId=${mediaId}${fallbackNote}`);
+            return {
+              ok: true,
+              video_url: pollResult.video_url,
+              image_url: pollResult.image_url || null,
+              media_id: mediaId,
+              provider_model_id: flowRequest.provider_model_id || "abra_t2v_6s",
+              project_id: flowRequest.project_id
+            };
+          }
         }
         if (pollResult?.terminal_error) {
           return { ok: false, error: `Google Flow từ chối render: ${pollResult.error}` };
+        }
+        const elapsed = Math.round((Date.now() - pollStart) / 1e3);
+        if (elapsed - lastDebugLog >= 30) {
+          lastDebugLog = elapsed;
+          const d = pollResult?._debug;
+          if (d) {
+            logActivity("info", `Poll[${elapsed}s] mediaId=${mediaId?.slice(0, 8)}… rpcReady=${d.rpcReady} zzl0ze=${d.zzl0ze} as29s=${d.as29s} jwpduf=${d.jwpduf} status=${d.jwpdufStatus} domVids=${d.domVideos}`);
+          } else {
+            logActivity("info", `Poll[${elapsed}s] mediaId=${mediaId?.slice(0, 8)}… result=${pollResult ? pollResult.error?.slice(0, 60) : "null"}`);
+          }
+        }
+        if (elapsed >= 150 && pollIteration % 10 === 0) {
+          try {
+            const broadInjected = await chrome.scripting.executeScript({
+              target: { tabId },
+              world: "MAIN",
+              func: recoverCurrentSceneInPage,
+              args: [flowRequest.provider_model_id || "abra_t2v_6s", null, flowRequest.project_id]
+            }).catch(() => null);
+            const br = broadInjected?.[0]?.result;
+            if (br?.ok && br?.video_url) {
+              logActivity("info", `Broad recovery found video after ${elapsed}s: media_id=${br.media_id}, assigning to job mediaId=${mediaId}`);
+              return {
+                ok: true,
+                video_url: br.video_url,
+                image_url: br.image_url || null,
+                media_id: mediaId,
+                provider_model_id: flowRequest.provider_model_id || "abra_t2v_6s",
+                project_id: flowRequest.project_id
+              };
+            }
+          } catch {
+          }
         }
       }
       return { ok: false, error: "Hết thời gian chờ video render xong trên Google Flow (9 phút)." };
@@ -3136,6 +3612,11 @@
       }
       const visible = (el) => el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && window.getComputedStyle(el).visibility !== "hidden";
       const norm = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\u0111/gi, "d").replace(/\s+/gu, " ").trim().toLowerCase();
+      const sameModel = (value) => {
+        const words = norm(req.model_display_name).split(" ").filter(Boolean);
+        const have = new Set(String(value || "").split(/\s+/));
+        return words.length > 0 && words.every((w) => have.has(w));
+      };
       const text = (el) => {
         const clone = el.cloneNode(true);
         clone.querySelectorAll('[aria-hidden="true"]').forEach((item) => item.remove());
@@ -3255,12 +3736,12 @@
       }
       if (action === "modelMenu") {
         const button = modelButton();
-        return button && text(button).includes(norm(req.model_display_name)) ? null : point(button);
+        return button && sameModel(text(button)) ? null : point(button);
       }
       if (action === "model") {
         const button = modelButton();
-        if (button && text(button).includes(norm(req.model_display_name))) return null;
-        const option = find('[role="menuitem"]', (el) => text(el) === norm(req.model_display_name) || text(el).includes(norm(req.model_display_name)));
+        if (button && sameModel(text(button))) return null;
+        const option = find('[role="menuitem"]', (el) => sameModel(text(el)));
         return option ? point(option) : null;
       }
       if (action === "verifySettings") {
@@ -3277,7 +3758,7 @@
           labels.push(`Duration ${req.duration_seconds}s`);
         }
         const mismatches = labels.filter((_, i) => choices[i]?.getAttribute("aria-checked") !== "true");
-        const modelOk = modelButton() && text(modelButton()).includes(norm(req.model_display_name));
+        const modelOk = modelButton() && sameModel(text(modelButton()));
         if (mismatches.length > 0 || !modelOk) {
           const diagParts = [];
           if (!modelOk) diagParts.push(`Model button not showing "${req.model_display_name}"`);
@@ -3488,6 +3969,7 @@
 
   // src/providers/google-flow/motion-ui.js
   var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  var MOTION_EDIT_MODELS = /* @__PURE__ */ new Set(["macaron_cookie_edit", "abra_edit", "abra_edit_360p"]);
   function isMotionReferenceAttached(type, ids, mediaId, previousImageIds = []) {
     const expected = type === "video" ? [mediaId] : [...previousImageIds, mediaId];
     return Array.isArray(ids) && ids.length === expected.length && ids.every((id, index) => id === expected[index]);
@@ -3575,7 +4057,7 @@
     const walk = (node) => {
       if (!Array.isArray(node)) return;
       const model = node?.[5]?.[6]?.[1]?.[0]?.[0];
-      const nativeEdit = node[3] == null && model === "abra_edit" && Array.isArray(node[7]);
+      const nativeEdit = node[3] == null && MOTION_EDIT_MODELS.has(model) && Array.isArray(node[7]);
       if (node.length >= 4 && UUID.test(String(node[0])) && node[1] === expectedProjectId && (node[3] === "CAE" || nativeEdit)) {
         if (expectedReq && nativeEdit && (model !== expectedReq.provider_model_id || normalizeFlowPrompt(node?.[5]?.[1]) !== normalizeFlowPrompt(expectedReq.prompt))) {
           throw new Error("Flow returned a Motion Control asset with a different prompt or model.");
@@ -3622,6 +4104,7 @@
     let chooser = null;
     let upload = null;
     let created = null;
+    let lost = false;
     let failure = null;
     let submissionRpc = null;
     const mergeCatalog = (assets) => {
@@ -3772,7 +4255,10 @@
       if (!info) return;
       if (method === "Network.loadingFailed") {
         requestTypes.delete(params.requestId);
-        if (info.generation) fail("Flow stopped the Motion Control request. Check Flow before retrying.");
+        if (info.generation) {
+          lost = true;
+          logActivity("warn", `Flow hủy request Motion Control (${params.errorText || "unknown"}) — không gửi lại, đi tìm video trên server`);
+        }
         return;
       }
       if (method === "Network.responseReceived" && info.generation && params.response?.status >= 400) {
@@ -3924,6 +4410,7 @@
       });
       await chrome.debugger.attach(target, "1.3");
       attached = true;
+      await ensureTabVisible(tabId);
       chrome.debugger.onEvent.addListener(onEvent);
       chrome.debugger.onDetach.addListener(onDetach);
       await command("Network.enable", { maxPostDataSize: 1024 * 1024, maxResourceBufferSize: 5 * 1024 * 1024, maxTotalBufferSize: 12 * 1024 * 1024 });
@@ -4005,9 +4492,13 @@
       await sleep(350);
       const submitPoint = await step("generate", { expected_image_ids: expectedImageIds });
       await command("Fetch.enable", { patterns: [{ urlPattern: "*AiSandboxAngularFrontend/data/batchexecute*", requestStage: "Request" }] });
+      const findLost = createLostGenerationFinder(tabId, req, Date.now());
       armed = true;
       await click(submitPoint);
-      await waitFor(() => created, 9e4, "Flow did not return a Motion Control video asset. Check Flow before retrying; no automatic resubmission.");
+      await waitFor(async () => {
+        if (!created && lost) created = await findLost();
+        return created;
+      }, 9e4, "Flow did not return a Motion Control video asset. Check Flow before retrying; no automatic resubmission.");
       closed = true;
       chrome.debugger.onEvent.removeListener(onEvent);
       chrome.debugger.onDetach.removeListener(onDetach);
@@ -4370,6 +4861,7 @@
         const modelName = (req.model_display_name || "").toLowerCase();
         const isPortrait2 = req.aspect_ratio === "9:16";
         if (isVideoEdit2) {
+          if (modelName.includes("1.2")) return "macaron_cookie_edit";
           return req.resolution === "360p" ? "abra_edit_360p" : "abra_edit";
         }
         if (isIngredients2) {
@@ -4454,6 +4946,35 @@
           for (const v of Object.values(node)) {
             const u = findVideoUrl(v);
             if (u) return u;
+          }
+        }
+        return null;
+      }, findSignedVideoUrl = function(node, targetMid) {
+        if (!node) return null;
+        if (typeof node === "string" && node.startsWith("https://")) {
+          const lower = node.toLowerCase();
+          if (/\.(?:jpg|jpeg|png|webp|gif|avif|svg|css|js|woff|ttf)(?:$|[?#])/.test(lower)) return null;
+          if (/(?:preview|thumbnail|poster|sprite|favicon)/.test(lower)) return null;
+          if (targetMid && node.includes(targetMid)) return node;
+          try {
+            const u = new URL(node);
+            if (u.hostname === "flow-content.google") {
+              const pn = u.pathname.toLowerCase();
+              if (!pn.startsWith("/image") && !pn.includes("/image/")) return node;
+            }
+          } catch {
+          }
+          return null;
+        }
+        if (Array.isArray(node)) {
+          for (const child of node) {
+            const found = findSignedVideoUrl(child, targetMid);
+            if (found) return found;
+          }
+        } else if (typeof node === "object" && node !== null) {
+          for (const v of Object.values(node)) {
+            const found = findSignedVideoUrl(v, targetMid);
+            if (found) return found;
           }
         }
         return null;
@@ -5043,7 +5564,7 @@
           const status = asset?.[5]?.[8]?.[0] ?? asset?.[5]?.[0]?.[8]?.[0];
           if (status === 3) {
             const finalAsset = await callRpc("as29s", [mediaId]);
-            videoUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset);
+            videoUrl = finalAsset?.[7]?.[0]?.[8] || finalAsset?.[5]?.[2]?.[0]?.[8] || findVideoUrl(finalAsset) || findSignedVideoUrl(finalAsset, mediaId);
             imageUrl = finalAsset?.[5]?.[10] || finalAsset?.[5]?.[0]?.[10] || null;
             if (videoUrl) break;
           }
@@ -5078,7 +5599,7 @@
         if (loopCount >= 7 && loopCount % 2 === 0) {
           try {
             const checkFinal = await callRpc("as29s", [mediaId]);
-            const asUrl = checkFinal?.[7]?.[0]?.[8] || checkFinal?.[5]?.[2]?.[0]?.[8] || findVideoUrl(checkFinal);
+            const asUrl = checkFinal?.[7]?.[0]?.[8] || checkFinal?.[5]?.[2]?.[0]?.[8] || findVideoUrl(checkFinal) || findSignedVideoUrl(checkFinal, mediaId);
             if (asUrl) {
               videoUrl = asUrl;
               imageUrl = checkFinal?.[5]?.[10] || checkFinal?.[5]?.[0]?.[10] || null;
@@ -5109,19 +5630,457 @@
     }
   }
 
+  // src/providers/google-flow/page/video-http.js
+  var VERIFIED_HTTP_MODEL = /^macaron_cookie_t2v_10s(_360p)?$/;
+  var VERIFIED_FRAMES_MODEL = /^macaron_cookie_i2v_fl_(6|10)s(_360p)?$/;
+  var VERIFIED_R2V_MODEL = /^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$/;
+  var VERIFIED_EDIT_MODEL = /^macaron_cookie_edit$/;
+  var MEDIA_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function motionImageOrder(req) {
+    const images = Array.isArray(req?.ingredient_images) ? req.ingredient_images : [];
+    const inputs = Array.isArray(req?.ingredient_inputs) && req.ingredient_inputs.length ? req.ingredient_inputs : [...(req?.ingredient_media_ids || []).map((media_id) => ({ media_id })), ...images.map(() => ({ local: true }))];
+    if (inputs.length < 1 || inputs.length > 3) return null;
+    let next = 0;
+    const order = [];
+    for (const input of inputs) {
+      if (input?.media_id) {
+        if (!MEDIA_ID_RE.test(String(input.media_id))) return null;
+        order.push({ media_id: String(input.media_id) });
+      } else {
+        const image = images[next];
+        next += 1;
+        if (!image?.base64) return null;
+        order.push({ image_index: next - 1 });
+      }
+    }
+    return next === images.length ? order : null;
+  }
+  function canUseHttpVideo(req) {
+    if (!req || req.transport !== "http") return false;
+    const mode = req.input_mode || "text_to_video";
+    const model = String(req.provider_model_id || "");
+    if (mode === "text_to_video") {
+      if (!VERIFIED_HTTP_MODEL.test(model)) return false;
+    } else if (mode === "frames") {
+      const m = VERIFIED_FRAMES_MODEL.exec(model);
+      if (!m || Number(req.duration_seconds) !== Number(m[1])) return false;
+      if (!req.image_base64 || !req.end_image_base64) return false;
+      const dims = [req.image_width, req.image_height, req.end_image_width, req.end_image_height].map(Number);
+      if (!dims.every((n) => Number.isFinite(n) && n > 0)) return false;
+    } else if (mode === "ingredients") {
+      const m = VERIFIED_R2V_MODEL.exec(model);
+      if (!m || Number(req.duration_seconds) !== Number(m[1])) return false;
+      const images = Array.isArray(req.ingredient_images) ? req.ingredient_images : [];
+      const ids = Array.isArray(req.ingredient_media_ids) ? req.ingredient_media_ids : [];
+      const total = images.length + ids.length;
+      if (total < 1 || total > 3 || !images.every((i) => i && i.base64)) return false;
+      if (!ids.every((x) => typeof x === "string" && MEDIA_ID_RE.test(x))) return false;
+    } else if (mode === "video_edit") {
+      if (!VERIFIED_EDIT_MODEL.test(model) || (req.resolution || "720p") !== "720p") return false;
+      if (!MEDIA_ID_RE.test(String(req.reference_video_id || ""))) return false;
+      const start = Number(req.reference_video_start_seconds || 0);
+      const end = Number(req.reference_video_end_seconds);
+      if (!(start >= 0) || !(end > start) || end - start > 10) return false;
+      if (!motionImageOrder(req)) return false;
+    } else {
+      return false;
+    }
+    if (model.endsWith("_360p") !== ((req.resolution || "720p") === "360p")) return false;
+    if (!["720p", "360p"].includes(req.resolution || "720p")) return false;
+    if (!["16:9", "9:16"].includes(req.aspect_ratio)) return false;
+    if (Number(req.num_outputs || 1) !== 1) return false;
+    return true;
+  }
+  async function runFlowHttpVideoInPage(flowRequest, _captchaToken, opts = {}) {
+    const pollMs = opts.pollMs ?? 5e3;
+    const timeoutMs = opts.timeoutMs ?? 6e5;
+    const sleep2 = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const w = typeof window !== "undefined" ? window : globalThis;
+    let submitted = false;
+    let mediaId = null;
+    let credit = null;
+    let startMediaId = null;
+    let endMediaId = null;
+    let ingredientMediaIds = null;
+    try {
+      let centerCrop = function(width, height, targetAspect) {
+        const ratio = width / height;
+        if (Math.abs(ratio - targetAspect) < 1e-9) return [null, null, 1, 1];
+        if (ratio > targetAspect) {
+          const frac2 = targetAspect / ratio;
+          const left = (1 - frac2) / 2;
+          return [null, left, 1, left + frac2];
+        }
+        const frac = ratio / targetAspect;
+        const top = (1 - frac) / 2;
+        return [top, null, top + frac, 1];
+      };
+      const prompt = typeof flowRequest?.prompt === "string" ? flowRequest.prompt.trim() : "";
+      if (!prompt) throw new Error("Flow prompt is empty");
+      const modelId = String(flowRequest?.provider_model_id || "");
+      const isFrames = (flowRequest?.input_mode || "text_to_video") === "frames";
+      const isIngredients = flowRequest?.input_mode === "ingredients";
+      const isEdit = flowRequest?.input_mode === "video_edit";
+      const modelOk = isFrames ? /^macaron_cookie_i2v_fl_(6|10)s(_360p)?$/.test(modelId) : isIngredients ? /^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$/.test(modelId) : isEdit ? modelId === "macaron_cookie_edit" : /^macaron_cookie_t2v_10s(_360p)?$/.test(modelId);
+      if (!modelOk) throw new Error(`HTTP path không hỗ trợ model ${modelId || "(trống)"}`);
+      const aspectEnum = { "9:16": 1, "16:9": 2 }[flowRequest?.aspect_ratio];
+      if (!aspectEnum) throw new Error(`HTTP path không hỗ trợ aspect_ratio ${flowRequest?.aspect_ratio || "(trống)"}`);
+      const route = location.pathname.match(/^(\/u\/\d+)?\/project\/([0-9a-f-]{36})/i);
+      const accountPath = route?.[1] || "";
+      const projectId = route?.[2] || null;
+      if (location.hostname !== "flow.google.com" || !projectId) {
+        throw new Error("Vui lòng mở một Dự án (Project) trên tab Google Flow trước khi bấm Tạo video");
+      }
+      const wiz = w.WIZ_global_data || {};
+      const at = wiz.SNlM0e;
+      const sid = wiz.FdrFJe;
+      const bl = wiz.cfb2h;
+      if (!at || !sid || !bl) throw new Error("Flow page session config is incomplete; reload the project");
+      const sidNum = Number(sid);
+      if (Number.isFinite(sidNum) && sidNum !== 0 && Math.abs(sidNum) < 1e6) {
+        throw new Error(`Flow session ID không hợp lệ (sid=${sidNum}); trang chưa load xong WIZ_global_data`);
+      }
+      const sourcePath = `${accountPath}/project/${projectId}`;
+      const hl = String(document?.documentElement?.lang || "en").split("-")[0];
+      const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : "00000000-0000-4000-8000-000000000000").toUpperCase();
+      async function rpc(rpcId2, payload) {
+        const query = new URLSearchParams({
+          rpcids: rpcId2,
+          "source-path": sourcePath,
+          bl: String(bl),
+          "f.sid": String(sid),
+          hl,
+          _reqid: String(1e5 + Math.floor(Math.random() * 9e5)),
+          rt: "c"
+        });
+        const body = new URLSearchParams({
+          "f.req": JSON.stringify([[[rpcId2, JSON.stringify(payload), null, "generic"]]]),
+          at: String(at)
+        });
+        const res = await fetch(`${location.origin}${accountPath}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`, {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Same-Domain": "1" },
+          body: body.toString()
+        });
+        if (!res.ok) throw new Error(`Flow RPC ${rpcId2} failed: HTTP ${res.status}`);
+        const text = await res.text();
+        let envelopeError = null;
+        for (const line of text.split(/\r?\n/)) {
+          if (!line.trim().startsWith("[")) continue;
+          let frames;
+          try {
+            frames = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (!Array.isArray(frames)) continue;
+          for (const item of frames) {
+            if (!Array.isArray(item)) continue;
+            if (item[0] === "wrb.fr" && item[1] === rpcId2) {
+              if (typeof item[2] === "string") return JSON.parse(item[2]);
+              envelopeError = `Flow RPC ${rpcId2} envelope error: ${JSON.stringify(item.slice(2, 6))}`;
+            } else if (item[0] === "er") {
+              envelopeError = `Flow server error (er): ${JSON.stringify(item)}`;
+            }
+          }
+        }
+        throw new Error(envelopeError || `Flow RPC ${rpcId2} returned no usable payload`);
+      }
+      async function freshCaptchaToken() {
+        const g = w.grecaptcha?.enterprise;
+        if (!g?.execute) throw new Error("reCAPTCHA chưa nạp trong trang Flow (mở project và đợi load xong)");
+        let key = "";
+        for (const s of document.scripts || []) {
+          const m = /recaptcha\/enterprise\.js\?render=([^&]+)/.exec(s.src || "");
+          if (m && m[1] !== "explicit") {
+            key = m[1];
+            break;
+          }
+        }
+        if (!key && typeof performance?.getEntriesByType === "function") {
+          for (const e of performance.getEntriesByType("resource")) {
+            const m = /google\.com\/recaptcha\/enterprise\/(?:anchor|reload|clr)\?(?:[^#]*&)?k=([^&]+)/.exec(e.name);
+            if (m) {
+              key = m[1];
+              break;
+            }
+          }
+        }
+        if (!key) {
+          for (const f of document.querySelectorAll?.('iframe[src*="recaptcha"]') || []) {
+            const m = /[?&]k=([^&]+)/.exec(f.src);
+            if (m) {
+              key = m[1];
+              break;
+            }
+          }
+        }
+        if (!key) throw new Error("Không tìm thấy site key reCAPTCHA trong trang Flow");
+        if (typeof g.ready === "function") await new Promise((resolve) => g.ready(resolve));
+        const token = await g.execute(key, { action: "VIDEO_GENERATION" });
+        if (typeof token !== "string" || !token) throw new Error("reCAPTCHA trả token rỗng");
+        return token;
+      }
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      async function uploadImage(base64, mime, filename) {
+        const raw = String(base64 || "").includes(",") ? String(base64).split(",")[1] : String(base64 || "");
+        if (!raw) throw new Error("Ảnh khung hình trống");
+        const data = await rpc("maseQ", [
+          [null, 22, null, null, null, projectId, null, null, null, null, null],
+          raw,
+          mime || "image/png",
+          true,
+          null,
+          null,
+          null,
+          false,
+          filename || "frame.png"
+        ]);
+        let id = data?.[0]?.[0];
+        if (!(typeof id === "string" && UUID_RE.test(id) && data?.[0]?.[1] === projectId)) {
+          id = null;
+          const find = (node) => {
+            if (typeof node === "string") return node !== projectId && UUID_RE.test(node) ? node : null;
+            if (Array.isArray(node)) {
+              for (const x of node) {
+                const f = find(x);
+                if (f) return f;
+              }
+            }
+            return null;
+          };
+          id = find(data);
+        }
+        if (!id) throw new Error(`Upload ảnh lên Flow không trả media id: ${JSON.stringify(data).slice(0, 160)}`);
+        return id;
+      }
+      let rpcId = "YhhmEf";
+      let createPayload;
+      if (isFrames) {
+        const targetAspect = flowRequest.aspect_ratio === "9:16" ? 9 / 16 : 16 / 9;
+        startMediaId = await uploadImage(flowRequest.image_base64, flowRequest.image_mime, flowRequest.image_name);
+        endMediaId = await uploadImage(flowRequest.end_image_base64, flowRequest.end_image_mime, flowRequest.end_image_name);
+        const slot = (id, w2, h) => [null, id, null, null, null, centerCrop(Number(w2), Number(h), targetAspect)];
+        const token = await freshCaptchaToken();
+        rpcId = "nprQif";
+        createPayload = [
+          [[
+            [null, null, [[[prompt]]]],
+            modelId,
+            aspectEnum,
+            null,
+            slot(startMediaId, flowRequest.image_width, flowRequest.image_height),
+            slot(endMediaId, flowRequest.end_image_width, flowRequest.end_image_height),
+            [null, null, null, null, uuid(), uuid()]
+          ]],
+          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+          [uuid(), 2]
+        ];
+      } else if (isEdit) {
+        const videoId = String(flowRequest.reference_video_id || "");
+        if (!UUID_RE.test(videoId)) throw new Error("Motion Control cần mã video mẫu đã tải lên Flow");
+        const startSec = Number(flowRequest.reference_video_start_seconds || 0);
+        const endSec = Number(flowRequest.reference_video_end_seconds);
+        if (!(startSec >= 0) || !(endSec > startSec) || endSec - startSec > 10) {
+          throw new Error("Đoạn cắt video mẫu không hợp lệ (tối đa 10 giây)");
+        }
+        const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
+        const inputs = Array.isArray(flowRequest.ingredient_inputs) && flowRequest.ingredient_inputs.length ? flowRequest.ingredient_inputs : [...(flowRequest.ingredient_media_ids || []).map((media_id) => ({ media_id })), ...images.map(() => ({ local: true }))];
+        if (inputs.length < 1 || inputs.length > 3) throw new Error("Motion Control cần 1–3 ảnh tham chiếu");
+        ingredientMediaIds = [];
+        let nextImage = 0;
+        for (const input of inputs) {
+          if (input?.media_id) {
+            if (!UUID_RE.test(String(input.media_id))) throw new Error("Mã media ảnh tham chiếu không hợp lệ");
+            ingredientMediaIds.push(String(input.media_id));
+          } else {
+            const img = images[nextImage];
+            nextImage += 1;
+            if (!img?.base64) throw new Error("Thiếu dữ liệu ảnh tham chiếu Motion Control");
+            ingredientMediaIds.push(await uploadImage(img.base64, img.mime, img.filename));
+          }
+        }
+        const readyDeadline = Date.now() + (opts.sourceReadyTimeoutMs ?? 24e4);
+        for (; ; ) {
+          const polled = await rpc("jwpduf", [null, null, [[videoId]]]);
+          const rec = polled?.[2]?.find?.((r) => r?.[0] === videoId);
+          if (!rec) throw new Error("Flow không tìm thấy video mẫu trong project này (hãy tải lại video mẫu)");
+          const sourceState = rec?.[5]?.[8]?.[0];
+          if (sourceState === 3) break;
+          if (![1, 2, 6, void 0, null].includes(sourceState)) throw new Error(`Flow xử lý video mẫu bị lỗi (trạng thái ${sourceState})`);
+          if (Date.now() > readyDeadline) throw new Error("Video mẫu chưa xử lý xong trên Flow; chưa gửi lệnh tạo video, hãy thử lại sau");
+          await sleep2(pollMs);
+        }
+        const token = await freshCaptchaToken();
+        rpcId = "jIps6";
+        createPayload = [
+          [[
+            [null, videoId, Math.round(startSec * 30), Math.round(endSec * 30)],
+            [null, null, [[[prompt]]]],
+            modelId,
+            Number(flowRequest.num_outputs || 1),
+            [null, null, null, null, uuid(), uuid()],
+            null,
+            null,
+            null,
+            ingredientMediaIds.map((id) => [null, id])
+          ]],
+          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+          [uuid(), 2]
+        ];
+      } else if (isIngredients) {
+        const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
+        const existing = Array.isArray(flowRequest.ingredient_media_ids) ? flowRequest.ingredient_media_ids.filter(Boolean) : [];
+        if (images.length + existing.length < 1 || images.length + existing.length > 3) throw new Error("Ingredients cần 1–3 ảnh tham chiếu");
+        if (!existing.every((x) => UUID_RE.test(String(x)))) throw new Error("Mã media ảnh tham chiếu không hợp lệ");
+        ingredientMediaIds = [...existing];
+        for (const img of images) ingredientMediaIds.push(await uploadImage(img.base64, img.mime, img.filename));
+        const token = await freshCaptchaToken();
+        rpcId = "MZZa6b";
+        const item = [
+          [null, null, [[[prompt]]]],
+          ingredientMediaIds.map((id) => [null, id]),
+          modelId,
+          aspectEnum,
+          null,
+          [null, null, null, null, uuid(), uuid()]
+        ];
+        if (modelId.endsWith("_360p")) item.push(null, null, null, null, null, [4]);
+        createPayload = [
+          [item],
+          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+          [uuid(), 2]
+        ];
+      } else {
+        const token = await freshCaptchaToken();
+        createPayload = [
+          [[[null, null, [[[prompt]]]], modelId, aspectEnum, null, [null, null, null, null, uuid(), uuid()]]],
+          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+          [uuid(), 2]
+        ];
+      }
+      const created = await rpc(rpcId, createPayload);
+      const record = created?.[3]?.[0];
+      mediaId = typeof record?.[0] === "string" ? record[0] : null;
+      credit = Number.isFinite(Number(created?.[1])) ? Number(created[1]) : null;
+      if (!mediaId) {
+        throw new Error(`Flow create response did not contain a media id: ${JSON.stringify(created).slice(0, 200)}`);
+      }
+      submitted = true;
+      try {
+        w.__FLOW_ACTIVE_GENERATION__ = { mediaId, projectId, modelId, startTime: Date.now(), prompt };
+      } catch {
+      }
+      const stateOf = (r) => r?.[5]?.[8]?.[0];
+      const describeFailure = (rec) => {
+        try {
+          const scrub = (node, depth) => {
+            if (node === null || typeof node === "number" || typeof node === "boolean") return node;
+            if (typeof node === "string") {
+              if (/^https?:\/\//i.test(node)) return "<url>";
+              if (UUID_RE.test(node)) return "<id>";
+              return node.length > 90 ? `${node.slice(0, 90)}…` : node;
+            }
+            if (Array.isArray(node)) return depth > 7 ? "[…]" : node.slice(0, 24).map((x) => scrub(x, depth + 1));
+            return "<obj>";
+          };
+          const text = JSON.stringify(scrub(rec, 0));
+          return ` [bản ghi poll: ${text.length > 700 ? `${text.slice(0, 700)}…` : text}]`;
+        } catch {
+          return "";
+        }
+      };
+      let state = stateOf(record);
+      const deadline = Date.now() + timeoutMs;
+      let consecutiveErrors = 0;
+      while (state !== 3) {
+        if (Date.now() > deadline) throw new Error("Timed out waiting for Flow render");
+        await sleep2(pollMs);
+        try {
+          const polled = await rpc("jwpduf", [null, null, [[mediaId]]]);
+          const rec = polled?.[2]?.find?.((r) => r?.[0] === mediaId);
+          if (!rec) throw new Error("poll response has no record for this media id");
+          consecutiveErrors = 0;
+          state = stateOf(rec);
+          if (state === void 0 || state === null) continue;
+          if (![1, 2, 3, 6].includes(state)) throw new Error(`Flow render ended with status ${state}${describeFailure(rec)}`);
+        } catch (err) {
+          if (String(err?.message || "").startsWith("Flow render ended")) throw err;
+          if (++consecutiveErrors >= 5) throw err;
+        }
+      }
+      let asset = null;
+      let videoUrl = null;
+      for (let attempt = 0; attempt < 4 && !videoUrl; attempt++) {
+        if (attempt) await sleep2(Math.min(pollMs, 2e3));
+        asset = await rpc("as29s", [mediaId]);
+        const candidate = asset?.[7]?.[0]?.[8];
+        if (typeof candidate === "string" && candidate.startsWith("https://flow-content.google/video/")) videoUrl = candidate;
+      }
+      if (!videoUrl) throw new Error("Flow render xong nhưng không lấy được URL video (as29s)");
+      const imageUrl = typeof asset?.[5]?.[10] === "string" ? asset[5][10] : null;
+      try {
+        if (w.__FLOW_ACTIVE_GENERATION__?.mediaId === mediaId) w.__FLOW_ACTIVE_GENERATION__ = null;
+      } catch {
+      }
+      return {
+        ok: true,
+        submitted: true,
+        video_url: videoUrl,
+        image_url: imageUrl,
+        media_id: mediaId,
+        provider_model_id: modelId,
+        project_id: projectId,
+        credit_balance: credit,
+        transport: "http",
+        start_media_id: startMediaId,
+        end_media_id: endMediaId,
+        ingredient_media_ids: ingredientMediaIds,
+        ...isEdit ? {
+          diagnostics: {
+            adapter: "motion-http-v1",
+            rpc: "jIps6",
+            reference_video_id: flowRequest.reference_video_id,
+            reference_start_seconds: flowRequest.reference_video_start_seconds,
+            reference_end_seconds: flowRequest.reference_video_end_seconds,
+            ingredient_media_ids: ingredientMediaIds,
+            prompt_verified: true
+          }
+        } : {}
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        submitted,
+        media_id: mediaId,
+        credit_balance: credit,
+        transport: "http",
+        error: error?.message || String(error),
+        start_media_id: startMediaId,
+        end_media_id: endMediaId,
+        ingredient_media_ids: ingredientMediaIds
+      };
+    }
+  }
+
   // src/providers/google-flow/generation.js
   async function generateFlowVideo(flowRequest, captchaToken) {
     const hasDebugger = typeof chrome !== "undefined" && Boolean(chrome?.debugger);
-    if (flowRequest?.input_mode === "frames" || flowRequest?.input_mode === "ingredients") {
+    const httpFrames = (flowRequest?.input_mode === "frames" || flowRequest?.input_mode === "ingredients") && canUseHttpVideo(flowRequest);
+    if ((flowRequest?.input_mode === "frames" || flowRequest?.input_mode === "ingredients") && !httpFrames) {
       if (!hasDebugger) return { ok: false, error: "FLOW_UI: Reload FlowsVeo to enable native browser control for Frames/Ingredients." };
       const tabId2 = await ensureProjectTab(flowRequest.project_id, { flowOnly: true });
       if (!tabId2) return { ok: false, error: "FLOW_UI: Không mở được project Flow." };
+      await ensureCleanComposer(tabId2);
       return flowRequest.input_mode === "ingredients" ? generateIngredientsThroughUi(flowRequest, tabId2) : generateFramesThroughUi(flowRequest, tabId2);
     }
-    if (flowRequest?.input_mode === "video_edit") {
+    if (flowRequest?.input_mode === "video_edit" && !canUseHttpVideo(flowRequest)) {
       if (!hasDebugger) return { ok: false, error: "FLOW_UI: Reload FlowsVeo to enable native browser control for Motion Control." };
       const tabId2 = await ensureProjectTab(flowRequest.project_id, { flowOnly: true });
       if (!tabId2) return { ok: false, error: "FLOW_UI: Không mở được project Flow cho Motion Control." };
+      await ensureCleanComposer(tabId2);
       return generateMotionVideoThroughUi(flowRequest, tabId2);
     }
     if (flowRequest?.project_id) {
@@ -5145,11 +6104,23 @@
     const isFrames = flowRequest?.input_mode === "frames";
     const isIngredients = flowRequest?.input_mode === "ingredients";
     const isVideoEdit = flowRequest?.input_mode === "video_edit";
-    if (!isFrames && !isIngredients && !isVideoEdit && hasDebugger) {
+    const useHttp = canUseHttpVideo(flowRequest);
+    const generationFn = useHttp ? runFlowHttpVideoInPage : runFlowGenerationInPage;
+    if (useHttp) await warmUpRecaptcha(tabId, 8e3).catch(() => null);
+    if (!isFrames && !isIngredients && !isVideoEdit && hasDebugger && !useHttp) {
+      await ensureCleanComposer(tabId);
       logActivity("info", `Running Video UI Automation on tab=${tabId}`);
       return await generateVideoThroughUi(flowRequest, tabId);
     }
-    logActivity("info", `Running In-Page RPC generation for ${flowRequest?.input_mode} on tab=${tabId}`);
+    const fallbackToUiIfNotSubmitted = async (result, isRetry = false) => {
+      if (!useHttp || !result || result.ok || result.submitted !== false || !hasDebugger) return null;
+      if (["frames", "ingredients", "video_edit"].includes(flowRequest?.input_mode)) return null;
+      if (!isRetry && /session ID không hợp lệ|session config is incomplete/i.test(result.error || "")) return null;
+      logActivity("warn", `HTTP video path failed before submit (${result.error}); falling back to UI automation`);
+      await ensureCleanComposer(tabId);
+      return generateVideoThroughUi(flowRequest, tabId);
+    };
+    logActivity("info", `Running ${useHttp ? "HTTP (no-UI)" : "In-Page RPC"} generation for ${flowRequest?.input_mode} on tab=${tabId}`);
     const recoverLostResult = async (originalError) => {
       logActivity("info", `Lost direct result (${originalError}). Starting patient scene recovery...`);
       const recoveryDeadline = Date.now() + 3e5;
@@ -5189,10 +6160,12 @@
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         world: "MAIN",
-        func: runFlowGenerationInPage,
+        func: generationFn,
         args: [flowRequest, captchaToken]
       });
       const result = injected?.[0]?.result;
+      const uiFallback = await fallbackToUiIfNotSubmitted(result);
+      if (uiFallback) return uiFallback;
       if (result && !result.ok && result.error && /session ID không hợp lệ|session config is incomplete/i.test(result.error)) {
         logActivity("warn", `Session stale on tab ${tabId}, reloading and retrying: ${result.error}`);
         try {
@@ -5207,10 +6180,12 @@
           const retryInjected = await chrome.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
-            func: runFlowGenerationInPage,
+            func: generationFn,
             args: [flowRequest, captchaToken]
           });
           const retryResult = retryInjected?.[0]?.result;
+          const retryUiFallback = await fallbackToUiIfNotSubmitted(retryResult, true);
+          if (retryUiFallback) return retryUiFallback;
           if (retryResult) {
             if (retryResult.ok || !/Flow page returned no result/i.test(retryResult.error || "")) return retryResult;
             return recoverLostResult(retryResult.error);
@@ -5251,6 +6226,7 @@
     }
     const hasDebugger = typeof chrome !== "undefined" && Boolean(chrome?.debugger);
     if (hasDebugger) {
+      await ensureCleanComposer(tabId);
       logActivity("info", `Running Image UI Automation on tab=${tabId}`);
       return await generateImageThroughUi(imageRequest, tabId);
     }
@@ -5487,18 +6463,15 @@
   // src/providers/google-flow/upload.js
   async function uploadVideoToFlow(request) {
     const targetPid = request.project_id || null;
-    let tabId = await findLabsTab(targetPid);
-    if (!tabId) return { ok: false, error: "Open a Flow project in Chrome" };
-    const captchaResult = await solveRecaptcha({ ...request, captcha_action: "VIDEO_GENERATION" });
-    if (!captchaResult.token) {
-      return { ok: false, error: captchaResult.error || "reCAPTCHA failed for video upload" };
-    }
+    if (!targetPid) return { ok: false, error: "Chọn Flow project trước khi tải video mẫu lên." };
+    const tabId = await ensureProjectTab(targetPid, { flowOnly: true });
+    if (!tabId) return { ok: false, error: "Không mở được Flow project để tải video mẫu lên." };
     try {
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         world: "MAIN",
         func: runVideoUploadInPage,
-        args: [request, captchaResult.token]
+        args: [request]
       });
       return injected?.[0]?.result || { ok: false, error: "Flow page returned no result for video upload" };
     } catch (error) {
@@ -5516,18 +6489,33 @@
         fail("Flow tab changed project before video upload.");
       }
       const visible = (el) => el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && window.getComputedStyle(el).visibility !== "hidden";
-      const norm = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/Ä‘/gi, "d").replace(/\s+/g, " ").trim().toLowerCase();
+      const norm = (value) => String(value || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").replace(/\s+/g, " ").trim().toLowerCase();
       const label = (el) => norm(el.getAttribute("aria-label")) || norm(el.innerText || el.textContent);
       const find = (selector, predicate) => [...document.querySelectorAll(selector)].find((el) => visible(el) && predicate(el));
+      const center = (el) => {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      };
+      const reachable = (el) => {
+        const { x, y } = center(el);
+        const topEl = document.elementFromPoint(x, y);
+        return Boolean(topEl && (el.contains(topEl) || topEl.contains(el)));
+      };
+      const describe = (el) => {
+        if (!el) return "nothing (control is off-screen)";
+        const cls = String(el.className?.baseVal ?? el.className ?? "").trim().replace(/\s+/g, ".").slice(0, 100);
+        const text = norm(el.getAttribute?.("aria-label") || el.innerText || el.textContent).slice(0, 60);
+        return `${el.tagName}${cls ? `.${cls}` : ""}${text ? ` "${text}"` : ""}`;
+      };
       const point = (el) => {
         if (!el) fail("Flow upload control was not found. Open the project prompt and try again.");
         if (el.disabled || el.getAttribute("aria-disabled") === "true") fail("Flow upload control is not ready.");
         el.scrollIntoView({ block: "nearest" });
-        const rect = el.getBoundingClientRect();
-        const x = rect.left + rect.width / 2;
-        const y = rect.top + rect.height / 2;
-        if (!el.contains(document.elementFromPoint(x, y))) fail("A window is covering the Flow upload control.");
-        return { x, y };
+        if (!reachable(el)) {
+          const { x, y } = center(el);
+          fail(`A window is covering the Flow upload control: ${describe(document.elementFromPoint(x, y))}.`);
+        }
+        return center(el);
       };
       if (action === "unlock") {
         document.documentElement.removeAttribute("data-flowsveo-upload-until");
@@ -5537,12 +6525,24 @@
         document.documentElement.setAttribute("data-flowsveo-upload-until", String(Date.now() + 3e5));
         return true;
       }
+      if (action === "dismissBackdrop") {
+        const backdrop = find(".cdk-overlay-backdrop", () => true);
+        if (!backdrop) return null;
+        const rect = backdrop.getBoundingClientRect();
+        for (const [x, y] of [[rect.left + 8, rect.top + 8], [rect.right - 8, rect.top + 8], [rect.left + 8, rect.bottom - 8]]) {
+          if (document.elementFromPoint(x, y) === backdrop) return { x, y };
+        }
+        return null;
+      }
       if (action === "openPicker") {
         const add = find(".base-prompt-box button.add-menu-trigger", () => true);
         return point(add);
       }
       if (action === "upload") {
-        const button = find('button,[role="button"]', (el) => /tai noi dung nghe nhin len|upload media|upload files/.test(label(el)));
+        const isUpload = (el) => /tai noi dung nghe nhin len|upload media|upload files/.test(label(el));
+        const candidates = [...document.querySelectorAll('button,[role="button"],[role="menuitem"]')].filter((el) => visible(el) && isUpload(el));
+        const inMenu = (el) => Boolean(el.closest('[role="menu"], .cdk-overlay-pane'));
+        const button = candidates.find((el) => inMenu(el) && reachable(el)) || candidates.find(reachable) || candidates.find(inMenu) || candidates[0];
         return point(button);
       }
       return fail("Unknown Flow video upload step.");
@@ -5581,6 +6581,32 @@
       return null;
     };
     return walk(value);
+  }
+  var COVERED = /^A window is covering the Flow upload control/;
+  var UPLOAD_MENU_ATTEMPTS = 3;
+  async function pressEscape(command) {
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }).catch(() => {
+    });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }).catch(() => {
+    });
+  }
+  async function openUploadChooser({ step, click, pressEscape: pressEscape2, wait = sleep, attempts = UPLOAD_MENU_ATTEMPTS }) {
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        await click(await step("openPicker"));
+        await click(await step("upload"));
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!COVERED.test(error?.message || "")) throw error;
+        const backdrop = await step("dismissBackdrop").catch(() => null);
+        if (backdrop && !backdrop.error) await click(backdrop);
+        await pressEscape2();
+        await wait(400);
+      }
+    }
+    throw lastError;
   }
   async function uploadVideoToFlowThroughUi(request, tabId) {
     if (!request?.project_id || !request.video_local_path || !request.video_filename) {
@@ -5668,6 +6694,7 @@
     try {
       await chrome.debugger.attach(target, "1.3");
       attached = true;
+      await ensureTabVisible(tabId);
       chrome.debugger.onEvent.addListener(onEvent);
       chrome.debugger.onDetach.addListener(onDetach);
       await command("Network.enable", { maxResourceBufferSize: 5 * 1024 * 1024, maxTotalBufferSize: 12 * 1024 * 1024 });
@@ -5685,8 +6712,7 @@
           }, 15e3)
         };
       });
-      await click(await step("openPicker"));
-      await click(await step("upload"));
+      await openUploadChooser({ step, click, pressEscape: () => pressEscape(command) });
       await chooserPromise;
       timeout = setTimeout(() => finish({
         ok: false,
@@ -5811,7 +6837,7 @@
                 }
               }
             }
-            const creditsMatch = fullText.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+            const creditsMatch = fullText.match(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/i);
             if (creditsMatch) {
               domCredits = parseInt(creditsMatch[1].replace(/[,.]/g, ""), 10);
             }
@@ -5819,8 +6845,8 @@
               const allElements = Array.from(document.querySelectorAll('div, span, p, h1, h2, h3, button, b, strong, [aria-label*="credit" i]'));
               for (const el of allElements) {
                 const txt = el.textContent || "";
-                if (/credits/i.test(txt)) {
-                  const m = txt.match(/(\d+[\d,.]*)\s*(?:Google\s*Flow\s*)?credits/i);
+                if (/credits|tín\s*dụng\s*Google\s*Flow/i.test(txt)) {
+                  const m = txt.match(/(\d+[\d,.]*)\s*(?:(?:Google\s*Flow\s*)?credits|tín\s*dụng\s*Google\s*Flow)/i);
                   if (m) {
                     domCredits = parseInt(m[1].replace(/[,.]/g, ""), 10);
                     break;
@@ -6212,7 +7238,8 @@
 
   // src/background/jobs/dispatch.js
   async function processCaptchaRequest(request) {
-    if (["frames", "ingredients", "video_edit"].includes(request.flow_request?.input_mode) && !request.flow_recovery) {
+    const httpEligible = Boolean(request.flow_request?.http_no_captcha) && canUseHttpVideo(request.flow_request);
+    if (["frames", "ingredients", "video_edit"].includes(request.flow_request?.input_mode) && !request.flow_recovery && !httpEligible) {
       if (runtime.activeGenerationCount > 0 || runtime.imageUiBusy || runtime.videoUiBusy) {
         await postFlowResponse(request.request_id, { ok: false, error: "FLOW_UI: Flow đang xử lý tác vụ khác. Chờ tác vụ đó xong rồi thử lại." });
         return;
@@ -6324,6 +7351,23 @@
         request.provider_model_id || ""
       );
       await postFlowResponse(request.request_id, recovered);
+      return;
+    }
+    if (request.flow_request?.http_no_captcha && canUseHttpVideo(request.flow_request) && !request.flow_recovery) {
+      runtime.activeGenerationCount++;
+      logActivity("info", `Flow generation dispatched (HTTP, no pre-solved captcha): request=${request.request_id.slice(0, 8)}`);
+      (async () => {
+        try {
+          const flowResult = await generateFlowVideo(request.flow_request, null);
+          await postFlowResponse(request.request_id, flowResult);
+          logActivity(flowResult.ok ? "info" : "warn", flowResult.ok ? `Flow generation completed: request=${request.request_id.slice(0, 8)}` : `Flow generation failed: ${flowResult.error}`);
+        } catch (e) {
+          await postFlowResponse(request.request_id, { ok: false, error: e?.message || "Flow generation error" });
+        } finally {
+          runtime.activeGenerationCount = Math.max(0, runtime.activeGenerationCount - 1);
+          onCaptchaSuccess();
+        }
+      })();
       return;
     }
     let result = await solveRecaptcha(request);
@@ -6848,6 +7892,11 @@
             });
             if (r.status === 200) {
               const req = await r.json();
+              if (req?.reload) {
+                logActivity("info", "Remote reload requested by bridge (watchdog)");
+                chrome.runtime.reload();
+                return;
+              }
               if (req?.request_id) {
                 await processCaptchaRequest(req);
               }
