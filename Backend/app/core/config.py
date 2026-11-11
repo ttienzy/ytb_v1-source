@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -26,12 +27,30 @@ except OSError:
 DEFAULT_DATABASE_URL = f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
 
 
+def _detect_chrome_executable() -> Path:
+    """Tự động phát hiện đường dẫn Google Chrome khả dụng trên Windows."""
+    candidates = [
+        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+    ]
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(Path(local_app_data) / "Google" / "Chrome" / "Application" / "chrome.exe")
+    which_chrome = shutil.which("chrome") or shutil.which("chrome.exe")
+    if which_chrome:
+        candidates.append(Path(which_chrome))
+    for c in candidates:
+        if c.is_file():
+            return c
+    return candidates[0]
+
+
 class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = DEFAULT_DATABASE_URL
     chrome_profile_dir: Path = DATA_DIR / "ChromeProfile"
     config_file: Path = DATA_DIR / "config.json"
-    chrome_executable: Path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    chrome_executable: Path = _detect_chrome_executable()
     voice_service_url: str = "http://127.0.0.1:8001"  # voice-service (VieNeu-TTS) nội bộ
     # Profile riêng cho YouTube login
     yt_profile_dir: Path = DATA_DIR / "YtProfile"
@@ -41,4 +60,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

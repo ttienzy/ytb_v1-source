@@ -24,13 +24,6 @@ from app.ai.gemini.recap import (
 )
 from app.core.config import TOOLS_DIR, DATA_DIR
 from app.core.storage import read_config, write_config
-from app.ai.chatgpt.service import (
-    chat_completion,
-    ensure_9router_running,
-    get_local_cli_secret,
-    is_9router_running,
-    normalize_endpoint,
-)
 from app.recap.ffmpeg import concat_segments, ffprobe_duration
 from app.workflow.schemas import (
     GeminiAnalysisResponse,
@@ -51,7 +44,7 @@ from app.workflow.schemas import (
     MotionPresetListResponse,
 )
 from app.workflow.config import (
-    resolve_default_script_model,
+    SCRIPT_PROVIDER_LABEL,
     resolve_default_voice_id,
     workflow_settings,
 )
@@ -74,7 +67,6 @@ GEMINI_PROMPT_DATA_FILE = DATA_DIR / "gemini_product_analysis.txt"
 def get_workflow_config() -> WorkflowConfigResponse:
     """Return the single runtime policy consumed by the workflow API and UI."""
     saved_config = read_config() or {}
-    router_config = saved_config.get("chatgpt_9router", {})
     return WorkflowConfigResponse(
         defaultClipDurationSeconds=workflow_settings.clip_duration_seconds,
         voiceoverWordsPerSecond={
@@ -87,7 +79,7 @@ def get_workflow_config() -> WorkflowConfigResponse:
             "requestTimeoutMs": workflow_settings.polling_request_timeout_ms,
             "maxConsecutiveErrors": workflow_settings.polling_max_consecutive_errors,
         },
-        defaultScriptModel=resolve_default_script_model(router_config),
+        defaultScriptModel=SCRIPT_PROVIDER_LABEL,
         defaultVoiceId=resolve_default_voice_id(saved_config),
         defaultVeoModel=workflow_settings.default_veo_model,
         defaultAspectRatio=workflow_settings.default_aspect_ratio,
@@ -229,63 +221,43 @@ def _extract_answer_text(raw: str) -> str | None:
     return max(texts, key=len) if texts else None
 
 
-def execute_9router_vision_analysis(
-    prompt: str,
-    images: list[str],
-    model: str | None = None,
-) -> str:
-    """Sử dụng 9Router (OpenAI-compatible Vision endpoint) để phân tích ảnh sản phẩm bằng AI Vision."""
-    cfg = read_config().get("chatgpt_9router", {})
-    endpoint = cfg.get("endpoint", "http://localhost:20128/v1")
-    api_key = "" if preview_only else (cfg.get("api_key", "").strip() or get_local_cli_secret())
-    target_model = model or resolve_default_script_model(cfg)
+def chatgpt_text(prompt: str, system: str = "", images: list[str] | None = None, timeout: float = 300.0) -> tuple[str, str]:
+    """Gửi một yêu cầu viết chữ tới tài khoản ChatGPT web (nhóm tài khoản ở Cài đặt → Tạo ảnh AI), thay cho 9router.
 
-    if "20128" in endpoint and not is_9router_running(20128):
-        logger.info("[Workflow] 9Router chưa chạy, tiến hành khởi động trên port 20128...")
-        ensure_9router_running(20128)
+    `images` nhận data URL, URL asset của workflow hoặc đường dẫn file: được ghi ra file tạm để tải lên ChatGPT.
+    Trả (văn bản, nhãn nhà cung cấp)."""
+    import shutil
+    import tempfile
 
-    valid_images = []
-    for img in images:
-        if not img or not img.strip():
-            continue
-        s = img.strip()
-        if s.startswith("data:") or s.startswith("http://") or s.startswith("https://"):
-            valid_images.append(s)
-        else:
-            # File path cục bộ: Đọc và chuyển sang Data URL base64
-            p = Path(s)
-            if p.exists() and p.is_file():
-                ext = p.suffix.lower().lstrip(".") or "jpeg"
-                if ext == "jpg":
-                    ext = "jpeg"
-                b64 = base64.b64encode(p.read_bytes()).decode("ascii")
-                valid_images.append(f"data:image/{ext};base64,{b64}")
-            else:
-                valid_images.append(s)
+    from app.ai.image_gen.service import get_image_client
 
-    res = chat_completion(
-        endpoint=endpoint,
-        api_key=api_key,
-        model=target_model,
-        prompt=prompt,
-        images=valid_images,
-        timeout=75.0,
-    )
-    if not res.get("ok"):
-        raise RuntimeError(f"Lỗi khi gọi 9Router Vision: {res.get('error', 'Không xác định')}")
-    content = res.get("content", "").strip()
-    if not content:
-        raise RuntimeError("9Router Vision không trả về nội dung phân tích.")
-    return content
+    tmp_dir = Path(tempfile.mkdtemp(prefix="wf_gpt_"))
+    try:
+        paths: list[str] = []
+        for i, img in enumerate(x for x in (images or []) if x and x.strip()):
+            data, filename, _mime = _parse_image_data(img, i)
+            target = tmp_dir / f"{i + 1}_{Path(filename).name}"
+            target.write_bytes(data)
+            paths.append(str(target))
+        text, account = get_image_client().chat_text(prompt, system=system, ref_paths=paths, timeout=timeout)
+        return text, f"chatgpt-web ({account})"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def execute_chatgpt_vision_analysis(prompt: str, images: list[str]) -> str:
+    """Phân tích ảnh sản phẩm bằng tài khoản ChatGPT web (lựa chọn thay cho Gemini web)."""
+    text, _ = chatgpt_text(prompt, images=images, timeout=240.0)
+    return text
 
 
 def execute_gemini_analysis(
     prompt: str,
     images: list[str],
     allow_refresh: bool = True,
-    fallback_to_9router: bool = False,
+    fallback_to_chatgpt: bool = False,
 ) -> tuple[str, str]:
-    """Gọi Google Gemini Web để phân tích hình ảnh, hỗ trợ auto-refresh siêu tốc và fallback 9Router.
+    """Gọi Google Gemini Web để phân tích hình ảnh, hỗ trợ auto-refresh siêu tốc và (tùy chọn) chuyển sang ChatGPT web.
 
     Trả về tuple: (raw_markdown_text, provider_used)
     """
@@ -301,15 +273,15 @@ def execute_gemini_analysis(
                 logger.warning(f"[Gemini Workflow] Token hết hạn: {exc}. Đang tự động làm mới ngầm siêu tốc qua Chrome...")
                 try:
                     _auto_refresh_cookies()
-                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_9router=fallback_to_9router)
+                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_chatgpt=fallback_to_chatgpt)
                 except GeminiAttachmentError:
                     raise
                 except Exception as refresh_err:
                     logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
-            if fallback_to_9router:
-                logger.info("[Gemini Workflow] Chuyển hướng phân tích qua 9Router Vision AI...")
-                text = execute_9router_vision_analysis(prompt, images)
-                return text, "9router"
+            if fallback_to_chatgpt:
+                logger.info("[Gemini Workflow] Chuyển hướng phân tích qua ChatGPT web...")
+                text = execute_chatgpt_vision_analysis(prompt, images)
+                return text, "chatgpt"
             raise
 
         # Upload ảnh
@@ -362,23 +334,23 @@ def execute_gemini_analysis(
                 logger.warning("[Gemini Workflow] Session hết hạn trong lúc gọi StreamGenerate. Tự động làm mới cookie...")
                 try:
                     _auto_refresh_cookies()
-                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_9router=fallback_to_9router)
+                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_chatgpt=fallback_to_chatgpt)
                 except GeminiAttachmentError:
                     raise
                 except Exception as refresh_err:
                     logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
-            if fallback_to_9router:
-                logger.info("[Gemini Workflow] Gemini StreamGenerate lỗi, chuyển hướng sang 9Router Vision...")
-                text = execute_9router_vision_analysis(prompt, images)
-                return text, "9router"
+            if fallback_to_chatgpt:
+                logger.info("[Gemini Workflow] Gemini StreamGenerate lỗi, chuyển hướng sang ChatGPT web...")
+                text = execute_chatgpt_vision_analysis(prompt, images)
+                return text, "chatgpt"
             raise RuntimeError(f"Gemini Web API error: HTTP {resp.status_code} — {resp.text[:300]}")
 
         answer = _extract_answer_text(resp.text)
         if not answer:
-            if fallback_to_9router:
-                logger.info("[Gemini Workflow] Không trích xuất được text Gemini, chuyển sang 9Router...")
-                text = execute_9router_vision_analysis(prompt, images)
-                return text, "9router"
+            if fallback_to_chatgpt:
+                logger.info("[Gemini Workflow] Không trích xuất được text Gemini, chuyển sang ChatGPT web...")
+                text = execute_chatgpt_vision_analysis(prompt, images)
+                return text, "chatgpt"
             raise RuntimeError("Không thể trích xuất nội dung trả lời từ luồng phản hồi của Gemini.")
 
         return answer, "gemini"
@@ -581,12 +553,8 @@ def get_default_motion_prompt() -> str:
             return MOTION_PROMPT_FILE.read_text(encoding="utf-8").strip()
         except Exception as e:
             logger.error(f"Không thể đọc file prompt {MOTION_PROMPT_FILE}: {e}")
-    return (
-        "The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. "
-        "Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout. "
-        "Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video. "
-        "Natural biomechanics, fluid body movement, photorealistic cinematic lighting."
-    )
+    # Câu mở đầu theo ảnh (nhân vật/bối cảnh) do giao diện tự dựng; đây chỉ là chỉ đạo chính mặc định (Omni 1.2).
+    return "Keep the movement natural and fluid, matching the timing and rhythm of the input video."
 
 
 MOTION_PRESETS_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "motion_prompt_presets.json"
@@ -880,16 +848,7 @@ def execute_gpt_script_generation(
     model: str | None = None,
     preview_only: bool = False,
 ) -> tuple[str, str]:
-    """Gọi 9Router / ChatGPT để sinh kịch bản video bán hàng từ Object có cấu trúc."""
-    cfg = read_config().get("chatgpt_9router", {})
-    endpoint = cfg.get("endpoint", "http://localhost:20128/v1")
-    api_key = cfg.get("api_key", "").strip() or get_local_cli_secret()
-    target_model = model or resolve_default_script_model(cfg)
-
-    # Đảm bảo 9Router đang chạy nếu dùng endpoint 20128
-    if not preview_only and "20128" in endpoint and not is_9router_running(20128):
-        logger.info("[Workflow] 9Router chưa chạy, tiến hành khởi động trên port 20128...")
-        ensure_9router_running(20128)
+    """Sinh kịch bản video bán hàng bằng tài khoản ChatGPT web (đã bỏ 9router). `model` được giữ cho tương thích API, không dùng."""
 
     target_count = 3
     if script_config and script_config.get("count"):
@@ -1061,40 +1020,9 @@ def execute_gpt_script_generation(
     if preview_only:
         return filled_prompt, system_instruction
 
-    # Gọi chat_completion
-    res = chat_completion(
-        endpoint=endpoint,
-        api_key=api_key,
-        model=target_model,
-        prompt=filled_prompt,
-        system_prompt=system_instruction,
-        images=valid_images if valid_images else None,
-        timeout=120.0,
-    )
-
-    if not res.get("ok"):
-        # Fallback model nếu model chỉ định gặp lỗi
-        fallback_models = ["cx/gpt-5.4", "ag/gemini-3-flash", "gh/gpt-4o", "ag/gemini-pro-agent"]
-        for fb in fallback_models:
-            if fb != target_model:
-                logger.warning(f"[Workflow] Thử lại kịch bản với model fallback: {fb}")
-                res = chat_completion(
-                    endpoint=endpoint,
-                    api_key=api_key,
-                    model=fb,
-                    prompt=filled_prompt,
-                    system_prompt=system_instruction,
-                    images=valid_images if valid_images else None,
-                    timeout=120.0,
-                )
-                if res.get("ok"):
-                    target_model = fb
-                    break
-
-    if not res.get("ok"):
-        raise RuntimeError(f"Lỗi khi gọi ChatGPT qua 9Router: {res.get('error', 'Không xác định')}")
-
-    return res.get("content", ""), target_model
+    # Gọi ChatGPT web (tài khoản ở Cài đặt → Tạo ảnh AI). Không còn chuỗi model dự phòng: lỗi thì nhóm tài khoản tự chuyển tài khoản.
+    text, provider = chatgpt_text(filled_prompt, system=system_instruction, images=valid_images or None, timeout=300.0)
+    return text, provider
 
 
 def preview_gpt_script_prompt(
@@ -1840,14 +1768,6 @@ def extract_character_scene_profiles(
     Trích xuất Canonical Character Profile và Scene Profile bằng tiếng Anh chuẩn cho Veo
     từ ảnh người mẫu và ảnh bối cảnh được tải lên.
     """
-    cfg = read_config()
-    chatgpt_cfg = cfg.get("chatgpt", {})
-    endpoint = chatgpt_cfg.get("endpoint", "http://localhost:20128/v1")
-    api_key = chatgpt_cfg.get("api_key", "")
-    if not api_key:
-        api_key = get_local_cli_secret()
-
-    target_model = model or chatgpt_cfg.get("model") or resolve_default_script_model(chatgpt_cfg)
     char_profile = ""
     scene_profile = ""
 
@@ -1861,18 +1781,8 @@ def extract_character_scene_profiles(
             "Output ONLY the descriptive profile text without preface or quotes."
         )
         try:
-            res_char = chat_completion(
-                endpoint=endpoint,
-                api_key=api_key,
-                model=target_model,
-                prompt=char_prompt,
-                images=[model_image.strip()],
-                timeout=45.0,
-            )
-            if res_char.get("ok"):
-                char_profile = res_char.get("content", "").strip().strip('"')
-            else:
-                logger.warning(f"Lỗi khi trích xuất character profile: {res_char.get('error')}")
+            text, _ = chatgpt_text(char_prompt, images=[model_image.strip()], timeout=180.0)
+            char_profile = text.strip().strip('"')
         except Exception as e:
             logger.warning(f"Ngoại lệ khi trích xuất character profile: {e}")
 
@@ -1886,18 +1796,8 @@ def extract_character_scene_profiles(
             "Output ONLY the descriptive profile text without preface or quotes."
         )
         try:
-            res_scene = chat_completion(
-                endpoint=endpoint,
-                api_key=api_key,
-                model=target_model,
-                prompt=scene_prompt,
-                images=[scene_image.strip()],
-                timeout=45.0,
-            )
-            if res_scene.get("ok"):
-                scene_profile = res_scene.get("content", "").strip().strip('"')
-            else:
-                logger.warning(f"Lỗi khi trích xuất scene profile: {res_scene.get('error')}")
+            text, _ = chatgpt_text(scene_prompt, images=[scene_image.strip()], timeout=180.0)
+            scene_profile = text.strip().strip('"')
         except Exception as e:
             logger.warning(f"Ngoại lệ khi trích xuất scene profile: {e}")
 
@@ -2003,7 +1903,7 @@ def list_exported_videos() -> list[dict]:
             provider_model_id = str(veo_meta.get("provider_model_id") or "").strip().lower()
             is_motion = (
                 input_mode == "video_edit"
-                or provider_model_id == "abra_edit"
+                or provider_model_id in ("abra_edit", "macaron_cookie_edit")
                 or any(k in prompt_text.lower() for k in ("motion reference", "motion-reference", "choreography", "motion video"))
             )
 

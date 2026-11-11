@@ -85,6 +85,17 @@ _captcha_busy_until: float = 0
 _captcha_stats = {"total_solved": 0, "last_solved_at": None}
 _video_upload_results: dict[str, dict[str, Any]] = {}  # request_id → video upload result
 
+# Hàng đợi việc: mỗi item có `expires_at`. Extension không nhận kịp → bỏ item và báo lỗi
+# ngay cho bên đang chờ, để việc không chạy "ma" muộn (tốn credit mà không ai nhận kết quả).
+PICKUP_TTL_SECONDS = 90.0
+RESULT_TTL_SECONDS = 900.0
+_cancelled: dict[str, float] = {}    # request_id → thời điểm hủy (kết quả muộn sẽ bị bỏ)
+_inflight: dict[str, dict[str, Any]] = {}  # request_id → {action, taken_at} (chỉ để chẩn đoán)
+_RESULT_STORES_NAMES = (
+    "_captcha_results", "_flow_results", "_project_results",
+    "_image_results", "_video_upload_results",
+)
+
 # Extension status
 _extension_info: dict[str, Any] = {
     "ext_fp": "",
@@ -100,6 +111,119 @@ _voice_cookies: dict[str, Any] = {}
 # Server instance
 _server: ThreadingHTTPServer | None = None
 _server_thread: threading.Thread | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Queue hygiene: TTL, hủy việc, dọn kết quả mồ côi
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _result_stores() -> list[dict[str, dict[str, Any]]]:
+    return [globals()[name] for name in _RESULT_STORES_NAMES]
+
+
+def _enqueue(job: dict[str, Any], ttl: float = PICKUP_TTL_SECONDS) -> bool:
+    """Đưa việc vào hàng đợi kèm hạn nhận việc. Trả False nếu hàng đợi đầy."""
+    job.setdefault("created_at", time.time())
+    job["expires_at"] = time.time() + ttl
+    try:
+        _captcha_pending.put_nowait(job)
+        return True
+    except Exception:
+        return False
+
+
+def _fail_waiter(job: dict[str, Any], reason: str) -> None:
+    """Đẩy lỗi tổng hợp vào đúng kho kết quả để người chờ không phải đợi hết timeout dài."""
+    rid = job.get("request_id")
+    if not rid:
+        return
+    now = time.time()
+    action = job.get("action")
+    with _bridge_lock:
+        if action == "IMAGE_GENERATION":
+            _image_results[rid] = {"result": None, "error": reason, "received_at": now}
+        elif action in ("UPLOAD_VIDEO", "UPLOAD_VIDEO_UI"):
+            _video_upload_results[rid] = {"ok": False, "error": reason, "received_at": now}
+        elif action in ("CREATE_PROJECT", "SWITCH_PROJECT"):
+            _project_results[rid] = {"ok": False, "error": reason, "received_at": now}
+        elif job.get("flow_request") is not None or job.get("flow_recovery"):
+            _flow_results[rid] = {"result": None, "error": reason, "received_at": now}
+            _captcha_results[rid] = {"token": None, "error": reason, "received_at": now}
+        elif action:
+            _captcha_results[rid] = {"token": None, "error": reason, "received_at": now}
+
+
+def _pop_next_job() -> dict[str, Any] | None:
+    """Lấy việc kế tiếp còn hạn và chưa bị hủy; việc hết hạn bị loại và báo lỗi cho người chờ."""
+    while True:
+        try:
+            job = _captcha_pending.get_nowait()
+        except Empty:
+            return None
+        rid = job.get("request_id")
+        with _bridge_lock:
+            if rid and rid in _cancelled:
+                logger.info("Bridge: bỏ qua việc đã hủy %s", str(rid)[:8])
+                continue
+        if time.time() > job.get("expires_at", float("inf")):
+            logger.warning(
+                "Bridge: việc %s (%s) hết hạn nhận việc, extension không lấy kịp",
+                str(rid)[:8], job.get("action") or ("flow" if job.get("flow_request") else "other"),
+            )
+            _fail_waiter(job, "Extension chưa kết nối hoặc không nhận việc kịp (service worker có thể đang ngủ). Chưa tạo gì trên Flow; hãy thử lại.")
+            continue
+        if rid:
+            with _bridge_lock:
+                _inflight[rid] = {"action": job.get("action"), "taken_at": time.time()}
+        return job
+
+
+def cancel_request(request_id: str | None) -> bool:
+    """Backend bỏ cuộc: loại việc khỏi hàng đợi (nếu extension chưa lấy) và bỏ kết quả muộn.
+
+    Trả True nếu việc còn nằm trong hàng đợi và đã được rút ra (chắc chắn chưa chạy).
+    """
+    if not request_id:
+        return False
+    removed = False
+    with _captcha_pending.mutex:
+        kept = [j for j in _captcha_pending.queue if j.get("request_id") != request_id]
+        removed = len(kept) != len(_captcha_pending.queue)
+        if removed:
+            _captcha_pending.queue.clear()
+            _captcha_pending.queue.extend(kept)
+    with _bridge_lock:
+        _cancelled[request_id] = time.time()
+        for store in _result_stores():
+            store.pop(request_id, None)
+        _inflight.pop(request_id, None)
+    return removed
+
+
+def _discard_if_cancelled(request_id: str) -> bool:
+    """True nếu việc đã bị hủy: kết quả muộn phải bị bỏ thay vì lưu mồ côi."""
+    with _bridge_lock:
+        _inflight.pop(request_id, None)
+        cancelled = request_id in _cancelled
+    if cancelled:
+        logger.info("Bridge: bỏ kết quả muộn của việc đã hủy %s", request_id[:8])
+    return cancelled
+
+
+def purge_stale(now: float | None = None) -> int:
+    """Xóa kết quả mồ côi quá RESULT_TTL_SECONDS và dấu hủy cũ. Trả số mục đã xóa."""
+    now = now or time.time()
+    removed = 0
+    with _bridge_lock:
+        for store in _result_stores():
+            for rid in [k for k, v in store.items() if now - float(v.get("received_at") or 0) > RESULT_TTL_SECONDS]:
+                store.pop(rid, None)
+                removed += 1
+        for rid in [k for k, ts in _cancelled.items() if now - ts > RESULT_TTL_SECONDS]:
+            _cancelled.pop(rid, None)
+        for rid in [k for k, v in _inflight.items() if now - v.get("taken_at", 0) > 3600]:
+            _inflight.pop(rid, None)
+    return removed
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,43 +281,33 @@ def request_captcha(
     }
     if flow_request is not None:
         job["flow_request"] = flow_request
-    try:
-        _captcha_pending.put_nowait(job)
-        return request_id
-    except Exception:
-        return None
+    return request_id if _enqueue(job) else None
 
 
 def request_flow_recovery(provider_model_id: str = "", project_id: str = "") -> str | None:
     """Ask the extension to recover the video URL from the open Flow scene."""
     request_id = secrets.token_hex(16)
-    try:
-        _captcha_pending.put_nowait({
-            "request_id": request_id,
-            "flow_recovery": True,
-            "provider_model_id": provider_model_id,
-            "project_id": project_id,
-            "created_at": time.time(),
-        })
-        return request_id
-    except Exception:
-        return None
+    ok = _enqueue({
+        "request_id": request_id,
+        "flow_recovery": True,
+        "provider_model_id": provider_model_id,
+        "project_id": project_id,
+        "created_at": time.time(),
+    })
+    return request_id if ok else None
 
 
 
 def request_create_project(name: str = "") -> str | None:
     """Yêu cầu Extension tự động tạo Project mới trên tab Google Flow."""
     request_id = secrets.token_hex(16)
-    try:
-        _captcha_pending.put_nowait({
-            "request_id": request_id,
-            "action": "CREATE_PROJECT",
-            "project_name": name,
-            "created_at": time.time(),
-        })
-        return request_id
-    except Exception:
-        return None
+    ok = _enqueue({
+        "request_id": request_id,
+        "action": "CREATE_PROJECT",
+        "project_name": name,
+        "created_at": time.time(),
+    })
+    return request_id if ok else None
 
 
 def wait_project_result(request_id: str, timeout: float = 35.0) -> dict[str, Any] | None:
@@ -210,17 +324,14 @@ def wait_project_result(request_id: str, timeout: float = 35.0) -> dict[str, Any
 def request_switch_project(flow_project_id: str, account_email: str = "") -> str | None:
     """Yêu cầu Extension tự động điều hướng / mở tab Project trên Google Flow."""
     request_id = secrets.token_hex(16)
-    try:
-        _captcha_pending.put_nowait({
-            "request_id": request_id,
-            "action": "SWITCH_PROJECT",
-            "flow_project_id": flow_project_id,
-            "account_email": account_email,
-            "created_at": time.time(),
-        })
-        return request_id
-    except Exception:
-        return None
+    ok = _enqueue({
+        "request_id": request_id,
+        "action": "SWITCH_PROJECT",
+        "flow_project_id": flow_project_id,
+        "account_email": account_email,
+        "created_at": time.time(),
+    })
+    return request_id if ok else None
 
 
 def wait_switch_result(request_id: str, timeout: float = 12.0) -> dict[str, Any] | None:
@@ -238,17 +349,14 @@ def wait_switch_result(request_id: str, timeout: float = 12.0) -> dict[str, Any]
 def request_generate_image(image_request: dict[str, Any]) -> str | None:
     """Yêu cầu Extension sinh ảnh trên Google Flow thông qua RPC ogiZ0b."""
     request_id = secrets.token_hex(16)
-    try:
-        _captcha_pending.put_nowait({
-            "request_id": request_id,
-            "action": "IMAGE_GENERATION",
-            "captcha_action": "IMAGE_GENERATION",
-            "image_request": image_request,
-            "created_at": time.time(),
-        })
-        return request_id
-    except Exception:
-        return None
+    ok = _enqueue({
+        "request_id": request_id,
+        "action": "IMAGE_GENERATION",
+        "captcha_action": "IMAGE_GENERATION",
+        "image_request": image_request,
+        "created_at": time.time(),
+    })
+    return request_id if ok else None
 
 
 def wait_image_result(request_id: str, timeout: float = 60.0) -> dict[str, Any] | None:
@@ -271,20 +379,17 @@ def request_video_upload(
 ) -> str | None:
     """Yêu cầu Extension upload video lên Google Flow qua RPC maseQ."""
     request_id = secrets.token_hex(16)
-    try:
-        _captcha_pending.put_nowait({
-            "request_id": request_id,
-            "action": "UPLOAD_VIDEO",
-            "project_id": project_id,
-            "video_base64": video_base64,
-            "video_mime": video_mime,
-            "video_filename": video_filename,
-            "force_fresh": force_fresh,
-            "created_at": time.time(),
-        })
-        return request_id
-    except Exception:
-        return None
+    ok = _enqueue({
+        "request_id": request_id,
+        "action": "UPLOAD_VIDEO",
+        "project_id": project_id,
+        "video_base64": video_base64,
+        "video_mime": video_mime,
+        "video_filename": video_filename,
+        "force_fresh": force_fresh,
+        "created_at": time.time(),
+    })
+    return request_id if ok else None
 
 
 def request_video_upload_ui(
@@ -295,19 +400,16 @@ def request_video_upload_ui(
 ) -> str | None:
     """Ask the extension to upload a reference video through Flow's native file picker."""
     request_id = secrets.token_hex(16)
-    try:
-        _captcha_pending.put_nowait({
-            "request_id": request_id,
-            "action": "UPLOAD_VIDEO_UI",
-            "project_id": project_id,
-            "video_local_path": video_local_path,
-            "video_filename": video_filename,
-            "force_fresh": force_fresh,
-            "created_at": time.time(),
-        })
-        return request_id
-    except Exception:
-        return None
+    ok = _enqueue({
+        "request_id": request_id,
+        "action": "UPLOAD_VIDEO_UI",
+        "project_id": project_id,
+        "video_local_path": video_local_path,
+        "video_filename": video_filename,
+        "force_fresh": force_fresh,
+        "created_at": time.time(),
+    })
+    return request_id if ok else None
 
 
 def wait_video_upload_result(request_id: str, timeout: float = 120.0) -> dict[str, Any] | None:
@@ -499,11 +601,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
             else:
                 _captcha_busy = False
 
-            try:
-                job = _captcha_pending.get_nowait()
-                self._send_json(job)
-            except Empty:
+            purge_stale()
+            job = _pop_next_job()
+            if job is None:
                 self._send_no_content()
+            else:
+                self._send_json(job)
             return
 
         if self.path == "/refresh/pending":
@@ -581,6 +684,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             token = data.get("token")
             error = data.get("error")
             if request_id:
+                if _discard_if_cancelled(request_id):
+                    self._send_json({"ok": True, "discarded": True})
+                    return
                 with _bridge_lock:
                     _captcha_results[request_id] = {
                         "token": token,
@@ -603,6 +709,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 logs = data.get("logs")
                 if logs:
                     logger.info("Flow response logs for %s: %s", request_id, json.dumps(logs, ensure_ascii=False))
+                if _discard_if_cancelled(request_id):
+                    self._send_json({"ok": True, "discarded": True})
+                    return
                 with _bridge_lock:
                     _flow_results[request_id] = {
                         "result": data.get("result"),
@@ -620,6 +729,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             request_id = data.get("request_id", "")
             if request_id:
+                if _discard_if_cancelled(request_id):
+                    self._send_json({"ok": True, "discarded": True})
+                    return
                 with _bridge_lock:
                     _project_results[request_id] = {
                         "ok": bool(data.get("ok", False)),
@@ -638,6 +750,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             request_id = data.get("request_id", "")
             if request_id:
+                if _discard_if_cancelled(request_id):
+                    self._send_json({"ok": True, "discarded": True})
+                    return
                 with _bridge_lock:
                     _project_results[request_id] = {
                         "ok": bool(data.get("ok", False)),
@@ -658,6 +773,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             if request_id:
                 if data.get("logs"):
                     logger.info("Extension logs for %s: %s", request_id[:8], data.get("logs"))
+                if _discard_if_cancelled(request_id):
+                    self._send_json({"ok": True, "discarded": True})
+                    return
                 with _bridge_lock:
                     _image_results[request_id] = {
                         "result": data.get("result"),
@@ -677,6 +795,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             if request_id:
                 if data.get("logs"):
                     logger.info("[VideoUpload] Extension logs %s: %s", request_id[:8], data.get("logs"))
+                if _discard_if_cancelled(request_id):
+                    self._send_json({"ok": True, "discarded": True})
+                    return
                 with _bridge_lock:
                     _video_upload_results[request_id] = {
                         "ok": bool(data.get("ok", False)),

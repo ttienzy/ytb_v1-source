@@ -60,13 +60,13 @@ def test_uploaded_video_media_id_builds_video_edit_request():
     request = service._build_verified_flow_request({
         "prompt": "Keep the same subject and motion in a sunny garden.",
         "input_mode": "video_edit",
-        "resolution": "360p",
+        "resolution": "720p",
         "reference_video_id": "uploaded-video-media-id",
         "reference_video_start_seconds": 0,
         "reference_video_end_seconds": 10,
     })
     assert request["input_mode"] == "video_edit"
-    assert request["provider_model_id"] == "abra_edit_360p"
+    assert request["provider_model_id"] == "macaron_cookie_edit"   # Omni 1.2 (HAR flow.google_video_motion.com)
     assert request["reference_video_id"] == "uploaded-video-media-id"
     assert request["reference_video_start_seconds"] == 0
     assert request["reference_video_end_seconds"] == 10
@@ -96,7 +96,7 @@ def test_video_edit_rejects_multiple_outputs_until_adapter_supports_them():
         service._build_verified_flow_request({
             "prompt": "product",
             "input_mode": "video_edit",
-            "resolution": "360p",
+            "resolution": "720p",
             "num_outputs": 2,
             "reference_video_id": "uploaded-video-media-id",
         })
@@ -108,7 +108,7 @@ def test_video_edit_encodes_optional_image_reference_fresh(monkeypatch, image_pa
     request = service._build_verified_flow_request({
         "prompt": "Transfer the motion to the person in the image.",
         "input_mode": "video_edit",
-        "resolution": "360p",
+        "resolution": "720p",
         "reference_video_id": "uploaded-video-media-id",
         "ingredient_image_paths": [image_path],
         "force_fresh_assets": True,
@@ -148,7 +148,7 @@ def test_duplicate_idempotency_key_returns_existing_job_without_starting_worker(
     request = VeoJobRequest(
         prompt="same motion request",
         input_mode="video_edit",
-        resolution="360p",
+        resolution="720p",
         reference_video_id="uploaded-video-media-id",
         idempotency_key="motion-click-1",
     )
@@ -170,7 +170,7 @@ def test_same_active_payload_without_key_is_deduplicated(monkeypatch):
     request = VeoJobRequest(
         prompt="same active request",
         input_mode="video_edit",
-        resolution="360p",
+        resolution="720p",
         reference_video_id="uploaded-video-media-id",
     )
 
@@ -220,6 +220,14 @@ def test_job_errors_include_stable_ui_metadata(message, previous_status, expecte
     assert details["error_stage"] == expected_stage
     assert details["error_hint"]
     assert details["error_retryable"] is True
+
+
+def test_prominent_people_filter_is_its_own_non_retryable_error():
+    message = 'Google Flow: Flow render ended with status 4 [bản ghi poll: [4,[3,"PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED"],["PROMINENT_PERSON"]]]'
+    details = service._classify_job_error(message, "generating")
+    assert details["error_code"] == "FLOW_PROMINENT_PEOPLE"
+    assert details["error_retryable"] is False
+    assert "khuôn mặt" in details["error_hint"]
 
 
 def test_job_api_corrects_legacy_picker_error_without_rewriting_history(monkeypatch):
@@ -273,3 +281,14 @@ def test_video_edit_is_treated_as_native_ui_mode_without_captcha_wait(monkeypatc
     wait_captcha.assert_not_called()
     wait_flow.assert_called_once_with("req-123", timeout=1080.0)
     assert job["status"] == "done"
+
+
+
+def test_omni_12_video_edit_uses_macaron_edit_and_rejects_unverified_360p_and_omni_11():
+    base = {"prompt": "Apply the motion to the person in the image.", "input_mode": "video_edit", "reference_video_id": "vid",
+            "model_display_name": "Omni 1.2 Flash", "resolution": "720p"}
+    assert service._build_verified_flow_request(dict(base))["provider_model_id"] == "macaron_cookie_edit"
+    with pytest.raises(ValueError, match="360p"):
+        service._build_verified_flow_request({**base, "resolution": "360p"})
+    with pytest.raises(ValueError, match="Omni 1.1"):
+        service._build_verified_flow_request({**base, "model_display_name": "Omni 1.1 Flash"})

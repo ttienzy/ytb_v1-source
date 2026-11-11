@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ class VeoJobRequest(BaseModel):
     )
     input_mode: InputMode = Field(default=InputMode.TEXT_TO_VIDEO)
     aspect_ratio: AspectRatio = Field(default=AspectRatio.PORTRAIT)
-    duration_seconds: int = Field(default=6, ge=4, le=10, description="Thời lượng clip (giây)")
+    duration_seconds: int = Field(default=6, ge=3, le=15, description="Thời lượng clip (giây)")
     resolution: str = Field(default="720p", description="Độ phân giải mong muốn")
     num_outputs: int = Field(default=1, ge=1, le=4, description="Số video output")
     seed: Optional[int] = Field(default=None, description="Random seed (không bảo đảm giống hệt)")
@@ -138,7 +138,7 @@ class VeoJobRequest(BaseModel):
         description="Danh sách media_id ảnh/video đã upload lên cùng Flow project",
     )
 
-    # Cho mode video_edit (Omni 1.1 Flash)
+    # Cho mode video_edit (Motion Control, Omni 1.2 Flash: macaron_cookie_edit)
     reference_video_id: Optional[str] = Field(default=None, description="Flow media_id cua video tham chieu da upload")
     reference_video_start_seconds: float = Field(default=0, ge=0, description="Thoi diem bat dau clip tham chieu")
     reference_video_end_seconds: Optional[float] = Field(default=None, gt=0, description="Thoi diem ket thuc clip tham chieu")
@@ -146,6 +146,13 @@ class VeoJobRequest(BaseModel):
         default=False,
         description="Bỏ qua cache media và upload lại reference cho lần render này",
     )
+
+    @model_validator(mode="after")
+    def _video_edit_defaults_to_omni_12(self):
+        """Chỉnh video chỉ còn Omni 1.2: request không ghi rõ model thì dùng Omni 1.2 (mặc định chung vẫn giữ cho chế độ khác)."""
+        if getattr(self.input_mode, "value", self.input_mode) == "video_edit" and "model_display_name" not in self.model_fields_set:
+            self.model_display_name = "Omni 1.2 Flash"
+        return self
 
     # Cho mode extend
     source_video_id: Optional[str] = Field(default=None, description="Video ID nguồn để extend")

@@ -15,20 +15,20 @@ from app.workflow.router import router
 from app.workflow.schemas import ScriptGenerationConfig
 
 
-def test_public_config_defaults_and_saved_model(monkeypatch):
+def test_public_config_defaults(monkeypatch):
     policy = WorkflowSettings(_env_file=None)
     monkeypatch.setattr(service, "workflow_settings", policy)
     monkeypatch.setattr(config, "workflow_settings", policy)
-    monkeypatch.setattr(service, "read_config", lambda: {"chatgpt_9router": {"default_model": "saved/model"}})
+    monkeypatch.setattr(service, "read_config", lambda: {})
     app = FastAPI()
     app.include_router(router)
     response = TestClient(app).get("/api/workflow/config")
     assert response.status_code == 200
     assert response.json() == {
         "defaultClipDurationSeconds": 10,
-        "defaultScriptModel": "saved/model",
+        "defaultScriptModel": "ChatGPT web",
         "defaultVoiceId": "bf4bed06c671",
-        "defaultVeoModel": "Omni 1.1 Flash",
+        "defaultVeoModel": "Omni 1.2 Flash",
         "defaultAspectRatio": "9:16",
         "defaultResolution": "720p",
         "defaultVariations": 1,
@@ -70,17 +70,13 @@ def test_invalid_policy_is_rejected(values):
         WorkflowSettings(_env_file=None, **values)
 
 
-def test_model_and_voice_resolution(monkeypatch):
-    from app.core.storage import default_config
-    assert config.resolve_default_script_model({"default_model": " "}) == default_config()["chatgpt_9router"]["default_model"]
+def test_voice_resolution_and_script_goes_through_chatgpt_web(monkeypatch):
     assert config.resolve_default_voice_id({"workflow": {"default_voice_id": " saved-voice "}}) == "saved-voice"
-    monkeypatch.setattr(service, "read_config", lambda: {
-        "chatgpt_9router": {"default_model": "custom/model", "endpoint": "http://test/v1", "api_key": "test"},
-    })
-    call = Mock(return_value={"ok": True, "content": "ok"})
-    monkeypatch.setattr(service, "chat_completion", call)
-    _, model = service.execute_gpt_script_generation("product", prompt_template="Create a script")
-    assert model == service.get_workflow_config().defaultScriptModel == call.call_args.kwargs["model"]
+    call = Mock(return_value=("ok", "chatgpt-web (acc@x)"))
+    monkeypatch.setattr(service, "chatgpt_text", call)
+    text, provider = service.execute_gpt_script_generation("product", prompt_template="Create a script")
+    assert (text, provider) == ("ok", "chatgpt-web (acc@x)")
+    assert "Create a script" in call.call_args.args[0] and call.call_args.kwargs["system"]
 
 
 @pytest.fixture
@@ -101,9 +97,9 @@ def test_gemini_rejects_partial_attachment_upload(monkeypatch, gemini_client, fa
     upload = Mock(side_effect=["uploaded/first", failure])
     fallback = Mock()
     monkeypatch.setattr(service, "_upload_file", upload)
-    monkeypatch.setattr(service, "execute_9router_vision_analysis", fallback)
+    monkeypatch.setattr(service, "execute_chatgpt_vision_analysis", fallback)
     with pytest.raises(service.GeminiAttachmentError, match="attachment 2 upload failed"):
-        service.execute_gemini_analysis("analyze", ["data:image/png;base64,YQ=="] * 2, fallback_to_9router=True)
+        service.execute_gemini_analysis("analyze", ["data:image/png;base64,YQ=="] * 2, fallback_to_chatgpt=True)
     gemini_client.post.assert_not_called()
     fallback.assert_not_called()
 
@@ -122,9 +118,9 @@ def test_refreshed_gemini_session_does_not_swallow_attachment_failure(monkeypatc
     monkeypatch.setattr(service, "_fresh_tokens", Mock(side_effect=[RuntimeError("expired"), ("at", "bl", "sid")]))
     monkeypatch.setattr(service, "_upload_file", Mock(side_effect=RuntimeError("upload failed")))
     fallback = Mock()
-    monkeypatch.setattr(service, "execute_9router_vision_analysis", fallback)
+    monkeypatch.setattr(service, "execute_chatgpt_vision_analysis", fallback)
     with pytest.raises(service.GeminiAttachmentError):
-        service.execute_gemini_analysis("analyze", ["data:image/png;base64,YQ=="], fallback_to_9router=True)
+        service.execute_gemini_analysis("analyze", ["data:image/png;base64,YQ=="], fallback_to_chatgpt=True)
     fallback.assert_not_called()
     gemini_client.post.assert_not_called()
 
@@ -220,12 +216,11 @@ def test_large_generation_is_batched_and_keeps_continuity(monkeypatch):
 
 @pytest.mark.parametrize("mode", ["sequential", "independent"])
 def test_generation_prompt_matches_mode_and_clean_audio(monkeypatch, mode):
-    monkeypatch.setattr(service, "read_config", lambda: {"chatgpt_9router": {"endpoint": "http://test/v1", "api_key": "test"}})
-    call = Mock(return_value={"ok": True, "content": "ok"})
-    monkeypatch.setattr(service, "chat_completion", call)
+    call = Mock(return_value=("ok", "chatgpt-web"))
+    monkeypatch.setattr(service, "chatgpt_text", call)
     service.execute_gpt_script_generation("product", script_config={"story_mode": mode}, prompt_template="Create scripts")
-    assert service._cta_instruction(mode) in call.call_args.kwargs["prompt"]
-    assert "The narrator speaks" not in call.call_args.kwargs["system_prompt"]
+    assert service._cta_instruction(mode) in call.call_args.args[0]
+    assert "The narrator speaks" not in call.call_args.kwargs["system"]
 
 
 @pytest.mark.parametrize("files", [{"vo_0.wav": b"audio"}, {"vo_0.wav": b"audio", "vo_1.wav": b""}])

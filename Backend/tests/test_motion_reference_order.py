@@ -31,7 +31,7 @@ class MotionReferenceOrderTests(unittest.TestCase):
 
             job = {
                 "prompt": "Follow the reference movement",
-                "model_display_name": "Omni 1.1 Flash",
+                "model_display_name": "Omni 1.2 Flash",
                 "input_mode": "video_edit",
                 "flow_project_id": "project-motion",
                 "project_id": "project-motion",

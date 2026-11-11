@@ -481,7 +481,8 @@ def _strip_audio_and_probe_duration(video_bytes: bytes, filename: str) -> tuple[
 def upload_video_reference(req: VideoUploadRequest):
     """Upload video lên Google Flow bằng resumable upload để dùng làm reference.
 
-    Chỉ hoạt động với Omni Flash 1.1 (video-to-video).
+    Dùng cho Motion Control (Omni 1.2). Mặc định tải bằng HTTP trong tab Flow (không bấm giao diện);
+    native_ui=true chỉ còn để dự phòng (bấm nút tải lên của Flow).
     Trả về media_id để dùng trong job submission.
     Mặc định tái sử dụng media_id nếu cùng video và project_id. Motion Control có
     thể đặt force_fresh=true để tránh tái sử dụng asset của lần render trước.
@@ -527,44 +528,52 @@ def upload_video_reference(req: VideoUploadRequest):
     if not ext.get("connected"):
         raise HTTPException(status_code=503, detail="Extension chưa kết nối. Hãy mở Chrome + Extension.")
 
-    upload_path: Path | None = None
-    if req.native_ui:
-        import uuid
-
-        upload_dir = _BASE_DIR / "Data" / "media" / "motion_uploads"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = Path(req.video_filename).name
-        if not safe_name.lower().endswith(".mp4"):
-            safe_name = f"{Path(safe_name).stem or 'reference_video'}.mp4"
-        upload_path = upload_dir / f"{uuid.uuid4().hex}-{safe_name}"
-        upload_path.write_bytes(clean_bytes)
-        req_id = bridge.request_video_upload_ui(
-            project_id=req.project_id,
-            video_local_path=str(upload_path.resolve()),
-            video_filename=safe_name,
-            force_fresh=req.force_fresh,
-        )
-    else:
-        req_id = bridge.request_video_upload(
-            project_id=req.project_id,
-            video_base64=clean_base64,
-            video_mime=req.video_mime,
-            video_filename=req.video_filename,
-            force_fresh=req.force_fresh,
-        )
-    if not req_id:
-        if upload_path:
-            upload_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=503, detail="Bridge queue đầy hoặc Extension chưa sẵn sàng.")
-
+    # Upload native điều khiển UI Flow thật: xếp hàng cùng video/ảnh để extension không bị giao 2 việc.
+    import contextlib
     try:
-        result = bridge.wait_video_upload_result(req_id, timeout=240.0 if req.native_ui else 120.0)
-    finally:
-        if upload_path:
-            upload_path.unlink(missing_ok=True)
-    if not result:
-        timeout = 240 if req.native_ui else 120
-        raise HTTPException(status_code=504, detail=f"Timeout chờ Extension upload video ({timeout}s).")
+        with (service.flow_ui_slot("upload", timeout=600.0) if req.native_ui else contextlib.nullcontext()):
+            upload_path: Path | None = None
+            if req.native_ui:
+                import uuid
+
+                upload_dir = _BASE_DIR / "Data" / "media" / "motion_uploads"
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                safe_name = Path(req.video_filename).name
+                if not safe_name.lower().endswith(".mp4"):
+                    safe_name = f"{Path(safe_name).stem or 'reference_video'}.mp4"
+                upload_path = upload_dir / f"{uuid.uuid4().hex}-{safe_name}"
+                upload_path.write_bytes(clean_bytes)
+                req_id = bridge.request_video_upload_ui(
+                    project_id=req.project_id,
+                    video_local_path=str(upload_path.resolve()),
+                    video_filename=safe_name,
+                    force_fresh=req.force_fresh,
+                )
+            else:
+                req_id = bridge.request_video_upload(
+                    project_id=req.project_id,
+                    video_base64=clean_base64,
+                    video_mime=req.video_mime,
+                    video_filename=req.video_filename,
+                    force_fresh=req.force_fresh,
+                )
+            if not req_id:
+                if upload_path:
+                    upload_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=503, detail="Bridge queue đầy hoặc Extension chưa sẵn sàng.")
+
+            try:
+                result = bridge.wait_video_upload_result(req_id, timeout=240.0)
+            finally:
+                if upload_path:
+                    upload_path.unlink(missing_ok=True)
+            if not result:
+                bridge.cancel_request(req_id)
+                timeout = 240
+                raise HTTPException(status_code=504, detail=f"Timeout chờ Extension upload video ({timeout}s).")
+
+    except service.FlowBusyError as busy:
+        raise HTTPException(status_code=503, detail=str(busy)) from busy
 
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error") or "Upload video thất bại.")

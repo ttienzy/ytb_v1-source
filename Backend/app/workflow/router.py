@@ -56,7 +56,7 @@ from app.workflow.service import (
     delete_exported_video,
     delete_prompt_preset,
     execute_gemini_analysis,
-    execute_9router_vision_analysis,
+    execute_chatgpt_vision_analysis,
     extract_character_scene_profiles,
     generate_validated_gpt_scripts,
     generate_voiceover_batch,
@@ -232,7 +232,7 @@ async def get_gemini_cookie_status():
 
 @router.post("/gemini/analyze", response_model=GeminiAnalysisResponse)
 async def analyze_product(req: GeminiAnalysisRequest) -> GeminiAnalysisResponse:
-    """Gửi ảnh sản phẩm và prompt tới Google Gemini Web hoặc 9Router Vision để phân tích chi tiết."""
+    """Gửi ảnh sản phẩm và prompt tới Google Gemini Web hoặc tài khoản ChatGPT web để phân tích chi tiết."""
     valid_images = [img for img in req.images if img and img.strip()]
     if not valid_images:
         raise HTTPException(
@@ -244,20 +244,20 @@ async def analyze_product(req: GeminiAnalysisRequest) -> GeminiAnalysisResponse:
     provider = (req.provider or "gemini").lower().strip()
 
     try:
-        if provider == "9router":
+        if provider in ("chatgpt", "9router"):          # "9router": giá trị cũ còn lưu trong sơ đồ workflow -> ChatGPT web
             raw_text = await run_in_threadpool(
-                execute_9router_vision_analysis,
+                execute_chatgpt_vision_analysis,
                 prompt=prompt,
                 images=valid_images,
             )
-            return parse_analysis_to_structured(raw_text, provider_used="9router")
+            return parse_analysis_to_structured(raw_text, provider_used="chatgpt")
         else:
             raw_text, provider_used = await run_in_threadpool(
                 execute_gemini_analysis,
                 prompt=prompt,
                 images=valid_images,
                 allow_refresh=True,
-                fallback_to_9router=False,
+                fallback_to_chatgpt=False,
             )
             return parse_analysis_to_structured(raw_text, provider_used=provider_used)
     except Exception as exc:

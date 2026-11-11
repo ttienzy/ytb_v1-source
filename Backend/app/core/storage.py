@@ -10,13 +10,6 @@ def default_config() -> dict:
         "google_chrome": {"executable": str(settings.chrome_executable), "profile_dir": str(settings.chrome_profile_dir)},
         "mailtm": {"accounts": []},
         "pippit": {"accounts": []},
-        "chatgpt_9router": {
-            "endpoint": "http://localhost:20128/v1",
-            "api_key": "",
-            "default_model": "gpt-4o",
-            "is_connected": False,
-            "last_checked_at": None,
-        },
         "muse": {
             "app_url": "https://muse.ai/",
             "is_connected": False,
@@ -26,6 +19,10 @@ def default_config() -> dict:
             "download_dir": str(settings.chrome_profile_dir.parent / "Downloads"),
             "timeout_seconds": 120,
             "default_prompt_prefix": "",
+        },
+        "image_gen": {
+            "provider": "chatgpt",
+            "saved_at": None,
         },
     }
 
@@ -42,8 +39,8 @@ def read_config() -> dict:
                 "google_chrome": {**defaults["google_chrome"], **config.get("google_chrome", {})},
                 "mailtm": {**defaults["mailtm"], **config.get("mailtm", {})},
                 "pippit": {**defaults["pippit"], **config.get("pippit", {})},
-                "chatgpt_9router": {**defaults["chatgpt_9router"], **config.get("chatgpt_9router", {})},
                 "muse": {**defaults["muse"], **config.get("muse", {})},
+                "image_gen": {**defaults["image_gen"], **config.get("image_gen", {})},
             }
     except (OSError, json.JSONDecodeError):
         pass

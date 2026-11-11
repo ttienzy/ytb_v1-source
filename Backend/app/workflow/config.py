@@ -7,12 +7,11 @@ WORKFLOW_POLLING_TIMEOUT_MS=900000. Settings are loaded at process startup.
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.storage import default_config
 
 
 class WorkflowSettings(BaseSettings):
     default_voice_id: str = Field(default="bf4bed06c671", min_length=1)
-    default_veo_model: str = Field(default="Omni 1.1 Flash", min_length=1)
+    default_veo_model: str = Field(default="Omni 1.2 Flash", min_length=1)   # HTTP, Ingredients 3–15s (1.1 vẫn chọn được)
     default_aspect_ratio: str = Field(default="9:16", min_length=3)
     default_resolution: str = Field(default="720p", min_length=2)
     default_variations: int = Field(default=1, ge=1, le=4)
@@ -40,8 +39,8 @@ class WorkflowSettings(BaseSettings):
 workflow_settings = WorkflowSettings()
 
 
-def resolve_default_script_model(router_config: dict) -> str:
-    return (router_config.get("default_model") or "").strip() or default_config()["chatgpt_9router"]["default_model"]
+# Kịch bản, phân tích ảnh (tùy chọn) và hồ sơ nhân vật/bối cảnh dùng tài khoản ChatGPT web (Cài đặt → Tạo ảnh AI); đã bỏ 9router.
+SCRIPT_PROVIDER_LABEL = "ChatGPT web"
 
 
 def resolve_default_voice_id(config: dict) -> str:

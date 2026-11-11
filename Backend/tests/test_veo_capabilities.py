@@ -205,15 +205,14 @@ class VeoCapabilitiesTests(unittest.TestCase):
         self.assertEqual(service._resolve_provider_model_id(job), "abra_edit_360p")
 
     def test_video_edit_profiles_are_exposed_to_frontend(self):
+        # Motion Control chỉ còn Omni 1.2 (macaron_cookie_edit): 720p, giá đã đo 30 credit (HAR 2026-11-11).
         profiles = [p for p in service.get_capabilities().profiles if p.input_mode.value == "video_edit"]
-        self.assertEqual(len(profiles), 4)
-        self.assertEqual({p.credit_cost for p in profiles}, {40})
-        self.assertEqual({p.resolution for p in profiles}, {"360p", "720p"})
+        self.assertEqual(len(profiles), 2)
+        self.assertEqual({p.model_display_name for p in profiles}, {"Omni 1.2 Flash"})
+        self.assertEqual({p.provider_model_id for p in profiles}, {"macaron_cookie_edit"})
+        self.assertEqual({p.credit_cost for p in profiles}, {30})
+        self.assertEqual({p.resolution for p in profiles}, {"720p"})
         self.assertEqual({p.aspect_ratio.value for p in profiles}, {"9:16", "16:9"})
-        verified = [p for p in profiles if p.runtime_verified]
-        self.assertEqual(len(verified), 1)
-        self.assertEqual(verified[0].aspect_ratio.value, "9:16")
-        self.assertEqual(verified[0].resolution, "360p")
 
     def test_build_verified_flow_request_ingredients_encoding(self):
         import tempfile

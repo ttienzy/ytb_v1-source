@@ -243,6 +243,61 @@ def remove_image_watermark_sync(input_path: Path, output_path: Path) -> Path:
 
 
 
+class WatermarkVideoError(RuntimeError):
+    """gwr không xóa được watermark của một video (lỗi chạy, hủy, hoặc không nhận ra watermark)."""
+
+
+def remove_video_watermark_sync(input_path: Path, output_path: Path, on_progress=None, cancelled=None) -> Path:
+    """Xóa watermark Gemini/Veo của MỘT video rồi mới công bố file sạch (ghi file tạm trước, đổi tên sau).
+
+    on_progress(done_frames, total_frames) được gọi theo tiến độ gwr báo; cancelled() trả True thì dừng tiến trình.
+    gwr nhận watermark theo khung hình gốc của Gemini/Veo: hãy chạy trên clip gốc, không chạy trên video đã crop/phóng.
+    """
+    source, destination = Path(input_path), Path(output_path)
+    if not source.is_file() or source.stat().st_size <= 0:
+        raise FileNotFoundError(f"Không thấy video: {source}")
+    runtime = _resolve_gwr_runtime()
+    if runtime is None:
+        raise WatermarkRuntimeUnavailableError("Watermark runtime (gwr) không khả dụng. Hãy cài lại ứng dụng.")
+    if not runtime.video_available:
+        raise WatermarkRuntimeUnavailableError("Watermark runtime thiếu trình duyệt xử lý video (watermark-runtime: npx playwright install chromium).")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = destination.with_name(f".{destination.stem}.{secrets.token_hex(6)}{destination.suffix}")
+    cmd = [*_gwr_command(runtime), "remove", str(source), "--output", str(temp_output), "--overwrite"]
+    logger.info("[watermark.video] Running (%s): %s", runtime.source, " ".join(cmd))
+    stderr_tail: list[str] = []
+    stopped = False
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                encoding="utf-8", errors="replace", env=_gwr_environment(runtime))
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            line = line.strip()
+            if line:
+                stderr_tail.append(line)
+                del stderr_tail[:-8]
+                done, total = _parse_frame_progress(line)
+                if done is not None and on_progress is not None:
+                    on_progress(done, total)
+            if cancelled is not None and cancelled():
+                stopped = True
+                proc.kill()
+                break
+        proc.wait()
+        if stopped:
+            raise WatermarkVideoError("Đã hủy xóa watermark.")
+        if proc.returncode != 0 or not temp_output.is_file() or temp_output.stat().st_size <= 0:
+            detail = next((l for l in reversed(stderr_tail) if not l.startswith("[video]")), "") or f"exit code {proc.returncode}"
+            if "置信度" in detail:          # gwr báo bằng tiếng Trung: độ tin cậy phát hiện watermark thấp
+                detail = "không nhận ra watermark Gemini/Veo ở vị trí chuẩn (video đã bị crop, phóng hoặc không có watermark)"
+            raise WatermarkVideoError(f"gwr không xóa được watermark: {detail}")
+        os.replace(temp_output, destination)
+        return destination
+    finally:
+        temp_output.unlink(missing_ok=True)
+
+
 def _parse_frame_progress(line: str) -> tuple[int | None, int | None]:
     """Parse: '[video] 63% 140/240 frames (AI 81, reused 59)'"""
     m = re.search(r"(\d+)/(\d+)\s+frames", line, re.IGNORECASE)

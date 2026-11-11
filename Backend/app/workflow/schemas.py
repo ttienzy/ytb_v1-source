@@ -42,7 +42,7 @@ class GeminiPromptUpdateRequest(BaseModel):
 class GeminiAnalysisRequest(BaseModel):
     images: list[str] = Field(default_factory=list, description="Danh sách ảnh (data URLs base64 hoặc file paths)")
     prompt: Optional[str] = Field(default=None, description="Prompt tùy chỉnh. Nếu None, dùng prompt mặc định từ file.")
-    provider: Optional[str] = Field(default="gemini", description="AI provider: 'gemini' (mặc định với auto-refresh) hoặc '9router' (ChatGPT vision)")
+    provider: Optional[str] = Field(default="gemini", description="AI provider: 'gemini' (mặc định, Gemini web) hoặc 'chatgpt' (tài khoản ChatGPT web; '9router' cũ được hiểu là 'chatgpt')")
 
 
 class GeminiProductClassification(BaseModel):
@@ -215,7 +215,7 @@ class WorkflowExtractProfilesRequest(BaseModel):
     """Yêu cầu trích xuất Canonical Character Profile & Scene Profile từ ảnh nhân vật/bối cảnh bằng AI."""
     model_image: Optional[str] = Field(default=None, description="URL hoặc data URL ảnh người mẫu/KOL")
     scene_image: Optional[str] = Field(default=None, description="URL hoặc data URL ảnh không gian/bối cảnh")
-    model: Optional[str] = Field(default=None, description="Model AI sử dụng (mặc định theo cấu hình 9Router hoặc gpt-4o)")
+    model: Optional[str] = Field(default=None, description="Không dùng nữa (giữ cho tương thích): kịch bản luôn viết bằng tài khoản ChatGPT web")
 
 
 class WorkflowExtractProfilesResponse(BaseModel):

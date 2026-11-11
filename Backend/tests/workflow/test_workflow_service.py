@@ -60,17 +60,12 @@ def test_gpt_prompt_uses_dynamic_clip_contract(monkeypatch):
 
     captured = {}
 
-    monkeypatch.setattr(
-        workflow_service,
-        "read_config",
-        lambda: {"chatgpt_9router": {"endpoint": "http://router.test/v1", "api_key": "test-key"}},
-    )
 
-    def fake_chat_completion(**kwargs):
-        captured.update(kwargs)
-        return {"ok": True, "content": "mock response"}
+    def fake_chatgpt_text(prompt, system="", images=None, timeout=0):
+        captured.update(prompt=prompt, system_prompt=system)
+        return "mock response", "chatgpt-web"
 
-    monkeypatch.setattr(workflow_service, "chat_completion", fake_chat_completion)
+    monkeypatch.setattr(workflow_service, "chatgpt_text", fake_chatgpt_text)
 
     raw_text, _ = execute_gpt_script_generation(
         product_data="Sản phẩm thử nghiệm",
@@ -98,13 +93,8 @@ def test_plain_user_prompt_always_receives_source_context(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         workflow_service,
-        "read_config",
-        lambda: {"chatgpt_9router": {"endpoint": "http://router.test/v1", "api_key": "test-key"}},
-    )
-    monkeypatch.setattr(
-        workflow_service,
-        "chat_completion",
-        lambda **kwargs: captured.update(kwargs) or {"ok": True, "content": "mock response"},
+        "chatgpt_text",
+        lambda prompt, system="", images=None, timeout=0: captured.update(prompt=prompt, system_prompt=system) or ("mock response", "chatgpt-web"),
     )
 
     execute_gpt_script_generation(
@@ -124,18 +114,13 @@ def test_empty_user_prompt_uses_neutral_instruction(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         workflow_service,
-        "read_config",
-        lambda: {"chatgpt_9router": {"endpoint": "http://router.test/v1", "api_key": "test-key"}},
-    )
-    monkeypatch.setattr(
-        workflow_service,
         "get_default_gpt_prompt",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("không được nạp preset khi user đã xóa prompt")),
     )
     monkeypatch.setattr(
         workflow_service,
-        "chat_completion",
-        lambda **kwargs: captured.update(kwargs) or {"ok": True, "content": "mock response"},
+        "chatgpt_text",
+        lambda prompt, system="", images=None, timeout=0: captured.update(prompt=prompt, system_prompt=system) or ("mock response", "chatgpt-web"),
     )
 
     execute_gpt_script_generation(product_data="product", prompt_template="")
@@ -163,13 +148,7 @@ def test_system_prompt_preset_cannot_be_overwritten(monkeypatch):
 def test_prompt_preview_matches_first_batch_without_calling_model(monkeypatch):
     from app.workflow import service as workflow_service
 
-    monkeypatch.setattr(
-        workflow_service,
-        "read_config",
-        lambda: {"chatgpt_9router": {"endpoint": "http://localhost:20128/v1", "api_key": "test-key"}},
-    )
-    monkeypatch.setattr(workflow_service, "ensure_9router_running", pytest.fail)
-    monkeypatch.setattr(workflow_service, "chat_completion", pytest.fail)
+    monkeypatch.setattr(workflow_service, "chatgpt_text", pytest.fail)
 
     user_prompt, system_prompt = workflow_service.preview_gpt_script_prompt(
         product_data="preview product",

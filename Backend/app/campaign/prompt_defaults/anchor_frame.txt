@@ -1,0 +1,16 @@
+@Create image REFERENCE ROLES:
+- Image 1 = the model's real face reference (face, hairstyle, hair color, skin tone).
+- Image 2 = the approved character sheet: the same model on the left, the outfit from front, side and back on the right.
+- Image 3 = real product photo of the garment: ground truth for logo, print and details.
+Priority: the references override any text description below. Do not redesign, restyle or substitute the person or the outfit.
+
+TASK: Create ONE photorealistic {{aspect_label}} ANCHOR photo for a fashion campaign: the model wearing exactly this outfit, medium-full shot, relaxed three-quarter stance, alive and confident, a natural half-smile. No text overlay, no watermark.
+LOCATION AND LIGHT (every later shot of this film reuses this exact place, time of day, light direction and color grade): {{master_scene}}
+LENS: 50mm, shallow depth of field, the subject clearly separated from the background.
+GARMENT: {{garment.summary}}
+{{#logo_rule}}LOGO RULE: {{logo_rule}}{{/logo_rule}}
+AVOID: {{style.dont}}
+
+{{#changes}}
+[OPTIONAL CHANGES]: {{changes}}
+{{/changes}}

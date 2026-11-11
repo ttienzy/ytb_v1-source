@@ -1,1 +1,1 @@
-The subject from the image reference is the sole character in the video, performing the exact choreography from the motion reference video. Preserve the subject's complete identity, facial features, hair, glasses, clothing, and distinctive details consistently throughout. Transfer the choreography, poses, gestures, rhythm, camera angle, framing, and composition seamlessly from the motion video. Natural biomechanics, fluid body movement, photorealistic cinematic lighting.
+Keep the movement natural and fluid, matching the timing and rhythm of the input video.

@@ -27,7 +27,7 @@ class MuseService:
     """Service xử lý tự động hóa tương tác với Meta Muse AI qua Chrome CDP."""
 
     def __init__(self):
-        self.profile_dir = Path(settings.chrome_profile_dir).resolve()
+        self.profile_dir = (Path(settings.chrome_profile_dir).parent / 'ChromeProfile_Muse').resolve()
         self.executable = Path(settings.chrome_executable).resolve()
 
     def get_config(self) -> Dict[str, Any]:

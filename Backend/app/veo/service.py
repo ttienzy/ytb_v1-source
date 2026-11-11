@@ -8,11 +8,14 @@ Chưa có contract Flow xác minh → adapter dispatch là placeholder.
 from __future__ import annotations
 
 import base64
+import collections
+import contextlib
 import hashlib
 import json
 import logging
 import mimetypes
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -72,18 +75,115 @@ _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow UI gate — một việc UI Flow mỗi lần (FIFO)
+# ─────────────────────────────────────────────────────────────────────────────
+# Extension điều khiển một tab Flow thật nên chỉ làm được một việc UI mỗi lúc và từ
+# chối/hủy việc đến sau ("Flow đang xử lý tác vụ khác", quá 30s trong hàng đợi).
+# Cổng này xếp hàng ngay ở backend: việc chỉ được đẩy vào bridge khi tới lượt.
+
+class FlowBusyError(RuntimeError):
+    """Không tới lượt dùng UI Flow trong thời gian cho phép."""
+
+
+class _FifoGate:
+    def __init__(self, min_gap_seconds: float = 3.0) -> None:
+        self._cv = threading.Condition()
+        self._waiting: collections.deque = collections.deque()
+        self._holder: str | None = None
+        self._released_at = 0.0
+        self._min_gap = min_gap_seconds
+
+    def acquire(self, owner: str, timeout: float) -> bool:
+        ticket = object()
+        deadline = time.monotonic() + timeout
+        with self._cv:
+            self._waiting.append(ticket)
+            while not (self._waiting[0] is ticket and self._holder is None):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._waiting.remove(ticket)
+                    self._cv.notify_all()
+                    return False
+                self._cv.wait(remaining)
+            self._waiting.popleft()
+            self._holder = owner
+            gap = self._min_gap - (time.monotonic() - self._released_at)
+        if gap > 0:
+            time.sleep(gap)  # để tab/debugger của việc trước kịp dọn trước khi việc sau chạy
+        return True
+
+    def release(self) -> None:
+        with self._cv:
+            self._holder = None
+            self._released_at = time.monotonic()
+            self._cv.notify_all()
+
+    def state(self) -> dict[str, Any]:
+        with self._cv:
+            return {"holder": self._holder, "waiting": len(self._waiting)}
+
+
+_flow_ui_gate = _FifoGate()
+
+
+@contextlib.contextmanager
+def flow_ui_slot(owner: str, timeout: float = 3600.0):
+    """Giữ lượt dùng UI Flow suốt thời gian việc nằm trong tay extension."""
+    before = _flow_ui_gate.state()
+    if before["holder"] or before["waiting"]:
+        logger.info("Flow UI bận (%s, %d đang chờ) — %s xếp hàng", before["holder"], before["waiting"], owner)
+    if not _flow_ui_gate.acquire(owner, timeout):
+        raise FlowBusyError(f"Flow đang bận việc khác quá {int(timeout)}s; chưa gửi gì lên Flow. Thử lại sau.")
+    try:
+        yield
+    finally:
+        _flow_ui_gate.release()
+
+
+def get_flow_ui_state() -> dict[str, Any]:
+    return _flow_ui_gate.state()
+
+
+def _ensure_flow_project_tab(flow_project_id: str | None, timeout: float = 15.0) -> None:
+    """Bảo đảm Chrome đang mở đúng project Flow trước khi giao việc (tránh lỗi reCAPTCHA ở trang chủ).
+
+    Chỉ hành động khi heartbeat đã báo danh sách tab mà không có tab project này.
+    """
+    pid = (flow_project_id or "").strip()
+    if not pid:
+        return
+    tabs = bridge.get_extension_info().get("tabs")
+    if tabs is None or any(pid in (t.get("url") or "") for t in tabs):
+        return
+    logger.info("Chưa có tab Flow cho project %s — yêu cầu extension mở/chuyển tab", pid)
+    rid = bridge.request_switch_project(pid)
+    if not rid:
+        return
+    res = bridge.wait_switch_result(rid, timeout=timeout)
+    if not res:
+        bridge.cancel_request(rid)
+        logger.warning("Extension không phản hồi việc chuyển tab project %s trong %.0fs", pid, timeout)
+    elif not res.get("ok"):
+        logger.warning("Chuyển tab project %s thất bại: %s", pid, res.get("error"))
+    else:
+        time.sleep(2.0)  # chờ trang nạp và reCAPTCHA khởi tạo
+
+
 def _save_jobs() -> None:
     """Persist jobs to disk."""
     try:
         with _jobs_lock:
             serializable = {}
-            for jid, job in _jobs.items():
-                serializable[jid] = {k: v for k, v in job.items() if k != "_thread"}
-        _VEO_JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _VEO_JOBS_FILE.write_text(
-            json.dumps(serializable, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+            for jid, job in list(_jobs.items()):
+                serializable[jid] = {k: v for k, v in list(job.items()) if k != "_thread"}
+            # Serialize khi còn giữ lock: nếu không, thread khác đổi job giữa chừng làm lưu hỏng.
+            content = json.dumps(serializable, ensure_ascii=False, indent=2, default=str)
+            _VEO_JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            # Tên tmp riêng mỗi thread để hai lần lưu đồng thời không giẫm lên nhau.
+            temp_file = _VEO_JOBS_FILE.with_suffix(f".{threading.get_ident()}.tmp")
+            temp_file.write_text(content, encoding="utf-8")
+            temp_file.replace(_VEO_JOBS_FILE)
     except Exception as e:
         logger.warning("Failed to save jobs: %s", e)
 
@@ -110,8 +210,48 @@ def _load_jobs() -> None:
 # Capabilities — từ Google Help, cập nhật khi có runtime verification
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Omni 1.2 Flash = macaron_cookie_* (suy từ banner "Introducing Gemini Omni 1.2 Flash" + HAR 2026-11-09).
+OMNI_12_NAME = "Omni 1.2 Flash"
+# Chỉnh video theo video mẫu (Motion Control): cùng RPC jIps6 như Omni 1.1, chỉ đổi model id. HAR flow.google_video_motion.com
+# (2026-11-11): đoạn 0–240 khung, 1 ảnh tham chiếu, 720p, trừ 30 credit, xong sau ~75 giây. 360p chưa có HAR -> chưa mở.
+OMNI_12_EDIT = "macaron_cookie_edit"
+OMNI_12_T2V_10S = "macaron_cookie_t2v_10s"
+OMNI_12_T2V_10S_360P = "macaron_cookie_t2v_10s_360p"  # độ phân giải nằm trong model id (HAR + PoC live 2026-11-09)
+# Frames đầu–cuối (i2v_fl): HAR flow.google_2_test_gd_7.com (6s, 720p = 18 credit) và flow.google_2_new_credit_check_11_09_v2.com
+# (10s: 720p = 30, 360p = 10). Thời lượng khác (8s…) chưa có HAR nên bị chặn.
+OMNI_12_I2V_FL_DURATIONS = (6, 10)
+OMNI_12_I2V_FL_RE = re.compile(r"^macaron_cookie_i2v_fl_(6|10)s(_360p)?$")
+
+
+def omni_12_frames_model_id(duration: int, resolution: str) -> str:
+    return f"macaron_cookie_i2v_fl_{int(duration)}s{'_360p' if str(resolution).lower() == '360p' else ''}"
+
+
+# Ingredients / "Thành phần" (r2v, 1–3 ảnh tham chiếu): Google cho 3-15 giây. Mẫu model id có trong HAR máy này (10, 13, 15 giây) và trong
+# request bị chặn của gflow-cli (3, 8 giây). Giá đã đo: xem campaign/graph.py.
+OMNI_12_R2V_DURATIONS = tuple(range(3, 16))
+OMNI_12_R2V_RE = re.compile(r"^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$")
+_MEDIA_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def omni_12_ingredients_model_id(duration: int, resolution: str) -> str:
+    return f"macaron_cookie_r2v_{int(duration)}s{'_360p' if str(resolution).lower() == '360p' else ''}"
+
 # Nguồn: https://support.google.com/flow/answer/16352836?hl=en
 _DEFAULT_MODELS: list[dict[str, Any]] = [
+    {
+        # Omni 1.2 Flash (Flow model id nội bộ: macaron_cookie_*), đi đường HTTP. Xác minh live: text_to_video 10s (PoC 2026-11-09),
+        # frames đầu–cuối 6/10s (HAR), ingredients 3–15s (HAR 10/13/15s + clip thật 6/8/10s 720p của Chiến dịch AI 2026-11-10).
+        "display_name": "Omni 1.2 Flash",
+        "provider": "flow",
+        "provider_model_id": "macaron_cookie_t2v_10s",
+        "group": "video",
+        "supported_modes": ["text_to_video", "frames", "ingredients"],
+        "supported_durations": list(range(3, 16)),
+        "supported_resolutions": ["360p", "720p"],
+        "extend_supported": None,
+        "verified": True,
+    },
     {
         "display_name": "Omni 1.1 Flash",
         "provider": "flow",
@@ -171,6 +311,74 @@ def _build_profiles() -> list[dict[str, Any]]:  # noqa: C901
     from app.veo.schemas import InputMode, AspectRatio  # local import tránh circular
 
     rows: list[dict[str, Any]] = []
+
+    # ── Omni 1.2 Flash ────────────────────────────────────────────────────────
+    # Credit (Flow Help, khớp số dư trừ thật trong PoC 2026-11-09): 720p = 3/giây → 30; 360p = 1/giây → 10.
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for res, model_id, credit in (("720p", OMNI_12_T2V_10S, 30), ("360p", OMNI_12_T2V_10S_360P, 10)):
+            rows.append({
+                "id": f"omni_12_flash_{aspect_slug}_10s_{res}",
+                "model_display_name": "Omni 1.2 Flash",
+                "provider_model_id": model_id,
+                "input_mode": InputMode.TEXT_TO_VIDEO.value,
+                "aspect_ratio": aspect,
+                "duration_seconds": 10,
+                "resolution": res,
+                "num_outputs": 1,
+                "credit_cost": credit,
+                "documented": True,
+                "runtime_verified": True,
+                "note": "Xác minh live 2026-11-09 (HTTP thuần). Chỉ 10s/text-to-video; tỉ lệ lấy theo cài đặt giao diện Flow.",
+            })
+
+    # ── Omni 1.2 Flash — Ingredients (r2v, 1–3 ảnh tham chiếu), 3–15 giây ───────
+    # Giá đã đo: 13s 720p = 48, 15s 360p = 20 (số dư trừ thật). Còn lại theo công thức Flow (1 hoặc 3 credit/giây tới 10s, gấp đôi
+    # từ giây 11) và ghi rõ là dự kiến. runtime_verified = đã chạy thật trên máy này (HAR hoặc clip của Chiến dịch AI).
+    r2v_measured = {("720p", 13): 48, ("360p", 15): 20}
+    r2v_live = {("720p", 6), ("720p", 8), ("720p", 10), ("720p", 13), ("720p", 15), ("360p", 15)}
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in OMNI_12_R2V_DURATIONS:
+            for res in ("720p", "360p"):
+                rate = 3 if res == "720p" else 1
+                measured = r2v_measured.get((res, dur))
+                rows.append({
+                    "id": f"omni_12_flash_ingr_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Omni 1.2 Flash",
+                    "provider_model_id": omni_12_ingredients_model_id(dur, res),
+                    "input_mode": InputMode.INGREDIENTS.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": measured if measured is not None else rate * min(dur, 10) + 2 * rate * max(dur - 10, 0),
+                    "documented": True,
+                    "runtime_verified": (res, dur) in r2v_live,
+                    "note": ("Giá đã đo" if measured is not None else "Giá dự kiến theo công thức") + " · HTTP, tối đa 3 ảnh tham chiếu",
+                })
+
+    # ── Omni 1.2 Flash — Frames đầu + cuối (i2v_fl), 6/10 giây ──────────────────
+    i2v_credit = {("720p", 6): 18, ("720p", 10): 30, ("360p", 10): 10, ("360p", 6): 6}
+    i2v_live = {("720p", 6), ("720p", 10), ("360p", 10)}
+    for aspect in ("16:9", "9:16"):
+        aspect_slug = "landscape" if aspect == "16:9" else "portrait"
+        for dur in OMNI_12_I2V_FL_DURATIONS:
+            for res in ("720p", "360p"):
+                rows.append({
+                    "id": f"omni_12_flash_frames_{aspect_slug}_{dur}s_{res}",
+                    "model_display_name": "Omni 1.2 Flash",
+                    "provider_model_id": omni_12_frames_model_id(dur, res),
+                    "input_mode": InputMode.FRAMES.value,
+                    "aspect_ratio": aspect,
+                    "duration_seconds": dur,
+                    "resolution": res,
+                    "num_outputs": 1,
+                    "credit_cost": i2v_credit[(res, dur)],
+                    "documented": True,
+                    "runtime_verified": (res, dur) in i2v_live,
+                    "note": "Cần CẢ khung đầu và khung cuối · HTTP",
+                })
 
     # ── Omni 1.1 Flash ────────────────────────────────────────────────────────
     # Credit: 360p → 4/5/6/7 credits; 720p → 7/10/12/15 credits
@@ -287,27 +495,24 @@ def _build_profiles() -> list[dict[str, Any]]:  # noqa: C901
                         "note": f"I2V {mode.value} — Theo Google Flow Help",
                     })
 
-    # Omni 1.1 Flash — edit uploaded/generated video with optional ingredients.
-    # Google documents video edits separately from ordinary Omni generations:
-    # 40 credits per generation for every supported length and resolution.
-    # The selected source segment controls the edit length (up to 10 seconds).
+    # Omni 1.2 Flash — Motion Control: chỉnh video theo video mẫu (cắt tối đa 10 giây) + ảnh tham chiếu.
+    # Giá đã đo MỘT lần (HAR 2026-11-11): đoạn 8 giây, 720p = 30 credit. Google: chỉnh video tính theo giây như tạo thường.
     for aspect in ("16:9", "9:16"):
         aspect_slug = "landscape" if aspect == "16:9" else "portrait"
-        for res in ("720p", "360p"):
-            rows.append({
-                "id": f"omni_flash_video_edit_{aspect_slug}_10s_{res}",
-                "model_display_name": "Omni 1.1 Flash",
-                "provider_model_id": "abra_edit_360p" if res == "360p" else "abra_edit",
-                "input_mode": InputMode.VIDEO_EDIT.value,
-                "aspect_ratio": aspect,
-                "duration_seconds": 10,
-                "resolution": res,
-                "num_outputs": 1,
-                "credit_cost": 40,
-                "documented": True,
-                "runtime_verified": aspect == "9:16" and res == "360p",
-                "note": "Video edit costs 40 credits per generation; source segment up to 10 seconds; 1080p is a separate upscale step",
-            })
+        rows.append({
+            "id": f"omni_12_flash_video_edit_{aspect_slug}_10s_720p",
+            "model_display_name": OMNI_12_NAME,
+            "provider_model_id": OMNI_12_EDIT,
+            "input_mode": InputMode.VIDEO_EDIT.value,
+            "aspect_ratio": aspect,
+            "duration_seconds": 10,
+            "resolution": "720p",
+            "num_outputs": 1,
+            "credit_cost": 30,
+            "documented": True,
+            "runtime_verified": True,
+            "note": "Giá đã đo 1 lần (đoạn 8 giây, 720p = 30 credit) · cắt 3–10 giây · 360p chưa xác minh",
+        })
 
     # Veo 3.1 Lite — frames (10 credits) + ingredients (10 credits)
     for mode in (InputMode.FRAMES, InputMode.INGREDIENTS):
@@ -704,7 +909,12 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
             request.ingredient_image_paths = [request.image_path]
             if request.end_image_path:
                 request.ingredient_image_paths.append(request.end_image_path)
-        if request.ingredient_media_ids or not 1 <= len(request.ingredient_image_paths or []) <= 3:
+        if request.model_display_name == OMNI_12_NAME:
+            # Omni 1.2: ảnh tham chiếu = file ảnh và/hoặc mã media đã có sẵn trong project Flow (tổng 1–3)
+            total_refs = len(request.ingredient_image_paths or []) + len(request.ingredient_media_ids or [])
+            if not 1 <= total_refs <= 3:
+                raise ValueError("Ingredients (Omni 1.2) yêu cầu 1–3 ảnh tham chiếu (file ảnh hoặc mã media có sẵn trong project).")
+        elif request.ingredient_media_ids or not 1 <= len(request.ingredient_image_paths or []) <= 3:
             raise ValueError("Ingredients yêu cầu 1–3 file ảnh; hãy chọn ảnh từ máy hoặc thư viện app.")
         request.image_path = None
         request.end_image_path = None
@@ -792,6 +1002,28 @@ def _process_job(job_id: str) -> None:
     logger.info("Job %s: startup jitter delay %.1fs", job_id, startup_jitter)
     time.sleep(startup_jitter)
 
+    # Kiểm tra nhanh trước khi xếp hàng: lỗi kết nối phải báo ngay, không bắt người dùng chờ lượt mới thấy.
+    try:
+        if not bridge.is_bridge_running():
+            _update_job(job, JobStatus.ERROR, error="Bridge Server không hoạt động")
+            return
+        if not bridge.get_extension_info().get("connected"):
+            _update_job(job, JobStatus.ERROR, error="Extension chưa kết nối. Hãy nạp FlowsVeo-Clean vào Chrome và mở tab labs.google")
+            return
+        state = get_flow_ui_state()
+        if state["holder"] or state["waiting"]:
+            _update_job(job, JobStatus.PENDING, f"Đang xếp hàng chờ Flow ({state['waiting'] + 1} việc phía trước)...")
+        with flow_ui_slot(f"video:{job_id}"):
+            _process_job_in_slot(job_id, job)
+    except FlowBusyError as e:
+        _update_job(job, JobStatus.ERROR, error=f"Google Flow: Timeout chờ lượt xử lý — {e}")
+    except Exception as e:
+        logger.exception("Job %s failed: %s", job_id, e)
+        _update_job(job, JobStatus.ERROR, error=f"Lỗi không xác định: {str(e)}")
+
+
+def _process_job_in_slot(job_id: str, job: dict[str, Any]) -> None:
+    """Chạy job khi đã giữ lượt UI Flow (extension chắc chắn rảnh)."""
     try:
         # Step 1: Check Bridge & Extension
         _update_job(job, JobStatus.CAPTCHA, "Đang chờ giải reCAPTCHA...")
@@ -811,19 +1043,33 @@ def _process_job(job_id: str) -> None:
 
         # Step 2: Request reCAPTCHA
         flow_request = _build_verified_flow_request(job)
+        _ensure_flow_project_tab(job.get("flow_project_id"))
         # The successful Flow HAR sends this exact Enterprise reCAPTCHA action.
-        request_id = bridge.request_captcha(
-            action="VIDEO_GENERATION",
-            flow_request=flow_request,
-        )
+        # Extension có thể đang tạm "busy" khi làm mới tab: chờ tối đa 25s thay vì lỗi ngay.
+        request_id = None
+        busy_deadline = time.monotonic() + 25.0
+        while True:
+            request_id = bridge.request_captcha(
+                action="VIDEO_GENERATION",
+                flow_request=flow_request,
+            )
+            if request_id or time.monotonic() >= busy_deadline:
+                break
+            time.sleep(1.0)
         if not request_id:
             _update_job(job, JobStatus.ERROR, error="Không thể tạo yêu cầu CAPTCHA (queue đầy hoặc Extension đang bận)")
             return
 
         is_native_ui_mode = job.get("input_mode") in ("frames", "ingredients", "video_edit")
-        if not is_native_ui_mode:
+        # HTTP: extension tự tạo token trong trang -> không có token thừa để chờ.
+        skip_captcha_wait = bool(flow_request.get("http_no_captcha"))
+        if skip_captcha_wait:
+            _update_job(job, JobStatus.GENERATING, "Đang tạo video bằng HTTP (không bấm giao diện)...")
+        elif not is_native_ui_mode:
             result = bridge.wait_captcha_result(request_id, timeout=30.0)
             if not result or not result.get("token"):
+                # Chưa có token = chưa tạo gì trên Flow; rút việc khỏi hàng đợi để không chạy muộn.
+                bridge.cancel_request(request_id)
                 error_msg = result.get("error", "Timeout") if result else "Timeout chờ token reCAPTCHA"
                 _update_job(job, JobStatus.ERROR, error=f"Giải reCAPTCHA thất bại: {error_msg}")
                 return
@@ -839,19 +1085,28 @@ def _process_job(job_id: str) -> None:
         flow_envelope = bridge.wait_flow_result(request_id, timeout=flow_timeout)
 
         if not flow_envelope:
+            bridge.cancel_request(request_id)
             if _try_recover_completed_scene(job):
                 return
             _update_job(job, JobStatus.ERROR, error="Timeout chờ kết quả Google Flow")
             return
         if flow_envelope.get("error"):
             flow_error = str(flow_envelope["error"])
+            logger.warning("Job %s: Flow báo lỗi, thử khôi phục scene: %s", job_id, flow_error[:500])
             if _try_recover_completed_scene(job):
                 return
             _update_job(job, JobStatus.ERROR, error=f"Google Flow: {flow_error}")
             return
         flow_result = flow_envelope.get("result") or {}
+        if not flow_result.get("ok") and flow_result.get("submitted") is False:
+            # Extension xác nhận CHƯA gửi lệnh tạo video (vd. upload ảnh lỗi): không có gì để khôi phục và không mất credit.
+            flow_error = str(flow_result.get("error") or "không rõ lý do")
+            logger.warning("Job %s: chưa gửi lên Flow: %s", job_id, flow_error[:500])
+            _update_job(job, JobStatus.ERROR, error=f"Chưa gửi lên Flow (không mất credit): {flow_error}")
+            return
         if not flow_result.get("ok") or not flow_result.get("video_url"):
             flow_error = str(flow_result.get("error") or "response không hợp lệ")
+            logger.warning("Job %s: Flow không trả video, thử khôi phục scene: %s", job_id, flow_error[:500])
             if _try_recover_completed_scene(job):
                 return
             _update_job(
@@ -878,7 +1133,7 @@ def _process_job(job_id: str) -> None:
         output_path = _download_flow_video(job, flow_result)
         job["output_files"] = [output_path.name]
         job["provider_media_id"] = flow_result.get("media_id")
-        job["provider_model_id"] = flow_result.get("provider_model_id")
+        job["provider_model_id"] = flow_result.get("provider_model_id") or _job_provider_model_id(job)
         _update_job(job, JobStatus.DONE, "Hoàn tất — video đã lưu vào máy")
         if job.get("project_id"):
             _increment_project_video_count(job["project_id"])
@@ -942,7 +1197,17 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
     is_ingredients = (input_mode == "ingredients")
 
     if input_mode == "video_edit":
-        return "abra_edit_360p" if (job.get("resolution") or "720p").lower() == "360p" else "abra_edit"
+        if model_name == OMNI_12_NAME.lower() or not job.get("model_display_name"):
+            return OMNI_12_EDIT
+        return "abra_edit_360p" if (job.get("resolution") or "720p").lower() == "360p" else "abra_edit"   # job cũ của Omni 1.1
+
+    if model_name == OMNI_12_NAME.lower():
+        # text_to_video 10s và frames đầu–cuối 6s/10s đã có HAR; các tổ hợp khác bị chặn ở _build_verified_flow_request.
+        if is_frames:
+            return omni_12_frames_model_id(dur, job.get("resolution") or "720p")
+        if is_ingredients:
+            return omni_12_ingredients_model_id(dur, job.get("resolution") or "720p")
+        return OMNI_12_T2V_10S_360P if (job.get("resolution") or "720p").lower() == "360p" else OMNI_12_T2V_10S
 
     if is_frames:
         has_start = bool(job.get("image_path"))
@@ -975,16 +1240,124 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
     return "veo_3_1_i2v_lite" if is_frames else "veo_3_1_t2v_lite"
 
 
+def _motion_image_order(req: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Phản chiếu motionImageOrder() của extension: 1–3 ảnh theo ingredient_inputs (media id có sẵn hoặc ảnh có base64)."""
+    images = req.get("ingredient_images") or []
+    inputs = req.get("ingredient_inputs") or (
+        [{"media_id": mid} for mid in (req.get("ingredient_media_ids") or [])] + [{"local": True} for _ in images]
+    )
+    if not 1 <= len(inputs) <= 3:
+        return None
+    order: list[dict[str, Any]] = []
+    nxt = 0
+    for item in inputs:
+        if isinstance(item, dict) and item.get("media_id"):
+            if not _MEDIA_ID_RE.match(str(item["media_id"])):
+                return None
+            order.append({"media_id": str(item["media_id"])})
+        else:
+            image = images[nxt] if nxt < len(images) else None
+            nxt += 1
+            if not (isinstance(image, dict) and image.get("base64")):
+                return None
+            order.append({"image_index": nxt - 1})
+    return order if nxt == len(images) else None
+
+
+def _http_video_eligible(req: dict[str, Any]) -> bool:
+    """Phản chiếu canUseHttpVideo() của extension: tổ hợp đã chứng minh live cho đường HTTP (không bấm UI).
+
+    Hai bên PHẢI khớp: backend dùng kết quả này để KHÔNG chờ token reCAPTCHA thừa; extension chỉ bỏ qua bước giải
+    captcha khi cả cờ này lẫn canUseHttpVideo() cùng đúng.
+    """
+    if str(req.get("transport") or "").lower() != "http":
+        return False
+    mode = req.get("input_mode") or "text_to_video"
+    model = str(req.get("provider_model_id") or "")
+    if mode == "text_to_video":
+        if model not in (OMNI_12_T2V_10S, OMNI_12_T2V_10S_360P):
+            return False
+    elif mode == "frames":
+        m = OMNI_12_I2V_FL_RE.match(model)
+        if not m or int(req.get("duration_seconds") or 0) != int(m.group(1)):
+            return False
+        if not (req.get("image_base64") and req.get("end_image_base64")):
+            return False
+        dims = [req.get("image_width"), req.get("image_height"), req.get("end_image_width"), req.get("end_image_height")]
+        if not all(isinstance(d, (int, float)) and d > 0 for d in dims):
+            return False
+    elif mode == "ingredients":
+        m = OMNI_12_R2V_RE.match(model)
+        if not m or int(req.get("duration_seconds") or 0) != int(m.group(1)):
+            return False
+        images = req.get("ingredient_images") or []
+        ids = req.get("ingredient_media_ids") or []
+        if not (1 <= len(images) + len(ids) <= 3) or not all(isinstance(i, dict) and i.get("base64") for i in images):
+            return False
+        if not all(isinstance(x, str) and _MEDIA_ID_RE.match(x) for x in ids):
+            return False
+    elif mode == "video_edit":
+        # Motion Control Omni 1.2 (HAR jIps6): 720p, video mẫu đã có media id, cắt tối đa 10 giây, 1–3 ảnh tham chiếu.
+        if model != OMNI_12_EDIT or (req.get("resolution") or "720p") != "720p":
+            return False
+        if not _MEDIA_ID_RE.match(str(req.get("reference_video_id") or "")):
+            return False
+        try:
+            start = float(req.get("reference_video_start_seconds") or 0)
+            end = float(req.get("reference_video_end_seconds"))
+        except (TypeError, ValueError):
+            return False
+        if start < 0 or end <= start or end - start > 10:
+            return False
+        if _motion_image_order(req) is None:
+            return False
+    else:
+        return False
+    res = req.get("resolution") or "720p"
+    if res not in ("720p", "360p") or model.endswith("_360p") != (res == "360p"):
+        return False
+    if req.get("aspect_ratio") not in ("16:9", "9:16"):
+        return False
+    return int(req.get("num_outputs") or 1) == 1
+
+
+def _job_provider_model_id(job: dict[str, Any]) -> str:
+    """provider_model_id của job: giá trị đã lưu, nếu chưa có thì suy ra từ cấu hình job (không dùng mặc định cũ)."""
+    stored = str(job.get("provider_model_id") or "").strip()
+    if stored:
+        return stored
+    try:
+        return _resolve_provider_model_id(job)
+    except Exception:  # noqa: BLE001 - chỉ để log/khôi phục, không được làm hỏng job
+        return ""
+
+
 def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     """Chuẩn hóa cấu hình gửi tới Google Flow với thời lượng, tỉ lệ, base64 frames và model ID động."""
     dur = int(job.get("duration_seconds") or 6)
     aspect = job.get("aspect_ratio") or "16:9"
-    model_name = job.get("model_display_name") or "Omni 1.1 Flash"
-    res = job.get("resolution") or "720p"
     mode = job.get("input_mode") or "text_to_video"
+    # Chỉnh video (Motion Control) chỉ còn Omni 1.2: request không ghi model được hiểu là Omni 1.2.
+    model_name = job.get("model_display_name") or (OMNI_12_NAME if mode == "video_edit" else "Omni 1.1 Flash")
+    res = job.get("resolution") or "720p"
     if mode not in ("text_to_video", "frames", "ingredients", "video_edit"):
         raise ValueError(f"Unsupported input_mode: {mode}")
-    if mode in ("frames", "ingredients"):
+    if model_name == OMNI_12_NAME:
+        if mode == "video_edit" and res == "360p":
+            raise ValueError(f"{OMNI_12_NAME} chỉnh video mới xác minh 720p; 360p chưa có dữ liệu giao thức.")
+        if mode == "ingredients":
+            if dur not in OMNI_12_R2V_DURATIONS or res not in ("720p", "360p") or int(job.get("num_outputs") or 1) != 1:
+                raise ValueError(f"{OMNI_12_NAME} ingredients nhận 3–15 giây, 360p/720p, một video mỗi lượt (nhận {dur}s/{res}).")
+        if mode == "frames":
+            if not (job.get("image_path") and job.get("end_image_path")):
+                raise ValueError(f"{OMNI_12_NAME} frames cần CẢ khung hình đầu và khung hình cuối (i2v_fl).")
+            if dur not in OMNI_12_I2V_FL_DURATIONS or res not in ("720p", "360p") or int(job.get("num_outputs") or 1) != 1:
+                raise ValueError(f"{OMNI_12_NAME} frames hiện chỉ xác minh {'/'.join(map(str, OMNI_12_I2V_FL_DURATIONS))} giây, 360p/720p, một video mỗi lượt (nhận {dur}s/{res}).")
+        elif mode == "text_to_video" and (dur != 10 or res not in ("720p", "360p") or int(job.get("num_outputs") or 1) != 1):
+            raise ValueError(f"{OMNI_12_NAME} hiện chỉ xác minh 10 giây, 360p/720p, một video mỗi lượt (nhận {dur}s/{res}).")
+    if mode == "video_edit" and model_name != OMNI_12_NAME:
+        raise ValueError("Motion Control (chỉnh video) đã chuyển sang Omni 1.2 Flash; Omni 1.1 không còn được dùng cho chế độ này.")
+    if mode in ("frames", "ingredients") and model_name != OMNI_12_NAME:
         if model_name != "Omni 1.1 Flash" or res != "720p" or int(job.get("num_outputs") or 1) != 1:
             raise ValueError(f"Chế độ {mode} hiện hỗ trợ Omni 1.1 Flash, 720p, một video mỗi lượt.")
         if mode == "frames" and job.get("end_image_path") and dur not in (6, 8, 10):
@@ -1009,7 +1382,10 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
             if job.get("end_image_path"):
                 paths.append(job["end_image_path"])
             job["ingredient_image_paths"] = paths
-        if ingredient_media_ids or not 1 <= len(paths) <= 3:
+        if model_name == OMNI_12_NAME:
+            if not 1 <= len(paths) + len(ingredient_media_ids) <= 3:
+                raise ValueError("Ingredients (Omni 1.2) yêu cầu 1–3 ảnh tham chiếu (file ảnh hoặc mã media có sẵn trong project).")
+        elif ingredient_media_ids or not 1 <= len(paths) <= 3:
             raise ValueError("Ingredients yêu cầu 1–3 file ảnh, không dùng Start/End Frame hoặc mã ảnh rời.")
     elif mode == "video_edit":
         if not job.get("ingredient_image_paths") and job.get("image_path"):
@@ -1109,12 +1485,14 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     else:
         reference_video_filename = None
 
+    transport = str(job.get("transport") or os.environ.get("FLOW_TRANSPORT") or "http").lower()
     logger.info(
-        "Chuẩn bị Flow request cho job %s: mode=%s, model=%s, provider_model_id=%s, duration=%ds, aspect=%s, has_start_frame=%s, has_end_frame=%s, num_ingredients=%d",
+        "Chuẩn bị Flow request cho job %s: mode=%s, model=%s, provider_model_id=%s, transport=%s, duration=%ds, aspect=%s, has_start_frame=%s, has_end_frame=%s, num_ingredients=%d",
         job.get("job_id"),
         mode,
         model_name,
         provider_model_id,
+        transport,
         dur,
         aspect,
         bool(start_frame_data),
@@ -1122,12 +1500,16 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         len(ingredient_data_list) + len(ingredient_media_ids),
     )
 
-    return {
+    request = {
         "prompt": job["prompt"],
         "project_id": job.get("flow_project_id") or job.get("project_id"),
         "input_mode": mode,
         "model_display_name": model_name,
         "provider_model_id": provider_model_id,
+        # 'http' = tạo video bằng HTTP thuần trong tab Flow (không bấm UI). Mặc định 'http': extension chỉ dùng đường này
+        # cho tổ hợp đã chứng minh (Omni 1.2 text-to-video 10s, 360p/720p, 16:9/9:16); mọi tổ hợp khác tự dùng UI.
+        # Ép về UI: job["transport"]="ui" hoặc biến môi trường FLOW_TRANSPORT=ui (phải có trong terminal chạy dev.js).
+        "transport": transport,
         "duration_seconds": (
             (10 if dur >= 10 else (8 if dur >= 8 else 6))
             if provider_model_id.startswith("omni_flash_i2v_")
@@ -1160,8 +1542,53 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
         "end_image_width": end_frame_data.get("width") if end_frame_data else None,
         "end_image_height": end_frame_data.get("height") if end_frame_data else None,
         "ingredient_images": ([{k: v for k, v in image.items() if k != "base64"} for image in ingredient_data_list]
-                              if mode == "ingredients" else ingredient_data_list),
+                              if mode == "ingredients" and model_name != OMNI_12_NAME else ingredient_data_list),
     }
+    # Đường HTTP tự tạo token reCAPTCHA tươi ngay trong trang ngay trước khi gửi -> không cần giải trước một token thừa.
+    request["http_no_captcha"] = _http_video_eligible(request)
+    return request
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _find_duplicate_output(path: Path) -> Path | None:
+    """Tìm video đã có trong thư mục kết quả trùng byte với `path` (khác tên).
+
+    Phục hồi scene có thể nhặt nhầm video cũ của project (media_id khác nhưng nội dung y hệt);
+    so ID là không đủ. Chỉ băm khi kích thước bằng nhau nên gần như không tốn chi phí.
+    """
+    try:
+        size = path.stat().st_size
+        digest = None
+        for other in _VEO_DATA_DIR.glob("*.mp4"):
+            if other.resolve() == path.resolve() or other.stat().st_size != size:
+                continue
+            digest = digest or _file_sha256(path)
+            if _file_sha256(other) == digest:
+                return other
+    except OSError as exc:
+        logger.warning("Không kiểm tra được video trùng cho %s: %s", path.name, exc)
+    return None
+
+
+def _reject_duplicate_recovery(job: dict[str, Any], output_path: Path) -> bool:
+    """Nếu video vừa khôi phục trùng một video đã có thì xóa nó và trả True."""
+    duplicate = _find_duplicate_output(output_path)
+    if not duplicate:
+        return False
+    logger.warning(
+        "Job %s: video khôi phục trùng byte với %s — đây là video cũ của project, từ chối nhận.",
+        job.get("job_id"), duplicate.name,
+    )
+    output_path.unlink(missing_ok=True)
+    output_path.with_suffix(".json").unlink(missing_ok=True)
+    return True
 
 
 def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any]) -> Path:
@@ -1208,7 +1635,7 @@ def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any]) -> Pa
     metadata = {
         "prompt": job["prompt"],
         "model_display_name": job["model_display_name"],
-        "provider_model_id": flow_result.get("provider_model_id"),
+        "provider_model_id": flow_result.get("provider_model_id") or _job_provider_model_id(job),
         "provider_media_id": flow_result.get("media_id"),
         "aspect_ratio": actual_aspect,
         "input_mode": job["input_mode"],
@@ -1271,7 +1698,7 @@ def recover_current_scene(job_id: str) -> VeoJobOut | None:
 def _try_recover_completed_scene(job: dict[str, Any]) -> bool:
     """Recover a Flow media card when the generation adapter lost its result."""
     request_id = bridge.request_flow_recovery(
-        provider_model_id=str(job.get("provider_model_id") or ""),
+        provider_model_id=_job_provider_model_id(job),
         project_id=str(job.get("flow_project_id") or ""),
     )
     if not request_id:
@@ -1306,9 +1733,11 @@ def _try_recover_completed_scene(job: dict[str, Any]) -> bool:
     try:
         _update_job(job, JobStatus.DOWNLOADING, "Đang tải video đã hoàn tất từ Flow...")
         output_path = _download_flow_video(job, result)
+        if _reject_duplicate_recovery(job, output_path):
+            return False
         job["output_files"] = [output_path.name]
         job["provider_media_id"] = result.get("media_id")
-        job["provider_model_id"] = result.get("provider_model_id") or job.get("provider_model_id")
+        job["provider_model_id"] = result.get("provider_model_id") or _job_provider_model_id(job)
         _update_job(job, JobStatus.DONE, "Hoàn tất — đã khôi phục video từ Flow")
         if job.get("project_id"):
             _increment_project_video_count(job["project_id"])
@@ -1326,7 +1755,7 @@ def _recover_current_scene(job_id: str) -> None:
     try:
         _update_job(job, JobStatus.DOWNLOADING, "Đang lấy video từ scene Flow đã hoàn tất...")
         request_id = bridge.request_flow_recovery(
-            provider_model_id=str(job.get("provider_model_id") or ""),
+            provider_model_id=_job_provider_model_id(job),
             project_id=str(job.get("flow_project_id") or ""),
         )
         if not request_id:
@@ -1340,9 +1769,11 @@ def _recover_current_scene(job_id: str) -> None:
         if not result.get("video_url"):
             raise RuntimeError("Scene Flow không cung cấp URL video")
         output_path = _download_flow_video(job, result)
+        if _reject_duplicate_recovery(job, output_path):
+            raise RuntimeError("Video trong scene Flow trùng một video đã có (video cũ của project), không nhận.")
         job["output_files"] = [output_path.name]
         job["provider_media_id"] = result.get("media_id")
-        job["provider_model_id"] = result.get("provider_model_id") or "abra_t2v_6s"
+        job["provider_model_id"] = result.get("provider_model_id") or _job_provider_model_id(job)
         _update_job(job, JobStatus.DONE, "Hoàn tất — video đã khôi phục và lưu vào máy")
     except Exception as exc:
         logger.exception("Job %s recovery failed: %s", job_id, exc)
@@ -1353,6 +1784,13 @@ def _classify_job_error(error: str, previous_status: str | None = None) -> dict[
     """Return stable, UI-friendly metadata without hiding the provider's raw error."""
     message = (error or "").lower()
 
+    if "chưa gửi lên flow" in message:
+        return {
+            "error_code": "NOT_SUBMITTED",
+            "error_stage": "pre_submit",
+            "error_hint": "Flow chưa nhận lệnh tạo video nên không mất credit. Có thể thử lại.",
+            "error_retryable": True,
+        }
     if "bridge server" in message:
         return {
             "error_code": "BRIDGE_OFFLINE",
@@ -1429,6 +1867,17 @@ def _classify_job_error(error: str, previous_status: str | None = None) -> dict[
             ),
             "error_retryable": True,
         }
+    if "prominent_people" in message or "prominent_person" in message:
+        return {
+            "error_code": "FLOW_PROMINENT_PEOPLE",
+            "error_stage": "generation",
+            "error_hint": (
+                "Flow chặn video vì bộ lọc người nổi tiếng (PROMINENT_PERSON) nhận diện khuôn mặt trong ảnh đầu vào. "
+                "Thường không bị trừ credit, nhưng chạy lại với cùng khuôn mặt sẽ lỗi lại. "
+                "Dùng nhân vật khác (ảnh AI tạo mới, không dựa trên ảnh người thật)."
+            ),
+            "error_retryable": False,
+        }
     if "render ended with status" in message:
         return {
             "error_code": "FLOW_RENDER_FAILED",
@@ -1472,21 +1921,22 @@ def _classify_job_error(error: str, previous_status: str | None = None) -> dict[
 
 def _update_job(job: dict, status: JobStatus, step: str = "", error: str | None = None) -> None:
     """Cập nhật trạng thái job."""
-    previous_status = job.get("status")
-    job["status"] = status.value
-    if step:
-        job["current_step"] = step
-    if error:
-        job["error_message"] = error
-        job["current_step"] = f"Lỗi: {error}"
-        job.update(_classify_job_error(error, previous_status))
-    elif status != JobStatus.ERROR:
-        job["error_message"] = None
-        job["error_code"] = None
-        job["error_stage"] = None
-        job["error_hint"] = None
-        job["error_retryable"] = None
-    job["updated_at"] = datetime.now(timezone.utc).isoformat()
+    with _jobs_lock:
+        previous_status = job.get("status")
+        job["status"] = status.value
+        if step:
+            job["current_step"] = step
+        if error:
+            job["error_message"] = error
+            job["current_step"] = f"Lỗi: {error}"
+            job.update(_classify_job_error(error, previous_status))
+        elif status != JobStatus.ERROR:
+            job["error_message"] = None
+            job["error_code"] = None
+            job["error_stage"] = None
+            job["error_hint"] = None
+            job["error_retryable"] = None
+        job["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_jobs()
 
 
@@ -1787,6 +2237,15 @@ def _model_to_image_item(img: VeoImage) -> VeoImageItem:
 
 
 def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
+    """Sinh ảnh qua Flow; xếp hàng cùng video để extension chỉ làm một việc UI mỗi lúc."""
+    try:
+        with flow_ui_slot(f"image:{uuid.uuid4().hex[:6]}", timeout=900.0):
+            return _generate_images_in_slot(req)
+    except FlowBusyError as e:
+        return VeoImageGenerateResponse(ok=False, error=str(e))
+
+
+def _generate_images_in_slot(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
     """Sinh ảnh từ prompt thông qua Google Flow Nano Banana (RPC ogiZ0b).
 
     Tách N biến thể thành N request qua bridge, mỗi request dùng CAPTCHA mới.
@@ -1818,6 +2277,8 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
     if not target_flow_pid:
         return VeoImageGenerateResponse(ok=False, error="Không tìm thấy project Flow. Hãy chọn hoặc tạo project trước khi tạo ảnh")
 
+    _ensure_flow_project_tab(target_flow_pid)
+
     target_count = min(max(req.count, 1), 4)
     # Scene UUID dùng chung cho tất cả biến thể (giống Flow gốc)
     shared_scene_uuid = str(uuid.uuid4()).upper()
@@ -1842,9 +2303,10 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
     if not req_id:
         return VeoImageGenerateResponse(ok=False, error="Bridge chưa sẵn sàng hoặc hàng đợi đầy")
 
-    bridge_res = bridge.wait_image_result(req_id, timeout=180.0)
+    bridge_res = bridge.wait_image_result(req_id, timeout=240.0)
     if not bridge_res:
-        return VeoImageGenerateResponse(ok=False, error="Timeout chờ Extension sinh ảnh (180s)")
+        bridge.cancel_request(req_id)
+        return VeoImageGenerateResponse(ok=False, error="Timeout chờ Extension sinh ảnh (240s)")
 
     if not bridge_res.get("result") or not bridge_res["result"].get("ok"):
         err = (
@@ -1854,7 +2316,8 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
         )
         return VeoImageGenerateResponse(ok=False, error=str(err))
 
-    first_batch_images = bridge_res["result"].get("images", [])
+    # Flow chỉ có x1/x2/x4: yêu cầu 3 thì Flow tạo 4, app giữ đúng số ảnh được yêu cầu.
+    first_batch_images = bridge_res["result"].get("images", [])[:target_count]
     raw_images.extend(first_batch_images)
 
     # 2. Resilient fallback: If Flow generated fewer than requested, generate remaining sequentially
@@ -1872,7 +2335,9 @@ def generate_images(req: VeoImageGenerateRequest) -> VeoImageGenerateResponse:
         sub_id = bridge.request_generate_image(sub_req)
         if not sub_id:
             break
-        sub_res = bridge.wait_image_result(sub_id, timeout=180.0)
+        sub_res = bridge.wait_image_result(sub_id, timeout=240.0)
+        if not sub_res:
+            bridge.cancel_request(sub_id)
         if sub_res and sub_res.get("result") and sub_res["result"].get("ok"):
             raw_images.extend(sub_res["result"].get("images", []))
         else:
