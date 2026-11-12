@@ -1,5 +1,10 @@
 # CreatorFlow AI (Google Search Studio)
 
+[![Build and Release](https://github.com/ttienzy/ytb_v1-source/actions/workflows/release.yml/badge.svg)](https://github.com/ttienzy/ytb_v1-source/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/ttienzy/ytb_v1-source?label=release)](https://github.com/ttienzy/ytb_v1-source/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/ttienzy/ytb_v1-source)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue)
+
 ![Giao diện ứng dụng](./assets/ui.png)
 
 Ứng dụng **desktop Windows (Electron)** tự động hóa sản xuất video bằng AI. Repo này là mã nguồn để dev cùng làm việc: cách dựng môi trường, chạy, kiểm thử, đóng gói và các bẫy đã gặp.
