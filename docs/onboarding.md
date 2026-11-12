@@ -117,6 +117,6 @@ Cập nhật khi xử lý xong.
 4. `VeoSection.tsx` hiển thị cổng bridge dự phòng `56526`, trong khi cổng mặc định là `60526`.
 5. `features/studio/pollState.test.ts` và `timing.test.ts` chưa có script npm nào chạy (thêm `test:studio`).
 6. Bốn bước của Chiến dịch AI khai báo nhưng chưa có executor: `look_check`, `clip_check`, `compliance`, `export_pack` ([campaign-engine.md §3](campaign-engine.md)).
-7. `Backend/run_server.py` bật `reload=True`, dễ làm cả cụm dev tắt trên Windows khi chạy trực tiếp (dùng `npm start`).
+7. ~~`run_server.py` bật `reload=True`~~ (đã sửa ở v2.1.0): lỗi này làm backend trong bản đóng gói sinh reloader vô hạn và không bao giờ phục vụ; CI smoke test đã bắt được. Nay reload mặc định tắt, chỉ bật khi đặt `BACKEND_RELOAD=1`.
 8. Không có CI chạy test ở mỗi PR, và CI không chạy `pytest` của Backend (~560 test).
 9. Bảo mật bridge (`/bridge/secret` không xác thực, CORS rộng, extension lưu token/cookie) và `OAUTHLIB_IGNORE_TLS=1` trong code OAuth chưa được xử lý.

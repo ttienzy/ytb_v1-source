@@ -36,7 +36,7 @@ npm test --prefix Desktop               # tests for dev.js process-kill logic
 **Backend** (`Backend/`, venv at `Backend/.venv`):
 ```powershell
 pip install -r requirements.txt
-python run_server.py                          # uvicorn app.main:app on :8000 (reload=True)
+python run_server.py                          # uvicorn app.main:app on :8000 (no reload by default; BACKEND_RELOAD=1 enables it, never in the frozen exe)
 python -m pytest tests/veo/test_flow_queue.py # single file; add ::test_name for one test
 python -m pytest tests/campaign               # a directory
 python -m unittest tests.test_watermark_runtime   # CI runs this one with unittest before pyinstaller

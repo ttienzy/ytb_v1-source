@@ -166,7 +166,7 @@ Lệnh này: dọn tiến trình cũ còn giữ cổng 8000/8001 → khởi đ�
 
 Cờ `dev.js`: `--reuse`, `--keep-services`, `--no-reload`, `--force`, `--only=backend,voice,frontend`, `--stop` (hoặc biến `DEV_<TÊN>=1`). Chi tiết và lý do thiết kế: [Desktop/README.md](Desktop/README.md).
 
-**Vì sao không dùng `uvicorn --reload`:** trên Windows uvicorn restart worker bằng `CTRL_C_EVENT`, tín hiệu này tới mọi tiến trình chung console nên cả cụm tự tắt. Hệ quả: `python Backend/run_server.py` (đang `reload=True`) và `npm run dev` trong `Frontend/` (tự spawn backend bằng `run_server.py` nếu chưa có) đều **dễ chết khi sửa `.py`**. Dùng `npm start`.
+**Vì sao không dùng `uvicorn --reload`:** trên Windows uvicorn restart worker bằng `CTRL_C_EVENT`, tín hiệu này tới mọi tiến trình chung console nên cả cụm tự tắt. Hệ quả: `python Backend/run_server.py` và `npm run dev` trong `Frontend/` (tự spawn backend bằng `run_server.py` nếu chưa có) **không tự reload khi sửa `.py`** (mặc định tắt; đặt `BACKEND_RELOAD=1` để bật nhưng trên Windows có thể làm cả cụm tắt). Dùng `npm start` để có tự restart đúng cách.
 
 **Chạy tay từng phần** (3 cửa sổ):
 ```powershell
@@ -358,7 +358,7 @@ cd Frontend;              npm run package
 | Triệu chứng | Nguyên nhân thường gặp / cách xử lý |
 |---|---|
 | App chạy **code backend cũ** | Worker mồ côi còn giữ cổng 8000. `npm run stop` rồi `npm start` (không dùng `start:reuse`) |
-| Cả cụm tự tắt khi lưu `.py` | Đang chạy `run_server.py`/`npm run dev` trực tiếp (reload của uvicorn). Dùng `npm start` |
+| Cả cụm tự tắt khi lưu `.py` | Đã đặt `BACKEND_RELOAD=1` (reload của uvicorn). Bỏ biến đó, dùng `npm start` |
 | Job dài bị cắt giữa chừng | Backend restart do sửa `.py`. Dùng `npm run start:stable` |
 | Bảng/dữ liệu không có dù đã khởi động | `ensure_*_table` nuốt lỗi lúc `lifespan` — đọc log backend |
 | Cài đặt → Google Veo: "Extension chưa kết nối" | Extension chưa nạp/đã tắt, chưa mở tab labs.google đã đăng nhập, hoặc đang bật 2 phiên bản extension; kiểm tra cổng bridge (mặc định 60526) |
