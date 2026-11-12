@@ -21,6 +21,7 @@ const MuseStudioPage = lazy(() => import('./features/muse-studio/MuseStudioPage'
 const YouTubePublisherPage = lazy(() => import('./features/youtube-publisher/YouTubePublisherPage').then(module => ({ default: module.YouTubePublisherPage })))
 const WorkflowPage = lazy(() => import('./features/workflow/WorkflowPage').then(module => ({ default: module.WorkflowPage })))
 const CampaignPage = lazy(() => import('./features/campaign/CampaignPage').then(module => ({ default: module.CampaignPage })))
+import { HELP_OPEN_EVENT, type HelpTarget } from './features/help/openHelp'
 const HelpDrawer = lazy(() => import('./features/help/components/HelpDrawer').then(module => ({ default: module.HelpDrawer })))
 
 const PUBLISHER_PAGES = new Set(['Lên lịch Pippit', 'Lên lịch Youtube'])
@@ -33,6 +34,7 @@ export function App() {
   const [isRefreshingMonitor, setIsRefreshingMonitor] = useState(false)
   const [showHealthModal, setShowHealthModal] = useState(false)
   const [showHelpDrawer, setShowHelpDrawer] = useState(false)
+  const [helpTarget, setHelpTarget] = useState<HelpTarget | null>(null)
   const previousPageRef = useRef(activePage)
 
   const loadMonitorSummary = useCallback(async (forceSync = false) => {
@@ -75,8 +77,16 @@ export function App() {
         setShowHelpDrawer(prev => !prev)
       }
     }
+    const handleOpenHelp = (e: Event) => {
+      setHelpTarget({ ...(e as CustomEvent<HelpTarget>).detail })
+      setShowHelpDrawer(true)
+    }
     window.addEventListener('keydown', handleF1)
-    return () => window.removeEventListener('keydown', handleF1)
+    window.addEventListener(HELP_OPEN_EVENT, handleOpenHelp)
+    return () => {
+      window.removeEventListener('keydown', handleF1)
+      window.removeEventListener(HELP_OPEN_EVENT, handleOpenHelp)
+    }
   }, [])
 
   const handleSendToStudioBatch = (urls: string[]) => {
@@ -255,9 +265,12 @@ export function App() {
       {showHelpDrawer && (
         <Suspense fallback={null}>
           <HelpDrawer
-            isOpen
-            onClose={() => setShowHelpDrawer(false)}
+            onClose={() => {
+              setShowHelpDrawer(false)
+              setHelpTarget(null)
+            }}
             currentSidebar={activePage}
+            target={helpTarget}
             onNavigate={page => setActivePage(page)}
           />
         </Suspense>

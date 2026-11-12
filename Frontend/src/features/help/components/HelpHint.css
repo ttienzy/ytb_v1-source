@@ -1,0 +1,2 @@
+.help-hint { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 5px; border-radius: 50%; color: #94a3b8; cursor: pointer; vertical-align: middle; flex-shrink: 0; transition: color .12s, background .12s; }
+.help-hint:hover, .help-hint:focus-visible { color: #4f46e5; background: #eef2ff; outline: 0; }

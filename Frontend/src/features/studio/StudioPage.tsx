@@ -30,6 +30,7 @@ import { JOB_LOST_MSG, isJobLost, isOffline } from './pollState'
 import { VideoResultCard } from './components/VideoResultCard'
 import type { JobOut } from './types'
 import './StudioYoutube.css'
+import { HelpHint } from '../help/components/HelpHint'
 
 const YOUTUBE_AUDIO_CONFIG_KEY = 'yt_workflow_audio_config'
 
@@ -419,6 +420,7 @@ export function StudioPage({
                         <ChevronDown size={13} />
                       )}
                       <span>Đính kèm raw transcript</span>
+                      <HelpHint hint="recap.raw" />
                       <small>(tùy chọn khi YouTube chặn auto-fetch)</small>
                     </div>
                     {(rawFile || rawText.trim()) && (
@@ -804,6 +806,7 @@ export function StudioPage({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14 }}>
                   <AlertTriangle size={18} color="#e11d48" />
                   <span>YouTube yêu cầu xác thực tài khoản (Bot-Wall)</span>
+                  <HelpHint hint="recap.botwall" />
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12.5, color: '#475569', lineHeight: 1.5 }}>
                   YouTube phát hiện lưu lượng tải video tự động và chặn bằng yêu cầu <em>"Sign in to confirm you're not a bot"</em>. Bạn cần đăng nhập tài khoản YouTube để cập nhật Cookie.

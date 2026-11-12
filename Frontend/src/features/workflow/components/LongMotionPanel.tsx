@@ -12,6 +12,7 @@ import {
   type LongAudioMode, type LongMotionJob, type LongMotionOptions, type LongPlan,
 } from '../services/longMotionView.ts'
 import './longMotion.css'
+import { HelpHint } from '../../help/components/HelpHint'
 
 interface Props {
   video: { file: File; fileName: string; durationSec: number }
@@ -168,7 +169,7 @@ export function LongMotionPanel({ video, prompt, aspectRatio, getImagePaths, onC
         <header className="lm-head">
           <div className="lm-head-icon"><Layers size={18} /></div>
           <div className="lm-head-text">
-            <h2>Motion video dài</h2>
+            <h2>Motion video dài<HelpHint hint="canvas.longMotion" /></h2>
             <p>{video.fileName} · {formatSeconds(video.durationSec)} · {aspectRatio}</p>
           </div>
           <button type="button" className="lm-icon-btn" onClick={onClose} aria-label="Đóng"><X size={18} /></button>

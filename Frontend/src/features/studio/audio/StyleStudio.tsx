@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AudioLines, ChevronDown, ChevronUp, Eye, ImagePlus, Layers, Loader2, Trash2, Volume2 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 import { describeStyle, type AudioStyle, type BgFit, type DuckMode, type LogoPosition, type TitleCard } from './audioModel'
+import { HelpHint } from '../../help/components/HelpHint'
 
 type Tab = 'sound' | 'overlay' | 'background'
 
@@ -125,7 +126,7 @@ export function StyleStudio({ style, onChange, onReset, locked, tracks, bgm, asp
       <div className="aw-outputs-head">
         <button type="button" className="aw-outputs-toggle" onClick={() => setOpen(value => !value)} aria-expanded={open}>
           {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          <strong>Âm thanh &amp; hiệu ứng</strong>
+          <strong>Âm thanh &amp; hiệu ứng</strong><HelpHint hint="audio.style" />
           {tags.length > 0 && <span className="aw-pill neutral">{tags.length} tùy chỉnh</span>}
         </button>
         {!open && tags.length > 0 && <small className="aw-video-hint">{tags.join(' · ')}</small>}

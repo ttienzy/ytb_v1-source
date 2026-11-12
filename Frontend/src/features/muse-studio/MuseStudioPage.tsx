@@ -32,6 +32,7 @@ import type {
 } from './types'
 import * as api from './services/museApi'
 import { API_URL } from '../../shared/constants'
+import { HelpHint } from '../help/components/HelpHint'
 
 interface Props {
   setActivePage: (page: string) => void
@@ -347,6 +348,7 @@ export function MuseStudioPage({ setActivePage }: Props) {
             </div>
             <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0' }}>
               Không gian sáng tạo video điện ảnh — Tự động hóa qua Meta Muse Cloud VM &amp; Chrome CDP
+              <HelpHint hint="muse.connect" />
             </p>
           </div>
         </div>

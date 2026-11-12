@@ -46,7 +46,7 @@ npm run dev            # electron-vite dev (spawns/reuses backend itself too)
 npm run typecheck      # tsc --noEmit  — the only "lint"; there is no eslint
 npm run build          # electron-vite build → out/
 npm test               # node --experimental-strip-types --test src/features/workflow/__tests__/*.test.{ts,mjs}
-npm run test:campaign | test:voices | test:veo   # other feature test sets (same node:test runner)
+npm run test:campaign | test:voices | test:veo | test:help | test:audio | test:video | test:discover   # other feature test sets (same node:test runner); test:help guards the in-app help docs
 node --experimental-strip-types --test path/to/file.test.ts   # single test file
 npm run package        # build + electron-builder (needs Backend/dist/backend_server.exe, voice dist exe, ffmpeg-static)
 ```
@@ -86,6 +86,13 @@ npm run verify                         # full: build, tests normal+minified, rel
 - `src/App.tsx` is the sidebar router; each sidebar page lives in `src/features/<name>/` (campaign, workflow, veo-studio, studio, video, watermark, voices, bgm, discover, stories, publisher, youtube-publisher, monitor, muse-studio, settings, dashboard, history, help). Features talk to the Backend over HTTP at `127.0.0.1:8000`; shared helpers in `src/shared/`.
 - Tests are plain `node:test` on `.ts` files via `--experimental-strip-types`, so tested modules must be pure TS (no React/DOM imports, no path aliases).
 
+### In-app help (`Frontend/src/features/help/`)
+- **Data**: one typed `HelpDoc` per sidebar page in `data/<name>Doc.ts` (`pageId`, `summary`, `verifiedAt`, `requires`, `start`, `areas`, `concepts`, `problems`, `related`, `changes`). `registry.ts` exposes `HELP_DOCS: Record<PageId, HelpDoc>` (exhaustive, so a new page without a doc fails `tsc`) and `HELP_GROUPS` generated from `NAV_STRUCTURE`. `data/overviewGuide.ts` is the cross-page "Tổng quan quy trình" (journeys of page chips). `model.ts` holds the types and pure helpers (`searchDocs` accent-insensitive AND search, `sectionsOf`, `recentChanges`, `allText`); `registry.ts`/`model.ts` are pure so `node:test` can load them.
+- **UI**: `components/HelpDrawer.tsx` (+ `.css`) renders the two-column drawer: page list + search on the left, doc / search results / overview on the right with a one-row table of contents. `App.tsx` opens it on F1 or the "?" button and on the `creatorflow:open-help` event.
+- **Contextual hints**: `hints.ts` maps a key to `{pageId, anchor}`; put `<HelpHint hint="…" />` (`components/HelpHint.tsx`, a `<span role="button">` so it can sit inside buttons/labels) next to a hard block. `anchor` is an `HelpArea.id` or a section key (`start`, `problems`, …). Programmatic: `openHelp(pageId, anchor?)` from `openHelp.ts`.
+- **Writing/maintaining a doc**: derive every claim from the code (button labels, error strings, constants) and only then set `verifiedAt` to today; `verifiedAt` means "checked against the code", not "run against live Flow/Drive/Pippit". Prefer dropping a detail you can't confirm. Keep area `id`s stable (hints and deep links use them). Add a dated line to `changes` for user-visible changes (feeds the "Có gì mới" list). Do not mention removed features outside `changes`; when you remove one, add its name to `BANNED_TERMS` in `help.test.ts`.
+- **Tests**: `npm run test:help` checks nav↔registry parity, `verifiedAt` format, related/hint anchors, banned stale terms, and that every doc has start steps, areas, problems and related pages.
+
 ### Voice service
 Standalone process so the heavy model isn't loaded in Backend; Backend reaches it through `app/voices/voice_client.py` (`voice_service_url` setting) and the browser only ever calls Backend's `/api/voices`. One inference session at a time.
 
@@ -95,4 +102,7 @@ Standalone process so the heavy model isn't loaded in Backend; Backend reaches i
 - Recap video encoding: prefer hardware encoder selection (`_pick_video_encoder`) over libx264 `medium`; final merge uses `-shortest` mux + concat demuxer with stream copy.
 - Manual raw text/file input to the Gemini script step is sent as-is (no normalization); `raw.txt` is persisted for inspection.
 - Each new phase of AI Workflow v2 is expected to ship with a clickable UI and a Playwright e2e, not just backend code.
+- In-app help (F1 / "?" drawer) must stay in sync with the UI: when you rename/remove/add a sidebar page, block, button or flow, update its doc and bump `verifiedAt` (see "In-app help" below). `npm run test:help` enforces it.
+- Sidebar pages are defined once in `Frontend/src/shared/navModel.ts` (`NAV_STRUCTURE`, `PageId`); `constants.ts` only attaches icons. The page label doubles as the `activePage` key, the help doc key and the `relatedPages`/`openHelp` id, so renaming a page = change it there and let `tsc` point at the rest. Current names: "Canvas AI" (node-graph + Motion Control, formerly "AI Workflow"), "Chiến dịch AI" (campaign engine), "Recap & Audio" (formerly "Workflow": tabs "Workflow YouTube" and "Workflow Audio").
+- Modules that tests import under `node --experimental-strip-types` (including anything they pull in transitively, e.g. `shared/constants.ts` → `navModel.ts`) must import siblings WITH the `.ts` extension; a bare `./x` import breaks only the node test run, not `tsc`/Vite.
 - README.md (Vietnamese) has per-sidebar setup instructions and still describes some older structure; prefer the code when they disagree.

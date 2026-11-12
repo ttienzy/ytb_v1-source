@@ -16,6 +16,7 @@ import {
   Tv,
   Workflow as WorkflowIcon,
 } from 'lucide-react'
+import { NAV_STRUCTURE, type PageId } from './navModel.ts'
 
 const configuredApiUrl = import.meta.env?.VITE_API_URL?.trim()
 export const API_URL = (configuredApiUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '')
@@ -33,53 +34,33 @@ export type NavGroup = {
   items: NavItem[]
 }
 
-export const navGroups: NavGroup[] = [
-  {
-    title: 'Tổng Quan',
-    collapsible: true,
-    items: [
-      { label: 'Dashboard', icon: LayoutDashboard },
-    ],
-  },
-  {
-    title: 'Tạo Video AI',
-    collapsible: true,
-    items: [
-      { label: 'Canvas AI', icon: WorkflowIcon, badge: 'PRO', badgeVariant: 'pro' },
-      { label: 'Chiến dịch AI', icon: Layers, badge: 'NEW', badgeVariant: 'new' },
-      { label: 'Veo Studio', icon: Clapperboard },
-      { label: 'Muse Studio', icon: Sparkles, badge: 'NEW', badgeVariant: 'new' },
-      { label: 'Recap & Audio', icon: AudioLines },
-    ],
-  },
-  {
-    title: 'Nguồn Nội Dung',
-    collapsible: true,
-    items: [
-      { label: 'Khám Phá Kênh', icon: Compass },
-      { label: 'Crawl truyện', icon: BookOpen },
-      { label: 'Video', icon: Video },
-    ],
-  },
-  {
-    title: 'Tiện Ích Biên Tập',
-    collapsible: true,
-    items: [
-      { label: 'Voices', icon: Mic },
-      { label: 'Thư viện nhạc', icon: Music },
-      { label: 'Xóa Watermark', icon: Eraser },
-    ],
-  },
-  {
-    title: 'Phân Phối & Hệ Thống',
-    collapsible: true,
-    items: [
-      { label: 'Lên lịch Pippit', icon: CalendarClock },
-      { label: 'Lên lịch Youtube', icon: Tv },
-      { label: 'Lịch sử', icon: Clock3 },
-      { label: 'Cài đặt', icon: Settings },
-    ],
-  },
-]
+const NAV_ICONS: Record<PageId, typeof LayoutDashboard> = {
+  'Dashboard': LayoutDashboard,
+  'Canvas AI': WorkflowIcon,
+  'Chiến dịch AI': Layers,
+  'Veo Studio': Clapperboard,
+  'Muse Studio': Sparkles,
+  'Recap & Audio': AudioLines,
+  'Khám Phá Kênh': Compass,
+  'Crawl truyện': BookOpen,
+  'Video': Video,
+  'Voices': Mic,
+  'Thư viện nhạc': Music,
+  'Xóa Watermark': Eraser,
+  'Lên lịch Pippit': CalendarClock,
+  'Lên lịch Youtube': Tv,
+  'Lịch sử': Clock3,
+  'Cài đặt': Settings,
+}
+
+export const navGroups: NavGroup[] = NAV_STRUCTURE.map(group => ({
+  title: group.title,
+  collapsible: true,
+  items: group.items.map((item): NavItem => ({
+    label: item.label,
+    icon: NAV_ICONS[item.label],
+    ...('badge' in item ? { badge: item.badge, badgeVariant: item.badgeVariant } : {}),
+  })),
+}))
 
 export const navigation: NavItem[] = navGroups.flatMap(group => group.items)

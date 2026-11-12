@@ -44,6 +44,7 @@ import type {
   YouTubeStatus,
   YouTubeTask,
 } from './types'
+import { HelpHint } from '../help/components/HelpHint'
 
 const QUICK_HASHTAGS = [
   '#shorts',
@@ -1225,6 +1226,7 @@ export function YouTubePublisherPage({ setActivePage }: YouTubePublisherPageProp
                   </span>
                   <strong style={{ fontSize: 14, color: '#0f172a' }}>
                     Cấu hình Lên lịch &amp; Metadata Hàng loạt
+                    <HelpHint hint="youtube.schedule" />
                   </strong>
                 </div>
 

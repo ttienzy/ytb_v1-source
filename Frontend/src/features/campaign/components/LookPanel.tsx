@@ -7,6 +7,7 @@ import { describeElement, describeGate, errorMessage, planSummary, progressText,
 import type { ArtifactView, CampaignState, Plan, PromptPreview } from '../types.ts'
 import { Badge, Fold } from './Common.tsx'
 import { PromptEditor } from './PromptEditor.tsx'
+import { HelpHint } from '../../help/components/HelpHint'
 
 interface Props {
   campaignId: string
@@ -98,7 +99,7 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
     <section className="cp-card" data-testid="look-panel">
       <header className="cp-card-head">
         <div className="cp-head-title">
-          <h3>Ảnh mẫu mặc áo (look sheet)</h3>
+          <h3>Ảnh mẫu mặc áo (look sheet)<HelpHint hint="campaign.look" /></h3>
           <span className="cp-head-sub">Chân dung bên trái, áo xoay 3 góc bên phải. Mọi khối sau chỉ dùng ảnh đã duyệt.</span>
         </div>
         <div className="cp-head-actions">

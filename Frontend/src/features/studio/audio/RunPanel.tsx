@@ -1,4 +1,5 @@
 import { AlertTriangle, Film, Headphones, HardDriveUpload, Loader2, Music, Trash2, X } from 'lucide-react'
+import { HelpHint } from '../../help/components/HelpHint'
 import type { Voice } from '../../voices/types'
 import { formatRanges, queueTotals, type AudioStory, type BgFit, type BgSummary, type QueueItem } from './audioModel'
 
@@ -120,7 +121,7 @@ export function RunPanel(props: RunPanelProps) {
         </div>
 
         <div className="aw-field">
-          <span>Nền video</span>
+          <span>Nền video<HelpHint hint="audio.queue" /></span>
           <button type="button" className={`aw-bg-summary ${bgMode === 'library' && bgLoaded && bg.total === 0 ? 'empty' : ''}`} onClick={onManageBg} title="Mở khối Video nền để thêm / xóa video">
             <Film size={15} />
             <span>

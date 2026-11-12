@@ -19,6 +19,7 @@
     "test:campaign": "node --experimental-strip-types --test src/features/campaign/__tests__/*.test.ts",
     "test:video": "node --experimental-strip-types --test src/features/video/*.test.ts",
     "test:audio": "node --experimental-strip-types --test src/features/studio/audio/*.test.ts",
+    "test:help": "node --experimental-strip-types --test src/features/help/*.test.ts",
     "test:discover": "node --experimental-strip-types --test src/features/discover/*.test.ts",
     "test:voices": "node --experimental-strip-types --test src/features/voices/*.test.ts",
     "package": "npm run build && electron-builder",

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, MoreHorizontal, Pencil, Trash2, Wallet, X } from 'lucide-react'
 import { PLATFORM_LABEL, budgetView, shortDate } from '../services/campaignView.ts'
 import type { CampaignSummary } from '../types.ts'
+import { HelpHint } from '../../help/components/HelpHint'
 
 interface Props {
   campaign: CampaignSummary
@@ -70,7 +71,7 @@ export function CampaignHeader({ campaign, spent, onRename, onSetCap, onDelete }
       <div className="cp-header-side">
         {editingCap ? (
           <form className="cp-budget cp-budget-edit" onSubmit={e => { e.preventDefault(); void saveCap() }}>
-            <label htmlFor="cap" className="cp-budget-label">Trần credit Flow</label>
+            <label htmlFor="cap" className="cp-budget-label">Trần credit Flow<HelpHint hint="campaign.credit" /></label>
             <div className="cp-row">
               <input id="cap" className="cp-input cp-narrow" inputMode="numeric" value={cap} placeholder="không giới hạn" autoFocus
                      onChange={e => setCap(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditingCap(false) }} />

@@ -10,6 +10,7 @@ import {
 import type { ArtifactView, CampaignState, ClipPreview, ElementState, Plan, ShotPlanDoc, Tier } from '../types.ts'
 import { Badge, Fold } from './Common.tsx'
 import { PromptEditor } from './PromptEditor.tsx'
+import { HelpHint } from '../../help/components/HelpHint'
 
 interface Props {
   campaignId: string
@@ -126,7 +127,7 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
     <section className="cp-card" data-testid="clip-panel">
       <header className="cp-card-head">
         <div className="cp-head-title">
-          <h3>Clip Ingredients của từng shot <span className="cp-tag cp-tag-warn">Tốn credit Flow</span></h3>
+          <h3>Clip Ingredients của từng shot <span className="cp-tag cp-tag-warn">Tốn credit Flow</span><HelpHint hint="campaign.clip" /></h3>
           <span className="cp-head-sub">Omni 1.2 nhận 3 ảnh: khung mẫu, storyboard đã duyệt, ảnh áo thật. Không bao giờ tự gửi lại lệnh tạo video.</span>
         </div>
         <div className="cp-head-actions">
