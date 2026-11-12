@@ -1,6 +1,8 @@
 # AI Workflow v2 – kiến trúc node cho quảng cáo THỜI TRANG
 
-Ngày: 2026-11-09. Trạng thái: **thiết kế, chưa có code**. Thay thế bản "4 giai đoạn" trước đó (bị loại: quá ít node, quá giống wizard).
+> **Cập nhật 2026-11-12:** đây là thiết kế gốc; engine đã được cài đặt theo [PLAN_ai_workflow_campaign.md](PLAN_ai_workflow_campaign.md) và đã đổi hướng ở [PLAN_campaign_v24_storyboard_ingredients.md](PLAN_campaign_v24_storyboard_ingredients.md). Danh sách ~25 node và bước Keyframe trong file này không còn khớp code (`Backend/app/campaign/graph.py` hiện có 19 bước).
+
+Ngày: 2026-11-09. Trạng thái ban đầu: thiết kế (nay đã cài đặt, xem ghi chú đầu file). Thay thế bản "4 giai đoạn" trước đó (bị loại: quá ít node, quá giống wizard).
 Nguồn thị trường là blog/trang hãng công cụ (có lợi ích thương mại); con số hiệu quả chưa kiểm chứng. Phần engine tham khảo cách ComfyUI (cache theo vân tay đầu vào), Weavy (iterator cho danh sách biến thể), LangGraph (interrupt/resume có lưu trạng thái); các nguồn đó là bản sao/tài liệu không chính thức, cần đối chiếu mã nguồn chính thức trước khi bắt chước chi tiết.
 
 > **Cập nhật 2026-11-09:** bạn thấy ~25 node là quá phức tạp, nên giao diện chỉ hiện **8 khối** (Sản phẩm → Người mẫu → Kế hoạch / Ảnh mẫu mặc áo ✋ → Keyframe → Clip ✋ → Kiểm tra → Ghép & Xuất). Các node ở §4 là **bước nội bộ của engine**, nằm trong các khối (bảng ánh xạ ở §4.1). Kế hoạch triển khai từng giai đoạn: [PLAN_ai_workflow_campaign.md](PLAN_ai_workflow_campaign.md).

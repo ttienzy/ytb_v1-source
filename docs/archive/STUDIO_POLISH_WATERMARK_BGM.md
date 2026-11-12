@@ -1,5 +1,8 @@
 # Studio Polish — Nhạc nền (R5)
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Phần nhạc nền (R5) đã triển khai; phần watermark đã gỡ khỏi code (bảng `watermarks` còn lại trong DB). Hiện hành: code `Backend/app/recap/` và `Backend/app/media/`. Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 > Trạng thái: **ĐÃ TRIỂN KHAI (BGM only)**. Watermark **đã bỏ** — burn-in text `drawtext`
 > buộc re-encode toàn frame video (chậm ~66s/221s 1080p vs BGM-only 3s `-c:v copy`);
 > user quyết định không cần → gỡ sạch code (model/router/FE). Bảng `watermarks` (migration
@@ -18,7 +21,7 @@ Cả 2 gộp trong **1 lệnh ffmpeg re-encode đúng 1 lần** (cùng `-filter_
 
 ## Vì sao gộp 1 pass re-encode
 
-Pipeline hiện tại (xem [`Backend/app/recap/ffmpeg.py`](../Backend/app/recap/ffmpeg.py)) **toàn `stream-copy`** — rất nhanh:
+Pipeline hiện tại (xem [`Backend/app/recap/ffmpeg.py`](../../Backend/app/recap/ffmpeg.py)) **toàn `stream-copy`** — rất nhanh:
 - `cut_segment`: `-c copy`
 - `mux_segment`: `-c:v copy` + `a:a aac` (chỉ audio re-encode nhẹ)
 - `concat_segments`: `-c copy`
@@ -45,7 +48,7 @@ Thumbnail (sau này) = nhánh độc lập, song song với cut/voice, không ph
 
 ### 5.1 State model — thêm phase `polish`
 
-Theo pattern per-phase đã dựng ở [`state.py`](../Backend/app/recap/state.py):
+Theo pattern per-phase đã dựng ở [`state.py`](../../Backend/app/recap/state.py):
 
 ```python
 # JobState — thêm:
@@ -132,7 +135,7 @@ Logo watermark (overlay) — v2: `overlay=W-w-20:H-h-20` thay drawtext. v1 làm 
 
 ### 6.1 Sidebar — thêm nav item
 
-[`navigation`](../Frontend/src/main.tsx) (line 7) hiện: Dashboard / Studio / Voices / Lịch sử / Cài đặt. Thêm:
+[`navigation`](../../Frontend/src/main.tsx) (line 7) hiện: Dashboard / Studio / Voices / Lịch sử / Cài đặt. Thêm:
 
 ```tsx
 { label: 'Thư viện', icon: Image },      // hoặc 'Tài sản' / 'Media'
@@ -145,7 +148,7 @@ Page "Thư viện" quản lý asset dùng lại (mirror VoicesPage):
 
 ### 6.2 Studio form — thêm 3 toggle/input
 
-Trong [`StudioPage`](../Frontend/src/main.tsx) (form card, ~line 323) — Studio chỉ **toggle + chọn**, KHÔNG nhập asset trực tiếp (asset quản lý ở trang Thư viện, đã chốt ở 6.1):
+Trong [`StudioPage`](../../Frontend/src/main.tsx) (form card, ~line 323) — Studio chỉ **toggle + chọn**, KHÔNG nhập asset trực tiếp (asset quản lý ở trang Thư viện, đã chốt ở 6.1):
 - `☑ Watermark` (checkbox) — bật/tắt; text/logo lấy default từ trang Thư viện. (v2: cho phép override per-video — v1 dùng default.)
 - `☑ Nhạc nền` (checkbox) + `<select>` track (lấy từ Thư viện) + slider volume (default 15%).
 - 3 field này append vào `FormData` của `POST /run` (chỉ append khi bật; gửi **asset id/path** của item đã chọn, KHÔNG gửi blob file).

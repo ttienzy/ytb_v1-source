@@ -1,7 +1,7 @@
 """HTTP client → voice-service (port 8001, nội bộ).
 
 Chỉ main backend gọi voice-service qua đây. Voice-service không expose ra trình duyệt.
-Xem docs/VOICE_SERVICE_PLAN.md §3.2.
+Xem docs/archive/VOICE_SERVICE_PLAN.md §3.2.
 """
 from pathlib import Path
 

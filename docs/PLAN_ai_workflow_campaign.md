@@ -1,6 +1,8 @@
 # Kế hoạch triển khai AI Workflow v2 ("Chiến dịch" quảng cáo thời trang)
 
-Ngày: 2026-11-09. Trạng thái: **kế hoạch, chưa có code**. Đi kèm [AI_WORKFLOW_FASHION_DESIGN.md](AI_WORKFLOW_FASHION_DESIGN.md) (kiến trúc đầy đủ ~25 node) và sơ đồ 8 khối (artifact "Sơ đồ AI Workflow").
+> **Cập nhật 2026-11-12:** engine và giao diện đã được cài đặt (xem bảng theo dõi mục 7 và `Backend/app/campaign/`). Kiến trúc chung (artifact bất biến, fingerprint, cổng duyệt, làn tài nguyên, API) vẫn đúng. Các phần về **Keyframe / giai đoạn 6** đã bị thay: bản hiện hành là [PLAN_campaign_v24_storyboard_ingredients.md](PLAN_campaign_v24_storyboard_ingredients.md) (`anchor_frame` + `storyboard`, Ingredients). Lịch sử v2.2/v2.3 ở [archive/](archive/).
+
+Ngày: 2026-11-09. Trạng thái ban đầu: kế hoạch (nay đã cài đặt, xem ghi chú đầu file). Đi kèm [AI_WORKFLOW_FASHION_DESIGN.md](AI_WORKFLOW_FASHION_DESIGN.md) (kiến trúc đầy đủ ~25 node) và sơ đồ 8 khối (artifact "Sơ đồ AI Workflow").
 
 Cách đọc: mục 1–3 là **bối cảnh và quyết định chung**; mục 4 là **danh sách giai đoạn** (mỗi giai đoạn nhỏ, tự chạy và kiểm được); mục 5–7 là rủi ro, thứ tự, bảng theo dõi.
 

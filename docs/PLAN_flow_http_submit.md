@@ -1,5 +1,7 @@
 # Plan: tạo video Flow bằng HTTP thay vì bấm giao diện
 
+> **Cập nhật 2026-11-12:** backend mặc định gửi qua HTTP (`transport=http`, đặt `FLOW_TRANSPORT=ui` để ép đường UI); HTTP chỉ dùng khi `_http_video_eligible` (backend) và `canUseHttpVideo` (extension) cùng đúng, nếu không thì rơi về đường cũ. Mục "Còn thiếu để làm HTTP thành mặc định" và "Hiện trạng" là ghi chú tại 2026-11-09, chưa cập nhật. Phần giao thức quan sát từ HAR vẫn là tham chiếu chính; Google có thể đổi bất kỳ lúc nào.
+
 Ngày: 2026-11-09. Nguồn: HAR `flow.google_2_new_credit_check_11_09.com` + code extension hiện tại.
 
 ## Hiện trạng (đã xác minh trong code)

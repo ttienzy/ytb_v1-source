@@ -1,5 +1,8 @@
 # Kế hoạch Chiến dịch AI v2.3: nhịp dựng, độ liền mạch, chế độ Ingredients
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Đã triển khai nhưng bị thay bởi v2.4: Frames mặc định, bước keyframe và micro-cut mặc định đã bỏ. Hiện hành: [PLAN_campaign_v24_storyboard_ingredients.md](../PLAN_campaign_v24_storyboard_ingredients.md). Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 Ngày: 2026-11-10. Đầu vào: bản rà soát video 30 giây của campaign `ab172628e62e` và đề xuất chuyển sang Ingredients, cắt nhanh theo nhịp, Master Scene.
 
 ## 1. Dữ liệu thật của video 30 giây

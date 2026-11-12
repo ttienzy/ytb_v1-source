@@ -1,5 +1,8 @@
 # Plan triển khai: Recap Pipeline chính (Backend + Studio UI)
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Plan triển khai R1–R5; đã cài đặt, dòng "chưa code BE" không còn đúng và một số đường dẫn file đã không còn. Hiện hành: code `Backend/app/recap/` và mục 10 của [README](../../README.md). Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 > Trạng thái: **plan — chưa code BE. Cấu trúc thư mục + cơ chế Gemini đã dọn + validate xong.**
 > Cập nhật: 2026-08-22
 > Tham khảo: [[RECAP_PIPELINE_PLAN]] (flow tổng quan, quyết định mục 6) + [[VOICE_SERVICE_PLAN]] (Phase 3 đã xong)

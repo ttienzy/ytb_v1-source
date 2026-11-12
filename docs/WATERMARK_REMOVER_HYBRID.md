@@ -1,5 +1,7 @@
 # Watermark Remover - Hybrid Mode (Path + Upload)
 
+> **Cập nhật 2026-11-12:** hai endpoint `POST /api/watermark/process` (đường dẫn) và `POST /api/watermark/upload` vẫn đúng. Một số chỗ đã lỗi thời: nay xử lý cả **ảnh và video** (không chỉ `.mp4`), `gwr` là runtime đi kèm (`Frontend/watermark-runtime`, kiểm tra bằng `GET /api/watermark/check`) chứ không phải CLI cài riêng, và `gwr` chỉ xóa được trên clip gốc từ Flow. Cách cài runtime: mục 4 của [README](../README.md).
+
 ## 🎯 Vấn đề ban đầu
 
 **Lỗi**: `"Không tìm thấy file MP4 hợp lệ tại các đường dẫn: ['Cooking_garlic_butter_shrimp_202608232323.mp4']"`

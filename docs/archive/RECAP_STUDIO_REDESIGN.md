@@ -1,5 +1,8 @@
 # Recap Studio Redesign — 1-button parallel pipeline + History page
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Đã triển khai: `POST /api/recap/run` và trạng thái theo từng phase có trong `Backend/app/recap/`. Hiện hành: code `Backend/app/recap/` và `Frontend/src/features/studio/`. Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 ## Context
 
 Studio hiện tại bắt user bấm **4 nút tuần tự** (Tạo recap → Cắt → Voice → Ghép), mỗi bước fire-and-forget (không có tiến trình live), và show recap/clips/voice ngay trong flow. Người dùng muốn:

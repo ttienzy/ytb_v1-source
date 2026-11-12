@@ -1,5 +1,8 @@
 # Chẩn đoán Flow: Captcha config not loaded
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Chẩn đoán ngày 2026-09-05 với extension 1.0.2; "Flow adapter chưa triển khai" nay đã có. Hiện hành: [PLAN_flow_http_submit.md](../PLAN_flow_http_submit.md) và [Extensions/FlowsVeo-Clean/docs/](../../Extensions/FlowsVeo-Clean/docs/). Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 Ngày kiểm tra: 2026-09-05. Đây là kết quả kiểm tra checkout sau khi người dùng bổ sung luồng Flow, thay cho các nhận xét về code chưa tồn tại trong audit trước.
 
 ## Cập nhật: đã test trực tiếp Chrome với extension 1.0.2
@@ -17,7 +20,7 @@ Chuỗi kiểm tra runtime:
 | `7dd4b08c-5a3` | Extension 1.0.1 với project đã mở | Qua lỗi module, dừng `No site key found`; cách dò registry cũ không tìm thấy key. |
 | `add67f72-6a0` | Reload extension 1.0.2, Backend/Bridge thật, 1 tài khoản kết nối | CAPTCHA thành công; dừng tại adapter placeholder. |
 
-Sửa bổ sung trong [background.js](../Extensions/FlowsVeo-Clean/background.js):
+Sửa bổ sung trong [background.js](../../Extensions/FlowsVeo-Clean/background.js):
 
 - Ưu tiên tab project trong các tab Flow/Labs, ưu tiên project đang active.
 - Bỏ chèn script. Probe trong MAIN world chờ module do website nạp tối đa 8 giây; ở trang chủ thiếu module, báo rõ cần mở project.
@@ -25,7 +28,7 @@ Sửa bổ sung trong [background.js](../Extensions/FlowsVeo-Clean/background.js
 - Dùng cùng probe cho trạng thái popup và job; log tab/module/key source, không log giá trị key/token.
 - Giới hạn chờ callback `ready` và `execute`; lỗi vẫn được trả về, không đổi trạng thái Ready thành kết luận generation thành công.
 - Version extension **1.0.2**. Đã bấm Reload đúng card extension trong `chrome://extensions` và xác nhận version qua heartbeat Backend.
-- Bỏ log tiền tố token trong [service.py](../Backend/app/veo/service.py).
+- Bỏ log tiền tố token trong [service.py](../../Backend/app/veo/service.py).
 
 Kiểm tra mới: 11 Node tests (config + reCAPTCHA), 3 Python Bridge tests và JS syntax đều đạt. Test tự động không gọi Google; kết quả job nêu trên là kiểm tra riêng với Chrome thật. Backend đã dừng giữa phiên kiểm tra; đã khởi động lại bằng `Backend/.venv/Scripts/python.exe run_server.py` chạy ẩn, API 8000, Bridge 56526, và để chạy phục vụ người dùng.
 
@@ -66,10 +69,10 @@ File thực tế tìm thấy là `flow.google.com.har` tại gốc repo, không 
 
 ## Sửa đổi đã thực hiện
 
-- [background.js](../Extensions/FlowsVeo-Clean/background.js): gửi POST khi lấy config; kiểm tra HTTP status, envelope và CAPTCHA module trước khi nhận config. Response health HTTP 200 không còn bị bỏ qua im lặng. Config lỗi không ghi đè config đang dùng.
+- [background.js](../../Extensions/FlowsVeo-Clean/background.js): gửi POST khi lấy config; kiểm tra HTTP status, envelope và CAPTCHA module trước khi nhận config. Response health HTTP 200 không còn bị bỏ qua im lặng. Config lỗi không ghi đè config đang dùng.
 - Hàm kiểm tra CAPTCHA readiness khởi tạo fallback config trước khi đọc trạng thái.
-- [bridge.py](../Backend/app/veo/bridge.py): dùng chung handler config có xác thực cho POST và GET tương thích client cũ; endpoint không tồn tại trả 404 thay vì health giả.
-- [manifest.json](../Extensions/FlowsVeo-Clean/manifest.json): version `1.0.1` để phân biệt extension đã reload.
+- [bridge.py](../../Backend/app/veo/bridge.py): dùng chung handler config có xác thực cho POST và GET tương thích client cũ; endpoint không tồn tại trả 404 thay vì health giả.
+- [manifest.json](../../Extensions/FlowsVeo-Clean/manifest.json): version `1.0.1` để phân biệt extension đã reload.
 
 ## Kiểm chứng
 
@@ -88,4 +91,4 @@ File thực tế tìm thấy là `flow.google.com.har` tại gốc repo, không 
 
 ## Phần tạo video còn thiếu trong checkout
 
-[service.py](../Backend/app/veo/service.py), `_process_job()`, vẫn có placeholder sau CAPTCHA và trả lỗi **Flow adapter chưa triển khai**. Chưa có dispatch/poll/download thực tế tại bước này. Vì vậy sửa config không có nghĩa luồng tạo MP4 đã hoàn tất; đây là điểm dừng tiếp theo cần triển khai dựa trên HAR và kiểm chứng riêng.
+[service.py](../../Backend/app/veo/service.py), `_process_job()`, vẫn có placeholder sau CAPTCHA và trả lỗi **Flow adapter chưa triển khai**. Chưa có dispatch/poll/download thực tế tại bước này. Vì vậy sửa config không có nghĩa luồng tạo MP4 đã hoàn tất; đây là điểm dừng tiếp theo cần triển khai dựa trên HAR và kiểm chứng riêng.

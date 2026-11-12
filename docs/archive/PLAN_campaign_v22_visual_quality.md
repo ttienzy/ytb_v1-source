@@ -1,5 +1,8 @@
 # Kế hoạch nâng chất lượng hình ảnh Chiến dịch AI (v2.2)
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Đã triển khai nhưng bị thay một phần bởi v2.4: bước keyframe/frame_pair_check đã bỏ. Hiện hành: [PLAN_campaign_v24_storyboard_ingredients.md](../PLAN_campaign_v24_storyboard_ingredients.md). Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 Ngày: 2026-11-10. Nguồn: rà soát của chuyên gia (dán vào phiên) đối chiếu với dữ liệu thật của campaign `ab172628e62e` (3 shot, 3 clip 720p, video 18 s) và code hiện tại.
 
 ## 1. Đối chiếu nhận định với dữ liệu thật

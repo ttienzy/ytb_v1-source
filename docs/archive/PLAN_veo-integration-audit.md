@@ -1,5 +1,8 @@
 # Audit nghiên cứu Google Flow / Veo và kế hoạch tích hợp
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Kết luận về hiện trạng code (chưa có router Veo, chưa có sinh video) đã sai so với code hiện tại. Hiện hành: [PLAN_flow_http_submit.md](../PLAN_flow_http_submit.md) và [Extensions/FlowsVeo-Clean/docs/](../../Extensions/FlowsVeo-Clean/docs/). Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 > Khởi tạo: 2026-09-04. Đối chiếu lại: 2026-09-05.
 > File thực tế: `docs/PLAN_veo-integration-audit.md`; không có `docs/PLAN/_veo-integration-audit.md` trong checkout được kiểm tra.
 > Phạm vi: website Flow, tài liệu Google công khai và mã nguồn hiện tại của dự án `tools`.
@@ -92,15 +95,15 @@ Credits tính theo generation, không nhất thiết theo request; một request
 
 | Hạng mục | Bằng chứng | Kết luận |
 |---|---|---|
-| FastAPI | [app/main.py](../Backend/app/main.py) không import/đăng ký Veo router | **CODE:** chưa có đăng ký `/api/veo/*`. |
+| FastAPI | [app/main.py](../../Backend/app/main.py) không import/đăng ký Veo router | **CODE:** chưa có đăng ký `/api/veo/*`. |
 | Bridge Python | Tìm trong `Backend`/`services`, kể cả file bị ignore, loại môi trường ảo/build: không có `veo_bridge`, `captcha_queue`, `batchAsyncGenerate`, `ensure_started` trong Python | Chưa tìm thấy implementation Bridge trong phạm vi này; không kết luận về dịch vụ ngoài repo. |
 | Lifecycle | Không có `ensure_started()` hay hook Veo startup/shutdown trong `Backend/app/main.py` | Bỏ task “chuyển ensure_started từ shutdown sang startup”: chưa có căn cứ cho lỗi đó. |
-| Veo Studio | [constants.ts](../Frontend/src/shared/constants.ts), [App.tsx](../Frontend/src/App.tsx) | Chưa có menu/trang Veo tại các điểm điều hướng này. |
-| Nơi nhận video | [video_router.py](../Backend/app/media/video_router.py), [Pippit router](../Backend/app/externals/pippit/router.py), [YouTube router](../Backend/app/externals/youtube/router.py) | Có API thư viện video và lịch đăng; chưa chứng minh handover từ Veo. |
+| Veo Studio | [constants.ts](../../Frontend/src/shared/constants.ts), [App.tsx](../../Frontend/src/App.tsx) | Chưa có menu/trang Veo tại các điểm điều hướng này. |
+| Nơi nhận video | [video_router.py](../../Backend/app/media/video_router.py), [Pippit router](../../Backend/app/externals/pippit/router.py), [YouTube router](../../Backend/app/externals/youtube/router.py) | Có API thư viện video và lịch đăng; chưa chứng minh handover từ Veo. |
 
 ### 3.2. Extension: những gì code thực sự có
 
-Nguồn: [background.js](../Extensions/FlowsVeo-Clean/background.js), [content.js](../Extensions/FlowsVeo-Clean/content.js), [popup.js](../Extensions/FlowsVeo-Clean/popup.js), [popup.html](../Extensions/FlowsVeo-Clean/popup.html), [manifest.json](../Extensions/FlowsVeo-Clean/manifest.json).
+Nguồn: [background.js](../../Extensions/FlowsVeo-Clean/background.js), [content.js](../../Extensions/FlowsVeo-Clean/content.js), [popup.js](../../Extensions/FlowsVeo-Clean/popup.js), [popup.html](../../Extensions/FlowsVeo-Clean/popup.html), [manifest.json](../../Extensions/FlowsVeo-Clean/manifest.json).
 
 | Hạng mục | Quan sát | Hệ quả cho plan |
 |---|---|---|

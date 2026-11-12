@@ -1,5 +1,8 @@
 # Báo Cáo Phân Tích & Giải Pháp: Lỗi Tua Nhanh và Cắt Cụt Hình Video Recap (Video Sync & Cut Issues)
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Phân tích lỗi tua nhanh/cắt cụt; giải pháp 1 (cắt frame-accurate bằng libx264 veryfast) đã áp dụng ở `cut_segment`. Các mục còn lại trong checklist chưa được đối chiếu lại với code. Hiện hành: code `Backend/app/recap/ffmpeg.py`, `Backend/app/recap/timing.py`. Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 Tài liệu này ghi nhận nguyên nhân gốc rễ (Root Cause Analysis), số liệu thực tế đo đạc từ quá trình render video thử nghiệm ([Mark Wiens Mexico City](https://www.youtube.com/watch?v=OO9kSxcT9Rg)), và đề xuất giải pháp kỹ thuật toàn diện để fix triệt để trong các giai đoạn tiếp theo.
 
 ---

@@ -1,5 +1,8 @@
 # Plan: Voice Service (VieNeu-TTS độc lập) + quản lý Voices
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Voice service đã được cài đặt (VieNeu SDK 3.8.1); dòng "chưa code" và một số đường dẫn trong file không còn đúng. Hiện hành: [services/voice-service/README.md](../../services/voice-service/README.md). Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 > Trạng thái: **plan — chưa code BE.**
 > Cập nhật: 2026-08-21
 > Tham khảo: https://github.com/pnnbao97/VieNeu-TTS
@@ -15,7 +18,7 @@ Tách phần voice (TTS tiếng Việt) ra khỏi app chính thành **một serv
 - Cấu trúc đủ để **triển khai nội bộ** (docker-compose, model weights pre-download offline).
 
 Phạm vi **giai đoạn này (plan)**: chỉ định nghĩa kiến trúc, API contract, lưu trữ, và cách FE
-"Voices" (đã thêm ở [main.tsx](../Frontend/src/main.tsx)) sẽ gọi. **Chưa code BE.**
+"Voices" (đã thêm ở [main.tsx](../../Frontend/src/main.tsx)) sẽ gọi. **Chưa code BE.**
 
 ---
 
@@ -106,7 +109,7 @@ Hai lớp: **FE → main backend** (`/api/*`, DB = `app.db`) và **main backend 
 
 ### 3.4 Mapping FE "Voices" → main backend
 
-FE [main.tsx VoicesPage](../Frontend/src/main.tsx) gọi `/api/voices` (đã sẵn trong code). Mọi CRUD
+FE [main.tsx VoicesPage](../../Frontend/src/main.tsx) gọi `/api/voices` (đã sẵn trong code). Mọi CRUD
 đều qua main backend — main backend tự xử metadata (app.db) và chỉ forward phần engine khi cần:
 
 | FE gọi | Main backend làm |

@@ -1,5 +1,8 @@
 # Plan: YouTube Recap Pipeline (Gemini + VieNeu-TTS + FFmpeg)
 
+> **ĐÃ LƯU TRỮ (2026-11-12), chỉ để tham khảo lịch sử.** Plan phân tích ban đầu; pipeline R1–R4 đã được cài đặt, dòng "chưa code" trong file không còn đúng. Hiện hành: code `Backend/app/recap/` và mục 10 của [README](../../README.md). Đường dẫn file và số dòng trong tài liệu phản ánh thời điểm viết.
+
+
 > Trạng thái: **phân tích nghiệp vụ / kiến trúc** — chưa code.
 > Cập nhật: 2026-08-21 (rev 2 — đã chốt quyết định mục 6)
 
