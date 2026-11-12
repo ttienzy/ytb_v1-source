@@ -8,7 +8,7 @@ const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf-8'))
 const appVersion = pkg.version ? (pkg.version.startsWith('v') ? pkg.version : `v${pkg.version}`) : 'v1.0.0'
 const githubRepo = {
   owner: pkg.build?.publish?.owner || 'ttienzy',
-  repo: pkg.build?.publish?.repo || 'ytb_v1',
+  repo: pkg.build?.publish?.repo || 'ytb_v1-source',
 }
 
 export default defineConfig({

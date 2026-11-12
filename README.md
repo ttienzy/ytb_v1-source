@@ -307,9 +307,16 @@ Workflow gồm các job, bốn job giữa chạy **song song** để rút ngắn
 | `voice-exe` | Unit test voice-service + PyInstaller (`voice.spec`) → `voice_server.exe` + smoke test exe đóng gói (nạp model, tổng hợp thử) |
 | `extension` | `npm run verify:ci`: build, test thường + minify, build release, ZIP + SHA-256 (không có smoke Chromium, xem ghi chú dưới) |
 | `frontend-checks` | `npm run typecheck` + `npm run test:all` |
-| `package` | Chỉ chạy khi các job trên đều qua: `electron-builder` (NSIS x64), kiểm `latest.yml`, smoke test watermark trên bản đóng gói, rồi **publish** lên release của `ttienzy/ytb_v1` bằng secret `RELEASES_TOKEN` |
+| `package` | Chỉ chạy khi các job trên đều qua: `electron-builder` (NSIS x64), kiểm `latest.yml`, smoke test watermark trên bản đóng gói, rồi **publish** release vào chính repo này bằng `GITHUB_TOKEN` (và phản chiếu sang `ttienzy/ytb_v1` cho người dùng bản cũ, xem bên dưới) |
 
 `npm run verify` đầy đủ (thêm smoke trình duyệt headless với trang Flow giả) **chỉ chạy tay ở máy dev**: bước đó phải tải Chromium, chậm, và từng đỏ trên runner CI dù pass cục bộ, nên đã bỏ khỏi CI. Hãy chạy nó trước khi tag nếu sửa extension. Chỉ khi chạy từ **tag `v*`** mới publish; chạy tay (`workflow_dispatch`) thực hiện toàn bộ build và kiểm tra nhưng **không publish**, dùng để thử thay đổi workflow. Auto-update dùng `electron-updater` với `latest.yml`.
+
+### Cập nhật trong app
+
+- Bản cài dùng `electron-updater` (provider `github`). Địa chỉ repo lấy từ `Frontend/package.json` → `build.publish` (`ttienzy/ytb_v1-source`); electron-builder ghi nó vào `resources/app-update.yml` **lúc đóng gói** và cũng được nhúng vào giao diện (`__GITHUB_REPO__`). Muốn đổi nơi phát hành chỉ sửa một chỗ đó.
+- Luồng: 4 giây sau khi mở app kiểm tra một lần (`latest.yml` của release mới nhất) → thông báo của Windows nếu có bản mới → người dùng mở **Cài đặt → Gemini & YouTube → Cập nhật Ứng dụng** để tải (hiện tiến trình) → **Khởi động lại để cập nhật**. Không tự tải, không tự cài khi thoát.
+- Chỉ báo "có bản mới" khi phiên bản trên GitHub **mới hơn** (so semver, `Frontend/electron/version.ts`). Bản chạy từ mã nguồn (dev) gọi GitHub API `releases/latest` và hiện nút tải **giả lập** (có chú thích "Môi trường Dev").
+- **Chuyển repo phát hành (v2.1.0):** bản cài ≤ 2.0.0 có địa chỉ `ttienzy/ytb_v1` đóng cứng, không đổi được từ xa. Vì vậy workflow phát hành mỗi bản sang **cả hai** repo (bước *Mirror release* trong `release.yml`, dùng secret `RELEASES_TOKEN`). Người dùng cũ cập nhật lên 2.1.0 từ `ytb_v1`; từ đó bản của họ trỏ về `ytb_v1-source`. Gỡ bước phản chiếu và secret khi không còn người dùng bản cũ.
 
 Build local (cần `Backend\dist\backend_server.exe`, `services\voice-service\dist\voice_server.exe`, `ffmpeg-static`, `watermark-runtime\node_modules`):
 ```powershell

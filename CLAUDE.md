@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-"CreatorFlow AI" / "Google Search Studio" (repo `ytb_v1`): a **Windows-first Electron desktop app** for automating AI video production. Docs, comments and UI strings are mostly **Vietnamese**. Features: AI Workflow / Campaign (product images → ad video via Google Flow/Veo), Veo Studio, Motion Control, YouTube Recap pipeline (R1–R4), Vietnamese TTS (VieNeu), watermark removal, publishing schedulers (Pippit/YouTube/Drive).
+"CreatorFlow AI" / "Google Search Studio" (repo `ytb_v1-source`; releases and CI both live there): a **Windows-first Electron desktop app** for automating AI video production. Docs, comments and UI strings are mostly **Vietnamese**. Features: AI Workflow / Campaign (product images → ad video via Google Flow/Veo), Veo Studio, Motion Control, YouTube Recap pipeline (R1–R4), Vietnamese TTS (VieNeu), watermark removal, publishing schedulers (Pippit/YouTube/Drive).
 
 Four cooperating processes + one browser extension:
 

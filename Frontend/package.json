@@ -18,7 +18,7 @@
     "test": "node --experimental-strip-types --test src/features/workflow/__tests__/*.test.ts src/features/workflow/__tests__/*.test.mjs",
     "test:campaign": "node --experimental-strip-types --test src/features/campaign/__tests__/*.test.ts",
     "test:studio": "node --experimental-strip-types --test src/features/studio/*.test.ts",
-    "test:all": "node --experimental-strip-types --test \"src/**/*.test.ts\" \"src/**/*.test.mjs\"",
+    "test:all": "node --experimental-strip-types --test \"src/**/*.test.ts\" \"src/**/*.test.mjs\" \"electron/*.test.ts\"",
     "test:video": "node --experimental-strip-types --test src/features/video/*.test.ts",
     "test:audio": "node --experimental-strip-types --test src/features/studio/audio/*.test.ts",
     "test:help": "node --experimental-strip-types --test src/features/help/*.test.ts",
@@ -55,7 +55,7 @@
     "publish": {
       "provider": "github",
       "owner": "ttienzy",
-      "repo": "ytb_v1"
+      "repo": "ytb_v1-source"
     },
     "directories": {
       "output": "release"

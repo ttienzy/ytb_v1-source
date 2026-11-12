@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from 'electron'
 import type { AppUpdater } from 'electron-updater'
+import { isNewerVersion } from './version.ts'
 import { basename, delimiter, join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -459,7 +460,7 @@ async function checkForUpdatesNow(): Promise<UpdaterStatusPayload> {
   if (!app.isPackaged) {
     try {
       const owner = typeof __GITHUB_REPO__ !== 'undefined' && __GITHUB_REPO__?.owner ? __GITHUB_REPO__.owner : 'ttienzy'
-      const repo = typeof __GITHUB_REPO__ !== 'undefined' && __GITHUB_REPO__?.repo ? __GITHUB_REPO__.repo : 'ytb_v1'
+      const repo = typeof __GITHUB_REPO__ !== 'undefined' && __GITHUB_REPO__?.repo ? __GITHUB_REPO__.repo : 'ytb_v1-source'
       const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`, {
         headers: { 'User-Agent': 'CreatorFlow-App' },
       })
@@ -467,9 +468,8 @@ async function checkForUpdatesNow(): Promise<UpdaterStatusPayload> {
         throw new Error(`HTTP ${res.status}`)
       }
       const data = (await res.json()) as { tag_name?: string; name?: string; body?: string; published_at?: string }
-      const latestTag = data.tag_name?.replace(/^v/, '') || ''
-      const currentVer = app.getVersion().replace(/^v/, '')
-      if (latestTag && latestTag !== currentVer) {
+      // Chỉ báo "có bản mới" khi bản trên GitHub MỚI HƠN (trước đây dùng !== nên máy dev chạy 2.1.0 vẫn thấy "có bản mới v2.0.0")
+      if (data.tag_name && isNewerVersion(data.tag_name, app.getVersion())) {
         const payload: UpdaterStatusPayload = {
           status: 'available',
           isDev: true,

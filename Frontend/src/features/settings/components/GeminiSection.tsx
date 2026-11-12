@@ -317,33 +317,9 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       return
     }
 
-    const owner = typeof __GITHUB_REPO__ !== 'undefined' ? __GITHUB_REPO__.owner : 'ttienzy'
-    const repo = typeof __GITHUB_REPO__ !== 'undefined' ? __GITHUB_REPO__.repo : 'ytb_v1'
-
-    try {
-      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`)
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
-      }
-      const data = await res.json()
-      const latestTag = data.tag_name
-      if (latestTag && latestTag !== appVersion) {
-        setUpdateStatus('available')
-        setUpdateInfo({
-          version: data.tag_name,
-          name: data.name,
-          published_at: data.published_at,
-          releaseNotes: data.body,
-          html_url: data.html_url,
-        })
-      } else {
-        setUpdateStatus('up_to_date')
-      }
-    } catch {
-      setUpdateError('Không thể kiểm tra cập nhật. Vui lòng kiểm tra kết nối Internet.')
-    } finally {
-      setUpdateChecking(false)
-    }
+    // Mở giao diện bằng trình duyệt thường (không qua Electron) thì không có bộ cập nhật để dùng.
+    setUpdateError('Chức năng cập nhật chỉ hoạt động trong ứng dụng desktop.')
+    setUpdateChecking(false)
   }
 
   async function handleDownloadUpdate() {
@@ -358,23 +334,8 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
         setUpdateStatus('available')
       }
     } else {
-      // Giả lập tiến trình trong môi trường Web để test đầy đủ các state
-      let percent = 0
-      const total = 480000000
-      const interval = setInterval(() => {
-        percent += 20
-        if (percent >= 100) {
-          clearInterval(interval)
-          setUpdateStatus('downloaded')
-        } else {
-          setDownloadProgress({
-            percent,
-            bytesPerSecond: 16500000,
-            transferred: Math.round((total * percent) / 100),
-            total,
-          })
-        }
-      }, 400)
+      setUpdateError('Chức năng cập nhật chỉ hoạt động trong ứng dụng desktop.')
+      setUpdateStatus('available')
     }
   }
 
@@ -382,8 +343,6 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
     if (window.desktop?.quitAndInstall) {
       setInstalling(true)
       window.desktop.quitAndInstall()
-    } else {
-      alert('Ứng dụng đã tải xong bản cập nhật (môi trường Web). Trên bản cài Windows (.exe), ứng dụng sẽ tự khởi động lại và hoàn tất cài đặt.')
     }
   }
 
@@ -697,6 +656,16 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
                   <ArrowDownCircle size={15} />
                   <span>Cập nhật ngay</span>
                 </button>
+                {updateInfo.version && typeof __GITHUB_REPO__ !== 'undefined' && (
+                  <a
+                    href={`https://github.com/${__GITHUB_REPO__.owner}/${__GITHUB_REPO__.repo}/releases/tag/${updateInfo.version.startsWith('v') ? updateInfo.version : `v${updateInfo.version}`}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ fontSize: 12, marginLeft: 10 }}
+                  >
+                    Xem ghi chú phát hành
+                  </a>
+                )}
                 {updateInfo.isDev && (
                   <span className="update-dev-note">
                     (Môi trường Dev: Tải thử nghiệm)
