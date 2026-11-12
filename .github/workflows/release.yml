@@ -219,14 +219,23 @@ jobs:
           cache: 'npm'
           cache-dependency-path: Extensions/FlowsVeo-Clean/package-lock.json
 
-      # verify:ci = build + test (thường và minify) + build release + zip. Bỏ smoke Chromium headless của `npm run verify`
-      # (phải tải Chromium, chậm và nhạy với tốc độ máy); chạy `npm run verify` đầy đủ ở máy dev trước khi tag.
+      # Một số test của extension chạy trên Chromium thật (Playwright) nên vẫn cần cài, nhưng có cache.
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v6
+        with:
+          path: Extensions/FlowsVeo-Clean/.local/browsers
+          key: ext-chromium-${{ runner.os }}-${{ hashFiles('Extensions/FlowsVeo-Clean/package-lock.json') }}
+
+      # verify:ci = build + test (thường và minify) + build release + zip. Bỏ smoke trình duyệt đầy đủ của `npm run verify`
+      # (chậm và nhạy với tốc độ máy, từng đỏ trên runner dù pass cục bộ); chạy `npm run verify` ở máy dev trước khi tag.
       - name: Install, verify and package
         working-directory: Extensions/FlowsVeo-Clean
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           npm ci
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.local/browsers'
+          npx playwright install chromium --no-shell
           npm run verify:ci
 
       - uses: actions/upload-artifact@v7
