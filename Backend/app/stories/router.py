@@ -1,12 +1,13 @@
 """REST API cho giao diện cào truyện."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.db import Base, engine, get_db
-from app.stories import service
-from app.stories.models import CrawledChapter, CrawledStory
+from app.stories import service, summary as story_summary
+from app.stories.models import CrawledChapter, CrawledStory, StorySummary
 from app.stories.schemas import BulkCrawlRequest, CrawlRequest
 
 router = APIRouter(prefix="/api/stories", tags=["Stories"])
@@ -17,7 +18,7 @@ def ensure_story_tables() -> None:
     """Cho phép bản cài mới dùng được ngay; migration vẫn là nguồn quản lý schema."""
     Base.metadata.create_all(
         bind=engine,
-        tables=[CrawledStory.__table__, CrawledChapter.__table__],
+        tables=[CrawledStory.__table__, CrawledChapter.__table__, StorySummary.__table__],
     )
     # create_all không bổ sung cột cho bảng đã tồn tại. Bản cài cũ có thể đã
     # tạo crawled_stories trước khi các trường hiển thị được thêm vào.
@@ -146,3 +147,22 @@ def crawl_job_status(story_slug: str, job_id: str) -> dict:
     if job is None or job["story_slug"] != story_slug:
         raise HTTPException(status_code=404, detail="Không tìm thấy tiến trình cào.")
     return job
+
+
+class SummaryRequest(BaseModel):
+    force: bool = False  # True = tạo lại dù đã có bản lưu (vd bản cũ kém hoặc truyện vừa crawl thêm chương)
+
+
+@router.get("/{story_slug}/summary")
+def get_story_summary(story_slug: str, db: Session = Depends(get_db)) -> dict:
+    """Bản tóm tắt cốt truyện đã lưu (hoặc tiến trình đang tạo)."""
+    return story_summary.get_summary(db, story_slug)
+
+
+@router.post("/{story_slug}/summary", status_code=202)
+def create_story_summary(story_slug: str, body: SummaryRequest | None = None) -> dict:
+    """Gửi cả truyện (dạng file đính kèm) cho Gemini để tóm tắt. Đã có bản lưu thì trả luôn, không gọi Gemini lại (trừ khi force)."""
+    try:
+        return story_summary.start_summary(story_slug, force=bool(body and body.force))
+    except story_summary.StoryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

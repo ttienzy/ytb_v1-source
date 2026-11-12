@@ -3,20 +3,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+from functools import partial
 import math
 import subprocess
 import uuid
 import zipfile
 import re
 import random
+import shutil
 import textwrap
 from datetime import datetime
 from pathlib import Path
 
 from app.core.config import TOOLS_DIR
 from app.recap.ffmpeg import ffprobe_duration
-from app.voices.voice_client import tts_batch
-from app.media import video_service
+from app.voices.voice_client import VoiceBusyError, tts_batch
+from app.media import backgrounds, overlays
+from app.media.audio_options import AudioOptions
+from app.media.fonts import stage_font
 
 AUDIO_DIR = TOOLS_DIR / "Data" / "media" / "videos" / "Viaudio"
 AUDIO_JOBS: dict[str, dict] = {}
@@ -34,12 +38,44 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^\w.-]+", "_", value, flags=re.UNICODE).strip("._")[:80] or "story"
 
 
+THUMBNAIL_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+
 def thumbnail_path(story_slug: str) -> Path | None:
-    for suffix in (".png", ".jpg", ".jpeg", ".webp"):
+    for suffix in THUMBNAIL_SUFFIXES:
         path = AUDIO_THUMBNAIL_DIR / f"{_safe_name(story_slug)}{suffix}"
         if path.exists() and path.stat().st_size:
             return path
     return None
+
+
+def thumbnail_index() -> dict[str, str]:
+    """Quét thư mục thumbnail MỘT lần: tên-đã-safe của truyện -> tên file (cùng thứ tự ưu tiên đuôi file với thumbnail_path).
+
+    Dùng khi cần tra hàng nghìn truyện, thay vì gọi thumbnail_path (vài lệnh stat) cho từng truyện."""
+    found: dict[str, dict[str, str]] = {}
+    if AUDIO_THUMBNAIL_DIR.exists():
+        for path in AUDIO_THUMBNAIL_DIR.iterdir():
+            if path.suffix in THUMBNAIL_SUFFIXES and path.is_file() and path.stat().st_size:
+                found.setdefault(path.stem, {})[path.suffix] = path.name
+    return {stem: by_suffix[next(s for s in THUMBNAIL_SUFFIXES if s in by_suffix)] for stem, by_suffix in found.items()}
+
+
+# Voice-service chỉ chạy một suy luận một lúc; nếu Recap/Campaign đang dùng thì chờ thay vì hủy cả chương.
+TTS_BUSY_RETRIES = 6
+TTS_BUSY_DELAY_SEC = 10.0
+
+
+async def _tts_with_retry(job_id: str, items: list[dict], voice_id: str) -> bytes:
+    for attempt in range(TTS_BUSY_RETRIES + 1):
+        try:
+            return await tts_batch(items, voice_id)
+        except VoiceBusyError as error:
+            if attempt >= TTS_BUSY_RETRIES:
+                raise RuntimeError(f"Voice-service vẫn bận sau {TTS_BUSY_RETRIES} lần thử lại (đang có tác vụ giọng đọc khác chạy). Chạy lại sau khi tác vụ đó xong. Chi tiết: {error}") from error
+            _set(job_id, message=f"Voice-service đang bận (có tác vụ giọng đọc khác), thử lại sau {TTS_BUSY_DELAY_SEC:.0f} giây ({attempt + 1}/{TTS_BUSY_RETRIES})…")
+            await asyncio.sleep(TTS_BUSY_DELAY_SEC)
+    raise AssertionError("unreachable")
 
 
 def _process_thumbnail(source: Path, story_name: str, chapter_number: int | None, work: Path, aspect: str) -> Path:
@@ -53,40 +89,103 @@ def _process_thumbnail(source: Path, story_name: str, chapter_number: int | None
         break_long_words=False,
         break_on_hyphens=False,
     ))
-    text_file = work / "thumbnail-label.txt"
-    text_file.write_text(label, encoding="utf-8")
     size = "1080:1920" if aspect == "9:16" else "1920:1080"
     output = work / "thumbnail.jpg"
-    text_file_arg = text_file.as_posix().replace(":", r"\:")
-    vf = (
-        f"scale={size}:force_original_aspect_ratio=increase,crop={size},"
-        f"drawtext=textfile='{text_file_arg}':fontcolor=white:fontsize=46:"
-        "line_spacing=10:fix_bounds=1:x=(w-text_w)/2:y=110:"
-        "box=1:boxcolor=black@0.65:boxborderw=24"
+    vf = f"scale={size}:force_original_aspect_ratio=increase,crop={size}"
+    # drawtext phải có fontfile= (không có thì ffmpeg Windows crash vì Fontconfig) và dùng đường dẫn TƯƠNG ĐỐI + cwd=work
+    # để khỏi dính lỗi dấu ':' của ổ đĩa / dấu cách. Không tìm được font thì bỏ label chứ không làm hỏng cả chương.
+    if stage_font(work):
+        (work / "thumbnail-label.txt").write_text(label, encoding="utf-8")
+        vf += (
+            ",drawtext=fontfile=font.ttf:textfile=thumbnail-label.txt:fontcolor=white:fontsize=46:"
+            "line_spacing=10:fix_bounds=1:x=(w-text_w)/2:y=110:"
+            "box=1:boxcolor=black@0.65:boxborderw=24"
+        )
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source), "-vf", vf, "-frames:v", "1", output.name],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, cwd=str(work),
     )
-    result = subprocess.run(["ffmpeg", "-y", "-i", str(source), "-vf", vf, "-frames:v", "1", str(output)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     if result.returncode or not output.exists():
-        raise RuntimeError((result.stderr or "Không thể xử lý thumbnail.")[-1000:])
+        raise RuntimeError(f"Không thể xử lý thumbnail (ffmpeg exit {result.returncode}): {(result.stderr or '').strip()[-900:]}")
     return output
 
 
-def _mux(video: Path, audio: Path, output: Path, bgm: Path | None = None, bgm_volume: float = 0.22) -> None:
+DUCK_SETTINGS = {
+    "normal": "threshold=0.03:ratio=6:attack=20:release=350",   # mức cũ: nhạc tự hạ khi giọng đang nói
+    "strong": "threshold=0.02:ratio=10:attack=15:release=400",
+}
+
+
+def build_audio_filter(has_bgm: bool, *, bgm_volume: float = 0.22, duck: str = "normal", fade_out: float = 1.5,
+                       loudnorm: bool = True, duration: float | None = None) -> str:
+    """filter_complex âm thanh cuối: [1:a] là giọng đọc, [2:a] là nhạc nền (nếu có) → [aout].
+
+    amix có normalize=0 (mặc định nó chia đôi mỗi đầu vào → giọng nhỏ đi ~6 dB). loudnorm kéo cả video về ~-16 LUFS để các video đồng đều
+    (YouTube quy chuẩn quanh -14 LUFS; giọng đọc nên -14…-16); aresample vì loudnorm có thể đổi tần số lấy mẫu. alimiter chặn vỡ tiếng."""
+    tail: list[str] = []
+    if loudnorm:
+        tail += ["loudnorm=I=-16:TP=-1.5:LRA=11", "aresample=48000"]
+    if fade_out > 0 and duration and duration > fade_out:
+        tail.append(f"afade=t=out:st={duration - fade_out:.3f}:d={fade_out:.3f}")
+    tail.append("alimiter=limit=0.97")
+    tail_s = ",".join(tail)
+    if not has_bgm:
+        return f"[1:a]{tail_s}[aout]"
+    volume = max(0.0, min(1.0, bgm_volume))
+    if duck == "off" or duck not in DUCK_SETTINGS:
+        chain = f"[2:a]volume={volume:.3f}[music];[1:a][music]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[mix]"
+    else:
+        chain = (f"[1:a]asplit=2[voice][sidechain];[2:a]volume={volume:.3f}[music];"
+                 f"[music][sidechain]sidechaincompress={DUCK_SETTINGS[duck]}[ducked];"
+                 f"[voice][ducked]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[mix]")
+    return f"{chain};[mix]{tail_s}[aout]"
+
+
+def _mux(video: Path, audio: Path, output: Path, bgm: Path | None = None, bgm_volume: float = 0.22, *, duck: str = "normal",
+         fade_out: float = 1.5, loudnorm: bool = True, duration: float | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     inputs = ["-i", str(video), "-i", str(audio)]
-    maps = ["-map", "0:v:0", "-map", "1:a:0"]
-    filters: list[str] = []
     if bgm:
-        inputs = ["-i", str(video), "-i", str(audio), "-stream_loop", "-1", "-i", str(bgm)]
-        # Giữ BGM ở khoảng 22% bản gốc và tự duck thêm khi voice đang phát.
-        filters = [f"[1:a]asplit=2[voice][sidechain];[2:a]volume={max(0.0, min(1.0, bgm_volume))}[music];[music][sidechain]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=350[ducked];[voice][ducked]amix=inputs=2:duration=first:dropout_transition=2[aout]"]
-        maps = ["-map", "0:v:0", "-map", "[aout]"]
+        inputs += ["-stream_loop", "-1", "-i", str(bgm)]
+    graph = build_audio_filter(bool(bgm), bgm_volume=bgm_volume, duck=duck, fade_out=fade_out, loudnorm=loudnorm,
+                               duration=duration if duration else ffprobe_duration(audio))
     result = subprocess.run(
-        ["ffmpeg", "-y", *inputs, *(["-filter_complex", filters[0]] if filters else []), *maps,
+        ["ffmpeg", "-y", *inputs, "-filter_complex", graph, "-map", "0:v:0", "-map", "[aout]",
          "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(output)],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800,
     )
     if result.returncode or not output.exists() or not output.stat().st_size:
         raise RuntimeError((result.stderr or "Không thể ghép voice vào video.")[-1200:])
+
+
+def apply_voice_speed(src: Path, dst: Path, speed: float) -> Path:
+    """Đổi tốc độ đọc bằng atempo (giữ nguyên cao độ). speed≈1 thì dùng nguyên file."""
+    if abs(speed - 1.0) < 0.01:
+        return src
+    result = subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-filter:a", f"atempo={speed:.3f}", "-vn", str(dst)],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+    if result.returncode or not dst.exists() or not dst.stat().st_size:
+        raise RuntimeError(f"Không đổi được tốc độ đọc: {(result.stderr or '').strip()[-400:]}")
+    return dst
+
+
+LOGO_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def logo_dir() -> Path:
+    return AUDIO_DIR / "logos"
+
+
+def logo_path(logo_id: str | None) -> Path | None:
+    """Đường dẫn file logo theo id (12 ký tự hex); không có/không tồn tại -> None."""
+    if not logo_id or not re.fullmatch(r"[a-f0-9]{12}", logo_id):
+        return None
+    for suffix in LOGO_SUFFIXES:
+        path = logo_dir() / f"{logo_id}{suffix}"
+        if path.is_file() and path.stat().st_size:
+            return path
+    return None
+
 
 def _upload_audio_output(output: Path, story_name: str, chapter_number: int | None, story_slug: str | None = None) -> dict:
     from app.externals.gdrive import service as gdrive_service
@@ -217,16 +316,26 @@ def history() -> list[dict]:
     return items
 
 
-async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, start: int = 0, end: int = 100, auto_upload_drive: bool = False, delete_local_after_upload: bool = False, story_slug: str | None = None) -> str:
-    voice_file: Path | None = None
+async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, start: int = 0, end: int = 100, auto_upload_drive: bool = False, delete_local_after_upload: bool = False, story_slug: str | None = None, bg_fit: str = "fill", options: AudioOptions | None = None) -> str:
+    options = options or AudioOptions()
     merged_file: Path | None = None
+    overlay_file: Path | None = None
+    work = AUDIO_DIR / ".tmp" / job_id
     try:
         def progress(value: int) -> int:
             return round(start + (end - start) * value / 100)
-        _set(job_id, status="running", step="voice", progress=progress(20), message=f"Đang chuyển chương {chapter_number or ''} thành voice…")
-        payload = await tts_batch([{ "text": paragraph }], voice_id)
-        work = AUDIO_DIR / ".tmp" / job_id
         work.mkdir(parents=True, exist_ok=True)
+        # Bước nào không chạy (vd chế độ test không có thumbnail/nhạc nền) thì báo rõ để giao diện không hiện nhầm "đã hoàn tất".
+        _set(job_id, skipped_steps=[step for step, skipped in (("image", not thumbnail), ("bgm", not bgm_pool), ("overlay", not options.needs_overlay())) if skipped])
+
+        # Bước rẻ và dễ hỏng làm TRƯỚC TTS: lỗi thumbnail (font, ảnh hỏng…) báo ngay thay vì sau khi đã đọc xong cả chương.
+        labeled_thumbnail = None
+        if thumbnail:
+            _set(job_id, status="running", step="image", progress=progress(5), message=f"Đang xử lý thumbnail và ghép label chương {chapter_number or ''}…")
+            labeled_thumbnail = await asyncio.to_thread(_process_thumbnail, thumbnail, story_name, chapter_number, work, aspect)
+
+        _set(job_id, status="running", step="voice", progress=progress(20), message=f"Đang chuyển chương {chapter_number or ''} thành voice…")
+        payload = await _tts_with_retry(job_id, [{ "text": paragraph }], voice_id)
         archive = work / "voice.zip"
         archive.write_bytes(payload)
         with zipfile.ZipFile(archive) as zf:
@@ -234,28 +343,46 @@ async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: 
             voice_name = manifest["items"][0]["filename"]
             voice_file = work / "voice.wav"
             voice_file.write_bytes(zf.read(voice_name))
+        if abs(options.voice_speed - 1.0) >= 0.01:
+            _set(job_id, message=f"Đang chỉnh tốc độ đọc ×{options.voice_speed:.2f}…")
+            voice_file = await asyncio.to_thread(apply_voice_speed, voice_file, work / "voice_speed.wav", options.voice_speed)
         voice_duration = ffprobe_duration(voice_file)
         if voice_duration <= 0:
             raise RuntimeError("Không đọc được thời lượng voice.")
         _set(job_id, step="duration", progress=progress(35), duration_sec=voice_duration, message=f"Voice dài {voice_duration:.1f} giây.")
 
-        labeled_thumbnail = None
-        if thumbnail:
-            _set(job_id, step="image", progress=progress(40), message="Đang xử lý thumbnail và ghép label chương…")
-            labeled_thumbnail = await asyncio.to_thread(_process_thumbnail, thumbnail, story_name, chapter_number, work, aspect)
-
         _set(job_id, step="merge", progress=progress(45), message="Đang gộp video hoàn tất theo thời lượng voice…")
-        merged = await asyncio.to_thread(video_service.merge_done_videos, max(1, math.ceil(voice_duration)), None, True, aspect)
-        merged_file = Path(merged["file_path"])
-        _set(job_id, progress=progress(70), message="Đã gộp video nền, đang ghép voice…")
+        # Nối (stream copy) các clip nền đã chuẩn hóa — chỉ chuẩn hóa thêm đúng phần còn thiếu, không mã hóa lại cả chiều dài chương.
+        seconds = max(1, math.ceil(voice_duration))
+        on_status = lambda message: _set(job_id, message=message)  # noqa: E731
+        if options.bg_mode == "cover":
+            if not thumbnail:
+                raise RuntimeError("Chế độ nền ảnh bìa cần truyện có thumbnail.")
+            merged_file = await asyncio.to_thread(backgrounds.build_cover_background, thumbnail, seconds, aspect, on_status)
+        else:
+            merged_file = await asyncio.to_thread(backgrounds.build_background, seconds, aspect, bg_fit, on_status)
+        _set(job_id, progress=progress(66), message="Đã gộp video nền.")
+
+        video_for_mux = merged_file
+        if options.needs_overlay():
+            _set(job_id, step="overlay", progress=progress(68), message="Đang phủ lớp hiệu ứng (tiêu đề, waveform, logo…)…")
+            logo = logo_path(options.logo_id)
+            if options.logo_id and logo is None:
+                raise RuntimeError("Không tìm thấy file logo đã chọn. Hãy chọn lại logo.")
+            lines = overlays.title_lines(story_name, chapter_number, chapter_title, aspect)
+            overlay_file = await asyncio.to_thread(overlays.render_overlays, merged_file, voice_file, logo, work, aspect=aspect,
+                                                   duration=voice_duration, options=options, lines=lines)
+            video_for_mux = overlay_file
 
         _set(job_id, step="mux", progress=progress(78), message="Đang ghép voice vào video…")
         safe_story = "".join(c if c.isalnum() or c in "-_" else "_" for c in story_name).strip("_")[:60] or "story"
         chapter_suffix = f"{chapter_number}" if chapter_number is not None else job_id[:8]
         output = AUDIO_DIR / f"{safe_story}_chuong_{chapter_suffix}_{job_id[:8]}.mp4"
-        _set(job_id, step="bgm", progress=progress(88), message="Đang chọn và mix nhạc nền ngẫu nhiên…")
         selected_bgm = random.choice(bgm_pool) if bgm_pool else None
-        await asyncio.to_thread(_mux, merged_file, voice_file, output, selected_bgm)
+        if selected_bgm:
+            _set(job_id, step="bgm", progress=progress(88), message="Đang chọn và mix nhạc nền ngẫu nhiên…")
+        await asyncio.to_thread(partial(_mux, video_for_mux, voice_file, output, selected_bgm, options.bgm_volume, duck=options.bgm_duck,
+                                        fade_out=options.fade_out_sec, loudnorm=options.loudnorm, duration=voice_duration))
         output_thumbnail_name = None
         if labeled_thumbnail:
             output_thumbnail_name = f"{output.stem}.jpg"
@@ -281,48 +408,80 @@ async def _run_one(job_id: str, story_name: str, chapter_title: str, paragraph: 
                 metadata["drive_error"] = str(drive_error)
         _append_manifest(metadata)
         return output.name
-    except Exception as error:  # noqa: BLE001
-        raise
     finally:
-        if voice_file:
-            voice_file.unlink(missing_ok=True)
+        # Dọn mọi file trung gian dù thành công hay lỗi: video ghép nền dài bằng cả chương (hàng trăm MB), voice.zip/wav, thumbnail tạm.
+        # (Thumbnail có label đã được chép sang AUDIO_THUMBNAIL_DIR trước đó.)
+        if merged_file:
+            merged_file.unlink(missing_ok=True)
+        shutil.rmtree(work, ignore_errors=True)
 
 
-async def run(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None = None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False, story_slug: str | None = None) -> None:
+async def run(job_id: str, story_name: str, chapter_title: str, paragraph: str, voice_id: str, aspect: str, chapter_number: int | None = None, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False, story_slug: str | None = None, bg_fit: str = "fill", options: AudioOptions | None = None) -> None:
     try:
-        output_name = await _run_one(job_id, story_name, chapter_title, paragraph, voice_id, aspect, chapter_number, thumbnail, bgm_pool, auto_upload_drive=auto_upload_drive, delete_local_after_upload=delete_local_after_upload, story_slug=story_slug)
+        output_name = await _run_one(job_id, story_name, chapter_title, paragraph, voice_id, aspect, chapter_number, thumbnail, bgm_pool, auto_upload_drive=auto_upload_drive, delete_local_after_upload=delete_local_after_upload, story_slug=story_slug, bg_fit=bg_fit, options=options)
         _set(job_id, status="completed", step="done", progress=100, message="Hoàn thành video Audio.", output_name=output_name)
     except Exception as error:  # noqa: BLE001
-        _set(job_id, status="error", step="error", message=str(error), error=str(error))
+        # Giữ nguyên `step` đang chạy: giao diện tô đỏ đúng node bị lỗi và hiện `error` ở đó.
+        _set(job_id, status="error", message=str(error), error=str(error))
 
 
-async def run_batch(job_id: str, story_name: str, chapters: list, voice_id: str, aspect: str, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False, story_slug: str | None = None) -> None:
-    total = len(chapters)
-    try:
-        for index, chapter in enumerate(chapters):
-            _set(job_id, current_chapter=chapter.chapter_number, completed_chapters=index, total_chapters=total, message=f"Đang xử lý chương {chapter.chapter_number}/{total}…")
-            output_name = await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(index * 100 / total), round((index + 1) * 100 / total), auto_upload_drive, delete_local_after_upload, story_slug)
-            _set(job_id, completed_chapters=index + 1, output_name=output_name)
-        _set(job_id, status="completed", step="done", progress=100, message=f"Đã hoàn thành {total} video Audio.")
-    except Exception as error:  # noqa: BLE001
-        _set(job_id, status="error", step="error", message=str(error), error=str(error))
+async def run_batch(job_id: str, story_name: str, chapters: list, voice_id: str, aspect: str, thumbnail: Path | None = None, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False, story_slug: str | None = None, bg_fit: str = "fill", options: AudioOptions | None = None) -> None:
+    """Nhiều chương của MỘT truyện = queue có một truyện."""
+    await run_queue(job_id, [(story_slug or "", story_name, chapters, thumbnail)], voice_id, aspect, bgm_pool, auto_upload_drive, delete_local_after_upload, bg_fit, options)
 
 
-async def run_queue(job_id: str, queue: list[tuple[str, str, list, Path | None]], voice_id: str, aspect: str, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False) -> None:
-    """Chạy tuần tự các chương đã chọn từ tối đa 10 truyện."""
+# Dừng cả queue khi liên tiếp N chương lỗi: gần như chắc chắn là lỗi hệ thống (voice-service tắt, thiếu video nền…),
+# chạy tiếp chỉ đốt thời gian (mỗi chương có thể chờ TTS tới 15 phút) mà vẫn lỗi.
+MAX_CONSECUTIVE_FAILURES = 3
+
+
+def _failure_summary(failures: list[dict]) -> str:
+    first = failures[0]
+    return f"{first['story_name']} · chương {first['chapter_number']}: {first['error']}"
+
+
+async def run_queue(job_id: str, queue: list[tuple[str, str, list, Path | None]], voice_id: str, aspect: str, bgm_pool: list[Path] | None = None, auto_upload_drive: bool = False, delete_local_after_upload: bool = False, bg_fit: str = "fill", options: AudioOptions | None = None) -> None:
+    """Chạy tuần tự các chương đã chọn từ tối đa 10 truyện.
+
+    Một chương lỗi KHÔNG làm hỏng các chương còn lại: ghi vào `failed_chapters` rồi chạy tiếp
+    (trừ khi liên tiếp MAX_CONSECUTIVE_FAILURES chương lỗi)."""
     total = sum(len(chapters) for _, _, chapters, _ in queue)
-    completed = 0
-    try:
-        for story_slug, story_name, chapters, thumbnail in queue:
-            _set(job_id, current_story=story_name, message=f"Đang xử lý truyện {story_name}…")
-            for chapter in chapters:
-                _set(job_id, current_chapter=chapter.chapter_number, completed_chapters=completed, total_chapters=total, message=f"Đang xử lý {story_name} · chương {chapter.chapter_number}…")
-                await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(completed * 100 / total), round((completed + 1) * 100 / total), auto_upload_drive, delete_local_after_upload, story_slug)
-                completed += 1
-                _set(job_id, completed_chapters=completed)
-        _set(job_id, status="completed", step="done", progress=100, message=f"Đã hoàn thành {completed} video Audio từ {len(queue)} truyện.")
-    except Exception as error:  # noqa: BLE001
-        _set(job_id, status="error", step="error", message=str(error), error=str(error))
+    processed = 0
+    succeeded = 0
+    consecutive = 0
+    aborted = False
+    failures: list[dict] = []
+    _set(job_id, total_chapters=total, completed_chapters=0, failed_chapters=[])
+    for story_slug, story_name, chapters, thumbnail in queue:
+        _set(job_id, current_story=story_name, message=f"Đang xử lý truyện {story_name}…")
+        for chapter in chapters:
+            _set(job_id, current_chapter=chapter.chapter_number, message=f"Đang xử lý {story_name} · chương {chapter.chapter_number}…")
+            try:
+                output_name = await _run_one(job_id, story_name, chapter.title, chapter.paragraph, voice_id, aspect, chapter.chapter_number, thumbnail, bgm_pool, round(processed * 100 / total), round((processed + 1) * 100 / total), auto_upload_drive, delete_local_after_upload, story_slug or None, bg_fit, options)
+                succeeded += 1
+                consecutive = 0
+                _set(job_id, completed_chapters=succeeded, output_name=output_name)
+            except Exception as error:  # noqa: BLE001
+                failures.append({"story_name": story_name, "chapter_number": chapter.chapter_number, "error": str(error)})
+                consecutive += 1
+                _set(job_id, failed_chapters=list(failures))
+                if consecutive >= MAX_CONSECUTIVE_FAILURES:
+                    aborted = True
+            processed += 1
+            if aborted:
+                break
+        if aborted:
+            break
+
+    if not failures:
+        _set(job_id, status="completed", step="done", progress=100, message=f"Đã hoàn thành {succeeded} video Audio từ {len(queue)} truyện." if len(queue) > 1 else f"Đã hoàn thành {succeeded} video Audio.")
+    elif aborted:
+        _set(job_id, status="error", error=f"Dừng sớm vì {MAX_CONSECUTIVE_FAILURES} chương liên tiếp lỗi (xong {succeeded}/{total}). Lỗi đầu tiên — {_failure_summary(failures)}",
+             message=f"Dừng sớm vì {MAX_CONSECUTIVE_FAILURES} chương liên tiếp lỗi (xong {succeeded}/{total}).")
+    elif succeeded == 0:
+        _set(job_id, status="error", error=_failure_summary(failures), message=f"Tất cả {total} chương đều lỗi.")
+    else:
+        _set(job_id, status="completed", step="done", progress=100, message=f"Xong {succeeded}/{total} chương, {len(failures)} chương lỗi (xem danh sách bên dưới).")
 
 
 def create(story_name: str, chapter_title: str, total_chapters: int = 1) -> str:

@@ -24,6 +24,7 @@ from app.discover.router import router as discover_router
 from app.media.router import router as media_router
 from app.media.video_router import router as video_router
 from app.media.audio_router import router as audio_router
+from app.media.background_router import router as background_router
 from app.recap.router import router as recap_router
 from app.routers.health import router as health_router
 from app.voices.router import router as voices_router
@@ -89,6 +90,7 @@ app.include_router(voices_router)
 app.include_router(media_router)
 app.include_router(video_router)
 app.include_router(audio_router)
+app.include_router(background_router)
 app.include_router(recap_router)
 app.include_router(discover_router)
 app.include_router(watermark_router)

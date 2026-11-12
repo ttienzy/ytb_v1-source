@@ -48,3 +48,17 @@ class CrawledChapter(Base):
     crawled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
+
+
+class StorySummary(Base):
+    """Bản tóm tắt cốt truyện do Gemini viết. Tạo một lần rồi lưu lại — chỉ để người dùng nắm cốt truyện."""
+
+    __tablename__ = "story_summaries"
+
+    story_slug: Mapped[str] = mapped_column(String(255), primary_key=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    chapters_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # số chương đã gửi cho Gemini
+    source_chars: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    truncated: Mapped[bool] = mapped_column(nullable=False, default=False)  # nội dung bị cắt bớt vì quá dài
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

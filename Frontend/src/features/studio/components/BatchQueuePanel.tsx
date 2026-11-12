@@ -93,9 +93,9 @@ export function BatchQueuePanel({
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
-      setYtLoginMsg('✅ Đã đăng nhập và lưu Cookie YouTube thành công!')
+      setYtLoginMsg('Đã đăng nhập và lưu Cookie YouTube thành công!')
     } catch (error: any) {
-      setYtLoginMsg(`❌ ${error instanceof Error ? error.message : 'Đăng nhập thất bại.'}`)
+      setYtLoginMsg(error instanceof Error ? error.message : 'Đăng nhập thất bại.')
     } finally {
       setYtLoggingIn(false)
     }
@@ -330,9 +330,9 @@ export function BatchQueuePanel({
               </span>
             </div>
             <div style={{ display: 'flex', gap: 12, fontSize: '12px', fontWeight: 600 }}>
-              <span style={{ color: '#16a34a' }}>✅ {batch.done_count} xong</span>
-              <span style={{ color: '#dc2626' }}>❌ {batch.error_count} lỗi</span>
-              <span style={{ color: '#64748b' }}>⏳ {batch.pending_count} chờ</span>
+              <span style={{ color: '#16a34a' }}>{batch.done_count} xong</span>
+              <span style={{ color: '#dc2626' }}>{batch.error_count} lỗi</span>
+              <span style={{ color: '#64748b' }}>{batch.pending_count} chờ</span>
               <span style={{ color: '#94a3b8' }}>/ {batch.total} tổng</span>
             </div>
           </div>
@@ -363,11 +363,11 @@ export function BatchQueuePanel({
                     marginTop: 8,
                     padding: '6px 10px',
                     borderRadius: 6,
-                    background: ytLoginMsg.startsWith('✅') ? '#f0fdf4' : '#fff',
+                    background: ytLoginMsg.startsWith('Đã đăng nhập') ? '#f0fdf4' : '#fff',
                     border: '1px solid',
-                    borderColor: ytLoginMsg.startsWith('✅') ? '#bbf7d0' : '#fecdd3',
+                    borderColor: ytLoginMsg.startsWith('Đã đăng nhập') ? '#bbf7d0' : '#fecdd3',
                     fontSize: 11.5,
-                    color: ytLoginMsg.startsWith('✅') ? '#166534' : '#be123c',
+                    color: ytLoginMsg.startsWith('Đã đăng nhập') ? '#166534' : '#be123c',
                   }}
                 >
                   {ytLoginMsg}
@@ -420,7 +420,7 @@ export function BatchQueuePanel({
                   {item.status === 'error' && item.error && (
                     <span className="batch-item-error">
                       {isYouTubeBotWallError(item.error)
-                        ? '🔴 Lỗi YouTube Bot-Wall: Cần đăng nhập tài khoản YouTube để xác thực'
+                        ? 'Lỗi YouTube Bot-Wall: Cần đăng nhập tài khoản YouTube để xác thực'
                         : item.error}
                     </span>
                   )}

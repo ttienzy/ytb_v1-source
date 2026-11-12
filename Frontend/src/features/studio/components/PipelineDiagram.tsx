@@ -8,7 +8,86 @@ import {
   Sparkles,
   XCircle,
 } from 'lucide-react'
-import type { JobOut, NodeState } from '../types'
+import type { JobOut, NodeState, PhaseTiming } from '../types'
+import { useNow } from '../useNow'
+import { fmtDur, geminiDetailText, mergeDetailText, phaseSec, sumPhases, totalSec, voiceDetailText } from '../timing'
+
+type TimingRow = { label: string; keys: string[]; note?: string; detail?: string }
+
+/** Bảng thời gian từng bước — thấy ngay bước nào chiếm nhiều thời gian nhất. */
+function TimingPanel({
+  timings,
+  total,
+  nowMs,
+  live,
+}: {
+  timings: Record<string, PhaseTiming>
+  total: number | null
+  nowMs: number
+  live: boolean
+}) {
+  const rows: TimingRow[] = [
+    { label: 'Lấy transcript', keys: ['transcript'] },
+    { label: 'Kiểm tra cookie Gemini', keys: ['cookie_check'] },
+    { label: 'Gemini viết kịch bản', keys: ['gemini'], detail: geminiDetailText(timings.gemini) },
+    { label: 'Tải video gốc', keys: ['cut'], note: 'song song' },
+    { label: 'Tạo voice (TTS)', keys: ['voice'], note: 'song song', detail: voiceDetailText(timings.voice) },
+    // Merge ghép từng đoạn ngay khi có giọng nên thời gian của nó phần lớn nằm trong thời gian TTS.
+    { label: 'Ghép video', keys: ['merge'], note: 'chồng lên voice', detail: mergeDetailText(timings.merge) },
+    { label: 'Polish nhạc nền', keys: ['polish'] },
+    { label: 'Upload Drive', keys: ['drive'] },
+  ]
+  const shown = rows
+    .map(r => ({ ...r, sec: sumPhases(timings, r.keys, nowMs, live) }))
+    .filter(r => r.sec != null) as Array<TimingRow & { sec: number }>
+  if (shown.length === 0) return null
+
+  const denom = total && total > 0 ? total : Math.max(...shown.map(r => r.sec))
+  const slowest = shown.reduce((a, b) => (b.sec > a.sec ? b : a))
+  const share = total && total > 0 ? Math.round((slowest.sec / total) * 100) : null
+
+  return (
+    <div className="tm">
+      <div className="tm-hdr">
+        <span>Thời gian từng bước</span>
+        {total != null && <b>Tổng {fmtDur(total)}</b>}
+      </div>
+      {shown.map(r => {
+        const t = timings[r.keys[0]]
+        const running = t && t.duration_sec == null && live
+        const failed = t?.ok === false
+        return (
+          <div className="tm-row" key={r.label}>
+            <div className="tm-top">
+              <span className="tm-label">
+                {r.label}
+                {r.note && <em> · {r.note}</em>}
+                {t?.attempts && t.attempts > 1 ? <em> · lần {t.attempts}</em> : null}
+              </span>
+              <span className={`tm-dur${failed ? ' err' : ''}`}>
+                {fmtDur(r.sec)}
+                {running ? '…' : ''}
+              </span>
+            </div>
+            <div className="tm-bar">
+              <i
+                className={failed ? 'err' : running ? 'run' : ''}
+                style={{ width: `${Math.min(100, Math.max(1.5, (r.sec / denom) * 100))}%` }}
+              />
+            </div>
+            {r.detail && <div className="tm-detail">{r.detail}</div>}
+          </div>
+        )
+      })}
+      {share != null && shown.length > 1 && (
+        <div className="tm-foot">
+          Bước chiếm nhiều thời gian nhất: <b>{slowest.label}</b> ({share}% tổng). Tải video, Tạo voice và Ghép video
+          chạy chồng nhau nên tổng thời gian nhỏ hơn tổng các dòng.
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function NodeIcon({
   state,
@@ -131,6 +210,20 @@ export function PipelineDiagram({
     ? 'error'
     : 'idle'
 
+  // Đồng hồ tự chạy mỗi giây khi job còn sống, KHÔNG phụ thuộc nhịp poll (poll trễ thì số giây vẫn nhảy đều).
+  // Job lỗi thì dừng đếm các phase đang chạy dở (không để đồng hồ chạy mãi).
+  const live = job.overall !== 'error'
+  const nowMs = useNow(live && job.overall !== 'merged' && job.overall !== 'polished')
+  const cookieStep = p.recap?.step
+  const timings = job.timings ?? null
+  const total = totalSec(timings, job.created_at, nowMs, live)
+  const withDur = (label: string | undefined, keys: string[], st: NodeState) => {
+    const s = sumPhases(timings, keys, nowMs, live)
+    if (s == null || st === 'idle' || st === 'skipped') return label
+    const base = label ?? (st === 'running' ? 'Đang chạy…' : st === 'done' ? 'Hoàn tất' : 'Lỗi')
+    return `${base} · ${fmtDur(s)}`
+  }
+
   const afterRecapDone = recapState === 'done'
   const bothDone = cutState === 'done' && voiceState === 'done'
   const mergeDone = mergeState === 'done'
@@ -146,9 +239,9 @@ export function PipelineDiagram({
     recapState === 'done'
       ? `${segs} đoạn · ${job.recap?.scenes?.length ?? 0} cảnh`
       : job.recap_status === 'rate_limited'
-      ? '⏳ Quá tải 429 — tạm nghỉ 30s…'
+      ? 'Quá tải 429, tạm nghỉ 30s…'
       : job.recap_status === 'refreshing_cookie'
-      ? 'Làm mới cookie Gemini…'
+      ? 'Làm mới cookie…'
       : p.recap && p.recap.total > 0
       ? `Chunk ${p.recap.done}/${p.recap.total}`
       : undefined
@@ -167,12 +260,12 @@ export function PipelineDiagram({
       : cutState === 'done'
       ? '1080p sẵn sàng'
       : cutState === 'error' && isBotWall
-      ? '🔒 Cần Login YouTube'
+      ? 'Cần đăng nhập YouTube'
       : undefined
   const subVoice =
     voiceState === 'running'
-      ? p.voice.phase === 'unpack'
-        ? `Giải nén ${p.voice.done}/${p.voice.total}`
+      ? p.voice.total > 0
+        ? `TTS ${p.voice.done}/${p.voice.total} đoạn`
         : 'TTS đang tổng hợp…'
       : voiceState === 'done'
       ? `${p.voice.total} VO`
@@ -201,7 +294,7 @@ export function PipelineDiagram({
   const statusText = (() => {
     if (job.overall === 'error') return `Lỗi: ${job.error ?? 'không xác định'}`
     if (polishState === 'done')
-      return '✅ Hoàn tất — final_studio.mp4 sẵn sàng tải về'
+      return 'Hoàn tất — final_studio.mp4 sẵn sàng tải về'
     if (polishState === 'running') {
       const pct =
         p.polish && p.polish.total > 0
@@ -214,15 +307,17 @@ export function PipelineDiagram({
         : 'Polish — đang mix nhạc nền dưới VO…'
     }
     if (mergeState === 'done')
-      return '✅ Hoàn tất — final_recap.mp4 sẵn sàng tải về'
+      return 'Hoàn tất — final_recap.mp4 sẵn sàng tải về'
+    if (mergeState === 'running' && voiceState === 'running')
+      return 'Voice đang đọc — đoạn nào có giọng được ghép video ngay (chạy chồng)…'
     if (mergeState === 'running')
       return 'Ghép video — mux clip + VO → concat final…'
     if (cutState === 'running' || voiceState === 'running')
       return 'Cut & Voice đang chạy song song…'
     if (job.recap_status === 'rate_limited')
-      return '⏳ Gemini đang giới hạn tốc độ (429 Rate Limit) — tự động tạm nghỉ 30s trước khi tiếp tục…'
+      return 'Gemini đang giới hạn tốc độ (429 Rate Limit) — tự động tạm nghỉ 30s trước khi tiếp tục…'
     if (job.recap_status === 'refreshing_cookie')
-      return '🔄 Cookie Gemini hết hạn — đang tự động làm mới (Chrome)…'
+      return `Cookie Gemini hết hạn — đang làm mới qua Chrome${cookieStep ? `: ${cookieStep}` : ''}…`
     if (recapState === 'running')
       return 'Recap — đang lấy & phân tích transcript (YouTube → Gemini)…'
     return 'Đang khởi động pipeline…'
@@ -257,6 +352,11 @@ export function PipelineDiagram({
           <span className="jid">job: {job.job_id}</span>
         </div>
         <div className="pc-progress">
+          {total != null && (
+            <span className="pc-elapsed" title="Thời gian từ lúc tạo job">
+              Đã chạy {fmtDur(total)}
+            </span>
+          )}
           <span className="pc-pct">{overallPct}%</span>
           <div className="pc-pbar">
             <i style={{ width: `${overallPct}%` }} />
@@ -268,7 +368,7 @@ export function PipelineDiagram({
           label="Recap LLM"
           state={recapState}
           icon={Sparkles}
-          subLabel={subRecap}
+          subLabel={withDur(subRecap, ['transcript', 'cookie_check', 'gemini'], recapState)}
           progress={recapState === 'running' ? p.recap : undefined}
         />
         <div className={connCls(afterRecapDone, afterRecapDone)} />
@@ -279,18 +379,16 @@ export function PipelineDiagram({
             label="Tải video"
             state={cutState}
             icon={Scissors}
-            subLabel={subCut}
+            subLabel={withDur(subCut, ['cut'], cutState)}
             progress={cutState === 'running' ? p.cut : undefined}
           />
           <PipelineNode
             label="Tạo voice"
             state={voiceState}
             icon={Mic}
-            subLabel={subVoice}
+            subLabel={withDur(subVoice, ['voice'], voiceState)}
             progress={
-              voiceState === 'running' && p.voice.phase === 'unpack'
-                ? p.voice
-                : undefined
+              voiceState === 'running' && p.voice.total > 0 ? p.voice : undefined
             }
           />
         </div>
@@ -300,7 +398,7 @@ export function PipelineDiagram({
           label="Ghép video"
           state={mergeState}
           icon={Film}
-          subLabel={subMerge}
+          subLabel={withDur(subMerge, ['merge'], mergeState)}
           progress={mergeState === 'running' ? p.merge : undefined}
         />
         <div
@@ -313,7 +411,7 @@ export function PipelineDiagram({
           label="Polish"
           state={polishState}
           icon={Music}
-          subLabel={subPolish}
+          subLabel={withDur(subPolish, ['polish'], polishState)}
           progress={
             polishState === 'running' && p.polish && p.polish.total > 0
               ? p.polish
@@ -325,6 +423,9 @@ export function PipelineDiagram({
         <span className={dotCls} />
         <span>{statusText}</span>
       </div>
+      {timings && Object.keys(timings).length > 0 && (
+        <TimingPanel timings={timings} total={total} nowMs={nowMs} live={live} />
+      )}
     </>
   )
 }

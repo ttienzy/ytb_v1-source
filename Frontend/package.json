@@ -17,6 +17,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/features/workflow/__tests__/*.test.ts src/features/workflow/__tests__/*.test.mjs",
     "test:campaign": "node --experimental-strip-types --test src/features/campaign/__tests__/*.test.ts",
+    "test:video": "node --experimental-strip-types --test src/features/video/*.test.ts",
+    "test:audio": "node --experimental-strip-types --test src/features/studio/audio/*.test.ts",
+    "test:discover": "node --experimental-strip-types --test src/features/discover/*.test.ts",
     "test:voices": "node --experimental-strip-types --test src/features/voices/*.test.ts",
     "package": "npm run build && electron-builder",
     "test:veo": "node --experimental-strip-types --test src/features/veo-studio/services/*.test.ts"

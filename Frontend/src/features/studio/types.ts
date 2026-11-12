@@ -23,6 +23,31 @@ export type BackendRecap = {
   scenes: BackendScene[]
 }
 
+/** Thời gian 1 phase (backend app/recap/timing.py). `duration_sec` null khi đang chạy. */
+export type PhaseTiming = {
+  started_at?: string | null
+  ended_at?: string | null
+  duration_sec?: number | null
+  ok?: boolean | null
+  attempts?: number
+  detail?: {
+    // gemini
+    chunks?: number[]
+    rate_limit_wait_sec?: number
+    cookie_refresh_sec?: number
+    network_retries?: number
+    tail_sec?: number
+    // voice (TTS theo lô)
+    tts_sec?: number
+    unpack_sec?: number
+    batches?: number
+    resumed_batches?: number
+    // merge
+    segments?: number
+    ffmpeg_sec?: number
+  } | null
+}
+
 export type JobOut = {
   job_id: string
   youtube_url: string
@@ -33,7 +58,7 @@ export type JobOut = {
   merge_status: string
   polish_status: string // idle | running | done | error (Phase R5)
   progress: {
-    recap?: { done: number; total: number; phase?: string }
+    recap?: { done: number; total: number; phase?: string; step?: string }
     cut: { done: number; total: number }
     voice: { done: number; total: number; phase?: string }
     merge: { done: number; total: number }
@@ -50,6 +75,7 @@ export type JobOut = {
   final?: string | null
   final_studio?: string | null
   credits?: string | null
+  timings?: Record<string, PhaseTiming> | null
   pippit_tasks?: any[]
   youtube_tasks?: any[]
   // legacy compat

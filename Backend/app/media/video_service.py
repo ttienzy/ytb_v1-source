@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.config import DATA_DIR
+from app.media.fonts import filter_path, find_font
 from app.recap.ffmpeg import ffprobe_duration
 
 VIDEO_DIR = DATA_DIR / "media" / "videos"
@@ -183,29 +184,67 @@ def merge_done_videos(target_seconds: int, done_ids: list[str] | None = None, ra
 
     MERGE_DIR.mkdir(parents=True, exist_ok=True)
     output = MERGE_DIR / f"merged_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.mp4"
+    parts_dir = MERGE_DIR / f".parts_{output.stem}"
     try:
-        inputs: list[str] = []
-        filters: list[str] = []
-        with_audio = all(_has_audio_stream(Path(item["file_path"])) for item, _ in usable)
-        for index, (item, _) in enumerate(usable):
-            inputs.extend(["-i", item["file_path"]])
-            filters.append(f"[{index}:v:0]setpts=PTS-STARTPTS[v{index}]")
-            if with_audio:
-                filters.append(f"[{index}:a:0]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a{index}]")
-        concat_inputs = "".join(f"[v{index}]" + (f"[a{index}]" if with_audio else "") for index in range(len(usable)))
-        concat_filter = f"{concat_inputs}concat=n={len(usable)}:v=1:a={1 if with_audio else 0}[v]" + ("[a]" if with_audio else "")
-        filter_graph = ";".join([*filters, concat_filter])
-        cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filter_graph, "-map", "[v]"]
-        if with_audio: cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
-        else: cmd += ["-an"]
-        cmd += ["-t", str(target_seconds), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart", str(output)]
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
-        if proc.returncode != 0 or not output.exists() or output.stat().st_size == 0:
-            raise RuntimeError((proc.stderr or "FFmpeg không thể gộp video.")[-1200:])
+        with_audio = all(_has_audio_stream(Path(path)) for path in dict.fromkeys(item["file_path"] for item, _ in usable))
+        if len(usable) <= MAX_CONCAT_INPUTS:
+            _concat_clips(usable, output, target_seconds, with_audio)
+        else:
+            # Quá nhiều clip cho MỘT lệnh ffmpeg (Windows giới hạn ~32.767 ký tự dòng lệnh): ghép từng nhóm thành đoạn,
+            # rồi nối các đoạn bằng concat demuxer (stream copy, gần như tức thì). Mỗi clip vẫn chỉ bị encode một lần.
+            parts_dir.mkdir(parents=True, exist_ok=True)
+            remaining = float(target_seconds)
+            parts: list[str] = []
+            for start in range(0, len(usable), MAX_CONCAT_INPUTS):
+                group = usable[start:start + MAX_CONCAT_INPUTS]
+                group_len = sum(duration for _, duration in group)
+                take = min(group_len, remaining)
+                part = parts_dir / f"part_{len(parts):03d}.mp4"
+                # Chỉ đoạn cuối mới bị cắt cho vừa thời lượng đích (cắt bằng re-encode nên chính xác, không lệch theo keyframe).
+                _concat_clips(group, part, take if take < group_len else None, with_audio, normalize_fps=True)
+                parts.append(part.name)
+                remaining -= take
+                if remaining <= 0: break
+            (parts_dir / "list.txt").write_text("".join(f"file '{name}'\n" for name in parts), encoding="utf-8")
+            proc = subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy", "-movflags", "+faststart", str(output)],
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800, cwd=str(parts_dir))
+            if proc.returncode != 0 or not output.exists() or output.stat().st_size == 0:
+                raise RuntimeError((proc.stderr or "FFmpeg không thể nối các đoạn video.")[-1200:])
         return {"file_name": output.name, "file_path": str(output), "duration_sec": ffprobe_duration(output),
                 "source_count": len(usable), "source_names": [item["name"] for item, _ in usable], "aspect": aspect}
+    except Exception:
+        output.unlink(missing_ok=True)  # không để lại file ghép dở dang
+        raise
     finally:
-        pass
+        shutil.rmtree(parts_dir, ignore_errors=True)
+
+
+# Số clip tối đa trong một lệnh ffmpeg. Mỗi clip tốn ~220 ký tự (đường dẫn + filter); 60 clip ≈ 13K, xa giới hạn 32.767 của Windows.
+MAX_CONCAT_INPUTS = 60
+
+
+def _concat_clips(clips: list[tuple[dict, float]], output: Path, seconds: float | None, with_audio: bool, normalize_fps: bool = False) -> None:
+    """Nối các clip (re-encode) bằng concat filter, tùy chọn cắt còn `seconds`."""
+    inputs: list[str] = []
+    filters: list[str] = []
+    # normalize_fps: các đoạn sẽ được nối bằng stream copy nên phải cùng khung hình/giây.
+    fps = ",fps=30" if normalize_fps else ""
+    for index, (item, _) in enumerate(clips):
+        inputs.extend(["-i", item["file_path"]])
+        filters.append(f"[{index}:v:0]setpts=PTS-STARTPTS{fps}[v{index}]")
+        if with_audio:
+            filters.append(f"[{index}:a:0]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a{index}]")
+    concat_inputs = "".join(f"[v{index}]" + (f"[a{index}]" if with_audio else "") for index in range(len(clips)))
+    concat_filter = f"{concat_inputs}concat=n={len(clips)}:v=1:a={1 if with_audio else 0}[v]" + ("[a]" if with_audio else "")
+    filter_graph = ";".join([*filters, concat_filter])
+    cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filter_graph, "-map", "[v]"]
+    if with_audio: cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+    else: cmd += ["-an"]
+    if seconds is not None: cmd += ["-t", str(seconds)]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart", str(output)]
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+    if proc.returncode != 0 or not output.exists() or output.stat().st_size == 0:
+        raise RuntimeError((proc.stderr or "FFmpeg không thể gộp video.")[-1200:])
 
 
 def _write_process_log(log_file: Path | None, message: str) -> None:
@@ -318,7 +357,10 @@ def transform(item: dict, options: dict, on_progress: Callable[[int], None] | No
         label_x = float(options.get("label_x", 0.5)); label_y = float(options.get("label_y", 0.88))
         pos = {"top": "y=fontsize", "center": "y=(h-text_h)/2", "bottom": f"y=h-{size*2}"}.get(label_pos, f"x=w*{label_x}-text_w/2:y=h*{label_y}")
         if label_pos != "custom": pos = f"x=(w-text_w)/2:{pos}"
-        label_filter = f"drawtext=text='{safe_label}':fontcolor=white:fontsize={size}:" + pos + f":box=1:boxcolor=0x{label_bg}cc:boxborderw=18"
+        # fontfile= bắt buộc: drawtext không có nó sẽ đi qua Fontconfig và làm ffmpeg Windows crash (xem app/media/fonts.py).
+        font = find_font()
+        font_arg = f"fontfile={filter_path(font)}:" if font else ""
+        label_filter = f"drawtext={font_arg}text='{safe_label}':fontcolor=white:fontsize={size}:" + pos + f":box=1:boxcolor=0x{label_bg}cc:boxborderw=18"
         vf = f"{base_vf},{label_filter}"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUTPUT_DIR / f"video_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{item['video_id']}_{aspect.replace(':','x')}.mp4"

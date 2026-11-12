@@ -1,0 +1,265 @@
+/* Workflow Audio — bố cục mới: duyệt truyện (trái) + hàng đợi/cấu hình (phải), chiều cao cố định để không phải cuộn dài. */
+.aw {
+  --aw-border: #e2e8f0;
+  --aw-text: #0f172a;
+  --aw-muted: #64748b;
+  --aw-accent: #4f46e5;
+  --aw-accent-soft: #eef2ff;
+  --aw-ok: #16a34a;
+  --aw-warn: #d97706;
+  --aw-err: #dc2626;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  color: var(--aw-text);
+  font-size: 13px;
+}
+.aw button { font-family: inherit; }
+.aw-card { background: #fff; border: 1px solid var(--aw-border); border-radius: 12px; min-width: 0; }
+.aw-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px 16px; color: var(--aw-muted); text-align: center; line-height: 1.5; }
+.aw-empty.small { padding: 12px 14px; font-size: 12.5px; justify-content: flex-start; text-align: left; }
+.aw-warn { color: var(--aw-warn); font-style: normal; font-weight: 600; }
+.aw-ok { color: var(--aw-ok); flex-shrink: 0; }
+
+.aw-icon-btn { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; background: transparent; color: var(--aw-muted); flex-shrink: 0; }
+.aw-icon-btn:hover { background: #f1f5f9; color: var(--aw-text); }
+.aw-link { display: inline-flex; align-items: center; gap: 4px; background: none; color: var(--aw-muted); font-size: 12px; padding: 2px 4px; border-radius: 6px; }
+.aw-link:hover { color: var(--aw-err); background: #fef2f2; }
+.aw-ghost { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--aw-border); background: #fff; color: #334155; font-size: 12.5px; font-weight: 600; }
+.aw-ghost:hover:not(:disabled) { border-color: #c7d2fe; background: var(--aw-accent-soft); color: var(--aw-accent); }
+.aw-ghost.danger:hover:not(:disabled) { border-color: #fecaca; background: #fef2f2; color: var(--aw-err); }
+.aw-ghost:disabled, .aw-primary:disabled { opacity: .5; cursor: not-allowed; }
+.aw-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--aw-accent); color: #fff; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.aw-pill.neutral { background: #e2e8f0; color: #475569; }
+
+/* ── Banner lỗi / thông báo ── */
+.aw-banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.aw-banner.error { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+.aw-banner span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* ── Bố cục chính ── */
+.aw-main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 12px; height: clamp(480px, calc(100vh - 330px), 640px); }
+@media (max-width: 1180px) { .aw-main { grid-template-columns: 1fr; height: auto; } .aw-browser { height: 520px; } .aw-run { height: auto; } }
+
+/* ── Duyệt truyện ── */
+.aw-browser { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.aw-browser-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--aw-border); }
+.aw-search { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid var(--aw-border); border-radius: 8px; background: #f8fafc; color: var(--aw-muted); }
+.aw-search:focus-within { border-color: var(--aw-accent); background: #fff; box-shadow: 0 0 0 3px rgba(79, 70, 229, .12); }
+.aw-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; color: var(--aw-text); }
+.aw-search button { display: grid; place-items: center; background: none; color: var(--aw-muted); padding: 2px; }
+.aw-filters { display: flex; gap: 4px; padding: 3px; background: #f1f5f9; border-radius: 9px; flex-wrap: wrap; }
+.aw-filters button { height: 26px; padding: 0 10px; border-radius: 7px; background: transparent; color: #475569; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.aw-filters button.active { background: #fff; color: var(--aw-accent); box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+.aw-browser-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(230px, 40%) 1fr; }
+.aw-story-pane { min-height: 0; min-width: 0; border-right: 1px solid var(--aw-border); display: flex; flex-direction: column; }
+.aw-story-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.aw-story { display: flex; align-items: center; gap: 10px; width: 100%; height: 100%; padding: 0 12px; background: transparent; text-align: left; border-left: 3px solid transparent; }
+.aw-story:hover { background: #f8fafc; }
+.aw-story.active { background: var(--aw-accent-soft); border-left-color: var(--aw-accent); }
+.aw-story-thumb { width: 36px; height: 36px; border-radius: 8px; overflow: hidden; flex-shrink: 0; display: grid; place-items: center; background: linear-gradient(135deg, #818cf8, #6366f1); color: #fff; font-size: 12px; font-weight: 700; }
+.aw-story-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.aw-story-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.aw-story-info strong { font-size: 13px; font-weight: 600; color: var(--aw-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw-story-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--aw-muted); }
+.aw-story-meta > span:first-child { white-space: nowrap; }
+.aw-bar { flex: 1; height: 4px; border-radius: 4px; background: #e2e8f0; overflow: hidden; min-width: 20px; }
+.aw-bar i { display: block; height: 100%; background: var(--aw-ok); border-radius: 4px; }
+.aw-browser-foot { padding: 6px 12px; border-top: 1px solid var(--aw-border); font-size: 11.5px; color: var(--aw-muted); }
+
+/* ── Chọn chương ── */
+.aw-chapters { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.aw-chapters.aw-empty { flex: 1; }
+.aw-chapters-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px 8px; }
+.aw-thumb-btn { position: relative; width: 52px; height: 52px; border-radius: 10px; overflow: hidden; flex-shrink: 0; display: grid; place-items: center; background: #f1f5f9; color: var(--aw-muted); border: 1px solid var(--aw-border); }
+.aw-thumb-btn img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.aw-thumb-btn span { position: absolute; left: 0; right: 0; bottom: 0; padding: 1px 0; font-size: 9.5px; font-weight: 700; text-align: center; background: rgba(15, 23, 42, .72); color: #fff; opacity: 0; transition: opacity .12s; }
+.aw-thumb-btn:hover span, .aw-thumb-btn.missing span { opacity: 1; }
+.aw-thumb-btn.missing { border: 1px dashed var(--aw-warn); background: #fffbeb; color: var(--aw-warn); }
+.aw-thumb-btn.missing span { background: transparent; color: var(--aw-warn); }
+.aw-chapters-title { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.aw-chapters-title strong { font-size: 14.5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.aw-chapters-title small { color: var(--aw-muted); font-size: 12px; }
+.aw-chapters-actions { display: flex; align-items: center; gap: 6px; padding: 4px 14px 10px; flex-wrap: wrap; }
+.aw-chapters-actions button { height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--aw-border); background: #fff; color: #334155; font-size: 12px; font-weight: 600; }
+.aw-chapters-actions button:hover:not(:disabled) { border-color: #c7d2fe; color: var(--aw-accent); background: var(--aw-accent-soft); }
+.aw-chapters-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.aw-chapters-count { margin-left: auto; font-size: 11.5px; color: var(--aw-muted); }
+.aw-chapter-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 14px 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); grid-auto-rows: 32px; gap: 6px; align-content: start; scrollbar-width: thin; }
+.aw-chip { display: inline-flex; align-items: center; justify-content: center; gap: 3px; border-radius: 8px; border: 1px solid var(--aw-border); background: #fff; color: #334155; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; user-select: none; }
+.aw-chip:hover { border-color: #a5b4fc; background: var(--aw-accent-soft); }
+.aw-chip.done { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
+.aw-chip.selected { background: var(--aw-accent); border-color: var(--aw-accent); color: #fff; }
+
+/* ── Cột phải: hàng đợi + cấu hình ── */
+.aw-run { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.aw-run-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px 8px; }
+.aw-run-head strong { font-size: 14px; }
+.aw-run-total { flex: 1; font-size: 12px; color: var(--aw-muted); }
+.aw-queue { flex: 1 1 auto; min-height: 56px; overflow-y: auto; padding: 0 8px; scrollbar-width: thin; }
+.aw-queue-row { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 6px; border-radius: 8px; }
+.aw-queue-row:hover { background: #f8fafc; }
+.aw-queue-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 5px 0; background: none; text-align: left; }
+.aw-queue-main strong { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--aw-text); }
+.aw-queue-main small { font-size: 11.5px; color: var(--aw-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Cài đặt co lại + cuộn khi khung thấp; chân khung (nút Bắt đầu) luôn ghim ở đáy */
+.aw-settings { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 96px; overflow-y: auto; scrollbar-width: thin; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--aw-border); }
+.aw-field { display: flex; flex-direction: column; gap: 5px; }
+.aw-field > span { font-size: 11.5px; font-weight: 600; color: var(--aw-muted); }
+.aw-field select { height: 34px; padding: 0 8px; border: 1px solid var(--aw-border); border-radius: 8px; background: #fff; color: var(--aw-text); font: inherit; width: 100%; }
+.aw-field select:focus { outline: 0; border-color: var(--aw-accent); box-shadow: 0 0 0 3px rgba(79, 70, 229, .12); }
+.aw-segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; background: #f1f5f9; border-radius: 9px; }
+.aw-segmented button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; border-radius: 7px; background: transparent; color: #475569; font-size: 12.5px; font-weight: 600; }
+.aw-segmented button.active { background: #fff; color: var(--aw-accent); box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+.aw-segmented button:disabled { opacity: .6; cursor: not-allowed; }
+.aw-ratio { display: inline-block; border: 1.5px solid currentColor; border-radius: 2px; }
+.aw-ratio.rv { width: 8px; height: 13px; }
+.aw-ratio.rh { width: 13px; height: 8px; }
+.aw-switch { position: relative; display: flex; align-items: center; gap: 8px; cursor: pointer; color: #334155; font-size: 12.5px; font-weight: 500; }
+.aw-switch.disabled { opacity: .6; cursor: not-allowed; }
+.aw-switch input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.aw-switch-track { position: relative; width: 30px; height: 17px; border-radius: 999px; background: #cbd5e1; flex-shrink: 0; transition: background .15s; }
+.aw-switch-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.aw-switch input:checked + .aw-switch-track { background: var(--aw-accent); }
+.aw-switch input:checked + .aw-switch-track::after { transform: translateX(13px); }
+.aw-switch input:focus-visible + .aw-switch-track { box-shadow: 0 0 0 3px rgba(79, 70, 229, .25); }
+.aw-run-foot { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 12px; border-top: 1px solid var(--aw-border); }
+.aw-hint { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.4; }
+.aw-hint.warn { color: #b45309; }
+.aw-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; border-radius: 10px; background: var(--aw-accent); color: #fff; font-size: 14px; font-weight: 700; }
+.aw-primary:hover:not(:disabled) { background: #4338ca; }
+.aw-outdir { font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Thanh tiến trình (một hàng) ── */
+.aw-job { padding: 10px 14px 12px; border-left: 4px solid var(--aw-accent); }
+.aw-job.ok { border-left-color: var(--aw-ok); }
+.aw-job.warn { border-left-color: var(--aw-warn); }
+.aw-job.error { border-left-color: var(--aw-err); }
+.aw-job-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.aw-job-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.aw-job-title strong { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw-job.run .aw-job-title svg { color: var(--aw-accent); }
+.aw-job.ok .aw-job-title svg { color: var(--aw-ok); }
+.aw-job.warn .aw-job-title svg { color: var(--aw-warn); }
+.aw-job.error .aw-job-title svg { color: var(--aw-err); }
+.aw-job-count { font-size: 12px; color: var(--aw-muted); white-space: nowrap; }
+.aw-steps { list-style: none; margin: 8px 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.aw-steps li { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; background: #f1f5f9; color: #94a3b8; font-size: 11.5px; font-weight: 600; }
+.aw-steps li i { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+.aw-steps li.done { background: #f0fdf4; color: #15803d; }
+.aw-steps li.running { background: var(--aw-accent-soft); color: var(--aw-accent); }
+.aw-steps li.error { background: #fef2f2; color: var(--aw-err); }
+.aw-steps li.skipped { background: #f8fafc; color: #94a3b8; text-decoration: line-through; }
+.aw-progress { height: 5px; border-radius: 5px; background: #e2e8f0; overflow: hidden; }
+.aw-progress i { display: block; height: 100%; background: var(--aw-accent); border-radius: 5px; transition: width .4s ease; }
+.aw-job.ok .aw-progress i { background: var(--aw-ok); }
+.aw-job.error .aw-progress i { background: var(--aw-err); }
+.aw-job-msg { margin: 8px 0 0; font-size: 12.5px; color: #475569; overflow-wrap: anywhere; }
+.aw-job-msg.error { color: #b91c1c; }
+.aw-job-failed { margin-top: 8px; font-size: 12.5px; color: #92400e; }
+.aw-job-failed summary { cursor: pointer; font-weight: 600; }
+.aw-job-failed ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; max-height: 130px; overflow: auto; }
+
+/* ── Kho video hoàn tất ── */
+.aw-outputs { padding: 8px 12px; }
+.aw-outputs-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.aw-outputs-toggle { display: inline-flex; align-items: center; gap: 8px; background: none; color: var(--aw-text); padding: 4px 0; font-size: 13.5px; }
+.aw-outputs-actions { display: flex; gap: 6px; }
+.aw-outputs-grid { margin-top: 8px; max-height: 188px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; scrollbar-width: thin; }
+.aw-output-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--aw-border); border-radius: 10px; background: #fff; text-align: left; color: #94a3b8; }
+.aw-output-card:hover { border-color: #c7d2fe; background: var(--aw-accent-soft); }
+.aw-output-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--aw-accent-soft); color: var(--aw-accent); flex-shrink: 0; }
+.aw-output-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.aw-output-copy strong { font-size: 12.5px; color: var(--aw-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw-output-copy small { font-size: 11.5px; color: var(--aw-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Test nhanh (gập mặc định) ── */
+.aw-test { padding: 0 12px; }
+.aw-test summary { display: flex; align-items: center; gap: 8px; padding: 10px 0; cursor: pointer; font-weight: 600; font-size: 13px; list-style: none; }
+.aw-test summary::-webkit-details-marker { display: none; }
+.aw-test summary small { color: var(--aw-muted); font-weight: 400; }
+.aw-test textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--aw-border); border-radius: 8px; font: inherit; }
+.aw-test-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0 12px; }
+.aw-test-actions small { color: var(--aw-muted); }
+
+/* ── Khu đọc dưới lưới chương: tab "Tóm tắt cốt truyện" / "Đọc chương" ── */
+.aw-chapter-grid { flex: 0 1 auto; max-height: 114px; padding-bottom: 10px; }
+.aw-reader { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--aw-border); }
+.aw-tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--aw-border); background: #fafbfc; }
+.aw-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; background: transparent; color: var(--aw-muted); font-size: 12.5px; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.aw-tabs button:hover { color: var(--aw-text); }
+.aw-tabs button.active { color: var(--aw-accent); border-bottom-color: var(--aw-accent); }
+.aw-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--aw-ok); display: inline-block; }
+.aw-has-summary { color: #a5b4fc; flex-shrink: 0; }
+.aw-reader-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.aw-reader-body > .aw-empty { height: 100%; min-height: 120px; }
+
+.aw-reader-content { display: flex; flex-direction: column; min-height: 100%; }
+.aw-reader-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #fff; border-bottom: 1px solid #f1f5f9; }
+.aw-reader-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.aw-reader-title strong { max-width: 100%; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw-reader-title small { color: var(--aw-muted); font-size: 11px; }
+.aw-icon-btn:disabled { opacity: .35; cursor: not-allowed; }
+.aw-reader-text { padding: 12px 18px 22px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; color: #1e293b; }
+
+.aw-summary { padding: 12px 18px 16px; display: flex; flex-direction: column; gap: 10px; }
+.aw-summary-text h4 { margin: 14px 0 4px; font-size: 11.5px; letter-spacing: .06em; color: var(--aw-accent); }
+.aw-summary-text h4:first-child { margin-top: 0; }
+.aw-summary-text p { margin: 0 0 6px; font-size: 13.5px; line-height: 1.7; color: #1e293b; }
+.aw-summary-text p.bullet { position: relative; padding-left: 14px; }
+.aw-summary-text p.bullet::before { content: ''; position: absolute; left: 3px; top: .72em; width: 5px; height: 5px; border-radius: 50%; background: #a5b4fc; }
+.aw-summary-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding-top: 8px; border-top: 1px solid #f1f5f9; font-size: 11.5px; color: var(--aw-muted); }
+.aw-summary-foot .aw-warn { display: inline-flex; align-items: center; gap: 4px; }
+.aw-summary-foot .aw-link { margin-left: auto; }
+.aw-summary-start, .aw-summary-wait { justify-content: center; text-align: left; align-items: flex-start; gap: 12px; }
+.aw-summary-start strong, .aw-summary-wait strong { display: block; color: var(--aw-text); font-size: 13.5px; }
+.aw-summary-start p, .aw-summary-wait p { margin: 4px 0 10px; max-width: 460px; }
+.aw-summary-start > svg { color: var(--aw-accent); margin-top: 2px; flex-shrink: 0; }
+
+/* ── Nền video: dòng tóm tắt ở cột phải + ngăn kéo "Thư viện nền" ── */
+.aw-bg-summary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px; border: 1px solid var(--aw-border); border-radius: 8px; background: #fff; color: #334155; font-size: 12.5px; text-align: left; }
+.aw-bg-summary > span { flex: 1; min-width: 0; line-height: 1.35; }
+.aw-bg-summary em { font-style: normal; font-weight: 600; font-size: 11.5px; color: var(--aw-accent); white-space: nowrap; }
+.aw-bg-summary:hover { border-color: #c7d2fe; background: var(--aw-accent-soft); }
+.aw-bg-summary.empty { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.aw-bg-summary.empty em { color: #b91c1c; }
+.aw-fit-mini { margin-top: 6px; }
+.aw-fit-mini button { height: 24px; font-size: 12px; }
+
+/* Khối "Video nền" (trang Video nhúng): gập như "Video đã hoàn tất" */
+.aw-video-block { padding-bottom: 0; }
+.aw-video-hint { color: var(--aw-muted); font-size: 12px; }
+.aw-video-body { margin: 8px -12px 0; padding: 12px 12px 14px; border-top: 1px solid var(--aw-border); background: #f8fafc; border-radius: 0 0 12px 12px; }
+.aw-video-body[hidden] { display: none; }
+
+/* ── Khối "Âm thanh & hiệu ứng" (gập) + xem thử ── */
+.aw-style { padding-bottom: 0; }
+.aw-style-body { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 0; margin: 8px -12px 0; border-top: 1px solid var(--aw-border); }
+@media (max-width: 1000px) { .aw-style-body { grid-template-columns: 1fr; } .aw-preview { border-left: 0 !important; border-top: 1px solid var(--aw-border); } }
+.aw-style-main { min-width: 0; display: flex; flex-direction: column; }
+.aw-style-pane { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 14px; min-height: 280px; }
+.aw-note { margin: 0; padding: 8px 10px; border-radius: 8px; background: #f8fafc; color: var(--aw-muted); font-size: 12px; line-height: 1.5; }
+.aw-slider { display: grid; grid-template-columns: 130px 1fr 52px; align-items: center; gap: 10px; font-size: 12.5px; }
+.aw-slider > span { color: #334155; font-weight: 500; }
+.aw-slider input { width: 100%; accent-color: var(--aw-accent); }
+.aw-slider em { font-style: normal; text-align: right; font-variant-numeric: tabular-nums; color: #475569; font-weight: 600; }
+.aw-slider.disabled { opacity: .5; }
+.aw-field.inline { flex-direction: row; align-items: center; justify-content: space-between; }
+.aw-segmented.corners { display: inline-grid; grid-template-columns: repeat(4, 34px); }
+.aw-logo-row { display: flex; align-items: center; gap: 10px; }
+.aw-logo-row img { width: 40px; height: 40px; object-fit: contain; border-radius: 8px; border: 1px solid var(--aw-border); background: repeating-conic-gradient(#e2e8f0 0% 25%, #fff 0% 50%) 50% / 12px 12px; }
+.aw-logo-empty { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; border: 1px dashed var(--aw-border); color: #94a3b8; font-size: 10px; }
+.aw-preview { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-left: 1px solid var(--aw-border); background: #f8fafc; border-radius: 0 0 12px 0; }
+.aw-preview-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.aw-preview-head small { color: var(--aw-muted); }
+.aw-preview-stage { position: relative; display: flex; align-items: center; justify-content: center; align-self: center; overflow: hidden; border-radius: 10px; background: #0f172a; box-shadow: 0 2px 10px rgba(15, 23, 42, .2); }
+.aw-preview-stage.portrait { aspect-ratio: 9 / 16; width: 150px; }
+.aw-preview-stage.landscape { aspect-ratio: 16 / 9; width: 100%; }
+.aw-preview-stage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.aw-preview-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; color: #94a3b8; font-size: 11.5px; line-height: 1.45; text-align: center; }
+.aw-preview-busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(15, 23, 42, .72); color: #fff; font-size: 12px; }
+.aw-primary.small { height: 34px; font-size: 13px; padding: 0 14px; }
+.aw-style .aw-segmented { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.aw-style .aw-segmented.corners { grid-auto-flow: row; grid-template-columns: repeat(4, 34px); grid-auto-columns: auto; }
+

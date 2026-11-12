@@ -19,7 +19,17 @@ def _client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=settings.voice_service_url, timeout=timeout)
 
 
+class VoiceBusyError(RuntimeError):
+    """voice-service trả 429: engine đang phục vụ việc khác (một lần suy luận tại một thời điểm). Có thể thử lại sau."""
+
+
 def _connection_error(error: httpx.HTTPError) -> RuntimeError:
+    if isinstance(error, httpx.TimeoutException):
+        # Trước đây timeout bị báo nhầm thành "không kết nối được" làm người dùng đi kiểm tra sai chỗ.
+        return RuntimeError(
+            f"voice-service xử lý quá lâu nên bị ngắt (timeout) tại {settings.voice_service_url}. "
+            f"Văn bản có thể quá dài hoặc máy đang bận; thử lại hoặc chia nhỏ nội dung. Chi tiết: {error!r}"
+        )
     return RuntimeError(
         f"Không kết nối được voice-service tại {settings.voice_service_url}. "
         f"Hãy khởi động voice-service trên cổng 8001. Chi tiết: {error}"
@@ -103,6 +113,8 @@ async def tts_batch(items: list[dict], voice_id: str) -> bytes:
     try:
         async with _client(TIMEOUT_TTS_BATCH) as client:
             r = await client.post("/tts/batch", json=payload)
+            if r.status_code == 429:
+                raise VoiceBusyError(f"voice-service đang bận (429): {r.text}")
             if r.status_code >= 400:
                 raise RuntimeError(f"voice-service tts/batch failed ({r.status_code}): {r.text}")
             return r.content
