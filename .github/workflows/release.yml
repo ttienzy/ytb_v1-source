@@ -1,40 +1,44 @@
 name: Build and Release Desktop App
 
+# Tag `v*` -> build + publish GitHub Release. Chạy tay (workflow_dispatch) -> build + kiểm tra đầy đủ nhưng KHÔNG publish.
 on:
   push:
     tags:
-      - 'v*' # Tự động kích hoạt khi push tag dạng v1.0.0, v1.0.1...
-  workflow_dispatch: # Cho phép kích hoạt thủ công từ GitHub Actions UI
+      - 'v*'
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: pwsh
 
+# Bố cục: validate -> (backend-exe | voice-exe | extension | frontend-checks) chạy SONG SONG -> package (+ publish nếu là tag).
+# Job nào lỗi thì package (bước 9 phút) không chạy, nên lỗi được báo sớm.
 jobs:
-  release:
-    name: Build Windows Installer & Create GitHub Release
-    runs-on: windows-latest
-    timeout-minutes: 90
-    permissions:
-      contents: write
-
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Validate Release Versions
+      - name: Validate release versions
         id: version
         run: |
           $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
           $version = (Get-Content Frontend/package.json -Raw | ConvertFrom-Json -AsHashtable).version
-          @('Frontend/package-lock.json', 'Extensions/FlowsVeo-Clean/package.json', 'Extensions/FlowsVeo-Clean/package-lock.json', 'Extensions/FlowsVeo-Clean/public/manifest.json') | ForEach-Object {
+          @('Frontend/package-lock.json', 'Extensions/FlowsVeo-Clean/package.json', 'Extensions/FlowsVeo-Clean/package-lock.json', 'Extensions/FlowsVeo-Clean/public/manifest.json', 'Extensions/FlowsVeo-Clean/manifest.json') | ForEach-Object {
             if ((Get-Content $_ -Raw | ConvertFrom-Json -AsHashtable).version -ne $version) { throw "Version mismatch: $_" }
           }
           $releaseTag = "v$version"
@@ -43,48 +47,75 @@ jobs:
           "tag=$releaseTag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
 
+  backend-exe:
+    name: Backend executable
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Cache packaged backend executable
+        id: cache-backend
+        uses: actions/cache@v6
+        with:
+          path: Backend/dist/backend_server.exe
+          key: backend-bin-${{ runner.os }}-${{ hashFiles('Backend/requirements.txt', 'Backend/backend.spec', 'Backend/app/**', 'Backend/run_server.py', 'Backend/prompts/**', 'Backend/resources/**') }}
+
       - name: Set up Python
-        uses: actions/setup-python@v5
+        if: steps.cache-backend.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: |
-            Backend/requirements.txt
-            services/voice-service/uv.lock
+          cache-dependency-path: Backend/requirements.txt
 
-      - name: Install Backend Dependencies
+      - name: Build standalone backend executable
+        if: steps.cache-backend.outputs.cache-hit != 'true'
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install --upgrade pip
           pip install -r Backend/requirements.txt
-          pip install pytest pyyaml python-dotenv websockets
-
-      - name: Cache Packaged Backend Executable
-        id: cache-backend
-        uses: actions/cache@v4
-        with:
-          path: Backend/dist/backend_server.exe
-          key: backend-bin-${{ runner.os }}-${{ hashFiles('Backend/requirements.txt', 'Backend/backend.spec', 'Backend/app/**', 'Backend/run_server.py', 'Backend/prompts/**', 'Backend/resources/**') }}
-
-      - name: Build Standalone Backend Executable
-        if: steps.cache-backend.outputs.cache-hit != 'true'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
           cd Backend
           python -m unittest tests.test_watermark_runtime -v
           pyinstaller --noconfirm backend.spec
           if (-not (Test-Path dist\backend_server.exe)) { throw 'backend_server.exe was not created' }
 
-      - name: Cache Packaged Voice Service Executable
+      - uses: actions/upload-artifact@v7
+        with:
+          name: backend-exe
+          path: Backend/dist/backend_server.exe
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  voice-exe:
+    name: Voice service executable
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Cache packaged voice service executable
         id: cache-voice
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: services/voice-service/dist/voice_server.exe
           key: voice-bin-${{ runner.os }}-${{ hashFiles('services/voice-service/pyproject.toml', 'services/voice-service/uv.lock', 'services/voice-service/voice.spec', 'services/voice-service/app/**') }}
 
-      - name: Install Voice Service Dependencies & Build Executable
+      - name: Set up Python
+        if: steps.cache-voice.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Build voice service executable
         if: steps.cache-voice.outputs.cache-hit != 'true'
         run: |
           $ErrorActionPreference = 'Stop'
@@ -96,70 +127,43 @@ jobs:
           .\.venv\Scripts\python.exe -m PyInstaller --noconfirm voice.spec
           if (-not (Test-Path dist\voice_server.exe)) { throw 'voice_server.exe was not created' }
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/upload-artifact@v7
         with:
-          node-version: 22
-          cache: 'npm'
-          cache-dependency-path: |
-            Frontend/package-lock.json
-            Frontend/watermark-runtime/package-lock.json
-            Extensions/FlowsVeo-Clean/package-lock.json
+          name: voice-exe
+          path: services/voice-service/dist/voice_server.exe
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
 
-      - name: Install Node Dependencies
+      # ffmpeg dùng cho smoke test lấy từ gói ffmpeg-static (cùng bản sẽ đóng vào app), không cần cài npm cả Frontend.
+      - name: Get ffmpeg-static (same build that ships in the app)
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          cd Frontend
-          npm ci
-          npm run typecheck
-          npm test
-          npm run test:voices
-          npm run test:veo
+          $dir = Join-Path $env:RUNNER_TEMP 'ffmpeg-static'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $version = ((Get-Content Frontend/package.json -Raw | ConvertFrom-Json).devDependencies.'ffmpeg-static')
+          Set-Location $dir
+          npm init -y | Out-Null
+          npm install "ffmpeg-static@$version" --no-audit --no-fund --loglevel=error
+          $ffmpeg = (Resolve-Path (Join-Path $dir 'node_modules\ffmpeg-static\ffmpeg.exe')).Path
+          & $ffmpeg -version | Out-Null
+          "FFMPEG_SMOKE_PATH=$ffmpeg" >> $env:GITHUB_ENV
 
-      - name: Verify and Package Flow Extension
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          cd Extensions/FlowsVeo-Clean
-          npm ci
-          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.local/browsers'
-          npx playwright install chromium
-          npm run verify
-
-      - name: Install and Smoke Test Watermark Runtime
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $env:PLAYWRIGHT_BROWSERS_PATH = '0'
-          cd Frontend\watermark-runtime
-          npm ci
-          npx playwright install --only-shell chromium
-          node .\smoke-test.mjs
-
-      - name: Verify Bundled FFmpeg
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $ffmpeg = (Resolve-Path Frontend\node_modules\ffmpeg-static\ffmpeg.exe).Path
-          $license = Resolve-Path Frontend\node_modules\ffmpeg-static\LICENSE
-          & $ffmpeg -version
-          Write-Host "FFmpeg license: $license"
-
-      - name: Cache Voice Model
-        uses: actions/cache@v4
+      - name: Cache voice model
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/voice-hf-cache
           key: voice-model-${{ runner.os }}-${{ hashFiles('services/voice-service/uv.lock') }}
 
-      - name: Smoke Test Packaged Voice Service
+      - name: Smoke test packaged voice service
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $voiceExe = (Resolve-Path services\voice-service\dist\voice_server.exe).Path
           $env:APP_DATA_DIR = Join-Path $env:RUNNER_TEMP 'voice-smoke-data'
           $env:HF_HOME = Join-Path $env:RUNNER_TEMP 'voice-hf-cache'
-          $env:FFMPEG_PATH = (Resolve-Path Frontend\node_modules\ffmpeg-static\ffmpeg.exe).Path
+          $env:FFMPEG_PATH = $env:FFMPEG_SMOKE_PATH
           $env:HOST = '127.0.0.1'
           $env:PORT = '8001'
           $stdout = Join-Path $env:RUNNER_TEMP 'voice-smoke.stdout.log'
@@ -185,7 +189,7 @@ jobs:
             } while ((Get-Date) -lt $deadline)
 
             if (-not $health.model_loaded) { throw 'Voice model did not become ready within 10 minutes' }
-            if (-not $health.ffmpeg_available) { throw 'Bundled FFmpeg was not detected by Voice Service' }
+            if (-not $health.ffmpeg_available) { throw 'FFmpeg was not detected by Voice Service' }
             $previewPayload = @{ text = 'Xin chào' } | ConvertTo-Json
             $previewResp = Invoke-WebRequest -Uri 'http://127.0.0.1:8001/preview' -Method Post -ContentType 'application/json' -Body $previewPayload -TimeoutSec 60
             if ($previewResp.StatusCode -ne 200) { throw "Voice preview endpoint returned HTTP $($previewResp.StatusCode)" }
@@ -199,10 +203,122 @@ jobs:
             if (Test-Path $stderr) { Get-Content $stderr }
           }
 
-      - name: Build and Package Electron App
+  extension:
+    name: Flow extension (verify + package)
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: Extensions/FlowsVeo-Clean/package-lock.json
+
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v6
+        with:
+          path: Extensions/FlowsVeo-Clean/.local/browsers
+          key: ext-chromium-${{ runner.os }}-${{ hashFiles('Extensions/FlowsVeo-Clean/package-lock.json') }}
+
+      # verify = build + test (thường và minify) + build release + smoke Chromium headless + zip.
+      - name: Install, verify and package
+        working-directory: Extensions/FlowsVeo-Clean
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
+          npm ci
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.local/browsers'
+          npx playwright install chromium --no-shell
+          npm run verify
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: extension
+          path: |
+            Extensions/FlowsVeo-Clean/release/*.zip
+            Extensions/FlowsVeo-Clean/release/*.sha256
+          retention-days: 1
+          if-no-files-found: error
+
+  frontend-checks:
+    name: Frontend typecheck + tests
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install, typecheck, test
+        working-directory: Frontend
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm ci
+          npm run typecheck
+          npm run test:all
+
+  package:
+    name: Package installer${{ startsWith(github.ref, 'refs/tags/v') && ' and publish' || ' (dry run, no publish)' }}
+    needs: [validate, backend-exe, voice-exe, extension, frontend-checks]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: |
+            Frontend/package-lock.json
+            Frontend/watermark-runtime/package-lock.json
+
+      - name: Download backend executable
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-exe
+          path: Backend/dist
+
+      - name: Download voice service executable
+        uses: actions/download-artifact@v8
+        with:
+          name: voice-exe
+          path: services/voice-service/dist
+
+      - name: Install frontend dependencies
+        working-directory: Frontend
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm ci
+
+      - name: Install watermark runtime
+        working-directory: Frontend/watermark-runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:PLAYWRIGHT_BROWSERS_PATH = '0'
+          npm ci
+          npx playwright install --only-shell chromium
+
+      - name: Verify release resources
+        run: |
+          $ErrorActionPreference = 'Stop'
           @(
             'Backend\dist\backend_server.exe',
             'services\voice-service\dist\voice_server.exe',
@@ -213,59 +329,65 @@ jobs:
           ) | ForEach-Object {
             if (-not (Test-Path $_)) { throw "Missing release resource: $_" }
           }
-          cd Frontend
+
+      - name: Cache Electron and electron-builder downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('Frontend/package-lock.json') }}
+
+      - name: Build app (electron-vite)
+        working-directory: Frontend
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           npm run build
+
+      - name: Package installer (electron-builder)
+        working-directory: Frontend
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           npx electron-builder --win nsis --x64 --publish never
+
+      - name: Verify update manifest and installer
+        working-directory: Frontend
+        run: |
+          $ErrorActionPreference = 'Stop'
           $updateManifest = Get-Content 'release\latest.yml' -Raw
           $artifactMatch = [regex]::Match($updateManifest, '(?m)^\s*-\s+url:\s+(.+?)\s*$')
-          if (-not $artifactMatch.Success) {
-            throw 'Could not read the installer URL from release\latest.yml'
-          }
+          if (-not $artifactMatch.Success) { throw 'Could not read the installer URL from release\latest.yml' }
           $expectedInstaller = $artifactMatch.Groups[1].Value.Trim().Trim('"', "'")
           if (-not (Test-Path (Join-Path 'release' $expectedInstaller))) {
             throw "Update manifest points to missing installer: $expectedInstaller"
           }
-          $blockmapFile = Join-Path 'release' "$expectedInstaller.blockmap"
-          if (Test-Path $blockmapFile) {
-            Write-Host "Found blockmap artifact: $expectedInstaller.blockmap"
-          } else {
-            Write-Host "Full installer distribution mode active (differential blockmap skipped for maximum download speed): $expectedInstaller"
-          }
           Write-Host "Verified update artifacts: $expectedInstaller"
-          $unpackedApp = (Get-ChildItem 'release\win-unpacked\*.exe' | Where-Object { $_.Name -notlike '*Uninstall*' } | Select-Object -First 1).FullName
-          if (-not $unpackedApp -or -not (Test-Path $unpackedApp)) {
-            throw 'Packaged Electron executable was not found in release\win-unpacked'
-          }
-          Write-Host "Found unpacked app executable: $unpackedApp"
-          $runtimeDir = (Resolve-Path 'release\win-unpacked\resources\watermark-runtime').Path
-          $env:ELECTRON_RUN_AS_NODE = '1'
-          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $runtimeDir 'node_modules\playwright-core\.local-browsers'
-          $smokeScript = Join-Path $runtimeDir 'smoke-test.mjs'
-          $smokeStdout = Join-Path $env:RUNNER_TEMP 'watermark-packaged-smoke.stdout.log'
-          $smokeStderr = Join-Path $env:RUNNER_TEMP 'watermark-packaged-smoke.stderr.log'
-          $smokeProcess = Start-Process -FilePath $unpackedApp -ArgumentList ('"' + $smokeScript + '"') `
-            -PassThru -Wait -WindowStyle Hidden `
-            -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
-          if (Test-Path $smokeStdout) { Get-Content $smokeStdout }
-          if (Test-Path $smokeStderr) { Get-Content $smokeStderr }
-          if ($smokeProcess.ExitCode -ne 0) {
-            throw "Packaged watermark runtime smoke test failed: $($smokeProcess.ExitCode)"
-          }
-      - name: Smoke Test Packaged Backend Watermark Flow
+
+      # Smoke end-to-end trên bản đã đóng gói: backend exe + runtime watermark kèm app xử lý một ảnh thật.
+      - name: Smoke test packaged backend watermark flow
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          .\.github\scripts\smoke-packaged-watermark.ps1 `
-            -AppRoot 'Frontend\release\win-unpacked'
+          .\.github\scripts\smoke-packaged-watermark.ps1 -AppRoot 'Frontend\release\win-unpacked'
+
+      - name: Download extension package
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/download-artifact@v8
+        with:
+          name: extension
+          path: Extensions/FlowsVeo-Clean/release
 
       - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           repository: ttienzy/ytb_v1
           token: ${{ secrets.RELEASES_TOKEN }}
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: CreatorFlow AI ${{ steps.version.outputs.tag }}
-          body_path: docs/releases/${{ steps.version.outputs.version }}.md
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: CreatorFlow AI ${{ needs.validate.outputs.tag }}
+          body_path: docs/releases/${{ needs.validate.outputs.version }}.md
           files: |
             Frontend/release/*.exe
             Frontend/release/latest.yml
