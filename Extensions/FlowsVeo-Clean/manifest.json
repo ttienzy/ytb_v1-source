@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FlowsVeo Clean",
   "description": "Cookie & Auth Token Service for Google AI Sandbox (labs.google)",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "permissions": [
     "alarms",
     "browsingData",
