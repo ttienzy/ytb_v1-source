@@ -266,7 +266,7 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth, monitorSumma
         <div className="studio-creation-grid">
           <div
             className="studio-create-card"
-            onClick={() => setActivePage('AI Workflow')}
+            onClick={() => setActivePage('Canvas AI')}
             title="Mở Node Graph Workflow tạo video từ ảnh sản phẩm"
           >
             <div className="studio-create-left">
@@ -372,9 +372,9 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth, monitorSumma
         {/* KPI 3: Video đã xuất xưởng */}
         <div
           className="studio-kpi-card"
-          onClick={() => setActivePage('AI Workflow')}
+          onClick={() => setActivePage('Canvas AI')}
           style={{ cursor: 'pointer' }}
-          title="Xem thư viện xuất xưởng trong AI Workflow"
+          title="Xem thư viện xuất xưởng trong Canvas AI"
         >
           <div className="studio-kpi-header">
             <span>VIDEO HOÀN CHỈNH</span>
@@ -867,7 +867,7 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth, monitorSumma
             <button
               type="button"
               className="studio-section-action"
-              onClick={() => setActivePage('AI Workflow')}
+              onClick={() => setActivePage('Canvas AI')}
             >
               <span>Vào Workflow</span>
               <ArrowUpRight size={13} />
@@ -894,11 +894,11 @@ export function DashboardPage({ setActivePage, onOpenChannelHealth, monitorSumma
                 <button
                   type="button"
                   className="channel-schedule-btn"
-                  onClick={() => setActivePage('AI Workflow')}
+                  onClick={() => setActivePage('Canvas AI')}
                   style={{ margin: '0 auto' }}
                 >
                   <Plus size={13} />
-                  <span>Tạo video đầu tiên với AI Workflow</span>
+                  <span>Tạo video đầu tiên với Canvas AI</span>
                 </button>
               </div>
             ) : (

@@ -37,7 +37,7 @@ export function WorkflowTabs({
     <nav
       className={`wf-tabs-container ${className}`}
       role="tablist"
-      aria-label="Chế độ làm việc AI Workflow"
+      aria-label="Chế độ làm việc Canvas AI"
     >
       {tabs.map((tab) => {
         const isActive = activeTab === tab.id

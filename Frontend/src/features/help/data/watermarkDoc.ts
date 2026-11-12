@@ -49,7 +49,7 @@ export const watermarkDoc: SidebarDoc = {
     {
       step: 3,
       title: 'Tải về hoặc Chuyển tiếp xưởng video',
-      desc: 'Lưu file về máy hoặc đưa trực tiếp vào "AI Workflow" để dùng làm cảnh bối cảnh nhân vật.',
+      desc: 'Lưu file về máy hoặc đưa trực tiếp vào "Canvas AI" để dùng làm cảnh bối cảnh nhân vật.',
       badge: 'Hoàn tất',
     },
   ],
@@ -76,5 +76,5 @@ export const watermarkDoc: SidebarDoc = {
         'Hãy mở link trên trình duyệt máy tính xem video có xem được bình thường không. Một số video ngắn Douyin cần sao chép toàn bộ đoạn text chia sẻ dán vào ô nhập.',
     },
   ],
-  relatedPages: ['Khám Phá Kênh', 'AI Workflow', 'Workflow'],
+  relatedPages: ['Khám Phá Kênh', 'Canvas AI', 'Recap & Audio'],
 }

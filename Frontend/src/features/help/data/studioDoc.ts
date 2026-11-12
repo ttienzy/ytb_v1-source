@@ -1,7 +1,7 @@
 import type { SidebarDoc } from '../types'
 
 export const studioDoc: SidebarDoc = {
-  id: 'Workflow',
+  id: 'Recap & Audio',
   title: 'Xưởng Xử Lý Hàng Loạt & Video Recap (Studio)',
   category: 'Sản xuất AI',
   badge: 'Batch Studio',

@@ -69,7 +69,7 @@ export const veoStudioDoc: SidebarDoc = {
       step: 2,
       title: 'Chọn Phân Tab làm việc phù hợp',
       desc: 'Tab Tạo Video (văn bản thuần) → Tab Tạo Ảnh (tạo ảnh mẫu) → Tab Ảnh sang Video (điều khiển chuyển động camera).',
-      badge: 'Workflow',
+      badge: 'Recap & Audio',
     },
     {
       step: 3,
@@ -104,7 +104,7 @@ export const veoStudioDoc: SidebarDoc = {
   proTips: [
     'Luồng tối ưu nhất: Dùng tab Tạo Ảnh sinh ảnh sản phẩm siêu nét → Bấm "Chuyển sang Video" → Chọn Motion Orbit nhẹ → Bấm Tạo Video.',
     'Để làm YouTube Shorts / TikTok, hãy nhớ luôn chọn tỷ lệ khung hình 9:16 dọc trước khi sinh clip.',
-    'Các clip sinh từ Veo có thể dùng trực tiếp trong phân hệ "AI Workflow" để ghép thành chuỗi video hoàn chỉnh có nhạc và lồng tiếng.',
+    'Các clip sinh từ Veo có thể dùng trực tiếp trong phân hệ "Canvas AI" để ghép thành chuỗi video hoàn chỉnh có nhạc và lồng tiếng.',
   ],
   troubleshooting: [
     {
@@ -118,5 +118,5 @@ export const veoStudioDoc: SidebarDoc = {
         'Hãy giảm bớt độ dài xuống 4–5 giây và chọn ảnh mẫu có góc chụp rõ ràng, chủ thể tách biệt với hậu cảnh.',
     },
   ],
-  relatedPages: ['AI Workflow', 'Workflow', 'Video', 'Cài đặt'],
+  relatedPages: ['Canvas AI', 'Recap & Audio', 'Video', 'Cài đặt'],
 }

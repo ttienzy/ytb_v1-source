@@ -76,5 +76,5 @@ export const bgmDoc: SidebarDoc = {
         'Hãy vào phần Cấu hình âm thanh giảm thanh trượt BGM Volume xuống mức 15% hoặc kiểm tra lại âm lượng gốc của file nhạc.',
     },
   ],
-  relatedPages: ['Voices', 'AI Workflow', 'Workflow'],
+  relatedPages: ['Voices', 'Canvas AI', 'Recap & Audio'],
 }

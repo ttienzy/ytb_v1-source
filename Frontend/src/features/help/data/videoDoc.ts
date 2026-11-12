@@ -6,7 +6,7 @@ export const videoDoc: SidebarDoc = {
   category: 'Kho tài nguyên',
   badge: 'Media Storage',
   summary:
-    'Trung tâm lưu trữ và kiểm soát toàn bộ video thành phẩm được tạo ra từ AI Workflow, Veo Studio và Batch Recap. Hỗ trợ xem trước chất lượng cao, quản lý dung lượng ổ đĩa và mở trực tiếp vị trí file trên hệ điều hành.',
+    'Trung tâm lưu trữ và kiểm soát toàn bộ video thành phẩm được tạo ra từ Canvas AI, Veo Studio và Batch Recap. Hỗ trợ xem trước chất lượng cao, quản lý dung lượng ổ đĩa và mở trực tiếp vị trí file trên hệ điều hành.',
   subTabs: [
     {
       id: 'gallery',
@@ -36,7 +36,7 @@ export const videoDoc: SidebarDoc = {
     {
       step: 1,
       title: 'Kiểm tra video vừa render',
-      desc: 'Mỗi khi một tác vụ xuất video hoàn tất ở AI Workflow hoặc Studio → File video sẽ lập tức xuất hiện tại đầu danh sách trang này.',
+      desc: 'Mỗi khi một tác vụ xuất video hoàn tất ở Canvas AI hoặc Studio → File video sẽ lập tức xuất hiện tại đầu danh sách trang này.',
       badge: 'Cập nhật tức thì',
     },
     {
@@ -75,5 +75,5 @@ export const videoDoc: SidebarDoc = {
         'Kiểm tra xem file video đó có bị xóa hoặc chuyển sang ổ đĩa khác thủ công trước đó không. Hãy bấm nút Làm mới để đồng bộ lại danh sách.',
     },
   ],
-  relatedPages: ['Dashboard', 'AI Workflow', 'Lên lịch Youtube', 'Lên lịch Pippit'],
+  relatedPages: ['Dashboard', 'Canvas AI', 'Lên lịch Youtube', 'Lên lịch Pippit'],
 }

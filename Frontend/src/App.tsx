@@ -81,7 +81,7 @@ export function App() {
 
   const handleSendToStudioBatch = (urls: string[]) => {
     setStudioBatchUrls(urls)
-    setActivePage('Workflow')
+    setActivePage('Recap & Audio')
   }
 
   return (
@@ -201,7 +201,7 @@ export function App() {
             <VeoStudioPage setActivePage={setActivePage} />
           ) : activePage === 'Muse Studio' ? (
             <MuseStudioPage setActivePage={setActivePage} />
-          ) : activePage === 'AI Workflow' ? (
+          ) : activePage === 'Canvas AI' ? (
             <WorkflowPage />
           ) : activePage === 'Chiến dịch AI' ? (
             <CampaignPage />
@@ -209,7 +209,7 @@ export function App() {
             <PublisherPage />
           ) : activePage === 'Lên lịch Youtube' ? (
             <YouTubePublisherPage setActivePage={setActivePage} />
-          ) : activePage === 'Workflow' ? (
+          ) : activePage === 'Recap & Audio' ? (
             <StudioPage
               setActivePage={setActivePage}
               initialUrls={studioBatchUrls}

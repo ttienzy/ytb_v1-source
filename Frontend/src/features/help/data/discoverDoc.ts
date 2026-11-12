@@ -67,5 +67,5 @@ export const discoverDoc: SidebarDoc = {
         'Hệ thống đã tích hợp sẵn cơ chế dự phòng (fallback gradient avatar) tự động tạo avatar chữ viết tắt chuyên nghiệp nếu link ảnh từ YouTube bị chặn hoặc tải chậm.',
     },
   ],
-  relatedPages: ['Workflow', 'AI Workflow', 'Xóa Watermark'],
+  relatedPages: ['Recap & Audio', 'Canvas AI', 'Xóa Watermark'],
 }

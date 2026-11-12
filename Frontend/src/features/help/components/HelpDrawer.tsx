@@ -153,8 +153,8 @@ export function HelpDrawer({
                   <option value="Xóa Watermark">Xóa Watermark (Clean Video)</option>
                 </optgroup>
                 <optgroup label="3. Sản Xuất & Dựng Video AI">
-                  <option value="AI Workflow">AI Workflow (Node-Graph Canvas)</option>
-                  <option value="Workflow">Workflow (Batch Studio &amp; Recap)</option>
+                  <option value="Canvas AI">Canvas AI (Node-Graph Canvas)</option>
+                  <option value="Recap & Audio">Recap &amp; Audio (Recap YouTube &amp; Audio truyện)</option>
                   <option value="Veo Studio">Veo Studio (Google Veo &amp; Nano Banana)</option>
                 </optgroup>
                 <optgroup label="4. Kho Tài Nguyên">

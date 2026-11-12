@@ -9,7 +9,7 @@ import {
   LayoutDashboard,
   Mic,
   Music,
-  PlaySquare,
+  AudioLines,
   Video,
   Settings,
   Sparkles,
@@ -45,11 +45,11 @@ export const navGroups: NavGroup[] = [
     title: 'Tạo Video AI',
     collapsible: true,
     items: [
-      { label: 'AI Workflow', icon: WorkflowIcon, badge: 'PRO', badgeVariant: 'pro' },
+      { label: 'Canvas AI', icon: WorkflowIcon, badge: 'PRO', badgeVariant: 'pro' },
       { label: 'Chiến dịch AI', icon: Layers, badge: 'NEW', badgeVariant: 'new' },
       { label: 'Veo Studio', icon: Clapperboard },
       { label: 'Muse Studio', icon: Sparkles, badge: 'NEW', badgeVariant: 'new' },
-      { label: 'Workflow', icon: PlaySquare },
+      { label: 'Recap & Audio', icon: AudioLines },
     ],
   },
   {

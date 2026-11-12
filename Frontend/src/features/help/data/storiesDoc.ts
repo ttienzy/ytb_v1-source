@@ -67,5 +67,5 @@ export const storiesDoc: SidebarDoc = {
         'Hãy chuyển qua tab "Truyện đã lưu trong máy" và bấm nút biểu tượng "Làm mới" trên thanh công cụ để đồng bộ lại danh mục từ database cục bộ.',
     },
   ],
-  relatedPages: ['Voices', 'AI Workflow', 'Workflow'],
+  relatedPages: ['Voices', 'Canvas AI', 'Recap & Audio'],
 }

@@ -24,7 +24,7 @@ export const settingsDoc: SidebarDoc = {
       id: 'chatgpt',
       label: '2. Tài khoản ChatGPT (ảnh & kịch bản)',
       iconName: 'bot',
-      desc: 'Một nhóm tài khoản ChatGPT dùng chung cho tạo ảnh (Chiến dịch AI) và viết kịch bản, phân tích ảnh ở AI Workflow. Không cần cài thêm công cụ nào.',
+      desc: 'Một nhóm tài khoản ChatGPT dùng chung cho tạo ảnh (Chiến dịch AI) và viết kịch bản, phân tích ảnh ở Canvas AI. Không cần cài thêm công cụ nào.',
       flowSteps: [
         'Mở Cài đặt → Tài khoản ChatGPT',
         'Bấm thêm tài khoản và đăng nhập ChatGPT trong cửa sổ hiện ra',
@@ -132,5 +132,5 @@ export const settingsDoc: SidebarDoc = {
         'Khóa API key hoặc token của bạn đã hết hạn, bị thu hồi hoặc tài khoản hết tiền/credit. Hãy tạo khóa mới trên trang chủ của dịch vụ tương ứng.',
     },
   ],
-  relatedPages: ['Dashboard', 'AI Workflow', 'Veo Studio', 'Lên lịch Youtube'],
+  relatedPages: ['Dashboard', 'Canvas AI', 'Veo Studio', 'Lên lịch Youtube'],
 }

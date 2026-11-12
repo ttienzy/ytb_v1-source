@@ -48,8 +48,8 @@ export const voicesDoc: SidebarDoc = {
     },
     {
       step: 3,
-      title: 'Tự động áp dụng vào AI Workflow',
-      desc: 'Giọng đọc đã chọn sẽ được tự động liên kết với node Voiceover trong "AI Workflow" và xưởng "Studio" khi sản xuất video.',
+      title: 'Tự động áp dụng vào Canvas AI',
+      desc: 'Giọng đọc đã chọn sẽ được tự động liên kết với node Voiceover trong "Canvas AI" và xưởng "Studio" khi sản xuất video.',
       badge: 'Tự động hóa',
     },
   ],
@@ -81,5 +81,5 @@ export const voicesDoc: SidebarDoc = {
         'Kiểm tra xem thiết bị loa/tai nghe của máy tính có đang tắt tiếng không. Đợi khoảng 1–2 giây để hệ thống tổng hợp file audio mẫu.',
     },
   ],
-  relatedPages: ['AI Workflow', 'Workflow', 'Thư viện nhạc'],
+  relatedPages: ['Canvas AI', 'Recap & Audio', 'Thư viện nhạc'],
 }

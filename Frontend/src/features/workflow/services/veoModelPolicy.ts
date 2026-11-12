@@ -1,5 +1,5 @@
 /**
- * Quy tắc chọn chế độ Veo cho clip của AI Workflow (thuần TS, test được bằng node:test).
+ * Quy tắc chọn chế độ Veo cho clip của Canvas AI (thuần TS, test được bằng node:test).
  *
  * - Omni 1.2 Flash (đi HTTP, nhanh): clip có ảnh tham chiếu -> Ingredients 3–15 giây, tối đa 3 ảnh. Clip nối tiếp dùng khung
  *   cuối của clip trước làm ảnh tham chiếu ĐẦU TIÊN (Omni 1.2 chưa có chế độ chỉ-khung-đầu: clip sau giống clip trước nhưng

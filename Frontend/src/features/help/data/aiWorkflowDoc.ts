@@ -1,7 +1,7 @@
 import type { SidebarDoc } from '../types'
 
 export const aiWorkflowDoc: SidebarDoc = {
-  id: 'AI Workflow',
+  id: 'Canvas AI',
   title: 'Xưởng Tự Động Hóa Video AI (Node-Graph Canvas)',
   category: 'Sản xuất AI',
   badge: 'Visual Automation',

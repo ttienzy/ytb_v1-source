@@ -57,7 +57,7 @@ export const dashboardDoc: SidebarDoc = {
     },
   ],
   proTips: [
-    'Nếu thấy dải cảnh báo đỏ "Kênh chưa đăng hôm nay", hãy ưu tiên vào AI Workflow để tạo video ngắn 15s-30s và đăng trước khung giờ vàng (11:30 hoặc 19:30).',
+    'Nếu thấy dải cảnh báo đỏ "Kênh chưa đăng hôm nay", hãy ưu tiên vào Canvas AI để tạo video ngắn 15s-30s và đăng trước khung giờ vàng (11:30 hoặc 19:30).',
     'Nút mở thư mục trong danh sách Video gần đây sẽ mở trực tiếp Windows Explorer tại đúng file video đã chọn.',
     'Chế độ xem "Toàn bộ clip AI" trên biểu đồ vận tốc rất hữu ích để bạn biết hôm nay bạn đã chạy bao nhiêu lượt sinh clip qua mô hình Veo.',
   ],
@@ -73,5 +73,5 @@ export const dashboardDoc: SidebarDoc = {
         'Hãy kiểm tra xem cửa sổ terminal chạy Backend FastAPI (cổng 8000) có bị tắt không. Chạy lệnh: `python -m uvicorn app.main:app --port 8000` tại thư mục Backend.',
     },
   ],
-  relatedPages: ['AI Workflow', 'Veo Studio', 'Lên lịch Youtube', 'Lên lịch Pippit'],
+  relatedPages: ['Canvas AI', 'Veo Studio', 'Lên lịch Youtube', 'Lên lịch Pippit'],
 }

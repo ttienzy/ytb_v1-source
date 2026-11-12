@@ -83,8 +83,8 @@ export function buildWorkflowVideoRequest(params: RenderSceneJobParams): VeoJobR
   if (videoConfig.variations !== 1) throw new Error('Chuỗi video yêu cầu 1 biến thể mỗi clip. Hãy chọn 1 biến thể trong Cấu hình Veo.')
   if (!['16:9', '9:16'].includes(videoConfig.aspectRatio)) throw new Error('Chọn tỉ lệ 16:9 hoặc 9:16 cho video.')
   if (isOmni12(videoConfig.model)) return buildOmni12Request(params, assets)
-  // Omni 1.1 đã bỏ khỏi AI Workflow; model khác không nhận ảnh tham chiếu/nối clip ở đây.
-  throw new Error(`AI Workflow chỉ tạo clip bằng Omni 1.2 Flash (đang chọn "${videoConfig.model || 'chưa chọn'}"). Mở Cấu hình Veo và chọn Omni 1.2 Flash.`)
+  // Omni 1.1 đã bỏ khỏi Canvas AI; model khác không nhận ảnh tham chiếu/nối clip ở đây.
+  throw new Error(`Canvas AI chỉ tạo clip bằng Omni 1.2 Flash (đang chọn "${videoConfig.model || 'chưa chọn'}"). Mở Cấu hình Veo và chọn Omni 1.2 Flash.`)
 }
 
 /** Injectable transport and policy keep lifecycle tests independent of the provider. */
