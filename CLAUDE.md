@@ -22,8 +22,8 @@ The root dir also contains lots of untracked scratch (`*.har`, `*.com` captures,
 
 **Run everything (dev)** — from repo root or `Desktop/`:
 ```powershell
-npm start                    # node Desktop/dev.js: kills stale processes on 8000/8001, starts backend(--reload)+voice+Electron
-npm run start:stable --prefix Desktop   # backend without --reload (use during long jobs; reload kills running jobs)
+npm start                    # node Desktop/dev.js: kills stale processes on 8000/8001, starts backend+voice+Electron; dev.js itself watches Backend/**/*.py and restarts ONLY the backend (not uvicorn --reload: on Windows that sends CTRL_C_EVENT to the whole console and shuts everything down)
+npm run start:stable --prefix Desktop   # no backend auto-restart on .py edits (use during long jobs; a restart kills running jobs)
 npm run stop --prefix Desktop           # clean up leftover dev processes
 npm test --prefix Desktop               # tests for dev.js process-kill logic
 ```
@@ -90,7 +90,7 @@ npm run verify                         # full: build, tests normal+minified, rel
 Standalone process so the heavy model isn't loaded in Backend; Backend reaches it through `app/voices/voice_client.py` (`voice_service_url` setting) and the browser only ever calls Backend's `/api/voices`. One inference session at a time.
 
 ## Conventions & gotchas
-- Windows paths and PowerShell are the norm. ffmpeg `drawtext` with `fontfile=`/`textfile=` breaks on drive-letter colons/spaces: use relative paths with `cwd` set to the temp dir.
+- Windows paths and PowerShell are the norm. ffmpeg `drawtext` with `fontfile=`/`textfile=` breaks on drive-letter colons/spaces: use relative paths with `cwd` set to the temp dir. `drawtext` WITHOUT `fontfile=` crashes the Windows ffmpeg build (0xC0000005, Fontconfig) — always pass one (`app/media/fonts.py`: `find_font` / `stage_font`).
 - yt-dlp must be kept current (YouTube blocks); working flags use nightly + node + `ejs:github`, not cookies.
 - Recap video encoding: prefer hardware encoder selection (`_pick_video_encoder`) over libx264 `medium`; final merge uses `-shortest` mux + concat demuxer with stream copy.
 - Manual raw text/file input to the Gemini script step is sent as-is (no normalization); `raw.txt` is persisted for inspection.

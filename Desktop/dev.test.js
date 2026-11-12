@@ -1,7 +1,7 @@
 // Kiểm thử logic chọn tiến trình cần kill của dev.js (không kill gì thật). Chạy: npm test
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { collectVictims, isManagedChild } = require('./dev.js')
+const { collectVictims, isManagedChild, isBackendSource } = require('./dev.js')
 
 const T0 = Date.parse('2026-11-09T14:00:00Z')
 const p = (pid, ppid, name, cmd = '', createdOffsetMs = 0) => ({ pid, ppid, name, cmd, created: T0 + createdOffsetMs })
@@ -57,4 +57,14 @@ test('gom đủ cây nhiều tầng của voice (uv -> uvicorn -> python venv ->
 test('root là tiến trình lõi hệ điều hành thì bị loại khỏi danh sách kill', () => {
   const procs = [p(4, 0, 'System'), p(700, 4, 'svchost.exe')]
   assert.deepEqual(collectVictims([4, 700], procs), [])
+})
+
+test('isBackendSource: chỉ .py của mã nguồn backend mới kích hoạt restart', () => {
+  assert.equal(isBackendSource('app/discover/service.py'), true)
+  assert.equal(isBackendSource('app\discover\service.py'), true)
+  assert.equal(isBackendSource('run_server.py'), true)
+  for (const ignored of ['.venv/Lib/site-packages/x.py', 'app/__pycache__/x.cpython-311.pyc', 'Data/media/gen.py',
+    'tests/discover/test_freshness.py', 'poc/campaign_look/a.py', 'app/discover/notes.txt', '', undefined]) {
+    assert.equal(isBackendSource(ignored), false, String(ignored))
+  }
 })

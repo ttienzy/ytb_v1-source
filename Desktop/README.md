@@ -5,7 +5,7 @@ Chạy backend FastAPI + voice-service + frontend Electron cùng lúc, và **t�
 ```powershell
 npm start            # khởi động sạch (dọn tiến trình cũ còn giữ cổng 8000/8001 rồi chạy mới)
 npm run stop         # chỉ dọn sạch mọi tiến trình dev còn sót, không khởi động gì
-npm run start:stable # như start nhưng backend KHÔNG tự reload khi sửa .py (tránh job dài bị kill giữa chừng)
+npm run start:stable # như start nhưng backend KHÔNG tự restart khi sửa .py (tránh job dài bị kill giữa chừng)
 npm run start:reuse  # dùng lại service đang chạy sẵn nếu khỏe (hành vi cũ, dễ chạy nhầm code cũ)
 npm test             # kiểm thử logic chọn tiến trình cần kill
 ```
@@ -14,6 +14,10 @@ npm test             # kiểm thử logic chọn tiến trình cần kill
 - **Ctrl+C, đóng terminal, hoặc đóng cửa sổ app → tắt HẾT** (backend, voice, electron, mọi tiến trình con kể cả worker `--reload` mồ côi). Muốn đóng app mà giữ backend/voice: `node dev.js --keep-services`.
 - **Mỗi lần `npm start` đều khởi động backend MỚI.** Nếu cổng đang bị giữ bởi service cũ (phiên trước tắt không sạch), nó được dọn trước; chỉ khi là chương trình lạ không phải của dự án thì dừng và báo (thêm `--force` để ép kill).
 - Frontend chỉ bật sau khi backend trả lời `/api/ping` (tối đa 60 giây).
+
+## Sửa file `.py` không còn làm tắt cả cụm
+
+`dev.js` **không** dùng `uvicorn --reload` nữa. Trên Windows uvicorn restart worker bằng `CTRL_C_EVENT`, tín hiệu này phát tới mọi tiến trình chung console (cả `dev.js`, voice, electron-vite) nên mỗi lần lưu file `.py` là cả cụm tự tắt. Giờ `dev.js` tự theo dõi `Backend/**/*.py` (bỏ qua `.venv`, `__pycache__`, `Data`, `tests`, `poc`…), gom các lần lưu liên tiếp trong ~0,8 giây rồi **chỉ restart backend**; voice và cửa sổ Electron giữ nguyên (request tới backend sẽ lỗi trong vài giây lúc nó khởi động lại). Job đang chạy trong backend vẫn bị cắt khi restart — dùng `start:stable` khi chạy job dài. (Script `start:concurrently`/`start:core` cũ vẫn dùng `uvicorn --reload` nên còn lỗi này.)
 
 ## Vì sao trước đây hay chạy nhầm backend cũ
 
@@ -25,7 +29,7 @@ Trên Windows mỗi lệnh Python là 2 tiến trình nối nhau (venv launcher 
 |---|---|
 | `--reuse` | cổng có service khỏe thì dùng lại |
 | `--keep-services` | đóng Electron không tắt backend/voice |
-| `--no-reload` | uvicorn không `--reload` |
+| `--no-reload` | không tự restart backend khi sửa `.py` |
 | `--force` | được kill cả tiến trình lạ đang giữ cổng |
 | `--only=backend,voice,frontend` | chỉ chạy một phần |
 | `--stop` | chỉ dọn rồi thoát |

@@ -3,13 +3,16 @@
  *
  * Chạy:  npm start                  khởi động sạch (dọn tiến trình cũ còn giữ cổng rồi chạy mới)
  *        npm run stop               dọn sạch mọi tiến trình dev còn sót (không khởi động gì)
- *        npm run start:stable       như start nhưng backend KHÔNG tự reload khi sửa file .py
+ *        npm run start:stable       như start nhưng backend KHÔNG tự restart khi sửa file .py
+ *
+ * Sửa file .py -> dev.js (không phải uvicorn --reload) restart RIÊNG backend; voice + Electron giữ nguyên. Lý do: trên
+ * Windows `uvicorn --reload` restart worker bằng CTRL_C_EVENT, phát tới mọi tiến trình chung console => cả cụm tự tắt.
  *        npm run start:reuse        dùng lại service đang chạy sẵn nếu khỏe (hành vi cũ)
  *
  * Cờ (hoặc biến môi trường DEV_<TÊN>=1):
  *   --reuse          nếu cổng đang có service khỏe thì dùng lại thay vì dọn
  *   --keep-services  đóng cửa sổ Electron KHÔNG tắt backend/voice
- *   --no-reload      uvicorn không --reload (tránh bị kill giữa chừng khi một job dài đang chạy)
+ *   --no-reload      không tự restart backend khi sửa .py (tránh bị kill giữa chừng khi một job dài đang chạy)
  *   --force          được phép kill cả tiến trình lạ đang giữ cổng 8000/8001
  *   --only=a,b       chỉ chạy một phần: backend,voice,frontend
  *   --stop           chỉ dọn sạch rồi thoát
@@ -59,9 +62,13 @@ const ALL_TARGETS = [
     key: 'backend', name: 'BACKEND', critical: true, port: 8000,
     healthUrl: 'http://127.0.0.1:8000/api/ping', color: '\x1b[34m',
     cmd: PY,
-    args: ['-m', 'uvicorn', 'app.main:app', ...(OPT.noReload ? [] : ['--reload', '--reload-dir', path.join(ROOT, 'Backend')]),
+    // KHÔNG dùng `uvicorn --reload`: trên Windows nó restart worker bằng os.kill(pid, CTRL_C_EVENT), mà tín hiệu này
+    // được phát tới MỌI tiến trình chung console (dev.js, voice, electron-vite…) → cả cụm tự tắt mỗi lần sửa file .py.
+    // Thay vào đó dev.js tự theo dõi file (watchBackend) và chỉ restart riêng backend.
+    args: ['-m', 'uvicorn', 'app.main:app',
            '--app-dir', path.join(ROOT, 'Backend'), '--host', '127.0.0.1', '--port', '8000'],
     opts: { cwd: path.join(ROOT, 'Backend') },
+    watch: !OPT.noReload,
   },
   {
     key: 'voice', name: 'VOICE', critical: true, port: 8001,
@@ -200,8 +207,9 @@ async function isHealthy(target) {
 }
 
 // ── chạy & tắt ───────────────────────────────────────────────────────────────
-const children = []          // [{pid, target}]
+const children = []          // [{pid, target, child}]
 const launched = []          // các target do dev.js này khởi động (không tính cái dùng lại)
+const retired = new WeakSet() // child cố ý bị dừng để restart: việc nó thoát KHÔNG được kéo sập cả cụm
 let shuttingDown = false
 let cleaned = false
 
@@ -253,15 +261,15 @@ async function launch(target) {
     stdio: ['ignore', 'pipe', 'pipe'], shell: false, windowsHide: false, ...target.opts,
   })
   prefixPipe(child, target)
-  children.push({ pid: child.pid, target })
-  launched.push(target)
+  children.push({ pid: child.pid, target, child })
+  if (!launched.includes(target)) launched.push(target)
   child.on('error', error => {
     say(target.name, target.color, `không khởi động được: ${error.message}`)
     if (target.critical && !shuttingDown) shutdown(`${target.name}-spawn-error`, 1)
   })
   child.on('exit', (code, signal) => {
     say(target.name, target.color, `thoát (code=${code} sig=${signal})`)
-    if (shuttingDown) return
+    if (shuttingDown || retired.has(child)) return
     if (target.critical) {
       // Backend/voice là core: một service chết thì dừng cả cụm để tránh UI gửi request vào hệ thống nửa sống nửa chết.
       shutdown(`${target.name.toLowerCase()}-exit-${code ?? signal ?? 'unknown'}`, 1)
@@ -283,8 +291,61 @@ async function waitHealthy(target, timeoutMs) {
   return false
 }
 
+/** Thư mục/tệp không được kích hoạt restart (không phải mã nguồn backend, hoặc backend tự ghi vào lúc chạy). */
+const WATCH_IGNORE = /(^|[\\/])(\.venv|venv|__pycache__|Data|node_modules|dist|build|tests|poc|\.git)([\\/]|$)/i
+const isBackendSource = rel => !!rel && /\.py$/i.test(rel) && !WATCH_IGNORE.test(rel)
+
+/** Dừng backend cũ (cả cây + giữ cổng) rồi chạy lại. Voice/Frontend giữ nguyên. */
+async function restartService(target, why) {
+  dev(`${why} → khởi động lại ${target.name} (voice/frontend giữ nguyên)…`)
+  const old = children.find(c => c.target === target)
+  if (old) {
+    retired.add(old.child)
+    children.splice(children.indexOf(old), 1)
+    killPids(collectVictims([old.pid], snapshot()))
+  }
+  if (target.port) freePort(target.port, { allowForeign: false })
+  if (shuttingDown) return
+  const child = await launch(target)
+  const ok = await waitHealthy(target, 60000)
+  say(target.name, target.color, ok ? `đã chạy lại (pid ${child.pid}) và sẵn sàng.` : 'đã chạy lại nhưng chưa phản hồi sau 60 giây — kiểm tra log phía trên (có thể lỗi cú pháp).')
+}
+
+/** Theo dõi Backend/**.py; gom các lần lưu liên tiếp (debounce) rồi restart đúng một lần. */
+function watchBackend(target) {
+  const dir = path.join(ROOT, 'Backend')
+  const changed = new Set()
+  let timer = null
+  let busy = false
+  async function flush() {
+    if (busy || shuttingDown) return
+    busy = true
+    try {
+      while (changed.size && !shuttingDown) {
+        const files = [...changed].slice(0, 3).join(', ') + (changed.size > 3 ? `… (+${changed.size - 3})` : '')
+        changed.clear()
+        await restartService(target, `phát hiện sửa ${files}`)
+      }
+    } catch (error) {
+      warn(`restart backend lỗi: ${error?.message || error}`)
+    } finally { busy = false }
+  }
+  try {
+    const watcher = fs.watch(dir, { recursive: true }, (_ev, rel) => {
+      if (!isBackendSource(rel && String(rel))) return
+      changed.add(String(rel).replace(/\\/g, '/'))
+      clearTimeout(timer)
+      timer = setTimeout(flush, 800)
+    })
+    watcher.on('error', error => warn(`không theo dõi được file backend: ${error.message}`))
+    dev('theo dõi Backend/**/*.py: sửa file sẽ chỉ restart backend, KHÔNG tắt voice/frontend.')
+  } catch (error) {
+    warn(`không bật được theo dõi file backend (${error.message}); chạy lại thủ công khi sửa .py.`)
+  }
+}
+
 if (require.main !== module) {
-  module.exports = { collectVictims, isManagedChild, looksOurs, PROTECTED, SPAWNED }
+  module.exports = { collectVictims, isManagedChild, looksOurs, isBackendSource, PROTECTED, SPAWNED }
 } else {
 process.on('SIGINT', () => shutdown('Ctrl+C'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))
@@ -326,11 +387,12 @@ process.on('exit', () => { if (!cleaned) cleanupAll(true) })   // phòng hờ: t
   // 2) Khởi động. Backend phải khỏe rồi mới bật frontend để UI không gọi vào backend chưa sẵn sàng.
   for (const t of toLaunch) {
     const child = await launch(t)
-    say(t.name, t.color, `đã bật (pid ${child.pid})${t.key === 'backend' && !OPT.noReload ? ' · --reload BẬT: sửa file .py sẽ tự khởi động lại; nếu không thấy nạp code mới hãy chạy lại npm start' : ''}`)
+    say(t.name, t.color, `đã bật (pid ${child.pid})${t.watch ? ' · tự restart backend khi sửa file .py (dev.js theo dõi)' : ''}`)
     if (t.key === 'backend' && toLaunch.some(x => x.key === 'frontend')) {
       const ok = await waitHealthy(t, 60000)
       say(t.name, t.color, ok ? 'sẵn sàng.' : 'chưa phản hồi sau 60 giây (vẫn tiếp tục bật frontend).')
     }
+    if (t.watch) watchBackend(t)
   }
   dev(`${TARGETS.map(t => t.name + (t.port ? ' :' + t.port : '')).join(' · ')}`)
   dev(`Ctrl+C hoặc đóng cửa sổ app → tắt HẾT${OPT.keepServices ? ' (trừ backend/voice vì --keep-services)' : ''}.`)
