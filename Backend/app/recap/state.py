@@ -46,6 +46,7 @@ class JobState:
     final_studio: str | None = None  # "final_studio.mp4" (Phase R5 polish)
     polish_opts: dict | None = None  # snapshot opts lúc trigger (bgm_ids, volume...)
     credits: str | None = None       # credit text BGM (để FE show dán lên YouTube)
+    timings: dict = field(default_factory=dict)  # phase → {started_at, ended_at, duration_sec, ...} (app.recap.timing)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

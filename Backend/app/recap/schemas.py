@@ -29,6 +29,8 @@ class JobOut(BaseModel):
     final: str | None = None
     final_studio: str | None = None
     credits: str | None = None
+    # Thời gian từng phase: {phase: {started_at, ended_at, duration_sec, ok, attempts, detail?}}
+    timings: dict[str, dict] | None = None
     pippit_tasks: list[dict] = []
     youtube_tasks: list[dict] = []
 

@@ -80,6 +80,16 @@ def recap_path(job_id: str):
     return job_dir_of(job_id) / "recap.json"
 
 
+def job_meta_path(job_id: str):
+    """job.json — url/giọng/BGM/giờ tạo, ghi ngay khi tạo job để job sống sót qua restart server."""
+    return job_dir_of(job_id) / "job.json"
+
+
+def timings_path(job_id: str):
+    """timings.json — thời gian từng phase của job (xem ``app.recap.timing``)."""
+    return job_dir_of(job_id) / "timings.json"
+
+
 def raw_path(job_id: str):
     """raw.txt — transcript gốc (user dán/đính kèm hoặc auto-fetch) đã chuẩn hoá,
     persisted ra file để upload file đó đi (không giữ raw lớn trong memory)."""

@@ -50,6 +50,54 @@ class RecapConfigError(RuntimeError):
     """Thiếu config (cookies/inner_template) — user cần login + capture trước."""
 
 
+class GeminiAuthError(RuntimeError):
+    """Phiên/cookie Gemini không hợp lệ THẬT SỰ (Google trả trang không có token, 401/403).
+
+    Chỉ lỗi này mới đáng mở Chrome refresh cookie. Đã refresh mà vẫn lỗi → dừng hẳn (không retry vòng ngoài).
+    """
+
+
+class GeminiTransientError(RuntimeError):
+    """Lỗi tạm thời (mạng đứt/timeout, Google 5xx) — thử lại nhanh, TUYỆT ĐỐI không mở Chrome refresh."""
+
+
+class GeminiRateLimitError(RuntimeError):
+    """Bị giới hạn tốc độ (429) quá số lần cho phép — dừng và báo rõ thay vì chờ vô hạn."""
+
+
+# Timeout: GET /app và upload thường < 2s → 10s là đủ rộng; treo hơn thế là lỗi mạng. (Đã từng đo 1 lần GET /app
+# treo 30s rồi bị ngắt: với 30s/lần × 3 lần thử ≈ 97s chờ vô ích trước khi báo lỗi — nay tối đa ~34s.)
+# Riêng StreamGenerate phải đợi Gemini sinh nội dung (10–20s, tối đa vài chục giây) nên cho đọc tới 180s.
+HTTP_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+STREAM_TIMEOUT = httpx.Timeout(180.0, connect=10.0)
+NET_RETRY_DELAYS = (1.0, 3.0)  # 1 lần gọi + 2 lần thử lại cho lỗi mạng (giây chờ giữa các lần)
+OUTER_RETRY_DELAYS = (2.0, 5.0, 10.0)  # vòng thử lại theo chunk (lỗi tạm thời/parse JSON)
+MAX_RATE_LIMIT_RETRIES = 4  # tối đa 4 lần chờ 30/45/60/60s ≈ 3 phút rồi báo lỗi
+
+
+def _with_net_retry(fn: Callable[[], Any], what: str, status_callback: Callable[[str], None] | None = None) -> Any:
+    """Chạy ``fn``; lỗi mạng/timeout/5xx (``httpx.TransportError`` | ``GeminiTransientError``) thì chờ ngắn
+    rồi thử lại. Hết lượt → ``GeminiTransientError``. Lỗi khác (vd. ``GeminiAuthError``) đi thẳng ra ngoài."""
+    for i in range(len(NET_RETRY_DELAYS) + 1):
+        try:
+            return fn()
+        except (httpx.TransportError, GeminiTransientError) as exc:
+            if i >= len(NET_RETRY_DELAYS):
+                raise GeminiTransientError(
+                    f"{what}: lỗi mạng sau {i + 1} lần thử ({type(exc).__name__}: {exc})"
+                ) from exc
+            _log(f"[Gemini] {what}: lỗi mạng ({type(exc).__name__}: {exc}). Thử lại sau {NET_RETRY_DELAYS[i]:.0f}s...")
+            if status_callback:
+                status_callback("network_retry")
+            time.sleep(NET_RETRY_DELAYS[i])
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _http_error_for(status: int, msg: str) -> RuntimeError:
+    """401/403 → lỗi xác thực; 5xx/429/khác → lỗi tạm thời."""
+    return GeminiAuthError(msg) if status in (401, 403) else GeminiTransientError(msg)
+
+
 def _gemini_config() -> dict:
     """Đọc phần persist từ config.json; raise RecapConfigError nếu thiếu."""
     g = read_config().get("gemini", {})
@@ -66,26 +114,61 @@ def _gemini_config() -> dict:
     }
 
 
-def _auto_refresh_cookies() -> dict:
-    """Tự động mở Chrome profile để refresh cookies Gemini và lưu vào config.json."""
+def _auto_refresh_cookies(on_step: Callable[[str], None] | None = None) -> dict:
+    """Tự động mở Chrome profile để refresh cookies Gemini và lưu vào config.json.
+
+    ``on_step(text)``: báo bước đang làm ("Mở Chrome…", "Chờ đăng nhập (còn 40s)"…) để giao diện hiển thị.
+    """
     from app.ai.gemini.service import login_and_save_cookie
 
     _log("[Gemini] Đang tự động làm mới cookie Gemini qua Chrome profile...")
-    res = login_and_save_cookie()
+    res = login_and_save_cookie(on_step=on_step)
     if not res.get("has_cookie"):
         raise RuntimeError("Không lấy được cookie Gemini sau khi mở Chrome.")
     return _gemini_config()
 
 
+def _refresh_or_raise(on_step: Callable[[str], None] | None = None) -> dict:
+    """Refresh cookie qua Chrome; MỌI lỗi (kể cả HTTPException của login) → ``GeminiAuthError`` (dừng hẳn)."""
+    try:
+        return _auto_refresh_cookies(on_step) if on_step else _auto_refresh_cookies()
+    except Exception as exc:  # noqa: BLE001
+        detail = getattr(exc, "detail", None) or exc
+        raise GeminiAuthError(f"Cookie Gemini hết hạn và làm mới tự động thất bại: {detail}") from exc
+
+
 def _fresh_tokens(client: httpx.Client, cookies: str, ua: str) -> tuple[str, str, str]:
-    """GET /app → regex token fresh (at/bl/f.sid). Raise nếu cookie hết hạn."""
+    """GET /app → regex token fresh (at/bl/f.sid).
+
+    ``GeminiAuthError``: Google trả trang không có token (cookie hết hạn). ``GeminiTransientError``: 5xx.
+    Lỗi mạng/timeout là ``httpx.TransportError`` (do ``_with_net_retry`` xử lý).
+    """
     r = client.get("https://gemini.google.com/app", headers={"User-Agent": ua, "Cookie": cookies})
+    if r.status_code >= 500:
+        raise GeminiTransientError(f"gemini.google.com/app trả HTTP {r.status_code}")
     at_val = re.search(r'"SNlM0e":"(.*?)"', r.text)
     bl_val = re.search(r'"cfb2h":"(.*?)"', r.text)
     fsid_val = re.search(r'"FdrFJe":"(.*?)"', r.text)
     if not (at_val and bl_val and fsid_val):
-        raise RuntimeError("Không lấy được token fresh (at/bl/f.sid) — cookie hết hạn? Re-login Gemini.")
+        raise GeminiAuthError("Không lấy được token fresh (at/bl/f.sid) — cookie hết hạn? Re-login Gemini.")
     return at_val.group(1), bl_val.group(1), fsid_val.group(1)
+
+
+def check_cookie_state() -> str:
+    """Kiểm tra nhanh phiên Gemini → ``"ok"`` | ``"auth"`` (cookie hỏng thật) | ``"network"`` (không chắc: mạng lỗi).
+
+    Lỗi mạng KHÔNG được coi là cookie hỏng (trước đây bị nhầm → mở Chrome refresh vô ích, tốn phút).
+    Raise ``RecapConfigError`` nếu chưa cấu hình.
+    """
+    cfg = _gemini_config()
+    try:
+        with httpx.Client(http2=False, timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            _with_net_retry(lambda: _fresh_tokens(client, cfg["cookies"], cfg["user_agent"]), "Kiểm tra cookie Gemini")
+        return "ok"
+    except GeminiAuthError:
+        return "auth"
+    except GeminiTransientError:
+        return "network"
 
 
 def _upload_file(client: httpx.Client, content: bytes, name: str, cookies: str, ua: str) -> str:
@@ -112,7 +195,9 @@ def _upload_file(client: httpx.Client, content: bytes, name: str, cookies: str, 
     )
     upload_url = r1.headers.get("x-goog-upload-url")
     if not upload_url:
-        raise RuntimeError(f"upload start fail [{name}]: HTTP {r1.status_code} — {r1.text[:200]}")
+        msg = f"upload start fail [{name}]: HTTP {r1.status_code} — {r1.text[:200]}"
+        # 5xx/429 = Google quá tải (tạm thời); còn lại (401/403, hoặc 200 không có URL) = phiên không hợp lệ.
+        raise GeminiTransientError(msg) if (r1.status_code >= 500 or r1.status_code == 429) else GeminiAuthError(msg)
 
     r2 = client.post(
         upload_url,
@@ -126,7 +211,7 @@ def _upload_file(client: httpx.Client, content: bytes, name: str, cookies: str, 
     )
     gcs = r2.text.strip()
     if not gcs.startswith("/contrib_service"):
-        raise RuntimeError(f"upload finalize fail [{name}]: HTTP {r2.status_code} — {r2.text[:200]}")
+        raise _http_error_for(r2.status_code, f"upload finalize fail [{name}]: HTTP {r2.status_code} — {r2.text[:200]}")
     return gcs
 
 
@@ -274,46 +359,53 @@ def _call_gemini_stream(
     allow_refresh: bool = True,
     status_callback: Callable[[str], None] | None = None,
     backoff_sec: int = 30,
+    rate_limit_retries: int = MAX_RATE_LIMIT_RETRIES,
 ) -> str:
     """Upload prompt text lên Gemini GCS và gọi StreamGenerate lấy response stream thô.
 
-    Tự động xử lý:
-    1. HTTP 429 / Rate Limit: Tạm dừng 30–45s, thông báo qua status_callback và retry êm ái.
-    2. HTTP 401/403 hoặc Auth hết hạn ngầm: Tự động refresh cookies và retry.
+    Phân loại lỗi (quan trọng — mỗi loại xử lý khác nhau):
+    1. Lỗi mạng / timeout / 5xx: thử lại nhanh (2s, 5s) rồi ``GeminiTransientError``. KHÔNG mở Chrome.
+    2. Phiên không hợp lệ thật (không có token, 401/403): refresh cookie qua Chrome 1 lần rồi gọi lại;
+       refresh hỏng hoặc vẫn lỗi → ``GeminiAuthError`` (vòng ngoài không retry).
+    3. HTTP 429 / rate limit: chờ 30→45→60→60s, tối đa ``MAX_RATE_LIMIT_RETRIES`` lần rồi ``GeminiRateLimitError``.
     """
     cfg = _gemini_config()
     cookies, inner_template, ua = cfg["cookies"], cfg["inner_template"], cfg["user_agent"]
 
-    with httpx.Client(http2=False, timeout=180, follow_redirects=True) as client:
+    def _retry_after_refresh() -> str:
+        _log("[Gemini] Phiên không hợp lệ (auth). Làm mới cookie qua Chrome rồi gọi lại...")
+        if status_callback:
+            status_callback("refreshing_cookie")
+        # Báo từng bước refresh ("Mở Chrome…", "Chờ đăng nhập…") qua status_callback → hiện trên giao diện.
+        _refresh_or_raise(
+            (lambda text: status_callback(f"cookie_step:{text}")) if status_callback else None
+        )
+        if status_callback:
+            status_callback("running")
+        return _call_gemini_stream(
+            prompt_text, filename, query_text,
+            allow_refresh=False, status_callback=status_callback,
+            backoff_sec=backoff_sec, rate_limit_retries=rate_limit_retries,
+        )
+
+    with httpx.Client(http2=False, timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
         try:
-            at_val, bl_val, fsid_val = _fresh_tokens(client, cookies, ua)
-        except Exception as exc:
+            at_val, bl_val, fsid_val = _with_net_retry(
+                lambda: _fresh_tokens(client, cookies, ua), "Lấy token Gemini", status_callback
+            )
+        except GeminiAuthError:
             if allow_refresh:
-                _log(f"[Gemini] Refreshing cookies: {exc}")
-                if status_callback:
-                    status_callback("refreshing_cookie")
-                _auto_refresh_cookies()
-                if status_callback:
-                    status_callback("running")
-                return _call_gemini_stream(
-                    prompt_text, filename, query_text, allow_refresh=False, status_callback=status_callback
-                )
+                return _retry_after_refresh()
             raise
 
         prompt_bytes = prompt_text.encode("utf-8")
         try:
-            gcs_prompt = _upload_file(client, prompt_bytes, filename, cookies, ua)
-        except Exception as exc:
+            gcs_prompt = _with_net_retry(
+                lambda: _upload_file(client, prompt_bytes, filename, cookies, ua), "Upload prompt Gemini", status_callback
+            )
+        except GeminiAuthError:
             if allow_refresh:
-                _log(f"[Gemini] Upload file auth fail ({exc}). Refreshing cookies...")
-                if status_callback:
-                    status_callback("refreshing_cookie")
-                _auto_refresh_cookies()
-                if status_callback:
-                    status_callback("running")
-                return _call_gemini_stream(
-                    prompt_text, filename, query_text, allow_refresh=False, status_callback=status_callback
-                )
+                return _retry_after_refresh()
             raise
 
         attachments = [
@@ -336,19 +428,23 @@ def _call_gemini_stream(
             f"?bl={bl_val}&f.sid={fsid_val}&hl=vi&_reqid=100000&rt=c"
         )
 
-        resp = client.post(
-            url_stream,
-            content=body,
-            headers={
-                "User-Agent": ua,
-                "Cookie": cookies,
-                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                "Origin": "https://gemini.google.com",
-                "Referer": "https://gemini.google.com/",
-                "X-Same-Domain": "1",
-            },
-            timeout=180,
-        )
+        try:
+            resp = client.post(
+                url_stream,
+                content=body,
+                headers={
+                    "User-Agent": ua,
+                    "Cookie": cookies,
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                    "Origin": "https://gemini.google.com",
+                    "Referer": "https://gemini.google.com/",
+                    "X-Same-Domain": "1",
+                },
+                timeout=STREAM_TIMEOUT,
+            )
+        except httpx.TransportError as exc:
+            # Vòng ngoài (generate_recap) sẽ thử lại chunk; không phải lỗi cookie.
+            raise GeminiTransientError(f"StreamGenerate lỗi mạng: {type(exc).__name__}: {exc}") from exc
 
         rr_text_lower = resp.text[:500].lower()
         _RATE_LIMIT_MARKERS = (
@@ -360,7 +456,15 @@ def _call_gemini_stream(
         is_rate_limit = (resp.status_code == 429) or any(m in rr_text_lower for m in _RATE_LIMIT_MARKERS)
 
         if is_rate_limit:
-            _log(f"[Gemini] Quá tải / Rate Limit (HTTP {resp.status_code}). Tự động tạm dừng {backoff_sec}s rồi thử lại...")
+            if rate_limit_retries <= 0:
+                raise GeminiRateLimitError(
+                    f"Gemini giới hạn tốc độ (HTTP {resp.status_code}) — đã chờ {MAX_RATE_LIMIT_RETRIES} lần "
+                    f"mà vẫn bị chặn. Thử lại sau vài phút."
+                )
+            _log(
+                f"[Gemini] Quá tải / Rate Limit (HTTP {resp.status_code}). Tạm dừng {backoff_sec}s rồi thử lại "
+                f"(còn {rate_limit_retries} lần)..."
+            )
             if status_callback:
                 status_callback(f"rate_limited:{backoff_sec}")
             time.sleep(backoff_sec)
@@ -373,6 +477,7 @@ def _call_gemini_stream(
                 allow_refresh=allow_refresh,
                 status_callback=status_callback,
                 backoff_sec=min(backoff_sec + 15, 60),
+                rate_limit_retries=rate_limit_retries - 1,
             )
 
         _SILENT_AUTH_MARKERS = (
@@ -387,17 +492,14 @@ def _call_gemini_stream(
         has_error_frame = '"er"' in resp.text[:200]
 
         if resp.status_code != 200 or has_error_frame or is_auth_fail_silent:
-            if allow_refresh and (is_http_auth_fail or is_auth_fail_silent):
-                _log(f"[Gemini] StreamGenerate auth fail ({resp.status_code}). Refreshing...")
-                if status_callback:
-                    status_callback("refreshing_cookie")
-                _auto_refresh_cookies()
-                if status_callback:
-                    status_callback("running")
-                return _call_gemini_stream(
-                    prompt_text, filename, query_text, allow_refresh=False, status_callback=status_callback
-                )
-            raise RuntimeError(f"Gemini StreamGenerate fail: HTTP {resp.status_code} — {resp.text[:300]}")
+            msg = f"Gemini StreamGenerate fail: HTTP {resp.status_code} — {resp.text[:300]}"
+            if is_http_auth_fail or is_auth_fail_silent:
+                if allow_refresh:
+                    return _retry_after_refresh()
+                raise GeminiAuthError(msg)
+            if resp.status_code >= 500:
+                raise GeminiTransientError(msg)
+            raise RuntimeError(msg)
 
         return resp.text
 
@@ -528,7 +630,8 @@ def generate_recap(
             chunk_task_note = "Nối tiếp mượt mà từ chunk trước."
 
         chunk_json = None
-        for attempt in range(1, 4):
+        last_err: Exception | None = None
+        for attempt in range(1, len(OUTER_RETRY_DELAYS) + 1):
             try:
                 resp_text = _call_gemini_stream(
                     prompt_text=filled_prompt,
@@ -539,12 +642,20 @@ def generate_recap(
                 chunk_json = _parse_gemini_response(resp_text)
                 if chunk_json and chunk_json.get("scenes"):
                     break
+            except (GeminiAuthError, GeminiRateLimitError):
+                # Đã refresh cookie / đã chờ rate-limit đủ lần mà vẫn lỗi → thử lại chỉ tốn thêm (và mở Chrome lại).
+                raise
             except Exception as ex:
-                _log(f"[Recap Engine] Chunk {c_idx + 1} thử lần {attempt}/3 thất bại ({ex}). Thử lại...")
-                time.sleep(2)
+                last_err = ex
+                if attempt < len(OUTER_RETRY_DELAYS):
+                    _log(f"[Recap Engine] Chunk {c_idx + 1} thử lần {attempt}/{len(OUTER_RETRY_DELAYS)} thất bại ({ex}). Thử lại...")
+                    time.sleep(OUTER_RETRY_DELAYS[attempt - 1])
 
         if not chunk_json:
-            raise RuntimeError(f"Xử lý chunk {c_idx + 1}/{total_chunks} thất bại sau 3 lần thử.")
+            reason = f" Lỗi cuối: {last_err}" if last_err else ""
+            raise RuntimeError(
+                f"Xử lý chunk {c_idx + 1}/{total_chunks} thất bại sau {len(OUTER_RETRY_DELAYS)} lần thử.{reason}"
+            )
 
         scenes_count = len(chunk_json.get("scenes", []))
         segs_count = sum(len(s.get("segments", [])) for s in chunk_json.get("scenes", []))

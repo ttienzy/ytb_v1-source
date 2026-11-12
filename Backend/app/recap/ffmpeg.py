@@ -107,32 +107,89 @@ def mux_segment(clip: Path, voice: Path, out: Path) -> Path:
     return out
 
 
+# Windows: BELOW_NORMAL_PRIORITY_CLASS; hệ khác = 0 (không đổi gì).
+_LOW_PRIORITY_FLAG = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+
+# VO dài hơn khung cảnh quá ngưỡng này (giây) thì kéo dài hình theo VO — dưới ngưỡng coi như khớp.
+VO_OVERRUN_TOLERANCE = 0.05
+
+
+def build_cut_and_mux_cmd(
+    source_video: Path,
+    start_sec: float,
+    window_sec: float,
+    voice_wav: Path,
+    out_seg: Path,
+    voice_dur: float,
+    threads: int | None = None,
+) -> tuple[list[str], float]:
+    """Dựng lệnh ffmpeg cắt + mux 1 segment. Trả ``(cmd, duration_cuối)``.
+
+    - VO ngắn hơn khung: giữ nguyên khung hình, đệm im lặng (``apad``).
+    - VO DÀI hơn khung: KHÔNG cắt lời — kéo dài hình tới hết VO (đọc tiếp từ source sau ``end``).
+      Nếu source hết trước khi đủ (đoạn cuối video) thì ``tpad`` giữ khung hình cuối.
+    """
+    window = max(0.1, window_sec)
+    dur = window
+    vf = "setpts=PTS-STARTPTS"
+    if voice_dur > window + VO_OVERRUN_TOLERANCE:
+        dur = voice_dur
+        # tpad chỉ phát clone khi source đã hết (EOF) → vô hại khi source còn dư hình.
+        vf += f",tpad=stop_mode=clone:stop_duration={voice_dur:.3f}"
+    # threads: giới hạn luồng giải mã + mã hoá (merge chạy chồng TTS thì nhường CPU cho TTS).
+    in_threads = ["-threads", str(threads)] if threads else []
+    out_threads = ["-threads", str(threads)] if threads else []
+    cmd = [
+        "ffmpeg", "-y",
+        *in_threads,
+        "-ss", f"{start_sec:.3f}",
+        "-i", str(source_video),
+        "-i", str(voice_wav),
+        "-t", f"{dur:.3f}",
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        *out_threads,
+        "-c:a", "aac", "-b:a", "192k",
+        "-af", "apad",
+        str(out_seg),
+    ]
+    return cmd, dur
+
+
 def cut_and_mux_segment(
     source_video: Path,
     start_sec: float,
     end_sec: float,
     voice_wav: Path,
     out_seg: Path,
+    *,
+    threads: int | None = None,
+    low_priority: bool = False,
 ) -> Path:
-    """Cắt trực tiếp từ source video theo [start, end] và mux với voice_wav (Frame-accurate, 1 pass duy nhất)."""
+    """Cắt trực tiếp từ source video theo [start, end] và mux với voice_wav (Frame-accurate, 1 pass duy nhất).
+
+    Thời lượng segment = max(khung [start, end], độ dài VO) — VO không bao giờ bị cắt đuôi.
+    ``threads`` / ``low_priority``: dùng khi merge chạy chồng lên TTS — ffmpeg ít luồng + ưu tiên thấp để TTS
+    (bước nằm trên đường găng) không bị kéo chậm. Ưu tiên thấp chỉ có tác dụng trên Windows.
+    """
     if out_seg.exists() and out_seg.stat().st_size:
         return out_seg
     out_seg.parent.mkdir(parents=True, exist_ok=True)
-    dur = max(0.1, end_sec - start_sec)
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", f"{start_sec:.3f}",
-        "-i", str(source_video),
-        "-i", str(voice_wav),
-        "-t", f"{dur:.3f}",
-        "-map", "0:v:0", "-map", "1:a:0",
-        "-vf", "setpts=PTS-STARTPTS",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-c:a", "aac", "-b:a", "192k",
-        "-af", "apad",
-        str(out_seg),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_MUX)
+    cmd, _dur = build_cut_and_mux_cmd(
+        source_video,
+        start_sec,
+        end_sec - start_sec,
+        voice_wav,
+        out_seg,
+        voice_dur=ffprobe_duration(voice_wav),
+        threads=threads,
+    )
+    flags = _LOW_PRIORITY_FLAG if low_priority else 0
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=TIMEOUT_MUX, creationflags=flags,
+    )
     if proc.returncode != 0 or not out_seg.exists() or not out_seg.stat().st_size:
         raise RuntimeError(f"ffmpeg cut_and_mux thất bại [{out_seg.name}]: {(proc.stderr or '')[-400:]}")
     return out_seg

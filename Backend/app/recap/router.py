@@ -126,6 +126,7 @@ def _to_out(job: state.JobState) -> JobOut:
         final=job.final,
         final_studio=job.final_studio,
         credits=job.credits,
+        timings=job.timings or None,
         pippit_tasks=pippit_tasks,
         youtube_tasks=youtube_tasks,
     )
@@ -261,10 +262,17 @@ async def polish_job(req: PolishRequest, job_id: str, db: Session = Depends(get_
     return _to_out(job)
 
 
+class ResumeRequest(BaseModel):
+    voice_id: str | None = None  # chỉ cần khi job không còn nhớ giọng (vd. restart server)
+
+
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)
-async def resume_job(job_id: str) -> JobOut:
-    """Tiếp tục/Thử lại pipeline từ bước bị lỗi (Cut, Voice, Merge hoặc Polish)."""
-    job = await service.resume_pipeline(job_id)
+async def resume_job(job_id: str, req: ResumeRequest | None = None) -> JobOut:
+    """Tiếp tục/Thử lại pipeline từ bước bị lỗi (Recap, Cut, Voice, Merge hoặc Polish).
+
+    Chỉ chạy lại phase chưa xong. 404 không có job, 409 job đang chạy, 400 thiếu voice_id.
+    """
+    job = await service.resume_pipeline(job_id, req.voice_id if req else None)
     return _to_out(job)
 
 
