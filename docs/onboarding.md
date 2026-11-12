@@ -13,7 +13,7 @@
 
 1. Làm theo mục 3–5 của [README gốc](../README.md); chạy `npm start` ở gốc repo.
 2. Kiểm tra sống: `http://127.0.0.1:8000/api/ping` (Backend), `http://127.0.0.1:8001/health` (voice; lần đầu tải model nên chậm), `http://127.0.0.1:8000/docs` (Swagger toàn bộ API).
-3. Chạy test để chắc môi trường đúng: `python -m pytest tests` (trong `Backend/`, ~2,5 phút), `npm run typecheck` và `npm test` (trong `Frontend/`).
+3. Chạy test để chắc môi trường đúng: `python -m pytest tests` (trong `Backend/`, ~2,5 phút), `npm run typecheck` và `npm run test:all` (trong `Frontend/`).
 4. Mở app → **Cài đặt**, kết nối thứ bạn cần ([README gốc](../README.md) mục 6). Muốn chạy thử Flow thì nạp extension và đăng nhập tab Flow.
 5. Đọc theo thứ tự ở mục 3, **chỉ phần liên quan** tới việc bạn sắp làm.
 
@@ -86,14 +86,14 @@ Khi thêm tính năng chạy lâu: chọn một trong ba kiểu trên cho nhất
 | Phần | Lệnh | Ghi chú |
 |---|---|---|
 | Backend | `python -m pytest tests` (trong `Backend/`) | ~560 test; không gọi dịch vụ thật; `manual_test_*.py` **không** tự động |
-| Frontend | `npm run typecheck` (đây là "lint" duy nhất); `npm test` + `test:campaign|video|audio|discover|voices|veo|help` | `node:test` + `--experimental-strip-types` |
+| Frontend | `npm run typecheck` (đây là "lint" duy nhất); `npm run test:all` (tất cả) hoặc từng nhóm `npm test`, `test:campaign|studio|video|audio|discover|voices|veo|help` | `node:test` + `--experimental-strip-types` |
 | Voice | `uv run python -m unittest discover -s tests` | trong `services/voice-service/` |
 | Extension | `npm test`, `npm run verify` | trong `Extensions/FlowsVeo-Clean/` |
 | Launcher | `npm test --prefix Desktop` | |
 
 Quy tắc cho module frontend được test: **TS thuần** (không React/DOM, không path alias) và **import tương đối phải có đuôi `.ts`** (Node strip-types không tự thêm). `tsc` không bắt lỗi này; test sẽ đỏ.
 
-CI (`.github/workflows/release.yml`) chạy: `unittest` watermark, test voice-service, `typecheck`, `npm test`, `test:voices`, `test:veo`, test + verify extension. **Chỉ chạy khi tag `v*`**; không có CI cho mỗi PR, nên **tự chạy test trước khi merge**.
+CI (`.github/workflows/release.yml`) chạy: `unittest` watermark, test voice-service, `typecheck`, `test:all`, `npm run verify:ci` extension (không có smoke trình duyệt, xem README gốc mục 9), và smoke test bản đóng gói (voice, watermark). Các job chạy song song (xem [README gốc](../README.md) mục 9). **Chỉ chạy khi tag `v*` hoặc chạy tay**; không có CI cho mỗi PR và **không chạy pytest của Backend**, nên **tự chạy test trước khi merge**.
 
 ## 7. Tìm lỗi
 
@@ -118,5 +118,5 @@ Cập nhật khi xử lý xong.
 5. `features/studio/pollState.test.ts` và `timing.test.ts` chưa có script npm nào chạy (thêm `test:studio`).
 6. Bốn bước của Chiến dịch AI khai báo nhưng chưa có executor: `look_check`, `clip_check`, `compliance`, `export_pack` ([campaign-engine.md §3](campaign-engine.md)).
 7. `Backend/run_server.py` bật `reload=True`, dễ làm cả cụm dev tắt trên Windows khi chạy trực tiếp (dùng `npm start`).
-8. Không có CI chạy test ở mỗi PR.
+8. Không có CI chạy test ở mỗi PR, và CI không chạy `pytest` của Backend (~560 test).
 9. Bảo mật bridge (`/bridge/secret` không xác thực, CORS rộng, extension lưu token/cookie) và `OAUTHLIB_IGNORE_TLS=1` trong code OAuth chưa được xử lý.

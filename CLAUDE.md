@@ -49,8 +49,9 @@ Files named `manual_test_*.py` are NOT automated tests (they hit real services).
 npm run dev            # electron-vite dev (spawns/reuses backend itself too)
 npm run typecheck      # tsc --noEmit  — the only "lint"; there is no eslint
 npm run build          # electron-vite build → out/
+npm run test:all       # all frontend node:test files in one command (this is what CI runs)
 npm test               # node --experimental-strip-types --test src/features/workflow/__tests__/*.test.{ts,mjs}
-npm run test:campaign | test:voices | test:veo | test:help | test:audio | test:video | test:discover   # other feature test sets (same node:test runner); test:help guards the in-app help docs
+npm run test:campaign | test:voices | test:veo | test:help | test:studio | test:audio | test:video | test:discover   # other feature test sets (same node:test runner); test:help guards the in-app help docs
 node --experimental-strip-types --test path/to/file.test.ts   # single test file
 npm run package        # build + electron-builder (needs Backend/dist/backend_server.exe, voice dist exe, ffmpeg-static)
 ```
@@ -66,7 +67,7 @@ npm run verify                         # full: build, tests normal+minified, rel
 ```
 **Do not edit** the root-level `background.js`, `content.js`, `popup.js`, `popup.html`, `manifest.json` — they are generated from `src/` + `public/` by `npm run build` (this keeps "Load unpacked" on the repo folder working). Rebuild after changing `src/`, and don't reload the extension while a job is running.
 
-**Release**: pushing a `v*` tag runs `.github/workflows/release.yml` (Windows). It requires the same version in `Frontend/package.json`, `Frontend/package-lock.json`, the extension's `package.json`/`package-lock.json`/`public/manifest.json`, and a `docs/releases/<version>.md` file.
+**Release**: pushing a `v*` tag runs `.github/workflows/release.yml` (Windows). It requires the same version in `Frontend/package.json`, `Frontend/package-lock.json`, the extension's `package.json`/`package-lock.json`/`public/manifest.json` and the generated root `manifest.json` (run `npm run build` in the extension), and a `docs/releases/<version>.md` file. Jobs run in parallel (validate → backend-exe | voice-exe | extension | frontend-checks → package); only a tag publishes — a manual `workflow_dispatch` run builds and verifies without publishing.
 
 ## Architecture
 

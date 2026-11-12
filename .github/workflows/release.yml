@@ -219,22 +219,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: Extensions/FlowsVeo-Clean/package-lock.json
 
-      - name: Cache Playwright Chromium
-        uses: actions/cache@v6
-        with:
-          path: Extensions/FlowsVeo-Clean/.local/browsers
-          key: ext-chromium-${{ runner.os }}-${{ hashFiles('Extensions/FlowsVeo-Clean/package-lock.json') }}
-
-      # verify = build + test (thường và minify) + build release + smoke Chromium headless + zip.
+      # verify:ci = build + test (thường và minify) + build release + zip. Bỏ smoke Chromium headless của `npm run verify`
+      # (phải tải Chromium, chậm và nhạy với tốc độ máy); chạy `npm run verify` đầy đủ ở máy dev trước khi tag.
       - name: Install, verify and package
         working-directory: Extensions/FlowsVeo-Clean
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           npm ci
-          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.local/browsers'
-          npx playwright install chromium --no-shell
-          npm run verify
+          npm run verify:ci
 
       - uses: actions/upload-artifact@v7
         with:
@@ -271,7 +264,7 @@ jobs:
           npm run test:all
 
   package:
-    name: Package installer${{ startsWith(github.ref, 'refs/tags/v') && ' and publish' || ' (dry run, no publish)' }}
+    name: Package installer (publishes only on tag)
     needs: [validate, backend-exe, voice-exe, extension, frontend-checks]
     runs-on: windows-latest
     timeout-minutes: 60

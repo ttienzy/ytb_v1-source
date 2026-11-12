@@ -13,7 +13,8 @@
     "test:minify": "node scripts/test-minified.mjs",
     "test:standalone": "node scripts/standalone-check.mjs",
     "package": "node scripts/package.mjs",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "verify:ci": "node scripts/build.mjs && npm test && npm run test:minify && node scripts/build.mjs --release && node scripts/package.mjs"
   },
   "engines": {
     "node": ">=22"

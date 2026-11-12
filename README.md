@@ -265,8 +265,9 @@ File `manual_test_*.py` **không phải test tự động** (gọi dịch vụ t
 **Frontend** (`Frontend/`)
 ```powershell
 npm run typecheck        # tsc --noEmit — "lint" duy nhất, không có eslint
-npm test                 # chỉ gồm features/workflow/__tests__ (CI chạy cái này)
-npm run test:campaign    # cũng có: test:video, test:audio, test:discover, test:voices, test:veo, test:help
+npm run test:all         # toàn bộ test frontend, một lệnh (CI chạy cái này)
+npm test                 # chỉ nhóm features/workflow/__tests__
+npm run test:campaign    # cũng có: test:studio, test:video, test:audio, test:discover, test:voices, test:veo, test:help
 node --experimental-strip-types --test path\to\file.test.ts   # một file
 ```
 Test là `node:test` chạy trực tiếp trên `.ts` bằng `--experimental-strip-types`, nên **module được test phải là TS thuần**: không import React/DOM, không path alias, và **import tương đối phải ghi đủ đuôi `.ts`** (xem mô hình ở `shared/navModel.ts`, `features/help/model.ts`).
@@ -295,9 +296,20 @@ Quy ước dự án: mỗi giai đoạn mới của AI Workflow v2 phải đi k�
 Bản phát hành do **GitHub Actions** dựng ([.github/workflows/release.yml](.github/workflows/release.yml), runner Windows) khi push tag `v*` hoặc chạy tay (`workflow_dispatch`).
 
 Trước khi tag, **cùng một version** phải có ở:
-`Frontend/package.json`, `Frontend/package-lock.json`, `Extensions/FlowsVeo-Clean/package.json`, `Extensions/FlowsVeo-Clean/package-lock.json`, `Extensions/FlowsVeo-Clean/public/manifest.json`, và có file `docs/releases/<version>.md` (nội dung file này thành release notes). Tag phải đúng `v<version>`.
+`Frontend/package.json`, `Frontend/package-lock.json`, `Extensions/FlowsVeo-Clean/package.json`, `Extensions/FlowsVeo-Clean/package-lock.json`, `Extensions/FlowsVeo-Clean/public/manifest.json` và `manifest.json` ở gốc extension (file generated, tạo lại bằng `npm run build` trong thư mục extension), và có file `docs/releases/<version>.md` (nội dung file này thành release notes). Tag phải đúng `v<version>`. Quy trình: sửa version → `npm run build` ở extension → commit → push `main` → (tùy chọn) chạy tay workflow để thử → `git tag v<version>` và push tag.
 
-Workflow: kiểm tra version → test + PyInstaller Backend (`backend.spec` → `backend_server.exe`) → build Voice (`voice.spec` → `voice_server.exe`) → typecheck/test frontend → `npm run verify` extension (ra ZIP + SHA-256) → smoke test watermark runtime và voice đóng gói → `electron-builder` (NSIS x64) → publish lên release của `ttienzy/ytb_v1` bằng secret `RELEASES_TOKEN`. Auto-update dùng `electron-updater` với `latest.yml`.
+Workflow gồm các job, bốn job giữa chạy **song song** để rút ngắn thời gian:
+
+| Job | Làm gì |
+|---|---|
+| `validate` | Kiểm tra version đồng bộ và có release notes (lỗi thì dừng ngay) |
+| `backend-exe` | `unittest` watermark + PyInstaller (`backend.spec`) → `backend_server.exe` (bỏ qua nếu cache khớp) |
+| `voice-exe` | Unit test voice-service + PyInstaller (`voice.spec`) → `voice_server.exe` + smoke test exe đóng gói (nạp model, tổng hợp thử) |
+| `extension` | `npm run verify:ci`: build, test thường + minify, build release, ZIP + SHA-256 (không có smoke Chromium, xem ghi chú dưới) |
+| `frontend-checks` | `npm run typecheck` + `npm run test:all` |
+| `package` | Chỉ chạy khi các job trên đều qua: `electron-builder` (NSIS x64), kiểm `latest.yml`, smoke test watermark trên bản đóng gói, rồi **publish** lên release của `ttienzy/ytb_v1` bằng secret `RELEASES_TOKEN` |
+
+`npm run verify` đầy đủ (thêm smoke trình duyệt headless với trang Flow giả) **chỉ chạy tay ở máy dev**: bước đó phải tải Chromium, chậm, và từng đỏ trên runner CI dù pass cục bộ, nên đã bỏ khỏi CI. Hãy chạy nó trước khi tag nếu sửa extension. Chỉ khi chạy từ **tag `v*`** mới publish; chạy tay (`workflow_dispatch`) thực hiện toàn bộ build và kiểm tra nhưng **không publish**, dùng để thử thay đổi workflow. Auto-update dùng `electron-updater` với `latest.yml`.
 
 Build local (cần `Backend\dist\backend_server.exe`, `services\voice-service\dist\voice_server.exe`, `ffmpeg-static`, `watermark-runtime\node_modules`):
 ```powershell
