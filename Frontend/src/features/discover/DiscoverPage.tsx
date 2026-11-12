@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bookmark,
   BookmarkCheck,
@@ -22,6 +22,19 @@ import {
 } from 'lucide-react'
 import * as api from './services/discoverApi'
 import type { ChannelVideo, DiscoveredChannel, QuickCategory } from './types'
+import {
+  filterVideos,
+  formatScanTime,
+  isNewPending,
+  isPending,
+  keepExistingSelection,
+  mergeVideos,
+  scanToast,
+  type VideoFilter,
+} from './videoList'
+
+/** Số video mỗi lần quét / mỗi lần "Tải thêm". */
+const PAGE_SIZE = 30
 
 const QUICK_CATEGORIES: QuickCategory[] = [
   { id: 'street_food', label: 'Street Food Châu Á', query: 'Top English YouTube channels reviewing Asian street food Vietnam Thailand Pakistan India' },
@@ -79,7 +92,12 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
   // Videos State
   const [videos, setVideos] = useState<ChannelVideo[]>([])
   const [loadingVideos, setLoadingVideos] = useState(false)
-  const [videoFilter, setVideoFilter] = useState<'all' | 'golden' | 'views' | 'unprocessed' | 'completed'>('all')
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+  const [nextOffset, setNextOffset] = useState(0)
+  const [scannedAt, setScannedAt] = useState<number | null>(null)
+  // Mặc định "Chưa làm": video đã recap không che mất video mới.
+  const [videoFilter, setVideoFilter] = useState<VideoFilter>('unprocessed')
   const [selectedVideoUrls, setSelectedVideoUrls] = useState<string[]>([])
   const [addChannelModalOpen, setAddChannelModalOpen] = useState(false)
   const [newChannelInput, setNewChannelInput] = useState('')
@@ -112,29 +130,69 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
     loadInitialData()
   }, []) // eslint-disable-line
 
-  // Load videos whenever selectedChannel changes
-  const loadVideosForChannel = useCallback(async (channel: DiscoveredChannel) => {
+  // failedAvatars đọc qua ref: nếu để trong deps của useCallback thì mỗi lần một avatar lỗi,
+  // callback đổi → effect bên dưới tự quét lại kênh, xóa danh sách và bỏ chọn video của người dùng.
+  const failedAvatarsRef = useRef(failedAvatars)
+  failedAvatarsRef.current = failedAvatars
+  // Chỉ nhận kết quả của lần quét mới nhất (đổi kênh nhanh không bị ghi đè bởi response cũ).
+  const scanSeqRef = useRef(0)
+
+  // 'switch' = đổi kênh (xóa danh sách cũ); 'refresh' = bấm làm mới (giữ danh sách + lựa chọn trong lúc quét)
+  const loadVideosForChannel = useCallback(async (channel: DiscoveredChannel, mode: 'switch' | 'refresh' = 'switch') => {
+    const seq = ++scanSeqRef.current
     setLoadingVideos(true)
-    setVideos([])
-    setSelectedVideoUrls([])
+    if (mode === 'switch') {
+      setVideos([])
+      setSelectedVideoUrls([])
+      setHasMore(false)
+      setNextOffset(0)
+      setScannedAt(null)
+    }
     try {
-      const res = await api.fetchChannelVideos(channel.channel_url || channel.handle, 30)
-      setVideos(res.videos || [])
+      const res = await api.fetchChannelVideos(channel.channel_url || channel.handle, PAGE_SIZE, 0)
+      if (seq !== scanSeqRef.current) return
+      const fresh = res.videos || []
+      setVideos(fresh)
+      setHasMore(!!res.has_more)
+      setNextOffset(res.next_offset ?? fresh.length)
+      setScannedAt(res.scanned_at ?? null)
+      if (mode === 'refresh') setSelectedVideoUrls(prev => keepExistingSelection(prev, fresh))
+      const msg = scanToast(res, mode === 'refresh')
+      if (msg) showToast(msg)
       // Update avatar if missing
-      if (res.avatar_url && (!channel.avatar_url || failedAvatars[channel.handle])) {
+      if (res.avatar_url && (!channel.avatar_url || failedAvatarsRef.current[channel.handle])) {
         channel.avatar_url = res.avatar_url
         setFailedAvatars(prev => ({ ...prev, [channel.handle]: false }))
       }
     } catch (err: any) {
+      if (seq !== scanSeqRef.current) return
       showToast(`Lỗi quét video: ${err.message || 'Không tải được video kênh'}`)
     } finally {
-      setLoadingVideos(false)
+      if (seq === scanSeqRef.current) setLoadingVideos(false)
     }
-  }, [failedAvatars])
+  }, [])
+
+  // "Tải thêm": lấy các video cũ hơn cửa sổ hiện tại (không đụng tới nhãn MỚI).
+  async function loadMoreVideos() {
+    if (!selectedChannel || loadingMore || loadingVideos) return
+    const seq = scanSeqRef.current
+    setLoadingMore(true)
+    try {
+      const res = await api.fetchChannelVideos(selectedChannel.channel_url || selectedChannel.handle, PAGE_SIZE, nextOffset)
+      if (seq !== scanSeqRef.current) return
+      setVideos(prev => mergeVideos(prev, res.videos || []))
+      setHasMore(!!res.has_more)
+      setNextOffset(res.next_offset ?? nextOffset)
+    } catch (err: any) {
+      showToast(`Lỗi tải thêm video: ${err.message || 'Không tải được video kênh'}`)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
     if (selectedChannel) {
-      loadVideosForChannel(selectedChannel)
+      loadVideosForChannel(selectedChannel, 'switch')
     }
   }, [selectedChannel, loadVideosForChannel])
 
@@ -238,22 +296,11 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
 
   // Completed & Unprocessed Counts
   const completedCount = useMemo(() => videos.filter(v => v.processed_status === 'completed').length, [videos])
-  const unprocessedCount = useMemo(() => videos.filter(v => v.processed_status !== 'completed' && v.processed_status !== 'processing').length, [videos])
+  const unprocessedCount = useMemo(() => videos.filter(isPending).length, [videos])
+  const newCount = useMemo(() => videos.filter(isNewPending).length, [videos])
 
-  // Filtered & Sorted Videos
-  const displayedVideos = useMemo(() => {
-    let list = [...videos]
-    if (videoFilter === 'golden') {
-      list = list.filter(v => v.is_golden_duration || (v.duration_sec && v.duration_sec >= 300 && v.duration_sec <= 1080))
-    } else if (videoFilter === 'views') {
-      list.sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
-    } else if (videoFilter === 'unprocessed') {
-      list = list.filter(v => v.processed_status !== 'completed' && v.processed_status !== 'processing')
-    } else if (videoFilter === 'completed') {
-      list = list.filter(v => v.processed_status === 'completed')
-    }
-    return list
-  }, [videos, videoFilter])
+  // Filtered Videos (thứ tự gốc của kênh = mới đăng nhất trước; 'views' sắp theo lượt xem)
+  const displayedVideos = useMemo(() => filterVideos(videos, videoFilter), [videos, videoFilter])
 
   // Transfer selected videos to Studio Batch Queue
   function handleSendToStudio() {
@@ -264,7 +311,7 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
     if (onSendToStudioBatch) {
       onSendToStudioBatch(selectedVideoUrls)
     } else if (setActivePage) {
-      setActivePage('Workflow')
+      setActivePage('Recap & Audio')
     }
   }
 
@@ -623,7 +670,9 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                   )}
                 </div>
                 <div style={{ fontSize: 11.5, color: '#64748b' }}>
-                  {loadingVideos ? 'Đang quét danh sách video…' : `Tìm thấy ${videos.length} video mới nhất`}
+                  {loadingVideos
+                    ? 'Đang quét danh sách video…'
+                    : `Đã quét ${videos.length} video${hasMore ? '+' : ''} mới nhất${scannedAt ? ` · lúc ${formatScanTime(scannedAt)}` : ''}${newCount > 0 ? ` · ${newCount} video mới` : ''}`}
                 </div>
               </div>
             </div>
@@ -648,10 +697,34 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                 Tất cả ({videos.length})
               </button>
 
+              {newCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setVideoFilter('new')}
+                  title="Video kênh vừa đăng kể từ lần quét trước và bạn chưa làm"
+                  style={{
+                    height: 28,
+                    padding: '0 10px',
+                    borderRadius: 6,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    border: videoFilter === 'new' ? 'none' : '1px solid #fdba74',
+                    background: videoFilter === 'new' ? '#ea580c' : '#fff7ed',
+                    color: videoFilter === 'new' ? '#fff' : '#c2410c',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                  }}
+                >
+                  <Sparkles size={12} /> Mới ({newCount})
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setVideoFilter('unprocessed')}
-                title="Chỉ hiển thị các video mới tinh chưa từng được tạo recap"
+                title="Chỉ hiển thị các video chưa từng được tạo recap"
                 style={{
                   height: 28,
                   padding: '0 10px',
@@ -742,9 +815,9 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                 <button
                   type="button"
                   className="btn-cancel"
-                  onClick={() => loadVideosForChannel(selectedChannel)}
-                  disabled={loadingVideos}
-                  title="Quét lại video mới nhất"
+                  onClick={() => loadVideosForChannel(selectedChannel, 'refresh')}
+                  disabled={loadingVideos || loadingMore}
+                  title="Quét lại để tìm video mới đăng"
                   style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center' }}
                 >
                   <RefreshCw size={12} className={loadingVideos ? 'spin' : ''} />
@@ -782,7 +855,7 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
           )}
 
           {/* Videos Grid */}
-          {loadingVideos ? (
+          {loadingVideos && videos.length === 0 ? (
             <div style={{ padding: 60, textAlign: 'center', color: '#64748b' }}>
               <Loader2 size={28} className="spin" style={{ margin: '0 auto 10px', color: '#4f46e5' }} />
               <div style={{ fontSize: 13, fontWeight: 600 }}>Đang quét nhanh video của kênh…</div>
@@ -790,7 +863,11 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
             </div>
           ) : displayedVideos.length === 0 ? (
             <div style={{ padding: 50, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
-              Không có video nào khớp với bộ lọc hiện tại.
+              {videoFilter === 'unprocessed' && videos.length > 0
+                ? `Bạn đã làm hết ${videos.length} video đã quét. ${hasMore ? 'Bấm "Tải thêm" để xem video cũ hơn.' : 'Kênh chưa có video mới.'}`
+                : videoFilter === 'new'
+                  ? 'Chưa có video mới kể từ lần quét trước.'
+                  : 'Không có video nào khớp với bộ lọc hiện tại.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
@@ -798,6 +875,7 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                 const isSelected = selectedVideoUrls.includes(v.url)
                 const isCompleted = v.processed_status === 'completed'
                 const isProcessing = v.processed_status === 'processing'
+                const isNew = isNewPending(v)
                 return (
                   <div
                     key={v.id}
@@ -870,6 +948,30 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                         </div>
                       )}
 
+                      {isNew && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            padding: '3px 8px',
+                            borderRadius: 6,
+                            background: 'rgba(234, 88, 12, 0.95)',
+                            color: '#fff',
+                            fontSize: 10.5,
+                            fontWeight: 800,
+                            letterSpacing: '0.04em',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                          }}
+                          title="Video mới đăng kể từ lần quét trước"
+                        >
+                          <Sparkles size={11} /> MỚI
+                        </div>
+                      )}
+
                       {isProcessing && (
                         <div
                           style={{
@@ -931,7 +1033,17 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, fontSize: 11, color: '#64748b' }}>
-                        <span>{v.view_count_formatted}</span>
+                        <span>
+                          {v.view_count_formatted}
+                          {v.published_label && (
+                            <span
+                              title={v.published_exact ? 'Ngày đăng chính xác' : 'Ngày đăng xấp xỉ'}
+                              style={{ color: v.is_new ? '#c2410c' : '#94a3b8', fontWeight: v.is_new ? 700 : 400 }}
+                            >
+                              {` · ${v.published_label}`}
+                            </span>
+                          )}
+                        </span>
                         <a
                           href={v.url}
                           target="_blank"
@@ -947,6 +1059,22 @@ export function DiscoverPage({ onSendToStudioBatch, setActivePage }: DiscoverPag
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {hasMore && !(loadingVideos && videos.length === 0) && (
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={loadMoreVideos}
+                disabled={loadingMore || loadingVideos}
+                title="Lấy thêm các video cũ hơn của kênh"
+                style={{ height: 34, padding: '0 16px', fontSize: 12.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                {loadingMore ? <Loader2 size={13} className="spin" /> : <Plus size={13} />}
+                {loadingMore ? 'Đang tải thêm…' : `Tải thêm ${PAGE_SIZE} video cũ hơn`}
+              </button>
             </div>
           )}
         </div>

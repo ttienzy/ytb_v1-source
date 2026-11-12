@@ -57,8 +57,8 @@ def recommend_channels(req: RecommendRequest):
 
 @router.post("/channel-videos")
 def get_channel_videos(req: ChannelVideoRequest):
-    """Trích xuất 20-30 video mới nhất của kênh YouTube bằng yt-dlp flat playlist."""
-    return service.get_channel_videos(channel_url=req.channel_url, limit=req.limit)
+    """Trích xuất video của kênh YouTube bằng yt-dlp flat playlist (mới nhất trước, hỗ trợ offset)."""
+    return service.get_channel_videos(channel_url=req.channel_url, limit=req.limit, offset=req.offset)
 
 
 @router.get("/processed-history")

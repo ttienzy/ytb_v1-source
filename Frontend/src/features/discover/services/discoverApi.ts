@@ -47,11 +47,11 @@ export async function searchChannelsWithGemini(query: string, category?: string)
   return res.json()
 }
 
-export async function fetchChannelVideos(channelUrl: string, limit = 24): Promise<ChannelVideosResponse> {
+export async function fetchChannelVideos(channelUrl: string, limit = 24, offset = 0): Promise<ChannelVideosResponse> {
   const res = await fetch(`${API_URL}/api/discover/channel-videos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel_url: channelUrl, limit }),
+    body: JSON.stringify({ channel_url: channelUrl, limit, offset }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

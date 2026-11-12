@@ -10,6 +10,13 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.core.config import TOOLS_DIR
+from app.discover.freshness import (
+    fetch_rss_published,
+    published_label,
+    register_scan,
+    resolve_published,
+    to_upload_date,
+)
 from app.discover.history import get_processed_video_map
 from app.discover.metadata import (
     fetch_live_channel_metadata,
@@ -168,8 +175,12 @@ def recommend_channels(query: str = "", category: str | None = None) -> list[dic
     return matches if matches else presets
 
 
-def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
-    """Trích xuất 20-30 video mới nhất của kênh YouTube bằng yt-dlp flat playlist và cập nhật cache."""
+def get_channel_videos(channel_url: str, limit: int = 24, offset: int = 0) -> dict[str, Any]:
+    """Trích xuất video của kênh (mới nhất trước) bằng yt-dlp flat playlist và cập nhật cache.
+
+    offset=0 là lần quét "làm mới": ghi sổ video đã thấy để gắn nhãn MỚI. offset>0 là "Tải thêm"
+    video cũ hơn — chỉ đọc sổ, không ghi.
+    """
     url = channel_url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="Thiếu channel_url.")
@@ -185,14 +196,20 @@ def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
         target_url = f"{target_url}/videos"
 
     bounded_limit = max(5, min(limit, 50))
+    start_idx = max(0, offset)
     cmd = [
         sys.executable,
         "-m",
         "yt_dlp",
         "--flat-playlist",
         "--dump-single-json",
+        "--playlist-start",
+        str(start_idx + 1),
         "--playlist-end",
-        str(bounded_limit),
+        str(start_idx + bounded_limit),
+        # Flat mode không có ngày đăng; cờ này cho timestamp xấp xỉ (theo ngày/tháng) để hiển thị.
+        "--extractor-args",
+        "youtubetab:approximate_date",
         "--no-warnings",
         target_url,
     ]
@@ -204,10 +221,10 @@ def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=45,
         )
     except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Quá thời gian tải danh sách video từ kênh (Timeout 30s).")
+        raise HTTPException(status_code=504, detail="Quá thời gian tải danh sách video từ kênh (Timeout 45s).")
 
     if proc.returncode != 0:
         err = proc.stderr or proc.stdout or "Không thể tải playlist kênh"
@@ -241,8 +258,14 @@ def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
         }
         write_cache(cache)
 
-    entries = data.get("entries") or []
+    entries = [it for it in (data.get("entries") or []) if it]
     processed_map = get_processed_video_map()
+
+    # Ngày đăng chính xác (RSS, ~15 video mới nhất) + sổ "đã thấy" để gắn nhãn MỚI.
+    rss_map = fetch_rss_published(channel_id) if start_idx == 0 else {}
+    entry_ids = [it.get("id") or "" for it in entries]
+    scan = register_scan(channel_id or url, entry_ids, record=start_idx == 0)
+
     videos = []
     for it in entries:
         if not it:
@@ -259,6 +282,7 @@ def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
             best_thumb = thumbs[-1].get("url") or ""
 
         p_info = processed_map.get(v_id)
+        published_iso, published_exact = resolve_published(v_id, rss_map, it.get("timestamp"))
 
         videos.append({
             "id": v_id,
@@ -270,7 +294,11 @@ def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
             "view_count": view_cnt,
             "view_count_formatted": format_views(view_cnt),
             "thumbnail_url": best_thumb,
-            "upload_date": it.get("upload_date") or "",
+            "upload_date": it.get("upload_date") or to_upload_date(published_iso),
+            "published_at": published_iso,
+            "published_exact": published_exact,
+            "published_label": published_label(published_iso, published_exact),
+            "is_new": v_id in scan["new_ids"],
             "processed_status": p_info.get("status") if p_info else None,
             "processed_date": p_info.get("formatted_date") if p_info else None,
             "processed_job_id": p_info.get("job_id") if p_info else None,
@@ -284,5 +312,12 @@ def get_channel_videos(channel_url: str, limit: int = 24) -> dict[str, Any]:
         "avatar_url": avatar_url,
         "subscribers": format_subscribers(subs_count),
         "video_count": len(videos),
+        "offset": start_idx,
+        "next_offset": start_idx + len(entries),
+        "has_more": len(entries) >= bounded_limit,
+        "new_in_scan": scan["new_in_scan"],
+        "first_scan": scan["first_scan"],
+        "previous_scan_at": scan["previous_scan_at"],
+        "scanned_at": int(time.time()),
         "videos": videos,
     }

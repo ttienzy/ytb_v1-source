@@ -36,7 +36,7 @@ def scout_channels_with_gemini(query: str) -> list[dict[str, Any]]:
         stream_resp = _call_gemini_stream(
             prompt_text=prompt,
             filename="discover_channels.txt",
-            query_url=chat_message,
+            query_text=chat_message,
             allow_refresh=False,
         )
 
