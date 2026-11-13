@@ -30,7 +30,14 @@ export interface StructuredPromptResult {
 export interface MotionReferenceRoles {
   character?: boolean
   scene?: boolean
+  /** Ảnh nhân vật là sheet do node "Tạo ảnh nhân vật mới" tạo: chân dung bên trái, áo xoay 3 góc (không đầu) bên phải. */
+  characterSheet?: boolean
 }
+
+// Sheet có nhiều hình người (chân dung + 3 dáng áo) nhưng là MỘT người: nói rõ để video không nhân bản người.
+const SHEET_PERSON = 'the one person shown in the character sheet image: take the face and hairstyle from the portrait '
+  + 'and the outfit from the front, side and back views'
+const SHEET_ONLY_ONE = 'The video shows only this one person, wearing that exact outfit.'
 
 export const DEFAULT_MOTION_PROMPT =
   'Keep the movement natural and fluid, matching the timing and rhythm of the input video.'
@@ -60,7 +67,14 @@ const MENTIONS_ROLES = /\b(image reference|reference image|image 1|image 2|motio
 
 /** Câu mở đầu theo ảnh thật sự có. Ảnh gửi theo thứ tự: nhân vật (Image 1) rồi bối cảnh (Image 2 hoặc Image 1 nếu không có nhân vật). */
 export function referenceOpening(roles: MotionReferenceRoles = {}): string {
-  const { character, scene } = roles
+  const { character, scene, characterSheet } = roles
+  if (character && characterSheet) {
+    if (scene) {
+      return `Apply the pose and motion from the input video to ${SHEET_PERSON.replace('the character sheet image', 'Image 1, a character sheet')}. `
+        + `Place this person in the setting shown in Image 2. ${SHEET_ONLY_ONE}`
+    }
+    return `Apply the pose and motion from the input video to ${SHEET_PERSON}. ${SHEET_ONLY_ONE}`
+  }
   if (character && scene) {
     return 'Apply the pose and motion from the input video to the person in Image 1, placed in the setting shown in Image 2. '
       + 'Keep the face, hairstyle and outfit from Image 1 unchanged.'

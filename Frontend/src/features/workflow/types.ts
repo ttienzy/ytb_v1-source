@@ -393,6 +393,8 @@ export interface MotionReferenceAsset {
   trimEndSec?: number
   /** Thời lượng thật của video mẫu (giây), đọc khi nạp file. */
   durationSec?: number
+  /** Ảnh nhân vật lấy từ node "Tạo ảnh nhân vật mới" (sheet: chân dung + áo nhiều góc), để prompt gọi đúng loại ảnh. */
+  source?: 'character_sheet'
 }
 
 export interface MotionCreativeDirection {

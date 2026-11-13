@@ -13,6 +13,7 @@ import {
   NodeChange,
   EdgeChange,
   BackgroundVariant,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import '../motionFlow.css'
@@ -28,6 +29,7 @@ import {
   Film,
   Sliders,
   Layers,
+  UserPlus,
 } from 'lucide-react'
 
 // Custom Nodes for Motion Control Studio
@@ -35,10 +37,23 @@ import { MotionReferenceGroupNode } from '../nodes/motion/MotionReferenceGroupNo
 import { MotionCreativeDirectionNode } from '../nodes/motion/MotionCreativeDirectionNode'
 import { MotionPromptPreviewNode } from '../nodes/motion/MotionPromptPreviewNode'
 import { MotionOutputNode } from '../nodes/motion/MotionOutputNode'
+import { MotionCharacterSheetNode } from '../nodes/motion/MotionCharacterSheetNode'
 
 // Services & Types
 import { buildStructuredPrompt, DEFAULT_MOTION_CREATIVE_DIRECTION, isLegacyDefaultBrief } from '../services/motionPromptBuilder'
-import { fetchMotionDefaultPrompt, fetchMotionPresets } from '../services/workflowApi'
+import { fetchMotionDefaultPrompt, fetchMotionPresets, generateMotionCharacterSheet } from '../services/workflowApi'
+import {
+  CHARACTER_SHEET_EDGE_ID,
+  CHARACTER_SHEET_NODE_ID,
+  CHARACTER_SHEET_TARGET_HANDLE,
+  EMPTY_CHARACTER_SHEET,
+  characterSheetFileError,
+  characterSheetMissing,
+  isSheetApplied,
+  withSource,
+  type CharacterSheetRole,
+  type CharacterSheetState,
+} from '../services/motionCharacterSheet'
 import {
   findMotionProfile,
   getMotionTrimDuration,
@@ -96,10 +111,22 @@ const nodeTypes = {
   motionCreative: MotionCreativeDirectionNode,
   motionPreview: MotionPromptPreviewNode,
   motionOutput: MotionOutputNode,
+  motionCharacterSheet: MotionCharacterSheetNode,
 }
 
 const edgeTypes = {
   removable: RemovableEdge,
+}
+
+// Node tùy chọn "Tạo Ảnh Nhân Vật Mới": bên trái khối Nguyên Liệu Tham Chiếu, ngang ô Nhân Vật.
+const CHARACTER_SHEET_POSITION = { x: -400, y: 230 }
+const CHARACTER_SHEET_EDGE: Edge = {
+  id: CHARACTER_SHEET_EDGE_ID,
+  source: CHARACTER_SHEET_NODE_ID,
+  sourceHandle: 'out-sheet',
+  target: 'n-refs',
+  targetHandle: CHARACTER_SHEET_TARGET_HANDLE,
+  type: 'removable',
 }
 
 export function MotionControlWorkspace({
@@ -123,6 +150,7 @@ export function MotionControlWorkspace({
   const [runError, setRunError] = useState<MotionRunError | null>(null)
   // State update không đồng bộ; ref này chặn double-click ngay trong cùng tick.
   const runLockRef = useRef(false)
+  const flowInstanceRef = useRef<ReactFlowInstance | null>(null)
 
   const showToast = useCallback((msg: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -402,8 +430,12 @@ export function MotionControlWorkspace({
 
   const structuredPrompt = useMemo(() => {
     // Câu mở đầu của prompt dựng theo ảnh thật sự đang nối (không bao giờ nhắc tới ảnh chưa có).
-    return buildStructuredPrompt(creativeDirection, { character: characterAsset.filled, scene: sceneAsset.filled })
-  }, [creativeDirection, characterAsset.filled, sceneAsset.filled])
+    return buildStructuredPrompt(creativeDirection, {
+      character: characterAsset.filled,
+      scene: sceneAsset.filled,
+      characterSheet: characterAsset.filled && characterAsset.source === 'character_sheet',
+    })
+  }, [creativeDirection, characterAsset.filled, characterAsset.source, sceneAsset.filled])
 
   const activePrompt = isCustomPrompt ? customPromptText : structuredPrompt.fullPrompt
 
@@ -485,7 +517,7 @@ export function MotionControlWorkspace({
     if (role === 'character') {
       setCharacterAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
-        return { ...prev, filled: true, previewUrl, fileName: file.name, file, backendPath: undefined }
+        return { ...prev, filled: true, previewUrl, fileName: file.name, file, backendPath: undefined, source: undefined }
       })
       showToast(`Đã nạp ảnh nhân vật: ${file.name}`)
     } else if (role === 'motion') {
@@ -529,7 +561,7 @@ export function MotionControlWorkspace({
     if (role === 'character') {
       setCharacterAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
-        return { ...prev, filled: false, previewUrl: null, fileName: '', file: undefined, backendPath: undefined }
+        return { ...prev, filled: false, previewUrl: null, fileName: '', file: undefined, backendPath: undefined, source: undefined }
       })
     } else if (role === 'motion') {
       setMotionAsset((prev) => {
@@ -609,6 +641,7 @@ export function MotionControlWorkspace({
           fileName: assetRef.fileName || `${item.id}.jpg`,
           backendPath: assetRef.backendPath,
           file,
+          source: undefined,
         }
       })
       showToast(`Đã nạp ảnh nhân vật từ Thư viện Veo`)
@@ -684,6 +717,13 @@ export function MotionControlWorkspace({
   // 8. React Flow Nodes & Positions (NEVER RESET POSITIONS ON DATA CHANGE!)
   // -------------------------------------------------------------
   const [nodes, setNodes] = useState<Node[]>([
+    // Node tùy chọn: hiện sẵn bên trái ô Nhân Vật (nút X để ẩn, mở lại từ thanh bên trái). Không ảnh hưởng luồng tạo video.
+    {
+      id: CHARACTER_SHEET_NODE_ID,
+      type: 'motionCharacterSheet',
+      position: CHARACTER_SHEET_POSITION,
+      data: {},
+    },
     {
       id: 'n-refs',
       type: 'motionRefGroup',
@@ -714,6 +754,7 @@ export function MotionControlWorkspace({
   // 9. Edges State (Neutral Dashed, Animated When Running)
   // -------------------------------------------------------------
   const [edges, setEdges] = useState<Edge[]>([
+    CHARACTER_SHEET_EDGE,
     {
       id: 'e-char-creative',
       source: 'n-refs',
@@ -756,6 +797,129 @@ export function MotionControlWorkspace({
     },
   ])
 
+  // -------------------------------------------------------------
+  // 9b. Node tùy chọn "Tạo Ảnh Nhân Vật Mới": ảnh người + trang phục -> ảnh tham chiếu nhân vật (ChatGPT).
+  //     Chỉ ghi vào ô Nhân Vật khi người dùng bấm "Dùng làm Ảnh Nhân Vật"; luồng tạo video không đọc node này.
+  // -------------------------------------------------------------
+  const [characterSheet, setCharacterSheet] = useState<CharacterSheetState>(EMPTY_CHARACTER_SHEET)
+  const sheetRunningRef = useRef(false)
+  const sheetApplied = isSheetApplied(characterSheet.result, characterAsset)
+
+  const revokeBlob = (url?: string | null) => {
+    if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
+  }
+
+  const openCharacterSheetNode = useCallback(() => {
+    setNodes((nds) => nds.some((n) => n.id === CHARACTER_SHEET_NODE_ID)
+      ? nds
+      : [...nds, { id: CHARACTER_SHEET_NODE_ID, type: 'motionCharacterSheet', position: CHARACTER_SHEET_POSITION, data: {} }])
+    setEdges((eds) => eds.some((e) => e.id === CHARACTER_SHEET_EDGE_ID) ? eds : [...eds, CHARACTER_SHEET_EDGE])
+    // Node nằm bên trái canvas, có thể ngoài khung nhìn hiện tại: căn lại khung nhìn sau khi node được vẽ.
+    setTimeout(() => {
+      void flowInstanceRef.current?.fitView({ padding: 0.15, duration: 300 })
+    }, 60)
+  }, [])
+
+  const closeCharacterSheetNode = useCallback(() => {
+    if (sheetRunningRef.current) return
+    setNodes((nds) => nds.filter((n) => n.id !== CHARACTER_SHEET_NODE_ID))
+    setEdges((eds) => eds.filter((e) => e.source !== CHARACTER_SHEET_NODE_ID))
+  }, [])
+
+  const handleSheetFile = useCallback((role: CharacterSheetRole, file: File) => {
+    const problem = characterSheetFileError(file)
+    if (problem) {
+      showToast(problem)
+      return
+    }
+    const previewUrl = URL.createObjectURL(file)
+    setCharacterSheet((prev) => {
+      revokeBlob(prev[role]?.previewUrl)
+      return withSource(prev, role, { fileName: file.name, previewUrl, file })
+    })
+  }, [showToast])
+
+  const handleSheetClear = useCallback((role: CharacterSheetRole) => {
+    setCharacterSheet((prev) => {
+      revokeBlob(prev[role]?.previewUrl)
+      return withSource(prev, role, null)
+    })
+  }, [])
+
+  const handleSheetUseCharacterSlot = useCallback(() => {
+    if (!characterAsset.filled || characterAsset.source === 'character_sheet') return
+    // URL blob riêng: ô Nhân Vật đổi ảnh (và thu hồi URL của nó) không làm hỏng ảnh xem trước ở node này.
+    const previewUrl = characterAsset.file ? URL.createObjectURL(characterAsset.file) : characterAsset.previewUrl
+    setCharacterSheet((prev) => {
+      revokeBlob(prev.identity?.previewUrl)
+      return withSource(prev, 'identity', {
+        fileName: characterAsset.fileName,
+        previewUrl,
+        file: characterAsset.file,
+        backendPath: characterAsset.backendPath,
+      })
+    })
+  }, [characterAsset])
+
+  const handleSheetChangeText = useCallback((text: string) => {
+    setCharacterSheet((prev) => ({ ...prev, changes: text }))
+  }, [])
+
+  const handleGenerateSheet = useCallback(async () => {
+    if (sheetRunningRef.current) return
+    const snapshot = characterSheet
+    const missing = characterSheetMissing(snapshot)
+    if (missing.length > 0) {
+      showToast(missing[0])
+      return
+    }
+    sheetRunningRef.current = true
+    setCharacterSheet((prev) => ({ ...prev, status: 'running', error: null }))
+    try {
+      const paths: Record<CharacterSheetRole, string> = { identity: '', outfit: '' }
+      for (const role of ['identity', 'outfit'] as const) {
+        const source = snapshot[role]!
+        let path = source.backendPath
+        if (!path && source.file) {
+          const uploaded = await uploadImage(source.file)
+          path = uploaded.file_path
+          setCharacterSheet((prev) => (prev[role]?.file === source.file
+            ? { ...prev, [role]: { ...prev[role]!, backendPath: uploaded.file_path } }
+            : prev))
+        }
+        paths[role] = path || ''
+      }
+      const result = await generateMotionCharacterSheet(paths.identity, paths.outfit, snapshot.changes.trim())
+      setCharacterSheet((prev) => ({ ...prev, status: 'done', error: null, result }))
+      showToast(`Đã tạo ảnh nhân vật mới (${result.seconds}s). Bấm “Dùng làm Ảnh Nhân Vật” để đưa vào ô Nhân Vật.`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setCharacterSheet((prev) => ({ ...prev, status: 'error', error: message }))
+      showToast(`Không tạo được ảnh nhân vật: ${message}`)
+    } finally {
+      sheetRunningRef.current = false
+    }
+  }, [characterSheet, showToast])
+
+  const handleApplySheet = useCallback(() => {
+    const result = characterSheet.result
+    if (!result || isRunning) return
+    setCharacterAsset((prev) => {
+      revokeBlob(prev.previewUrl)
+      return {
+        ...prev,
+        filled: true,
+        previewUrl: result.previewUrl,
+        fileName: result.fileName,
+        file: undefined,
+        backendPath: result.backendPath,
+        source: 'character_sheet',
+      }
+    })
+    setActiveRole('character')
+    showToast('Đã đưa ảnh nhân vật mới vào ô Nhân Vật. Prompt tự đổi câu mở đầu cho ảnh dạng sheet.')
+  }, [characterSheet.result, isRunning, showToast])
+
   // Attach runtime data to nodes dynamically without triggering side-effect state loops
   const nodesWithData = useMemo(() => {
     return nodes.map((node) => {
@@ -781,6 +945,24 @@ export function MotionControlWorkspace({
                 onOpenPreviewModal(url, title || 'Video Tham Chiếu')
               }
             },
+          },
+        }
+      }
+      if (node.id === CHARACTER_SHEET_NODE_ID) {
+        return {
+          ...node,
+          data: {
+            sheet: characterSheet,
+            canUseCharacterSlot: characterAsset.filled && characterAsset.source !== 'character_sheet',
+            applied: sheetApplied,
+            isMotionRunning: isRunning,
+            onPickFile: handleSheetFile,
+            onClearSource: handleSheetClear,
+            onUseCharacterSlot: handleSheetUseCharacterSlot,
+            onChangeText: handleSheetChangeText,
+            onGenerate: handleGenerateSheet,
+            onApply: handleApplySheet,
+            onClose: closeCharacterSheetNode,
           },
         }
       }
@@ -877,6 +1059,15 @@ export function MotionControlWorkspace({
     workflowName,
     selectedProject,
     onOpenPreviewModal,
+    characterSheet,
+    sheetApplied,
+    handleSheetFile,
+    handleSheetClear,
+    handleSheetUseCharacterSlot,
+    handleSheetChangeText,
+    handleGenerateSheet,
+    handleApplySheet,
+    closeCharacterSheetNode,
   ])
 
   // Attach styles & handlers to edges dynamically
@@ -886,7 +1077,9 @@ export function MotionControlWorkspace({
       type: 'removable',
       animated: isRunning,
       style: {
-        stroke: isRunning ? '#4F46E5' : e.id === 'e-motion-creative' ? '#EA580C' : '#94A3B8',
+        stroke: e.id === CHARACTER_SHEET_EDGE_ID
+          ? '#10B981'
+          : isRunning ? '#4F46E5' : e.id === 'e-motion-creative' ? '#EA580C' : '#94A3B8',
         strokeWidth: e.id === 'e-preview-output' ? 2.5 : 2,
         strokeDasharray: '4 4',
       },
@@ -898,7 +1091,13 @@ export function MotionControlWorkspace({
   }, [edges, isRunning, handleDeleteEdge])
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    (changes: NodeChange[]) => {
+      // Không cho xóa node tạo ảnh nhân vật (phím Delete) khi đang chờ ChatGPT trả ảnh.
+      const allowed = changes.filter(
+        (c) => !(c.type === 'remove' && c.id === CHARACTER_SHEET_NODE_ID && sheetRunningRef.current)
+      )
+      setNodes((nds) => applyNodeChanges(allowed, nds))
+    },
     []
   )
 
@@ -909,6 +1108,11 @@ export function MotionControlWorkspace({
 
   // Connection validation
   const isValidConnection = useCallback((connection: Connection) => {
+    // 0. Node "Tạo Ảnh Nhân Vật Mới" chỉ nối vào cổng của ô Nhân Vật, và cổng đó chỉ nhận từ node này
+    if (connection.source === CHARACTER_SHEET_NODE_ID) {
+      return connection.target === 'n-refs' && connection.targetHandle === CHARACTER_SHEET_TARGET_HANDLE
+    }
+    if (connection.targetHandle === CHARACTER_SHEET_TARGET_HANDLE) return false
     // 1. References can only connect to Creative Direction
     if (connection.source === 'n-refs' && connection.target !== 'n-creative') return false
     // 2. Creative Direction can only connect to Prompt Preview
@@ -1485,6 +1689,16 @@ export function MotionControlWorkspace({
             setIsInspectorOpen(true)
           },
         },
+        {
+          id: 'character-sheet',
+          name: 'Tạo Ảnh Nhân Vật Mới',
+          desc: 'Tùy chọn: ảnh của bạn + trang phục → ảnh nhân vật mới (ChatGPT)',
+          icon: <UserPlus size={16} />,
+          onClick: () => {
+            openCharacterSheetNode()
+            showToast('Đã mở node “Tạo Ảnh Nhân Vật Mới” bên trái ô Nhân Vật.')
+          },
+        },
       ],
     },
     {
@@ -1668,6 +1882,7 @@ export function MotionControlWorkspace({
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onNodeClick={(_, node) => {
+                if (node.id === CHARACTER_SHEET_NODE_ID) return   // node tự chứa, không có trang Inspector
                 if (node.id === 'n-refs') setSelectedNodeType('reference')
                 else if (node.id === 'n-creative') setSelectedNodeType('creative')
                 else if (node.id === 'n-preview') setSelectedNodeType('preview')
@@ -1676,6 +1891,9 @@ export function MotionControlWorkspace({
               }}
               fitView
               fitViewOptions={{ padding: 0.15 }}
+              onInit={(instance) => {
+                flowInstanceRef.current = instance
+              }}
               minZoom={0.3}
               maxZoom={2}
               deleteKeyCode={['Backspace', 'Delete']}

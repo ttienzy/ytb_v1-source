@@ -139,6 +139,20 @@ class WorkflowAssetUploadResponse(BaseModel):
     data_url: Optional[str] = Field(default=None, description="Data URL base64 nếu cần hiển thị trực tiếp")
 
 
+class MotionCharacterSheetRequest(BaseModel):
+    """Node tùy chọn của Motion Control: ảnh người + ảnh trang phục -> một ảnh tham chiếu nhân vật mới."""
+    identity_path: str = Field(..., min_length=1, description="Đường dẫn ảnh nhân vật trên máy (từ /api/veo/upload-image)")
+    outfit_path: str = Field(..., min_length=1, description="Đường dẫn ảnh trang phục trên máy (từ /api/veo/upload-image)")
+    changes: str = Field(default="", max_length=2000, description="Thay đổi thêm, ghi vào mục [OPTIONAL CHANGES] của prompt")
+
+
+class MotionCharacterSheetResponse(BaseModel):
+    asset: WorkflowAssetUploadResponse
+    prompt: str = Field(description="Prompt đã gửi cho ChatGPT")
+    template: dict[str, Any] = Field(default_factory=dict, description="Mẫu prompt đã dùng (id, phiên bản)")
+    seconds: float = 0.0
+
+
 class WorkflowAssetImportVeoRequest(BaseModel):
     image_id: str = Field(..., min_length=1, description="ID ảnh trong thư viện Veo Studio")
     kind: Optional[str] = Field(default="product", description="product | model | scene")

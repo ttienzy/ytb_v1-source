@@ -18,6 +18,7 @@ import type {
 import type { PromptPresetItem, MotionPresetItem, MotionOutputConfig, MotionCreativeDirection } from '../types'
 import { DEFAULT_CLIP_DURATION_SECONDS } from './buildScenePlan.ts'
 import { getWorkflowConfig } from './workflowConfig.ts'
+import type { CharacterSheetResult } from './motionCharacterSheet.ts'
 import { toApiError } from '../../../shared/apiError.ts'
 
 /**
@@ -156,6 +157,39 @@ export async function fetchMotionDefaultPrompt(): Promise<string> {
     return data.prompt || ''
   } catch {
     return ''
+  }
+}
+
+/**
+ * Node "Tạo ảnh nhân vật mới" (Motion Control): ảnh người + ảnh trang phục -> ảnh tham chiếu nhân vật bằng ChatGPT.
+ * Thường 40–70 giây; không gọi Flow, không tự thử lại.
+ */
+export async function generateMotionCharacterSheet(
+  identityPath: string,
+  outfitPath: string,
+  changes = '',
+): Promise<CharacterSheetResult> {
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}/api/workflow/motion/character-sheet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identity_path: identityPath, outfit_path: outfitPath, changes }),
+    })
+  } catch (error) {
+    throw toApiError(error, 'tạo ảnh nhân vật mới')
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `Tạo ảnh nhân vật thất bại (HTTP ${res.status})`)
+  }
+  const data = await res.json()
+  return {
+    previewUrl: `${API_URL}${data.asset.preview_url}`,
+    backendPath: data.asset.backend_path,
+    fileName: data.asset.file_name,
+    prompt: data.prompt || '',
+    seconds: Number(data.seconds) || 0,
   }
 }
 

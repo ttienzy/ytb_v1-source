@@ -334,7 +334,13 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                   <img
                     src={character.previewUrl}
                     alt={character.fileName || 'Character'}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      // Ảnh sheet (chân dung + áo nhiều góc) là 16:9: hiện đủ, không cắt mất mặt hoặc áo.
+                      objectFit: character.source === 'character_sheet' ? 'contain' : 'cover',
+                      background: character.source === 'character_sheet' ? '#1F2937' : undefined,
+                    }}
                   />
                   {nodeData.onRemoveAsset && (
                     <button
@@ -397,6 +403,15 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                 <span>Tải lên</span>
               </button>
             </div>
+
+            {/* Cổng nhận từ node tùy chọn "Tạo Ảnh Nhân Vật Mới" (chỉ để hiển thị nguồn ảnh) */}
+            <Handle
+              type="target"
+              position={Position.Left}
+              id="in-sheet"
+              className={`mf-ref-handle img ${character.source === 'character_sheet' ? 'on' : ''}`}
+              style={{ left: -7, top: '50%', transform: 'translateY(-50%)' }}
+            />
 
             {/* Connection Handle for Character */}
             <Handle

@@ -5,7 +5,7 @@ export const canvasAiDoc: HelpDoc = {
   title: 'Canvas AI (sơ đồ node & Motion Control)',
   summary:
     'Không gian node-graph để tự động hóa video từ ảnh sản phẩm (ảnh → Gemini phân tích → kịch bản → clip Flow → xuất video), và tab Motion Control để chuyển động tác từ một video mẫu sang nhân vật/bối cảnh của bạn. Chỉ dùng Omni 1.2 Flash qua Google Flow; mỗi clip tốn credit thật.',
-  verifiedAt: '2026-11-12',
+  verifiedAt: '2026-11-13',
   requires: [
     {
       label: 'Extension Flow đã nạp, tab Google Flow đã đăng nhập',
@@ -59,6 +59,18 @@ export const canvasAiDoc: HelpDoc = {
       ],
     },
     {
+      id: 'motion-anh-nhan-vat-moi',
+      name: 'Tạo Ảnh Nhân Vật Mới (node tùy chọn của Motion Control)',
+      what: 'Muốn giữ khuôn mặt của bạn nhưng đổi trang phục: đưa ảnh nhân vật và ảnh trang phục, ChatGPT vẽ một ảnh tham chiếu mới (chân dung bên trái, trang phục xoay mặt trước, nghiêng, sau bên phải) theo đúng mẫu prompt “Ảnh mẫu mặc áo” của Chiến dịch AI. Không gọi Google Flow, không tốn credit Flow; dùng tài khoản ChatGPT trong Cài đặt, mỗi ảnh thường 40–70 giây.',
+      how: [
+        'Node hiện sẵn bên trái ô Nhân Vật; nút X để ẩn, mở lại bằng mục “Tạo Ảnh Nhân Vật Mới” ở thanh bên trái.',
+        'Tải “Ảnh nhân vật” và “Ảnh trang phục” (PNG, JPG, WebP, tối đa 10 MB). Ô Nhân Vật đã có ảnh thì có thể bấm “Lấy ảnh đang có ở ô Nhân Vật làm ảnh khuôn mặt”.',
+        'Ghi “Thay đổi thêm” nếu cần (ví dụ kiểu tóc, giày), bấm “Tạo ảnh nhân vật”. Không ưng thì “Tạo ảnh khác”.',
+        'Bấm “Dùng làm Ảnh Nhân Vật” để đưa ảnh vào ô Nhân Vật. Chưa bấm thì luồng tạo video không thay đổi gì.',
+      ],
+      tip: 'Khi ô Nhân Vật đang dùng ảnh này, prompt Motion tự đổi câu mở đầu: nói rõ ảnh là sheet của MỘT người (mặt lấy từ chân dung, áo lấy từ các góc) để video không ra nhiều người. Nên thử trước một lượt ngắn trước khi chạy nhiều biến thể.',
+    },
+    {
       id: 'motion-video-dai',
       name: 'Motion video dài',
       what: 'Flow chỉ nhận tối đa 10 giây mỗi lượt, nên video mẫu dài được cắt thành nhiều đoạn, tạo lần lượt rồi ghép lại. Đoạn sau có thể gối một phần cuối của đoạn trước để mối nối mượt. Mỗi đoạn là một lượt tính phí; đoạn lỗi thì hàng đợi dừng và không tự gửi lại. Có thể “Chỉ tạo đoạn này”, “Tạo lại đoạn này (tốn credit)”, “Ghép video”, và xóa watermark một lần trên video đã ghép (“Xóa watermark rồi tải”, không tốn credit).',
@@ -99,6 +111,16 @@ export const canvasAiDoc: HelpDoc = {
       fix: 'Canvas AI chỉ dùng Omni 1.2 Flash. Mở cấu hình Veo và chọn Omni 1.2 Flash.',
     },
     {
+      symptom: 'Tạo Ảnh Nhân Vật Mới báo “ChatGPT không tạo được ảnh nhân vật”',
+      cause: 'Chưa có tài khoản ChatGPT dùng được (hết phiên đăng nhập hoặc đụng giới hạn tạo ảnh).',
+      fix: 'Vào Cài đặt, làm mới hoặc thêm tài khoản ChatGPT Plus rồi bấm tạo lại. App không tự thử lại.',
+      link: 'Cài đặt',
+    },
+    {
+      symptom: 'Báo “Đang tạo một ảnh nhân vật khác”',
+      fix: 'Mỗi lúc chỉ tạo một ảnh nhân vật; đợi lượt đang chạy xong (40–70 giây) rồi bấm lại.',
+    },
+    {
       symptom: 'Xóa watermark video dài báo không nhận ra watermark',
       fix: 'Công cụ chỉ nhận watermark ở vị trí chuẩn của clip Flow gốc; video đã cắt ghép có thể bị từ chối. Xem trang Xóa Watermark.',
       link: 'Xóa Watermark',
@@ -106,6 +128,7 @@ export const canvasAiDoc: HelpDoc = {
   ],
   related: ['Veo Studio', 'Chiến dịch AI', 'Xóa Watermark', 'Voices', 'Thư viện nhạc', 'Cài đặt'],
   changes: [
+    { date: '2026-11-13', text: 'Motion Control có node tùy chọn “Tạo Ảnh Nhân Vật Mới”: ảnh của bạn + trang phục → ảnh nhân vật mới (ChatGPT) cho ô Nhân Vật.' },
     { date: '2026-11-12', text: 'Đổi tên từ “AI Workflow” thành “Canvas AI”; chỉ dùng Omni 1.2 Flash.' },
   ],
 }

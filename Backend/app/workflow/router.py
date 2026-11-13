@@ -47,7 +47,10 @@ from app.workflow.schemas import (
     MotionWorkflowConfig,
     MotionPresetItem,
     MotionPresetListResponse,
+    MotionCharacterSheetRequest,
+    MotionCharacterSheetResponse,
 )
+from app.workflow import motion_character
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
 from app.workflow.service import (
@@ -301,6 +304,26 @@ def list_motion_presets() -> MotionPresetListResponse:
     """Lấy danh sách các mẫu phong cách chuyển động cho Motion Control."""
     presets = get_motion_presets()
     return MotionPresetListResponse(presets=[MotionPresetItem(**p) for p in presets])
+
+
+@router.post("/motion/character-sheet", response_model=MotionCharacterSheetResponse)
+def create_motion_character_sheet(req: MotionCharacterSheetRequest) -> MotionCharacterSheetResponse:
+    """Node tùy chọn "Tạo ảnh nhân vật mới": ảnh người + ảnh trang phục -> ảnh tham chiếu nhân vật (ChatGPT, mẫu look sheet).
+
+    Chạy đồng bộ (thường 40–70 giây), không gọi Flow, không tự thử lại. Kết quả là asset workflow để gắn vào ô Nhân Vật.
+    """
+    try:
+        result = motion_character.generate(req.identity_path, req.outfit_path, req.changes)
+    except motion_character.CharacterSheetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except motion_character.CharacterSheetBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - lỗi tài khoản/giới hạn ChatGPT: báo nguyên văn
+        logger.exception("Tạo ảnh nhân vật Motion Control lỗi")
+        raise HTTPException(status_code=502, detail=f"ChatGPT không tạo được ảnh nhân vật: {exc}") from exc
+    asset = result["asset"].model_copy(update={"data_url": None})   # ảnh lớn: frontend xem qua preview_url
+    return MotionCharacterSheetResponse(asset=asset, prompt=result["prompt"], template=result["template"],
+                                        seconds=result["seconds"])
 
 
 @router.get("/prompt-presets", response_model=PromptPresetListResponse)
