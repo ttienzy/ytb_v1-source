@@ -137,7 +137,14 @@ def meta():
     from . import graph
     svc = get_service()
     return {"executors": sorted(svc.runner.executors), "gated_steps": sorted(s.key for s in graph.STEPS if s.gate),
-            "steps": [s.key for s in graph.STEPS], "features": ["exports"]}
+            "steps": [s.key for s in graph.STEPS], "blocks": [{"block": n, "title": t} for n, t in graph.BLOCKS.items()],
+            "features": ["exports", "formats", "v3"]}
+
+
+@router.get("/formats")
+def list_formats():
+    """Các format quảng cáo có sẵn (dữ liệu trong app/campaign/formats/*.json)."""
+    return {"formats": get_service().list_formats()}
 
 
 # ── prompt (đặt trước /{campaign_id} để không bị bắt nhầm) ───────────────────────

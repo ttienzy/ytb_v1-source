@@ -16,7 +16,8 @@ def done(env):
     from .conftest import prime
     cid = prime(svc)
     reach_clips(svc, cid)
-    for k in ("shot:1", "shot:2", "shot:3"):
+    from .conftest import elements_of
+    for k in elements_of(svc, cid, "clip"):
         svc.decide_gate(cid, "clip", "approved", element_key=k)
     run_and_wait(svc, cid, "script")
     run_and_wait(svc, cid, "voice")
@@ -44,13 +45,13 @@ def test_each_variant_rebuilds_the_same_video_once_with_the_right_flags(done):
     seen: list[dict] = []
     st = exports.start(svc, cid, "clean", executor=fake_executor(seen), wait=True)
     assert st["variants"]["clean"]["state"] == "ready"
-    assert seen == [{"clean": True, "no_bgm": False, "clips": 3}]               # dựng lại từ đúng 3 clip đã duyệt
+    assert seen == [{"clean": True, "no_bgm": False, "clips": 4}]               # dựng lại từ đúng 4 clip đã duyệt (fit_check)
     path, name = exports.file_path(svc, cid, "clean")
     assert path.read_bytes() == b"V:True:False" and name.endswith("khong-watermark.mp4")
     exports.start(svc, cid, "clean", executor=fake_executor(seen), wait=True)   # đã có file: không dựng lại
     assert len(seen) == 1
     exports.start(svc, cid, "no_bgm", executor=fake_executor(seen), wait=True)
-    assert seen[-1] == {"clean": False, "no_bgm": True, "clips": 3}
+    assert seen[-1] == {"clean": False, "no_bgm": True, "clips": 4}
     assert exports.file_path(svc, cid, "no_bgm")[0].read_bytes() == b"V:False:True"
 
 

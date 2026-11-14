@@ -7,7 +7,7 @@ import { HINTS } from './hints.ts'
 
 // Từ khóa của tính năng đã bỏ/đổi tên. Doc đã đối chiếu (verifiedAt) mà nhắc lại thì test đỏ.
 // Mỗi lần bỏ một tính năng, thêm một từ vào đây.
-const BANNED_TERMS = ['Whisper', 'Studio Batch', 'Smart Crop', 'Omni 1.1', 'Veo 2', '9router', 'AI Workflow']
+const BANNED_TERMS = ['Whisper', 'Studio Batch', 'Smart Crop', 'Omni 1.1', 'Veo 2', '9router', 'AI Workflow', 'Storyboard', 'Khung mẫu']
 
 test('help: danh sách trang sinh từ NAV_STRUCTURE, đúng nhóm và thứ tự sidebar', () => {
   assert.deepEqual(

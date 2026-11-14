@@ -1,0 +1,17 @@
+@Create image REFERENCE ROLES:
+- Image 1 = identity reference (face, hairstyle, hair color, skin tone) of the {{presentation}} shown.
+- Image 2 = outfit reference (garment type, color, logo, fit, fabric).
+Priority: the reference images override any text description below.
+Do not redesign, restyle or substitute anything from the references.
+
+TASK: Create a professional split-screen character reference sheet, plain light-grey seamless studio background, 16:9, no text, no watermark.
+
+LEFT: close-up portrait, 45-degree three-quarter angle, of the {{presentation}} in Image 1. Keep the exact face, hairstyle and hair color. Soft even studio lighting, 85mm lens, photorealistic skin texture.
+
+RIGHT: headless neck-down turnaround (front, side profile, back, standing side by side, cropped at the collarbone) wearing EXACTLY the outfit from Image 2. Replicate color, logo placement, cut, fabric and proportions. Neutral studio lighting, photorealistic fabric texture.
+GARMENT: {{garment.summary}}
+{{#logo_rule}}LOGO RULE: {{logo_rule}}{{/logo_rule}}
+
+{{#changes}}
+[OPTIONAL CHANGES]: {{changes}}
+{{/changes}}

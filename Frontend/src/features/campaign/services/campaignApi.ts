@@ -10,6 +10,7 @@ import {
   type CastItem,
   type ExportStatus,
   type ExportVariant,
+  type FormatSummary,
   type Plan,
   type PromptPreview,
   type PromptTemplate,
@@ -159,8 +160,12 @@ export const useCast = (campaignId: string, libraryId: string) =>
   request<ArtifactView>(`/${campaignId}/cast/use-library`, json('POST', { library_id: libraryId }), 'dùng nhân vật')
 
 // ── gợi ý điền form bằng Gemini ───────────────────────────────────────────────
-export const suggestParams = (id: string, step: 'brief' | 'style') =>
+export const suggestParams = (id: string, step: 'brief' | 'scene_set') =>
   request<SuggestResult>(`/${id}/steps/${step}/suggest`, json('POST'), 'nhờ Gemini gợi ý')
+
+// ── format quảng cáo (dữ liệu backend) ───────────────────────────────────────
+export const listFormats = () =>
+  request<{ formats: FormatSummary[] }>('/formats', undefined, 'tải danh sách format').then(r => r.formats)
 
 // ── kiểm tra backend ──────────────────────────────────────────────────────────
 /** null nếu backend không có /meta (bản rất cũ) hoặc không gọi được. */

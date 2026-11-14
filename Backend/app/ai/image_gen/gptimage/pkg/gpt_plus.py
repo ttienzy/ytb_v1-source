@@ -348,7 +348,11 @@ class GPTPlus:
             refusal = check_limit_refusal(msg)
             if refusal:
                 raise PlusError(f"rate_limit: {refusal}")
-            raise PlusError(f"ChatGPT không tạo ra ảnh nào (timeout). Nội dung: {msg[:200]}")
+            if msg:
+                # ChatGPT TRẢ LỜI BẰNG CHỮ thay vì tạo ảnh (vd. hiểu nhầm yêu cầu thành sửa ảnh): lỗi của nội dung yêu cầu,
+                # không phải tài khoản hay mạng. Nhãn "no_image:" để adapter không đánh dấu tài khoản lỗi / không đổi tài khoản.
+                raise PlusError(f"no_image: {msg[:300]}")
+            raise PlusError("ChatGPT không trả ảnh trong thời gian chờ (timeout).")
 
         asset_pointer = assets[0]
         asset_id = asset_pointer.rsplit("/", 1)[-1]

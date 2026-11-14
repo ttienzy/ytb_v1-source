@@ -1,0 +1,18 @@
+{
+  "id": "grwm",
+  "name_vi": "GRWM rút gọn (chuẩn bị rồi ra đường)",
+  "desc_vi": "Kể chuyện: có việc phải đi, mặc xong, bước ra. Hook là tình huống, không phải áo.",
+  "best_for_vi": "Khi brief có dịp mặc rõ (họp lớp, hẹn hò, đi làm)",
+  "scenes": 2,
+  "hook_types": ["story", "pain_question", "direct"],
+  "shots": [
+    {"role": "hook", "scene": 1, "duration": 4, "camera": {"angle": "eye-level", "lens": "35mm", "move": "handheld push in"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "indoors, already wearing the outfit, checking the mirror or the phone: a what-to-wear-today moment"},
+    {"role": "proof", "scene": 1, "duration": 5, "camera": {"angle": "slightly high", "lens": "50mm", "move": "slow tilt down"}, "needs_face": false, "garment_ref": "detail", "motion": "minimal",
+     "beat_hint": "adjusting the collar, cuffs or waistband; hands show the fabric and the logo"},
+    {"role": "proof", "scene": 2, "duration": 6, "camera": {"angle": "eye-level", "lens": "35mm", "move": "handheld tracking"}, "needs_face": true, "garment_ref": "front", "motion": "free",
+     "beat_hint": "outside now, walking with purpose toward the destination, the outfit in motion"},
+    {"role": "cta", "scene": 2, "duration": 4, "camera": {"angle": "eye-level", "lens": "35mm", "move": "slow dolly out"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "arrived: a stop, a turn to camera, a small smile"}
+  ]
+}

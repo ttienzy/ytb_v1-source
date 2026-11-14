@@ -1,0 +1,20 @@
+{
+  "id": "occasions",
+  "name_vi": "1 set, 3 dịp",
+  "desc_vi": "Ba cảnh ngắn, mỗi cảnh một dịp (đi học, dạo phố, ở nhà) với cùng một bộ đồ, rồi kết.",
+  "best_for_vi": "Brief ghi nhiều dịp mặc; bộ đồ đa dụng",
+  "scenes": 3,
+  "hook_types": ["number_signal", "pain_question"],
+  "shots": [
+    {"role": "hook", "scene": 1, "duration": 4, "camera": {"angle": "eye-level", "lens": "35mm", "move": "slow dolly in"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "first occasion: the person does the natural thing for this place while looking at camera, counting one on the fingers"},
+    {"role": "proof", "scene": 2, "duration": 4, "camera": {"angle": "eye-level", "lens": "35mm", "move": "handheld tracking"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "second occasion: a different action in the second place, same outfit"},
+    {"role": "proof", "scene": 3, "duration": 4, "camera": {"angle": "slightly high", "lens": "50mm", "move": "slow push in"}, "needs_face": true, "garment_ref": "front", "motion": "minimal",
+     "beat_hint": "third occasion: relaxed, the comfortable side of the outfit"},
+    {"role": "detail", "scene": 3, "duration": 3, "camera": {"angle": "eye-level", "lens": "85mm macro", "move": "slow tilt"}, "needs_face": false, "garment_ref": "detail", "motion": "minimal",
+     "beat_hint": "close-up of the logo, drawstring or fabric"},
+    {"role": "cta", "scene": 1, "duration": 4, "camera": {"angle": "eye-level", "lens": "35mm", "move": "slow dolly out"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "back to the first place, final confident pose, ready for the call to action"}
+  ]
+}

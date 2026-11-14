@@ -1,0 +1,10 @@
+@Create image
+Generate a NEW photograph from scratch. There is no input image: do not edit, extend or redraw anything.
+A photorealistic {{aspect_label}} photo of an empty place: {{scene.place}}.
+Time of day and light: {{scene.time}}; {{scene.light}}.
+Mood: {{scene.mood}}.{{#style.palette}} Colour palette: {{style.palette}}.{{/style.palette}}
+Camera: eye-level, 35mm lens, open floor space in the middle ground, softly blurred background, nothing in the centre of the frame.
+The place is empty: no people, no mannequins, no clothing, no text, no readable signs, no logos, no watermark. Natural and real, not a 3D render.
+{{#changes}}
+Extra changes: {{changes}}
+{{/changes}}

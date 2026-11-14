@@ -1,0 +1,18 @@
+@Create image REFERENCE ROLES:
+- Image 1 = character sheet: the face of the {{presentation}} and the exact outfit from several angles.
+- Image 2 = real product photo of the garment: ground truth for logo, print, color and details.
+- Image 3 = the location photo: put the person INTO this exact place, same time of day, same light direction and color.
+Priority: the references override any text description below. Do not redesign, restyle or substitute the person, the outfit or the place.
+
+TASK: Create ONE photorealistic {{aspect_label}} photo for a fashion video: the {{presentation}} from Image 1, wearing exactly the garment from Image 2, standing in the location from Image 3.
+ACTION: {{scene.action}}
+FRAMING: medium-full shot, 35mm lens at eye level, the whole outfit visible, the person clearly separated from the background with real depth.
+EXPRESSION: natural, alive, a soft confident look toward the camera; not a stiff ID-photo stare.
+LIGHT: {{scene.light}}; keep the light of the location photo on the face and clothes.
+GARMENT: {{garment.summary}}
+{{#logo_rule}}LOGO RULE: {{logo_rule}}{{/logo_rule}}
+No text overlay, no watermark, no other people. {{#style.dont}}Avoid: {{style.dont}}.{{/style.dont}}
+
+{{#changes}}
+[OPTIONAL CHANGES]: {{changes}}
+{{/changes}}

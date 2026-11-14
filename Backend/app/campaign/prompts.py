@@ -23,50 +23,45 @@ DEFAULTS_DIR = Path(__file__).resolve().parent / "prompt_defaults"
 MAX_REFS = 3  # ràng buộc Flow/ChatGPT: tối đa 3 ảnh tham chiếu mỗi lần
 
 # Mẫu hệ thống: metadata ở đây, nội dung ở file. Tăng "version" khi đổi nội dung file.
+_IDENTITY_OUTFIT = [
+    {"role": "identity", "label": "Image 1", "desc": "Ảnh nhân vật (mặt, tóc, màu da)"},
+    {"role": "outfit", "label": "Image 2", "desc": "Ảnh trang phục (loại áo, màu, logo, form, chất liệu)"},
+]
 SYSTEM_TEMPLATES: dict[str, dict[str, Any]] = {
-    "system:look_sheet": {
-        "kind": "look_sheet",
-        "name": "Look sheet: nhân vật + trang phục",
-        "version": 1,
-        "file": "look_sheet.txt",
-        "ref_slots": [
-            {"role": "identity", "label": "Image 1", "desc": "Ảnh nhân vật (mặt, tóc, màu da)"},
-            {"role": "outfit", "label": "Image 2", "desc": "Ảnh trang phục (loại áo, màu, logo, form, chất liệu)"},
-        ],
+    # Dùng bởi node "Tạo Ảnh Nhân Vật Mới" của Motion Control (app/workflow/motion_character.py) và là biến thể cổ điển của cast sheet.
+    "system:look_sheet": {"kind": "look_sheet", "name": "Look sheet: nhân vật + trang phục", "version": 1, "file": "look_sheet.txt",
+                          "ref_slots": list(_IDENTITY_OUTFIT)},
+    "system:cast_sheet": {"kind": "cast_sheet", "name": "Cast sheet 3×2: mặt 3 góc + trang phục 3 góc, nền trơn", "version": 1,
+                          "file": "cast_sheet.txt", "ref_slots": list(_IDENTITY_OUTFIT)},
+    "system:cast_sheet_classic": {"kind": "cast_sheet", "name": "Cast sheet cổ điển: chân dung + turnaround không đầu, nền trơn", "version": 1,
+                                  "file": "cast_sheet_classic.txt", "ref_slots": list(_IDENTITY_OUTFIT)},
+    # v3: bỏ phong cách áo (style.dont/lighting nói về "logo áo", "redraw/alter") khỏi ảnh bối cảnh: ChatGPT hiểu nhầm
+    # thành SỬA ẢNH và trả lời bằng chữ thay vì tạo ảnh (6/6 lần chạy thật thất bại, thử lại prompt cũ trên tài khoản Plus 2/2 vẫn lỗi; prompt mới 2/2 thành công, 2026-11-14).
+    "system:scene_plate": {"kind": "scene_plate", "name": "Ảnh bối cảnh không người", "version": 3, "file": "scene_plate.txt", "ref_slots": []},
+    "system:scene_anchor": {
+        "kind": "scene_anchor", "name": "Khung chốt cảnh: người trong bối cảnh", "version": 1, "file": "scene_anchor.txt",
+        "ref_slots": [{"role": "sheet", "label": "Image 1"}, {"role": "photo", "label": "Image 2"}, {"role": "plate", "label": "Image 3"}],
     },
-    "system:angle": {"kind": "angle", "name": "Góc kể: xếp hạng theo rủi ro áo", "version": 1, "file": "angle.txt", "ref_slots": []},
-    "system:hook": {"kind": "hook", "name": "Hook: 5 kiểu mở đầu 3-6 giây", "version": 2, "file": "hook.txt", "ref_slots": []},
-    "system:shot_plan": {"kind": "shot_plan", "name": "Kịch bản shot và storyboard (đề xuất số shot, thời lượng)", "version": 7,
-                         "file": "shot_plan.txt", "ref_slots": []},
-    "system:script": {"kind": "script", "name": "Lời thoại, caption, hashtag, CTA", "version": 1, "file": "script.txt", "ref_slots": []},
-    "system:anchor_frame": {
-        "kind": "anchor_frame", "name": "Khung mẫu: chốt khuôn mặt, áo, bối cảnh, ánh sáng", "version": 1, "file": "anchor_frame.txt",
-        "ref_slots": [{"role": "identity", "label": "Image 1"}, {"role": "sheet", "label": "Image 2"}, {"role": "photo", "label": "Image 3"}],
+    "system:script_v3": {"kind": "script", "name": "Kịch bản theo format: beat, lời thoại, chữ, caption (một lượt)", "version": 1,
+                         "file": "script_v3.txt", "ref_slots": []},
+    "system:clip_v3": {
+        "kind": "clip", "name": "Clip Ingredients v3: cast sheet + ảnh áo + khung chốt cảnh, prompt theo công thức Google", "version": 1,
+        "file": "clip_v3.txt",
+        "ref_slots": [{"role": "sheet", "label": "Ảnh 1"}, {"role": "photo", "label": "Ảnh 2"}, {"role": "anchor", "label": "Ảnh 3"}],
     },
-    "system:clip_ingredients": {
-        "kind": "clip_ingredients", "name": "Clip Ingredients: khung mẫu + storyboard + ảnh áo, nhịp theo giây", "version": 2, "file": "clip_ingredients.txt",
-        "ref_slots": [{"role": "anchor", "label": "Ảnh 1"}, {"role": "storyboard", "label": "Ảnh 2"}, {"role": "photo", "label": "Ảnh 3"}],
-    },
-    "system:storyboard": {
-        "kind": "storyboard", "name": "Storyboard: nhiều khung của một shot trong một ảnh", "version": 1, "file": "storyboard.txt",
-        "ref_slots": [{"role": "anchor", "label": "Image 1"}, {"role": "photo", "label": "Image 2"}],
-    },
-    "system:brief_suggest": {"kind": "brief_suggest", "name": "Gợi ý brief từ ảnh áo", "version": 1,
-                             "file": "brief_suggest.txt", "ref_slots": []},
-    "system:style_suggest": {"kind": "style_suggest", "name": "Gợi ý phong cách từ ảnh áo", "version": 1,
-                             "file": "style_suggest.txt", "ref_slots": []},
-    "system:fact_sheet": {
-        "kind": "fact_sheet",
-        "name": "Hồ sơ áo: Gemini trích từ ảnh thật",
-        "version": 1,
-        "file": "fact_sheet.txt",
-        "ref_slots": [],
-    },
+    "system:brief_suggest": {"kind": "brief_suggest", "name": "Gợi ý brief từ ảnh áo", "version": 1, "file": "brief_suggest.txt", "ref_slots": []},
+    "system:scene_suggest": {"kind": "scene_suggest", "name": "Gợi ý cảnh và phong cách theo format", "version": 1, "file": "scene_suggest.txt",
+                             "ref_slots": []},
+    "system:fact_sheet": {"kind": "fact_sheet", "name": "Hồ sơ áo: Gemini trích từ ảnh thật", "version": 1, "file": "fact_sheet.txt", "ref_slots": []},
 }
 
 
-# Mẫu đã bỏ mà chiến dịch cũ có thể còn lưu trong tham số.
-RETIRED_SYSTEM_TEMPLATES = {"system:clip_video": "system:clip_ingredients"}
+# Mẫu đã bỏ (v2.x) mà chiến dịch cũ có thể còn lưu trong tham số: trỏ về mẫu v3 gần nghĩa nhất.
+RETIRED_SYSTEM_TEMPLATES = {
+    "system:clip_video": "system:clip_v3", "system:clip_ingredients": "system:clip_v3",
+    "system:shot_plan": "system:script_v3", "system:script": "system:script_v3", "system:angle": "system:script_v3", "system:hook": "system:script_v3",
+    "system:anchor_frame": "system:scene_anchor", "system:style_suggest": "system:scene_suggest",
+}
 
 
 class PromptError(ValueError):

@@ -50,21 +50,21 @@ def streams(path: Path):
 def parts(tmp_path, svc):
     """3 shot: clip 3s (360p dọc, một clip khác kích thước), lời thoại, chữ."""
     cid = svc.create_campaign("asm")["id"]
-    clips, voices, shots, script = [], [], [], []
+    clips, voices, shots = [], [], []
     for i, color in enumerate(("red", "green", "blue"), start=1):
         clip = tmp_path / f"c{i}.mp4"
         make_clip(clip, 3, *((180, 320) if i != 2 else (160, 288)), color=color)          # shot 2 khác kích thước: phải được pad/scale
         clips.append({"element_key": f"shot:{i}", "path": str(clip)})
-        shots.append({"key": f"shot:{i}", "beat_seconds": 2.0 if i == 1 else 3.0, "on_screen_text": ""})
-        script.append({"shot": f"shot:{i}", "voiceover": f"đoạn {i}", "on_screen_text": f"Chữ số {i} thật dài để thử ngắt dòng"})
+        shots.append({"key": f"shot:{i}", "beat_seconds": 2.0 if i == 1 else 3.0, "voiceover": f"đoạn {i}",
+                      "on_screen_text": f"Chữ số {i} thật dài để thử ngắt dòng"})
         if i != 3:                                                                         # shot 3 không có giọng: phải im lặng chứ không lỗi
             v = tmp_path / f"v{i}.wav"
             make_voice(v, 1.5)
             voices.append({"role": f"shot:{i}", "path": str(v)})
-    sp, sc = tmp_path / "shots.json", tmp_path / "script.json"
-    sp.write_text(json.dumps({"items": shots}), encoding="utf-8")
-    sc.write_text(json.dumps({"items": script}), encoding="utf-8")
-    inputs = {"clip": clips, "voice": voices, "shot_plan": [{"path": str(sp)}], "script": [{"path": str(sc)}]}
+    sc = tmp_path / "script.json"
+    # Không có CTA -> không có thẻ kết, để các test về thời lượng giữ nguyên; thẻ kết/hook mở màn thử riêng ở dưới.
+    sc.write_text(json.dumps({"items": shots, "hook": {"type": "direct", "on_screen_text": ""}, "cta": ""}), encoding="utf-8")
+    inputs = {"clip": clips, "voice": voices, "script": [{"path": str(sc)}]}
     ctx = ExecContext(campaign_id=cid, step_key="assemble", element_key="", tier="draft", params={"edit_style": "shots"}, inputs=inputs, fingerprint="f", note="",
                       store=svc.store, set_external_ref=lambda r: None, cancelled=lambda: False)
     return ctx, tmp_path
@@ -102,8 +102,8 @@ def test_voice_executor_unpacks_the_batch_into_one_wav_per_shot(tmp_path, svc, m
     seen = {}
     monkeypatch.setattr(voice, "_tts_batch", lambda items, voice_id: seen.update(items=items, voice=voice_id) or buf.getvalue())
     sc = tmp_path / "s.json"
-    sc.write_text(json.dumps({"items": [{"shot": "shot:1", "voiceover": "Xin chào"}, {"shot": "shot:2", "voiceover": ""},
-                                        {"shot": "shot:3", "voiceover": "Mua ngay"}]}), encoding="utf-8")
+    sc.write_text(json.dumps({"items": [{"key": "shot:1", "voiceover": "Xin chào"}, {"key": "shot:2", "voiceover": ""},
+                                        {"key": "shot:3", "voiceover": "Mua ngay"}]}), encoding="utf-8")
     cid = svc.create_campaign("v")["id"]
     ctx = ExecContext(campaign_id=cid, step_key="voice", element_key="", tier="draft", params={"voice_id": "Trúc Ly"},
                       inputs={"script": [{"path": str(sc)}]}, fingerprint="f", note="", store=svc.store,
@@ -343,3 +343,29 @@ def test_export_without_music_skips_the_mix_but_keeps_voice(parts, monkeypatch):
     ctx.params = {"edit_style": "shots", "bgm": ["x"], assemble.EXPORT_NO_BGM: True}
     art = assemble.run_assemble(ctx).artifacts[0]
     assert art.meta["bgm"] == [] and art.meta["no_bgm"] is True and art.meta["with_voice"] is True
+
+
+def test_opening_hook_end_card_and_ai_label_are_added_when_the_script_has_them(parts):
+    ctx, tmp = parts
+    sc = Path(ctx.inputs["script"][0]["path"])
+    doc = json.loads(sc.read_text(encoding="utf-8"))
+    doc["hook"] = {"type": "direct", "on_screen_text": "Hôm nay mặc gì?"}
+    doc["cta"] = "Mua ngay tại shop"
+    sc.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    ctx.params = {"edit_style": "shots"}
+    res = assemble.run_assemble(ctx)
+    out = tmp / "card.mp4"
+    out.write_bytes(res.artifacts[0].data)
+    kinds, duration, st = streams(out)
+    assert kinds.count("video") == 1 and kinds.count("audio") == 1
+    assert duration == pytest.approx(8.0 + assemble.END_CARD_SECONDS, abs=0.4)          # thẻ kết dán sau clip cuối
+    meta = res.artifacts[0].meta
+    assert meta["opening_text"] == "Hôm nay mặc gì?" and meta["end_card"] is True and meta["ai_label"] is True
+    ctx.params = {"edit_style": "shots", "end_card": False, "ai_label": "0", "opening_text": False}
+    meta = assemble.run_assemble(ctx).artifacts[0].meta
+    assert meta["opening_text"] == "" and meta["end_card"] is False and meta["ai_label"] is False
+    ctx.params = {"edit_style": "micro"}
+    res = assemble.run_assemble(ctx)
+    out2 = tmp / "card_micro.mp4"
+    out2.write_bytes(res.artifacts[0].data)
+    assert res.artifacts[0].meta["end_card"] is True and streams(out2)[1] > assemble.END_CARD_SECONDS

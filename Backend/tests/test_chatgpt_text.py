@@ -187,3 +187,66 @@ def test_old_9router_provider_value_runs_through_chatgpt(monkeypatch):
     for provider in ("9router", "chatgpt"):
         r = TestClient(app).post("/api/workflow/gemini/analyze", json={"images": ["data:image/png;base64,YWJj"], "provider": provider})
         assert r.status_code == 200 and r.json()["provider_used"] == "chatgpt"
+
+
+# ── tạo ảnh: ChatGPT trả lời bằng chữ thay vì ảnh ─────────────────────────────
+class _NoImageGPT:
+    """GPTPlus giả: generate_image luôn bị ChatGPT trả lời bằng chữ (như ảnh bối cảnh bị hiểu nhầm thành sửa ảnh)."""
+    calls = 0
+
+    async def generate_image(self, prompt, save_to=None, model=None, ref_paths=None):
+        from app.ai.image_gen.gptimage.pkg.gpt_plus import PlusError
+        type(self).calls += 1
+        raise PlusError("no_image: I couldn't generate the image because the image tool interpreted the request as an image-editing task.")
+
+
+def _two_account_client(tmp_path, monkeypatch, gpt):
+    store = ChatgptAccountStore(tmp_path)
+    a = store.add_account(email="a@x", cookies="c=1", ua="ua")
+    b = store.add_account(email="b@x", cookies="c=2", ua="ua")
+    client = adapter_mod.GptImageClient(store)
+    monkeypatch.setattr(client, "_gpt_for", lambda acc: gpt)
+    return client, store, a, b
+
+
+def test_text_reply_instead_of_image_keeps_accounts_usable_and_does_not_failover(tmp_path, monkeypatch):
+    _NoImageGPT.calls = 0
+    client, store, a, b = _two_account_client(tmp_path, monkeypatch, _NoImageGPT())
+    with pytest.raises(adapter_mod.GptImageError) as ei:
+        client.generate("empty bedroom", dest=str(tmp_path / "x.png"))
+    msg = str(ei.value)
+    assert "trả lời bằng chữ" in msg and "image-editing task" in msg  # nói đúng lý do, nguyên văn lời ChatGPT
+    assert "không khả dụng" not in msg and "timeout" not in msg       # không còn báo sai "tài khoản"/"timeout"
+    assert _NoImageGPT.calls == 1                                     # không đổi sang tài khoản khác cho cùng prompt
+    assert {x["status"] for x in store.list_raw()} <= {"active", None}  # không đánh dấu tài khoản lỗi oan
+
+
+def test_classify_text_reply_as_content_even_if_it_mentions_limit():
+    err = RuntimeError("no_image: I couldn't do this edit; there is no limit issue, please resend")
+    assert adapter_mod.GptImageClient._classify(err) == "content"
+    assert adapter_mod.GptImageClient._classify(RuntimeError("rate_limit: You've hit the Free plan limit")) == "rate"
+    assert adapter_mod.GptImageClient._classify(RuntimeError("ChatGPT không trả ảnh trong thời gian chờ (timeout).")) == "error"
+
+
+class _ThrottledGPT:
+    calls = 0
+
+    async def generate_image(self, prompt, save_to=None, model=None, ref_paths=None):
+        from app.ai.image_gen.gptimage.pkg.gpt_plus import PlusError
+        type(self).calls += 1
+        raise PlusError('/conversation HTTP 403: {"detail":"Unusual activity has been detected from your device. Try again later. (c6f6)"}')
+
+
+def test_unusual_activity_403_is_temporary_not_an_account_problem(tmp_path, monkeypatch):
+    """Lỗi thật 2026-11-14 (ảnh bối cảnh cảnh 2): 403 "Unusual activity" bị báo "Tất cả tài khoản không khả dụng... thêm tài
+    khoản Plus khác" và đánh dấu tài khoản lỗi. Đây là chặn tạm vài phút."""
+    _ThrottledGPT.calls = 0
+    client, store, a, b = _two_account_client(tmp_path, monkeypatch, _ThrottledGPT())
+    with pytest.raises(adapter_mod.GptImageError) as ei:
+        client.generate("empty street", dest=str(tmp_path / "x.png"))
+    msg = str(ei.value)
+    assert "hoạt động bất thường" in msg and "Chờ vài phút" in msg
+    assert "thêm tài khoản ChatGPT Plus" not in msg
+    assert _ThrottledGPT.calls == 2                                     # vẫn thử tài khoản thứ hai
+    assert {x["status"] for x in store.list_raw()} <= {"active", None}  # không đổi trạng thái (không khóa 3 giờ)
+    assert adapter_mod.GptImageClient._classify(RuntimeError("HTTP 403: Unusual activity has been detected")) == "throttled"

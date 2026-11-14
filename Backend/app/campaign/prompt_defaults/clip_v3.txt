@@ -1,0 +1,15 @@
+{{duration}}-second {{aspect_label}} fashion video, {{cut_rule}}
+Three reference images are attached: a character sheet (the face of the {{presentation}} and this exact outfit from several angles), the real product photo of the garment, and a photo of the same {{presentation}} standing in the location of this shot. Use them as references, not as frames to copy.
+SUBJECT: the {{presentation}} from the character sheet, wearing the exact garment in the product photo (keep its color, cut and logo exactly as photographed). Only this one person is in the video.
+GARMENT: {{garment.summary}}{{#logo_rule}} {{logo_rule}}{{/logo_rule}}
+LOCATION AND LIGHT: the place shown in the location photo: {{scene.place}}; {{scene.time}}; {{scene.light}}.
+CAMERA: {{camera.angle}}, {{camera.lens}}, {{camera.move}}.
+{{timeline}}
+PERFORMANCE: {{performance}}; real-time pace with natural weight in the steps, hair and fabric.
+MOTION LIMIT: {{motion_text}}
+SOUND: {{sound}}; no dialogue, no music.
+Do not show: on-screen text, subtitles, watermarks, another person, a changed or missing logo, slow motion, floating.{{#style.dont}} Also avoid: {{style.dont}}.{{/style.dont}}
+
+{{#changes}}
+[OPTIONAL CHANGES]: {{changes}}
+{{/changes}}

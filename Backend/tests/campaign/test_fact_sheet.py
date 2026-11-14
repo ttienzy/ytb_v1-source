@@ -72,7 +72,7 @@ def test_run_fact_sheet_sends_all_garment_photos_and_stores_profile(real_fact):
 
     prompt, paths = sent[0]
     assert "meticulous fashion product inspector" in prompt and "Extra instructions from the user: Chú ý tay áo gập" in prompt
-    assert [Path(p).read_bytes() for p in paths] == [b"shirt-bytes-1", b"shirt-bytes-2"]   # cả 2 ảnh, đúng thứ tự
+    assert [Path(p).read_bytes() for p in paths] == [b"shirt-bytes-1", b"shirt-bytes-2", b"shirt-bytes-3"]   # cả 3 ảnh, đúng thứ tự
     st = element_state(svc, cid, "fact_sheet")
     assert st["state"] == "fresh"
     art = svc.list_artifacts(cid, "fact_sheet")[0]
@@ -85,7 +85,7 @@ def test_preview_lists_photos_with_roles(real_fact):
     svc, sent = real_fact
     cid = prime(svc)
     p = svc.preview_prompt(cid, "fact_sheet")
-    assert [r["role"] for r in p["ref_order"]] == ["front", "back"] and p["template"]["template_id"] == "system:fact_sheet"
+    assert [r["role"] for r in p["ref_order"]] == ["front", "back", "detail"] and p["template"]["template_id"] == "system:fact_sheet"
     assert p["warnings"] == []
 
 
@@ -128,12 +128,12 @@ def test_changing_garment_photos_makes_fact_sheet_stale_but_keeps_it(real_fact):
     assert st["state"] == "stale" and st["reasons"] == ["inputs.garment_source"] and st["selected_artifact_id"]
 
 
-def test_style_no_longer_stales_the_look_step(real_fact, env):
+def test_style_does_not_stale_the_cast_sheet(real_fact, env):
     svc, calls, executors = env
     cid = prime(svc)
-    run_and_wait(svc, cid, "look")
+    run_and_wait(svc, cid, "cast_sheet")
     svc.set_params(cid, "style", {"lighting": "hard"})
-    assert element_state(svc, cid, "look")["state"] == "fresh"
+    assert element_state(svc, cid, "cast_sheet")["state"] == "fresh"
 
 
 # ── thư viện nhân vật ────────────────────────────────────────────────────────

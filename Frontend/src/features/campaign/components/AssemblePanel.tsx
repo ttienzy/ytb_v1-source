@@ -6,6 +6,7 @@ import { describeElement, errorMessage, planBlocker, progressText } from '../ser
 import type { ArtifactView, CampaignState, Plan, Tier } from '../types.ts'
 import { Badge } from './Common.tsx'
 import { DownloadMenu } from './DownloadMenu.tsx'
+import { ExportPackPanel } from './ExportPackPanel.tsx'
 
 interface Props {
   campaignId: string
@@ -117,6 +118,7 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
   const transition = String(assembleStep?.params.transition ?? 'cut')
   const editStyle = String(assembleStep?.params.edit_style ?? 'shots')
   const cutSeconds = Number(assembleStep?.params.cut_seconds ?? 2.2)
+  const flag = (key: string) => { const v = assembleStep?.params[key]; return v == null ? true : !['0', 'false', 'no', 'off', ''].includes(String(v).toLowerCase()) }
   // Video đã mới nhất mà bấm "Ghép lại": tạo lượt mới (nonce) rồi chạy, giống nút "Tạo lại" ở các khối khác.
   const rerunAssemble = async () => {
     try {
@@ -199,9 +201,14 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
           </div>
           <p className="cp-note">
             {editStyle === 'micro'
-              ? 'Cắt nhanh: mỗi shot chỉ giữ vài cú ngắn (nhiều chuyển động nhất) theo nhịp nhạc, nên video cuối ngắn hơn tổng thời lượng clip.'
-              : 'Giữ trọn: video cuối dài bằng tổng thời lượng các clip.'} Chữ nằm trong vùng an toàn của TikTok/Reels.
+              ? 'Cắt nhanh: mỗi shot chỉ giữ vài cú ngắn (nhiều chuyển động nhất) theo nhịp nhạc, nên video cuối NGẮN HƠN tổng thời lượng clip đã trả credit.'
+              : 'Giữ trọn: video cuối dài bằng tổng thời lượng các clip (mặc định, vì bạn đã trả credit theo giây).'} Chữ nằm trong vùng an toàn của TikTok/Reels.
           </p>
+          <div className="cp-row" data-testid="assemble-extras">
+            <label className="cp-switch"><input type="checkbox" checked={flag('opening_text')} disabled={running} onChange={e => setOpt({ opening_text: e.target.checked })} /> Chữ hook mở màn (giây 0–1,2)</label>
+            <label className="cp-switch"><input type="checkbox" checked={flag('end_card')} disabled={running} onChange={e => setOpt({ end_card: e.target.checked })} /> Thẻ kết với CTA (1,8 giây)</label>
+            <label className="cp-switch"><input type="checkbox" checked={flag('ai_label')} disabled={running} onChange={e => setOpt({ ai_label: e.target.checked })} /> Nhãn “Hình ảnh tạo bằng AI”</label>
+          </div>
         </div>
 
         <div className="cp-group" data-testid="bgm-row">
@@ -264,6 +271,7 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
         ) : (
           <div className="cp-placeholder cp-final-empty">Video sẽ hiện ở đây sau khi ghép.</div>
         )}
+        <ExportPackPanel campaignId={campaignId} state={state} busy={busy} hasVideo={!!finalVideo} onRun={t => onRun(t, undefined, runTier)} onError={onError} />
       </section>
     </div>
   )

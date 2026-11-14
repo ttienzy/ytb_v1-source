@@ -61,7 +61,7 @@ export const canvasAiDoc: HelpDoc = {
     {
       id: 'motion-anh-nhan-vat-moi',
       name: 'Tạo Ảnh Nhân Vật Mới (node tùy chọn của Motion Control)',
-      what: 'Muốn giữ khuôn mặt của bạn nhưng đổi trang phục: đưa ảnh nhân vật và ảnh trang phục, ChatGPT vẽ một ảnh tham chiếu mới (chân dung bên trái, trang phục xoay mặt trước, nghiêng, sau bên phải) theo đúng mẫu prompt “Ảnh mẫu mặc áo” của Chiến dịch AI. Không gọi Google Flow, không tốn credit Flow; dùng tài khoản ChatGPT trong Cài đặt, mỗi ảnh thường 40–70 giây.',
+      what: 'Muốn giữ khuôn mặt của bạn nhưng đổi trang phục: đưa ảnh nhân vật và ảnh trang phục, ChatGPT vẽ một ảnh tham chiếu mới (chân dung bên trái, trang phục xoay mặt trước, nghiêng, sau bên phải). Không gọi Google Flow, không tốn credit Flow; dùng tài khoản ChatGPT trong Cài đặt, mỗi ảnh thường 40–70 giây.',
       how: [
         'Node hiện sẵn bên trái ô Nhân Vật; nút X để ẩn, mở lại bằng mục “Tạo Ảnh Nhân Vật Mới” ở thanh bên trái.',
         'Tải “Ảnh nhân vật” và “Ảnh trang phục” (PNG, JPG, WebP, tối đa 10 MB). Ô Nhân Vật đã có ảnh thì có thể bấm “Lấy ảnh đang có ở ô Nhân Vật làm ảnh khuôn mặt”.',

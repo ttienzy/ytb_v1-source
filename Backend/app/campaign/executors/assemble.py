@@ -16,7 +16,7 @@ from typing import Any
 
 from ..runner import ArtifactSpec, ExecContext, ExecResult
 from . import edit_plan
-from .planning import load_input
+from .common import load_input
 
 FPS = 30
 VOICE_LEAD = 0.15           # giọng vào chậm một nhịp ngắn cho tự nhiên
@@ -35,6 +35,10 @@ CAPTION_SAFE_BOTTOM = 0.83  # đáy khối chữ ở 83% chiều cao: sát đáy
 TRANSITIONS = {"cut": None, "fade": "fade", "slide": "slideleft", "zoom": "zoomin"}
 TRANSITION_SECONDS = 0.3
 EDIT_STYLES = ("shots", "micro")                  # shots: giữ trọn clip đúng thời lượng đã chọn (mặc định); micro: nhiều cú cắt ngắn theo nhịp nhạc
+OPENING_SECONDS = 1.2        # chữ hook mở màn: xuất hiện ngay giây 0 (hook phải thấy trong 1–3 giây đầu)
+END_CARD_SECONDS = 1.8       # thẻ kết: CTA trên nền tối, dán sau clip cuối
+AI_LABEL_TEXT = "Hình ảnh tạo bằng AI"   # nhãn AI nhỏ ở góc (luật AI Việt Nam 1/3/2026; TikTok/Shopee yêu cầu nhãn)
+END_CARD_COLOR = "0x14161c"
 
 
 class AssembleError(RuntimeError):
@@ -198,14 +202,71 @@ def caption_filters(work: Path, index: int, caption: str, size: tuple[int, int],
     return out
 
 
+def opening_filters(work: Path, text: str, size: tuple[int, int], window: tuple[float, float] = (0.0, OPENING_SECONDS)) -> list[str]:
+    """Chữ hook mở màn: to, giữa màn hình, chỉ trong `window` giây đầu (mờ dần ở cuối)."""
+    w, h = size
+    text = clean_caption(text)
+    if not text:
+        return []
+    lines = wrap_caption(text, 14 if w < h else 26).split(chr(10))
+    fs = max(24, round(w / 9))
+    line_h = round(fs * 1.25)
+    top = round(h * 0.42) - len(lines) * line_h // 2
+    a, b = window
+    out = []
+    for k, line in enumerate(lines):
+        (work / f"open_{k}.txt").write_bytes(line.encode("utf-8"))
+        out.append(f"drawtext=fontfile=font.ttf:textfile=open_{k}.txt:fontcolor=white:fontsize={fs}:borderw={max(2, round(fs * 0.08))}:bordercolor=black"
+                   f":shadowcolor=black@0.6:shadowx=2:shadowy=3:x=(w-text_w)/2:y={top + k * line_h}"
+                   f":alpha='if(lt(t-{a:.3f},0.15),(t-{a:.3f})/0.15,if(gt(t,{b - 0.25:.3f}),max(0,({b:.3f}-t)/0.25),1))'"
+                   f":enable='between(t,{a:.3f},{b:.3f})'")
+    return out
+
+
+def ai_label_filters(work: Path, size: tuple[int, int], text: str = AI_LABEL_TEXT) -> list[str]:
+    """Nhãn AI nhỏ, góc trên trái, suốt video (dưới vùng giao diện trên cùng của TikTok)."""
+    w, h = size
+    (work / "ai_label.txt").write_bytes(clean_caption(text).encode("utf-8"))
+    fs = max(12, round(w / 34))
+    return [f"drawtext=fontfile=font.ttf:textfile=ai_label.txt:fontcolor=white@0.85:fontsize={fs}:borderw=1:bordercolor=black@0.6"
+            f":x={max(8, round(w * 0.035))}:y={round(h * 0.075)}"]
+
+
+def build_end_card(work: Path, size: tuple[int, int], lines: list[str], has_font: bool, label: bool, seconds: float = END_CARD_SECONDS) -> Path:
+    """Thẻ kết: nền tối, CTA ở giữa (+ nhãn AI), im lặng; cùng cỡ/fps/codec với các đoạn để concat copy được."""
+    w, h = size
+    out = work / "seg_end.mp4"
+    vf = ["format=yuv420p"]
+    if has_font:
+        texts = [clean_caption(t) for t in lines if clean_caption(t)]
+        fs = max(22, round(w / 11))
+        line_h = round(fs * 1.3)
+        wrapped: list[str] = []
+        for t in texts:
+            wrapped += wrap_caption(t, 16 if w < h else 30).split(chr(10))
+        top = round(h * 0.46) - len(wrapped) * line_h // 2
+        for k, line in enumerate(wrapped):
+            (work / f"end_{k}.txt").write_bytes(line.encode("utf-8"))
+            vf.append(f"drawtext=fontfile=font.ttf:textfile=end_{k}.txt:fontcolor=white:fontsize={fs}:borderw=2:bordercolor=black"
+                      f":x=(w-text_w)/2:y={top + k * line_h}:alpha='if(lt(t,0.3),t/0.3,1)'")
+        if label:
+            vf += ai_label_filters(work, size)
+    _run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={END_CARD_COLOR}:s={w}x{h}:d={seconds:.2f}:r={FPS}", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+          "-vf", ",".join(vf), "-t", f"{seconds:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", str(FPS), "-pix_fmt", "yuv420p",
+          "-c:a", "aac", "-ar", "48000", "-ac", "2", "-shortest", out.name], work)
+    return out
+
+
 def build_segment(work: Path, index: int, clip: Path, seconds: float, atempo: float, voice: Path | None, caption: str,
-                  size: tuple[int, int], has_font: bool, speed: float = 1.0, style: str = "pop", color: str = "white") -> Path:
+                  size: tuple[int, int], has_font: bool, speed: float = 1.0, style: str = "pop", color: str = "white",
+                  extra_vf: list[str] | None = None) -> Path:
     out = work / f"seg_{index}.mp4"
     w, h = size
     vf = [f"setpts=PTS/{speed:.4f}"] if speed > 1.001 else []
     vf += [f"scale={w}:{h}:force_original_aspect_ratio=decrease", f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2", "setsar=1", f"fps={FPS}", "format=yuv420p"]
     if has_font:
         vf += caption_filters(work, index, caption, size, style, color)
+        vf += list(extra_vf or [])
     cmd = ["ffmpeg", "-y", "-i", str(clip)]
     if voice is not None:
         cmd += ["-i", str(voice)]
@@ -258,7 +319,8 @@ def render_cut(work: Path, name: str, clip: Path, src_start: float, seconds: flo
     return out
 
 
-def finish_micro(work: Path, cuts: list[Path], slots: list[dict[str, Any]], size: tuple[int, int], style: str, color: str, has_font: bool) -> Path:
+def finish_micro(work: Path, cuts: list[Path], slots: list[dict[str, Any]], size: tuple[int, int], style: str, color: str, has_font: bool,
+                 extra_vf: list[str] | None = None) -> Path:
     """Nối các cú cắt, đặt lời thoại từng shot vào đúng khoảng của nó và in chữ theo thời gian."""
     (work / "cuts.txt").write_bytes("".join(f"file '{c.name}'" + chr(10) for c in cuts).encode("utf-8"))
     _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "cuts.txt", "-c", "copy", "visual.mp4"], work)
@@ -282,6 +344,7 @@ def finish_micro(work: Path, cuts: list[Path], slots: list[dict[str, Any]], size
     if has_font:
         for i, slot in enumerate(slots):
             drawn += caption_filters(work, i, slot["text"], size, style, color, (slot["start"], slot["end"]))
+        drawn += list(extra_vf or [])
     graph.append(f"[0:v]{','.join(drawn) if drawn else 'null'}[v]")
     cmd += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", final.name]
@@ -290,7 +353,8 @@ def finish_micro(work: Path, cuts: list[Path], slots: list[dict[str, Any]], size
 
 
 def build_micro(ctx: ExecContext, work: Path, shots: list[dict[str, Any]], script: dict[str, Any], clips: dict[str, Any], voices: dict[str, Any],
-                bgm: list[tuple[str, Path]], size: tuple[int, int], style: str, color: str, has_font: bool) -> tuple[Path, list[dict[str, Any]], dict[str, Any]]:
+                bgm: list[tuple[str, Path]], size: tuple[int, int], style: str, color: str, has_font: bool,
+                extra_vf: list[str] | None = None) -> tuple[Path, list[dict[str, Any]], dict[str, Any]]:
     """Kiểu dựng micro-cut: hình cắt ngắn theo nhịp nhạc nhưng lời thoại và chữ của mỗi shot vẫn nằm trọn trong khoảng của shot đó."""
     target = edit_plan.clamp_cut(ctx.params.get("cut_seconds"))
     rough = sum(probe(Path(clips[s["key"]]["path"]))["duration"] for s in shots)
@@ -329,8 +393,23 @@ def build_micro(ctx: ExecContext, work: Path, shots: list[dict[str, Any]], scrip
                        "voice": voice_path is not None, "caption": bool(clean_caption(text) and has_font and style != "none")})
         cursor = end
     ctx.report("Đang nối các cú cắt, đặt lời thoại và chữ…")
-    final = finish_micro(work, cuts, slots, size, style, color, has_font)
+    final = finish_micro(work, cuts, slots, size, style, color, has_font, extra_vf)
     return final, report, {"cuts": len(cuts), "cut_seconds": target, "beat_period": round(grid.period, 3) if grid else None}
+
+
+def append_end_card(work: Path, final: Path, card: Path) -> Path:
+    """Dán thẻ kết sau video (concat copy: cùng codec/cỡ/fps/âm thanh)."""
+    out = work / "final_card.mp4"
+    (work / "card.txt").write_bytes("".join(f"file '{p.name}'" + chr(10) for p in (final, card)).encode("utf-8"))
+    _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "card.txt", "-c", "copy", "-movflags", "+faststart", out.name], work)
+    return out
+
+
+def _flag(params: dict[str, Any], key: str, default: bool = True) -> bool:
+    v = params.get(key)
+    if v is None:
+        return default
+    return str(v).strip().lower() not in ("0", "false", "no", "off", "")
 
 
 # Cờ nội bộ chỉ do campaign/exports.py đặt khi tạo bản tải phụ (không phải tham số người dùng lưu ở bước ghép):
@@ -373,8 +452,9 @@ def clean_clips(ctx: ExecContext, shots: list[dict[str, Any]], clips: dict[str, 
 
 
 def run_assemble(ctx: ExecContext) -> ExecResult:
-    shots = [s for s in (load_input(ctx.inputs, "shot_plan").get("items") or []) if s.get("key")]
-    script = {str(i.get("shot")): i for i in (load_input(ctx.inputs, "script").get("items") or [])}
+    script_doc = load_input(ctx.inputs, "script")
+    shots = [s for s in (script_doc.get("items") or []) if s.get("key")]
+    script = {str(i["key"]): i for i in shots}
     clips = {r.get("element_key"): r for r in (ctx.inputs.get("clip") or [])}
     voices = {r.get("role"): r for r in (ctx.inputs.get("voice") or [])}
     if not shots:
@@ -393,6 +473,11 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
     transition = transition if transition in TRANSITIONS else "cut"
     edit_style = str(ctx.params.get("edit_style") or "shots")
     edit_style = edit_style if edit_style in EDIT_STYLES else "shots"
+    # Chữ hook mở màn (giây 0–1,2), thẻ kết CTA và nhãn AI: mặc định bật; tắt từng cái ở khối Ghép & Xuất.
+    opening = str((script_doc.get("hook") or {}).get("on_screen_text") or (shots[0].get("on_screen_text") if shots else "") or "") if _flag(ctx.params, "opening_text") else ""
+    end_lines = [str(script_doc.get("cta") or "")] if _flag(ctx.params, "end_card") else []
+    end_lines = [t for t in end_lines if t.strip()]
+    ai_label = _flag(ctx.params, "ai_label")
     extra: dict[str, Any] = {}
     if ctx.params.get(EXPORT_NO_BGM):
         bgm = []
@@ -410,8 +495,12 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
         # Clip có thể lẫn 360p và 720p (user tự chọn từng shot): ghép theo clip lớn nhất để không thu nhỏ bản 720p.
         biggest = max((probe(Path(clips[sh["key"]]["path"])) for sh in shots), key=lambda i: i["width"] * i["height"])
         size = (int(biggest["width"]) // 2 * 2, int(biggest["height"]) // 2 * 2)
+        has_font = font is not None
+        label_vf = ai_label_filters(work, size) if (ai_label and has_font) else []
+        open_vf = opening_filters(work, opening, size) if (opening and has_font) else []
         if edit_style == "micro":
-            final, report, extra = build_micro(ctx, work, shots, script, clips, voices, bgm, size, style, color, font is not None)
+            final, report, micro_extra = build_micro(ctx, work, shots, script, clips, voices, bgm, size, style, color, has_font, open_vf + label_vf)
+            extra.update(micro_extra)
         else:
             segments, report = [], []
             for i, shot in enumerate(shots):
@@ -424,13 +513,18 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
                 voice_path = Path(voice_ref["path"]) if voice_ref else None
                 seconds, atempo = plan_segment(clip_seconds, shot.get("beat_seconds"), audio_seconds(voice_path) if voice_path else 0.0)
                 speed = plan_speed(clip_seconds, seconds)
-                text = str((script.get(key) or {}).get("on_screen_text") or shot.get("on_screen_text") or "")
+                text = str(shot.get("on_screen_text") or "")
                 ctx.report(f"Đang ghép {key} ({i + 1}/{len(shots)})…")
-                segments.append(build_segment(work, i, clip_path, seconds, atempo, voice_path, text, size, font is not None, speed, style, color))
+                segments.append(build_segment(work, i, clip_path, seconds, atempo, voice_path, text, size, has_font, speed, style, color,
+                                              (open_vf if i == 0 else []) + label_vf))
                 report.append({"shot": key, "seconds": round(seconds, 2), "atempo": round(atempo, 3), "speed": round(speed, 3),
-                               "voice": voice_path is not None, "caption": bool(clean_caption(text) and font is not None and style != "none")})
+                               "voice": voice_path is not None, "caption": bool(clean_caption(text) and has_font and style != "none")})
             ctx.report("Đang nối các đoạn thành video hoàn chỉnh…" if transition == "cut" else "Đang nối các đoạn với chuyển cảnh…")
             final = join_segments(work, segments, transition)
+        if end_lines and has_font:
+            ctx.report("Đang dán thẻ kết…")
+            final = append_end_card(work, final, build_end_card(work, size, end_lines, has_font, ai_label))
+        extra.update({"opening_text": opening if (opening and has_font) else "", "end_card": bool(end_lines and has_font), "ai_label": bool(ai_label and has_font)})
         total = probe(final)["duration"]
         if bgm:
             ctx.report("Đang trộn nhạc nền dưới tiếng đọc…")

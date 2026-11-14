@@ -78,21 +78,19 @@ def _duration(path: Path) -> tuple[float, list[str]]:
 @ffmpeg_needed
 def test_micro_edit_makes_many_short_cuts_with_voice_inside_each_shot(tmp_path, svc):
     cid = svc.create_campaign("m")["id"]
-    clips, voices, shots, script = [], [], [], []
+    clips, voices, shots = [], [], []
     for i, (color, arch) in enumerate((("red", "hero"), ("green", "detail")), start=1):
         p = tmp_path / f"c{i}.mp4"
         _clip(p, 6, color)
         clips.append({"element_key": f"shot:{i}", "path": str(p)})
-        shots.append({"key": f"shot:{i}", "archetype": arch, "framing": "medium", "beat_seconds": 6})
-        script.append({"shot": f"shot:{i}", "voiceover": "x", "on_screen_text": f"Chữ {i}"})
+        shots.append({"key": f"shot:{i}", "archetype": arch, "framing": "medium", "beat_seconds": 6, "voiceover": "x", "on_screen_text": f"Chữ {i}"})
     v = tmp_path / "v.wav"
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=3", str(v)], check=True, capture_output=True)
     voices.append({"role": "shot:1", "path": str(v)})
-    sp, sc = tmp_path / "s.json", tmp_path / "t.json"
-    sp.write_text(json.dumps({"items": shots}), encoding="utf-8")
-    sc.write_text(json.dumps({"items": script}), encoding="utf-8")
+    sc = tmp_path / "t.json"
+    sc.write_text(json.dumps({"items": shots, "cta": ""}), encoding="utf-8")
     ctx = ExecContext(campaign_id=cid, step_key="assemble", element_key="", tier="final", params={"edit_style": "micro", "cut_seconds": 2.0}, fingerprint="f", note="",
-                      inputs={"clip": clips, "voice": voices, "shot_plan": [{"path": str(sp)}], "script": [{"path": str(sc)}]},
+                      inputs={"clip": clips, "voice": voices, "script": [{"path": str(sc)}]},
                       store=svc.store, set_external_ref=lambda r: None, cancelled=lambda: False)
     art = assemble.run_assemble(ctx).artifacts[0]
     out = tmp_path / "f.mp4"

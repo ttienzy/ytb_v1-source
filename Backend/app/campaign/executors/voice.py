@@ -11,7 +11,7 @@ import zipfile
 from typing import Any
 
 from ..runner import ArtifactSpec, ExecContext, ExecResult
-from .planning import load_input
+from .common import load_input
 
 
 class VoiceError(RuntimeError):
@@ -19,12 +19,13 @@ class VoiceError(RuntimeError):
 
 
 def voice_lines(script: dict[str, Any]) -> list[tuple[str, str]]:
-    """[(khóa shot, lời thoại)] theo thứ tự lời thoại; bỏ shot không có lời."""
+    """[(khóa shot, lời thoại)] theo thứ tự shot; bỏ shot không có lời. Kịch bản v3 ghi khóa ở `key` (bản cũ: `shot`)."""
     out = []
     for it in script.get("items") or []:
         text = str(it.get("voiceover") or "").strip()
-        if text and it.get("shot"):
-            out.append((str(it["shot"]), text))
+        key = it.get("key") or it.get("shot")
+        if text and key:
+            out.append((str(key), text))
     return out
 
 

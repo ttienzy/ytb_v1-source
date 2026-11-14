@@ -39,7 +39,7 @@ export const overviewGuide: HelpGuide = {
       steps: [
         { page: 'Cài đặt', note: 'Thêm tài khoản ChatGPT, đăng nhập Gemini, nạp extension và đăng nhập Google Flow.' },
         { page: 'Voices', note: 'Chọn giọng đọc cho video (bắt buộc ở khối Ghép & Xuất).' },
-        { page: 'Chiến dịch AI', note: 'Đi qua 8 khối, duyệt ảnh mẫu và storyboard trước khi tạo clip.' },
+        { page: 'Chiến dịch AI', note: 'Chọn format, đi qua 6 khối, duyệt cast sheet và khung chốt từng cảnh trước khi tạo clip.' },
         { page: 'Dashboard', note: 'Theo dõi thành phẩm và lịch đăng.' },
       ],
     },

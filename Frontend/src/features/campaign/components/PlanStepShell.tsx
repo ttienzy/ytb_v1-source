@@ -23,6 +23,9 @@ interface Props<T extends { warnings?: PlanWarning[] }> {
   onRun: (target: string) => Promise<void>
   onError: (message: string) => void
   stepKey: string
+  /** Loại mẫu prompt và mẫu mặc định (mặc định: kind = stepKey, system:<stepKey>). */
+  kind?: string
+  defaultTemplateId?: string
   title: string
   hint: string
   runLabel: string
@@ -30,6 +33,10 @@ interface Props<T extends { warnings?: PlanWarning[] }> {
   extra?: ReactNode
   /** Bước tự hiện cảnh báo theo phần tử: chỉ hiện ở đầu thẻ những cảnh báo không thuộc phần tử nào. */
   ownWarnings?: (w: PlanWarning) => boolean
+  /** Chuẩn hóa kết quả đọc từ artifact; trả null = dạng không dùng được (vd. tạo ở phiên bản cũ) → hiện
+   *  `incompatibleNote` thay vì đưa dữ liệu lạ vào form (trước đây làm vỡ cả trang). */
+  adapt?: (raw: unknown) => T | null
+  incompatibleNote?: string
   children: (api: ShellApi<T>) => ReactNode
 }
 
@@ -37,7 +44,9 @@ const withoutWarnings = (v: unknown) => JSON.stringify({ ...(v as object), warni
 
 /** Khung chung cho các bước LLM trả JSON: chạy ở đầu thẻ, xem/sửa kết quả, prompt ở mục Nâng cao, lưu thành phiên bản mới. */
 export function PlanStepShell<T extends { warnings?: PlanWarning[] }>(props: Props<T>) {
-  const { campaignId, state, artifacts, busy, onChanged, onRun, onError, stepKey, title, hint, runLabel, extra, ownWarnings, children } = props
+  const { campaignId, state, artifacts, busy, onChanged, onRun, onError, stepKey, title, hint, runLabel, extra, ownWarnings, children, adapt } = props
+  const kind = props.kind ?? stepKey
+  const defaultTemplateId = props.defaultTemplateId ?? `system:${stepKey}`
   const step = state.blocks.flatMap(b => b.steps).find(s => s.key === stepKey)
   const element = step?.elements[0]
   const params = step?.params ?? {}
@@ -46,6 +55,7 @@ export function PlanStepShell<T extends { warnings?: PlanWarning[] }>(props: Pro
   const running = !!state.active_exec || !!element?.active_run
 
   const [saved, setSaved] = useState<T | null>(null)
+  const [incompatible, setIncompatible] = useState(false)
   const [draft, setDraft] = useState<T | null>(null)
   const [saving, setSaving] = useState(false)
   const [plan, setPlan] = useState<Plan | null>(null)
@@ -54,12 +64,18 @@ export function PlanStepShell<T extends { warnings?: PlanWarning[] }>(props: Pro
 
   useEffect(() => {
     let alive = true
-    if (!selectedId) { setSaved(null); setDraft(null); return }
-    fetchArtifactJson<T>(selectedId)
-      .then(d => { if (alive) { setSaved(d); setDraft(d) } })
+    if (!selectedId) { setSaved(null); setDraft(null); setIncompatible(false); return }
+    fetchArtifactJson<unknown>(selectedId)
+      .then(raw => {
+        if (!alive) return
+        const d = adapt ? adapt(raw) : (raw as T)
+        setIncompatible(d === null)
+        setSaved(d)
+        setDraft(d)
+      })
       .catch(e => onError(errorMessage(e)))
     return () => { alive = false }
-  }, [selectedId, onError])
+  }, [selectedId, onError, adapt])
 
   const refreshKey = JSON.stringify([params, selectedId, element?.state, element?.blockers.length])
   useEffect(() => {
@@ -80,7 +96,7 @@ export function PlanStepShell<T extends { warnings?: PlanWarning[] }>(props: Pro
   const dirty = useMemo(() => !!saved && !!draft && withoutWarnings(saved) !== withoutWarnings(draft), [saved, draft])
   const blocked = !!element?.blockers.length && !selectedId
   const stale = element?.state === 'stale'
-  const needsRun = !selectedId || stale
+  const needsRun = !selectedId || stale || incompatible
   const lastError = element?.last_run?.state === 'error' ? element.last_run.error : ''
   const warnings = saved?.warnings ?? []
   const general = ownWarnings ? warnings.filter(w => !ownWarnings(w)) : warnings
@@ -128,6 +144,7 @@ export function PlanStepShell<T extends { warnings?: PlanWarning[] }>(props: Pro
 
       {blocked && <p className="cp-empty">{previewError || 'Chưa đủ đầu vào.'}</p>}
       {!blocked && !selectedId && !running && <p className="cp-empty">Chưa có kết quả.{planSummary(plan) ? ` Lần chạy: ${planSummary(plan)}.` : ''}</p>}
+      {incompatible && <p className="cp-note" data-testid={`incompatible-${stepKey}`}>{props.incompatibleNote ?? 'Kết quả này không đọc được trong giao diện hiện tại.'}</p>}
       {lastError && <p className="cp-error-inline">Lần chạy gần nhất lỗi: {lastError}</p>}
       {stale && <p className="cp-note">Đổi: {element!.reasons.map(reasonText).join(', ')}. Kết quả cũ vẫn giữ cho tới khi bạn viết lại hoặc sửa tay.</p>}
 
@@ -138,8 +155,8 @@ export function PlanStepShell<T extends { warnings?: PlanWarning[] }>(props: Pro
       {draft && children({ draft, update: fn => setDraft(d => (d ? fn(d) : d)), disabled: running || saving, warnings })}
 
       <Fold title="Nâng cao: prompt gửi Gemini" className="cp-fold-quiet"
-            meta={params.prompt?.template_id && params.prompt.template_id !== `system:${stepKey}` ? 'đang dùng mẫu riêng' : 'mặc định'}>
-        <PromptEditor campaignId={campaignId} stepKey={stepKey} kind={stepKey} defaultTemplateId={`system:${stepKey}`}
+            meta={params.prompt?.template_id && params.prompt.template_id !== defaultTemplateId ? 'đang dùng mẫu riêng' : 'mặc định'}>
+        <PromptEditor campaignId={campaignId} stepKey={stepKey} kind={kind} defaultTemplateId={defaultTemplateId}
                       prompt={params.prompt} onChanged={onChanged} onError={onError} />
         {previewError && <p className="cp-empty">{previewError}</p>}
         {preview && <pre className="cp-pre">{preview.prompt}</pre>}

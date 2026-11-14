@@ -1,4 +1,4 @@
-import { BLOCK_PHASE, IMPLEMENTED_STEPS, describeElement, describeGate } from '../services/campaignView.ts'
+import { IMPLEMENTED_STEPS, describeElement, describeGate, elementLabel } from '../services/campaignView.ts'
 import type { BlockView } from '../types.ts'
 import { Badge } from './Common.tsx'
 
@@ -6,33 +6,7 @@ const LANE_LABEL: Record<string, string> = {
   llm: 'LLM', 'chatgpt-image': 'Ảnh ChatGPT', flow: 'Video Flow (tốn credit)', local: 'Cục bộ',
 }
 
-/** Khối chưa có giao diện riêng: nói rõ khối sẽ làm gì và hiện việc đó đang được làm ở đâu. */
-export function PendingBlock({ block, onGo }: { block: BlockView; onGo: (block: number) => void }) {
-  const pending = block.steps.filter(s => !IMPLEMENTED_STEPS.has(s.key))
-  return (
-    <section className="cp-card cp-pending" data-testid={`pending-${block.block}`}>
-      <header className="cp-card-head">
-        <div className="cp-head-title">
-          <h3>{block.title}</h3>
-          <span className="cp-head-sub">Khối này chưa có phần chạy tự động ({BLOCK_PHASE[block.block] ?? 'giai đoạn sau'}).</span>
-        </div>
-        <Badge badge={{ label: 'Sắp có', tone: 'muted' }} />
-      </header>
-      {pending.length > 0 && (
-        <ul className="cp-checklist">
-          {pending.map(s => <li key={s.key}><span className="cp-dot" /> <span>{s.title}{s.paid ? ' (tốn credit)' : ''}</span></li>)}
-        </ul>
-      )}
-      <p className="cp-note">Trong lúc chờ, bạn tự kiểm tra bằng cách xem và duyệt từng clip ở khối 6. Video chỉ được ghép từ clip đã duyệt.</p>
-      <div className="cp-row">
-        <button type="button" className="btn-g cp-small" onClick={() => onGo(6)}>Sang khối 6 (Clip)</button>
-        <button type="button" className="btn-p cp-small" onClick={() => onGo(8)}>Sang khối 8 (Ghép & Xuất)</button>
-      </div>
-    </section>
-  )
-}
-
-/** Danh sách bước của một khối + trạng thái; bước chưa có thực thi ghi rõ giai đoạn dự kiến. */
+/** Danh sách bước của một khối + trạng thái từng phần tử (shot/cảnh). */
 export function StepList({ block }: { block: BlockView }) {
   return (
     <section className="cp-card">
@@ -54,11 +28,12 @@ export function StepList({ block }: { block: BlockView }) {
                   {implemented
                     ? step.elements.map(el => (
                         <span key={el.element_key} className="cp-inline">
+                          {el.element_key && <small className="cp-muted">{elementLabel(el.element_key)}</small>}
                           <Badge badge={describeElement(el)} />
                           {(() => { const g = describeGate(el.gate); return g ? <Badge badge={g} /> : null })()}
                         </span>
                       ))
-                    : <Badge badge={{ label: `Sắp có (${BLOCK_PHASE[block.block] ?? ''})`, tone: 'muted' }} />}
+                    : <Badge badge={{ label: 'Không có trong giao diện này', tone: 'muted' }} />}
                 </td>
                 <td className="cp-muted">{step.elements.length > 1 ? `${step.elements.length} phần tử` : ''}</td>
               </tr>
@@ -66,7 +41,7 @@ export function StepList({ block }: { block: BlockView }) {
           })}
         </tbody>
       </table>
-      <p className="cp-note">✋ có cổng duyệt · 💳 tốn credit Flow. Bước “Sắp có” đã nằm trong engine nhưng chưa có thực thi; mỗi giai đoạn sẽ mở thêm giao diện cho khối tương ứng.</p>
+      <p className="cp-note">✋ có cổng duyệt · 💳 tốn credit Flow. Trạng thái tính từ đầu vào hiện tại; “Cũ” không xóa kết quả, chỉ gợi ý tạo lại.</p>
     </section>
   )
 }

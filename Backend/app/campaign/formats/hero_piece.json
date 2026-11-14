@@ -1,0 +1,18 @@
+{
+  "id": "hero_piece",
+  "name_vi": "1 món, nhiều cách phối",
+  "desc_vi": "Cùng một áo xuất hiện ở 2–3 bối cảnh/tình huống, cắt nhanh. Format nổi nhất tháng 11/2026.",
+  "best_for_vi": "Áo mặc được nhiều dịp (đi học, đi chơi, cà phê)",
+  "scenes": 3,
+  "hook_types": ["number_signal", "direct"],
+  "shots": [
+    {"role": "hook", "scene": 1, "duration": 4, "camera": {"angle": "eye-level", "lens": "35mm", "move": "handheld tracking"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "the person steps into frame in the first setting and looks to camera: one outfit, first occasion"},
+    {"role": "proof", "scene": 2, "duration": 5, "camera": {"angle": "eye-level", "lens": "50mm", "move": "slow dolly in"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "same outfit in the second setting, a natural action that belongs to this place"},
+    {"role": "proof", "scene": 3, "duration": 5, "camera": {"angle": "low-angle", "lens": "35mm", "move": "slow arc around the subject"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "same outfit in the third setting, a different pose and energy"},
+    {"role": "cta", "scene": 1, "duration": 4, "camera": {"angle": "eye-level", "lens": "35mm", "move": "static with gentle handheld drift"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "back in the first setting, a final confident pose to camera"}
+  ]
+}

@@ -1,6 +1,11 @@
-"""Đồ thị bước của chiến dịch thời trang (docs/PLAN §3.1). 8 khối hiển thị, bước nội bộ cho engine.
+"""Đồ thị bước của chiến dịch thời trang v3 (docs/PLAN_campaign_v3_format_director.md §5): 6 khối, "format + đạo diễn theo cảnh".
 
 STEPS đã được sắp theo thứ tự tô-pô (mọi dep đứng trước bước dùng nó); kiểm tra lúc import.
+
+Ba kiểu phụ thuộc giữa bước map (engine.py):
+  * cùng `map_from` (vd. scene_anchor -> scene_plate, đều theo cảnh): phần tử nào dùng phần tử ấy;
+  * `dep_element` (vd. clip theo shot -> scene_anchor theo cảnh): phần tử đích = trường `scene` của shot;
+  * khác map và không khai báo: gom TOÀN BỘ phần tử của bước trước (đổi một phần tử là cũ tất cả) — tránh dùng cho bước paid.
 """
 from __future__ import annotations
 
@@ -13,20 +18,20 @@ TIERS = ("draft", "final")
 LANE_LIMITS = {"llm": 2, "chatgpt-image": 2, "flow": 3, "local": 2}
 
 BLOCKS = {
-    1: "Sản phẩm", 2: "Người mẫu", 3: "Kế hoạch", 4: "Ảnh mẫu",
-    5: "Storyboard", 6: "Clip", 7: "Kiểm tra", 8: "Ghép & Xuất",
+    1: "Sản phẩm", 2: "Nhân vật & Cảnh", 3: "Format & Kịch bản",
+    4: "Khung chốt cảnh", 5: "Clip", 6: "Ghép & Xuất",
 }
 
 # Đơn giá credit Flow ĐÃ XÁC MINH live (docs/PLAN_flow_http_submit.md): Omni 1.2 t2v 10 giây.
-# Khóa: (độ phân giải, giây). Chưa biết i2v -> trả None (kế hoạch báo "chưa rõ chi phí", không đoán).
 FLOW_CREDIT = {("360p", 10): 10, ("720p", 10): 30}
-# i2v (khung đầu + cuối): HAR gd_7 (6s 720p = 18) và HAR v2 (10s 720p = 30, 10s 360p = 10). 360p 6s CHƯA có số liệu -> None.
+# i2v (khung đầu + cuối): HAR gd_7 (6s 720p = 18) và HAR v2 (10s 720p = 30, 10s 360p = 10).
 FLOW_CREDIT_I2V = {("720p", 6): 18, ("720p", 10): 30, ("360p", 10): 10}
-# Ingredients (r2v, Omni 1.2): chỉ các mốc đã đo (HAR gd_7: 13s 720p = 48; credit_check v2: 15s 360p = 20). Mốc khác: xem clip_cost_estimate.
-FLOW_CREDIT_R2V = {("720p", 13): 48, ("360p", 15): 20}
-R2V_DURATIONS = tuple(range(3, 16))          # Google: Ingredients của Omni 1.2 nhận 3-15 giây (tài khoản không có gói Google AI: tối đa 10)
+# Ingredients (r2v, Omni 1.2): CHỈ các mốc đã đo. HAR gd_7: 13s 720p = 48; credit_check v2: 15s 360p = 20;
+# chiến dịch 5d27a03c3a42 (2026-11-10, credit_actual của 4 clip): 6s 720p = 18, 8s 720p = 24, 10s 720p = 30.
+FLOW_CREDIT_R2V = {("720p", 6): 18, ("720p", 8): 24, ("720p", 10): 30, ("720p", 13): 48, ("360p", 15): 20}
+R2V_DURATIONS = tuple(range(3, 16))          # Google: Ingredients của Omni 1.2 nhận 3-15 giây (không gói Google AI: tối đa 10)
 TIER_RESOLUTION = {"draft": "360p", "final": "720p"}
-R2V_BASE_RATE = {"360p": 1, "720p": 3}       # credit/giây tới 10 giây; từ giây thứ 11 gấp đôi. Khớp 13s 720p = 48, 15s 360p = 20, 15s 720p = 60 (giao diện Flow).
+R2V_BASE_RATE = {"360p": 1, "720p": 3}       # credit/giây tới 10 giây; từ giây thứ 11 gấp đôi. Khớp mọi mốc đã đo ở trên.
 
 
 def clip_duration(params: dict) -> int | None:
@@ -44,7 +49,7 @@ def clip_cost(params: dict, tier: str) -> int | None:
 
 
 def clip_cost_estimate(params: dict, tier: str) -> int | None:
-    """Giá DỰ KIẾN theo công thức, chỉ để hiển thị; không dùng thay giá đã xác minh."""
+    """Giá DỰ KIẾN theo công thức, chỉ để hiển thị và tính trần ngân sách; không thay giá đã xác minh."""
     n = clip_duration(params)
     if n is None:
         return None
@@ -61,7 +66,8 @@ class StepDef:
     deps: tuple[str, ...] = ()
     lane: str = "local"             # llm | chatgpt-image | flow | local
     paid: bool = False              # tốn credit thật -> không bao giờ tự gửi lại
-    map_from: str | None = None     # bước (không map) có artifact JSON {"items":[{"key":...}]} xác định phần tử
+    # Bước nguồn phần tử: bước compute có artifact JSON {"items":[{"key":...}]} HOẶC bước input_params có params["items"].
+    map_from: str | None = None
     gate: bool = False              # đầu ra phải được duyệt trước khi bước sau dùng
     advisory: bool = False          # kết quả chỉ để cảnh báo
     uses_tier: bool = False         # draft/final nằm trong vân tay
@@ -72,63 +78,64 @@ class StepDef:
     cost: Callable[[dict, str], int | None] | None = None
     cost_estimate: Callable[[dict, str], int | None] | None = None   # giá dự kiến khi `cost` chưa có số đo
     images_fixed: int = 0           # số ảnh ChatGPT cố định mỗi lần chạy một phần tử (0 = theo tham số count)
-    # Bước map: chỉ các trường này của phần tử nguồn (vd. shot) vào vân tay. None = băm cả phần tử. Nhờ vậy sửa lời thoại
-    # không làm "cũ" storyboard/clip vốn không dùng lời thoại.
+    # Bước map: chỉ các trường này của phần tử nguồn vào vân tay. None = băm cả phần tử. Nhờ vậy sửa lời thoại
+    # không làm "cũ" clip vốn không dùng lời thoại.
     item_fields: tuple[str, ...] | None = None
-    # Chỉ chạy chính bước này: dùng kết quả ĐÃ CÓ / ĐÃ DUYỆT của bước trước, không bao giờ kéo bước trước (có thể tốn credit) chạy lại.
-    # Dành cho bước hậu kỳ cục bộ: sau khi nâng prompt, clip đã duyệt có thể bị đánh dấu "cũ" nhưng vẫn ghép được.
+    # Chỉ chạy chính bước này trên kết quả ĐÃ CÓ / ĐÃ DUYỆT của bước trước, không bao giờ kéo bước trước (có thể tốn credit) chạy lại.
     isolated: bool = False
+    # (dep, trường của phần tử): bước map này dùng ĐÚNG MỘT phần tử của `dep` (bước map theo danh sách khác), chọn theo trường đó.
+    # vd. clip (theo shot) dùng scene_anchor (theo cảnh) có khóa = shot["scene"]. Đổi cảnh khác không làm cũ clip này.
+    dep_element: tuple[tuple[str, str], ...] = ()
 
+    @property
+    def dep_elements(self) -> dict[str, str]:
+        return dict(self.dep_element)
+
+
+SCENE_FIELDS = ("name", "place", "time", "light", "mood", "action")
+SHOT_CLIP_FIELDS = ("scene", "duration", "camera", "beats", "expression", "needs_face", "garment_ref", "motion")
 
 STEPS: tuple[StepDef, ...] = (
     # 1. Sản phẩm
     StepDef("garment_source", 1, "Ảnh sản phẩm", "input_files", output="bundle"),
     StepDef("fact_sheet", 1, "Hồ sơ áo", "compute", ("garment_source",), lane="llm", param_keys=("prompt",),
             default_template="system:fact_sheet"),
-    # 2. Người mẫu
-    StepDef("cast", 2, "Nhân vật", "input_files", output="bundle"),
-    StepDef("style", 2, "Phong cách", "input_params"),
-    # 3. Kế hoạch
+    # 2. Nhân vật & Cảnh
+    StepDef("cast", 2, "Ảnh nhân vật", "input_files", output="bundle"),
+    StepDef("cast_profile", 2, "Hồ sơ nhân vật", "input_params"),
+    # Cast sheet: nhân dạng + trang phục trên nền trơn (Flow Help: ảnh chủ thể nên nền trơn). Mọi khối sau chỉ dùng bản đã duyệt.
+    StepDef("cast_sheet", 2, "Cast sheet", "compute", ("garment_source", "cast", "cast_profile"), lane="chatgpt-image", gate=True,
+            param_keys=("prompt", "count", "aspect"), output="image", default_template="system:cast_sheet"),
+    StepDef("scene_set", 2, "Các cảnh", "input_params"),
+    StepDef("style", 2, "Phong cách chung", "input_params"),
+    # Scene plate: ảnh bối cảnh KHÔNG người, một ảnh mỗi cảnh (Flow Help: ảnh bối cảnh không có chủ thể).
+    StepDef("scene_plate", 2, "Ảnh bối cảnh", "compute", ("scene_set", "style"), lane="chatgpt-image", map_from="scene_set",
+            param_keys=("prompt", "aspect"), output="image", default_template="system:scene_plate", images_fixed=1,
+            item_fields=SCENE_FIELDS),
+    # 3. Format & Kịch bản
     StepDef("brief", 3, "Brief", "input_params"),
-    # 4. Ảnh mẫu mặc áo (đứng trước Kế hoạch: nhà dựng cảnh cần nhìn thấy người mẫu và áo thật đã duyệt)
-    StepDef("look", 4, "Ảnh mẫu mặc áo", "compute", ("garment_source", "cast"), lane="chatgpt-image", gate=True,
-            param_keys=("prompt", "count", "aspect"), output="image", default_template="system:look_sheet"),
-    StepDef("look_check", 4, "Kiểm tra ảnh mẫu", "compute", ("look", "garment_source"), lane="llm", advisory=True,
-            param_keys=("prompt",)),
-    StepDef("angle", 3, "Góc kể", "compute", ("fact_sheet", "brief"), lane="llm", param_keys=("prompt",),
-            default_template="system:angle"),
-    StepDef("hook", 3, "Hook", "compute", ("angle", "fact_sheet", "brief"), lane="llm", param_keys=("prompt", "count"),
-            default_template="system:hook"),
-    StepDef("shot_plan", 3, "Danh sách shot", "compute", ("angle", "hook", "look", "fact_sheet", "style", "brief"), lane="llm",
-            param_keys=("prompt", "shots", "total_seconds", "motion_limit"), default_template="system:shot_plan"),
-    StepDef("script", 3, "Lời thoại & caption", "compute", ("shot_plan", "brief", "fact_sheet"), lane="llm",
-            param_keys=("prompt",), default_template="system:script"),
-    # Khung mẫu: MỘT ảnh chốt khuôn mặt + áo + bối cảnh + ánh sáng; mọi storyboard và clip tham chiếu nó nên các shot liền mạch như cùng một buổi quay.
-    StepDef("anchor_frame", 4, "Khung mẫu bối cảnh", "compute", ("look", "cast", "garment_source", "fact_sheet", "style"),
-            lane="chatgpt-image", gate=True, param_keys=("prompt", "aspect"), output="image",
-            default_template="system:anchor_frame", images_fixed=1),
-    # 5. Storyboard: mỗi shot một ảnh gồm 2-4 khung
-    StepDef("storyboard", 5, "Storyboard", "compute", ("anchor_frame", "shot_plan", "fact_sheet", "style", "garment_source"),
-            lane="chatgpt-image", map_from="shot_plan", gate=True, param_keys=("prompt", "aspect"),
-            output="image", default_template="system:storyboard", images_fixed=1,
-            item_fields=("board_type", "framing", "panels", "face_policy", "expression", "duration")),
-    # 6. Clip: Ingredients (khung mẫu + storyboard + ảnh áo thật)
-    StepDef("clip", 6, "Clip", "compute", ("storyboard", "anchor_frame", "garment_source", "shot_plan", "fact_sheet", "style"),
-            lane="flow", paid=True, map_from="shot_plan", gate=True, uses_tier=True,
+    StepDef("format", 3, "Format quảng cáo", "input_params"),
+    # Một lượt LLM điền nội dung vào khung format: hook, beat từng shot, lời thoại, chữ, caption. Nhìn cast sheet đã duyệt.
+    StepDef("script", 3, "Kịch bản", "compute", ("fact_sheet", "cast_sheet", "scene_set", "brief", "format", "cast_profile"), lane="llm",
+            param_keys=("prompt",), default_template="system:script_v3"),
+    # 4. Khung chốt cảnh: MỘT ảnh người-trong-cảnh cho mỗi cảnh (cast sheet + ảnh áo + scene plate), duyệt một lần mỗi cảnh.
+    StepDef("scene_anchor", 4, "Khung chốt cảnh", "compute", ("scene_set", "style", "scene_plate", "cast_sheet", "garment_source", "fact_sheet", "cast_profile"),
+            lane="chatgpt-image", map_from="scene_set", gate=True, param_keys=("prompt", "aspect"), output="image",
+            default_template="system:scene_anchor", images_fixed=1, item_fields=SCENE_FIELDS),
+    # 5. Clip: Ingredients 3 ảnh theo vai (khung chốt cảnh của shot, cast sheet, ảnh áo thật), prompt theo công thức Google.
+    StepDef("clip", 5, "Clip", "compute", ("script", "scene_anchor", "cast_sheet", "garment_source", "fact_sheet", "scene_set", "style", "cast_profile"),
+            lane="flow", paid=True, map_from="script", gate=True, uses_tier=True,
             param_keys=("prompt", "duration", "aspect", "model"),
-            output="video", default_template="system:clip_ingredients", cost=clip_cost, cost_estimate=clip_cost_estimate,
-            item_fields=("role", "duration", "motion", "board_type", "panels", "camera_move")),
-    # 7. Kiểm tra
-    StepDef("clip_check", 7, "Kiểm tra clip", "compute", ("clip", "garment_source", "shot_plan"), lane="llm",
-            map_from="shot_plan", advisory=True, param_keys=("prompt",)),
-    StepDef("compliance", 7, "Tuân thủ nền tảng", "compute", ("script", "brief"), lane="local", advisory=True,
-            param_keys=("platform",)),
-    # 8. Ghép & Xuất
-    StepDef("voice", 8, "Giọng đọc", "compute", ("script",), lane="local", param_keys=("voice_id",), output="bundle", isolated=True),
-    StepDef("assemble", 8, "Ghép video", "compute", ("clip", "voice", "script", "shot_plan"), lane="local",
-            param_keys=("bgm", "bgm_volume", "caption_style", "caption_color", "transition", "edit_style", "cut_seconds"), output="video", isolated=True),
-    StepDef("export_pack", 8, "Gói xuất", "compute", ("assemble", "compliance", "script", "brief"), lane="local",
-            param_keys=("platforms",), output="bundle"),
+            output="video", default_template="system:clip_v3", cost=clip_cost, cost_estimate=clip_cost_estimate,
+            item_fields=SHOT_CLIP_FIELDS, dep_element=(("scene_anchor", "scene"), ("scene_set", "scene"))),
+    # 6. Ghép & Xuất
+    StepDef("voice", 6, "Giọng đọc", "compute", ("script",), lane="local", param_keys=("voice_id",), output="bundle", isolated=True),
+    StepDef("assemble", 6, "Ghép video", "compute", ("clip", "voice", "script"), lane="local",
+            param_keys=("bgm", "bgm_volume", "caption_style", "caption_color", "transition", "edit_style", "cut_seconds",
+                         "opening_text", "end_card", "ai_label"),
+            output="video", isolated=True),
+    StepDef("export_pack", 6, "Gói xuất", "compute", ("assemble", "script", "brief"), lane="local", param_keys=("platforms",),
+            isolated=True),
 )
 
 STEP_BY_KEY: dict[str, StepDef] = {s.key: s for s in STEPS}
@@ -142,6 +149,11 @@ def _validate() -> None:
             assert d in seen, f"{s.key} phụ thuộc {d} nhưng {d} chưa đứng trước (sai thứ tự tô-pô)"
         if s.map_from:
             assert s.map_from in s.deps, f"{s.key}: map_from {s.map_from} phải nằm trong deps"
+        for dep, _field in s.dep_element:
+            assert dep in s.deps, f"{s.key}: dep_element {dep} phải nằm trong deps"
+            assert s.map_from, f"{s.key}: dep_element chỉ dành cho bước map"
+            dd = STEP_BY_KEY[dep]
+            assert dd.map_from or dd.kind == "input_params", f"{s.key}: dep_element {dep} phải là bước map hoặc input_params"
         assert s.lane in LANE_LIMITS, f"{s.key}: làn {s.lane} không hợp lệ"
         seen.add(s.key)
     for s in STEPS:

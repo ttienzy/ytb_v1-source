@@ -3,7 +3,7 @@ import { AlertTriangle, Check, Copy, Loader2, RefreshCw, Sparkles, Square, Thumb
 import {
   artifactUrl, cancelRun, decideGate, planRun, previewStepPrompt, reroll, selectArtifact, setParams,
 } from '../services/campaignApi.ts'
-import { describeElement, describeGate, errorMessage, planSummary, progressText, reasonText } from '../services/campaignView.ts'
+import { PRESENTATION_LABEL, describeElement, describeGate, errorMessage, planSummary, progressText, reasonText } from '../services/campaignView.ts'
 import type { ArtifactView, CampaignState, Plan, PromptPreview } from '../types.ts'
 import { Badge, Fold } from './Common.tsx'
 import { PromptEditor } from './PromptEditor.tsx'
@@ -20,12 +20,13 @@ interface Props {
   onPreview: (src: string) => void
 }
 
-const SLOT_TITLE: Record<string, string> = { identity: 'Nhân dạng (ảnh nhân vật)', outfit: 'Trang phục (ảnh áo)' }
+const SLOT_TITLE: Record<string, string> = { identity: 'Nhân dạng (ảnh nhân vật)', outfit: 'Trang phục (ảnh áo mặt trước)' }
 
-/** Khối 4: look sheet từ ảnh nhân vật + ảnh áo. Xem lớn một ứng viên, so bằng dải ảnh nhỏ, duyệt/từ chối ngay cạnh ảnh. */
-export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun, onError, onPreview }: Props) {
+/** Khối 2: hồ sơ nhân vật (cách gọi, ảnh người thật?) + cast sheet nền trơn từ ảnh nhân vật + ảnh áo. Mọi khối sau chỉ dùng bản đã duyệt. */
+export function CastSheetPanel({ campaignId, state, artifacts, busy, onChanged, onRun, onError, onPreview }: Props) {
   const steps = useMemo(() => state.blocks.flatMap(b => b.steps), [state])
-  const step = steps.find(s => s.key === 'look')
+  const step = steps.find(s => s.key === 'cast_sheet')
+  const profile = steps.find(s => s.key === 'cast_profile')?.params ?? {}
   const element = step?.elements[0]
   const params = step?.params ?? {}
   const running = !!state.active_exec || !!element?.active_run
@@ -41,27 +42,28 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
   const inputKey = [
     steps.find(s => s.key === 'garment_source')?.elements[0]?.selected_artifact_id,
     steps.find(s => s.key === 'cast')?.elements[0]?.selected_artifact_id,
+    JSON.stringify(profile),
   ].join('|')
   const refreshKey = JSON.stringify([params, inputKey, element?.selected_artifact_id, element?.gate, element?.state])
   useEffect(() => {
     let alive = true
-    if (element?.blockers.length) {            // thiếu đầu vào: không gọi mạng, báo luôn lý do
+    if (element?.blockers.length) {
       setPreview(null)
       setPreviewError('Chưa đủ đầu vào: ' + element.blockers.map(b => `${b.dep}: ${b.reason}`).join('; '))
       setPlan(null)
       return
     }
-    previewStepPrompt(campaignId, 'look')
+    previewStepPrompt(campaignId, 'cast_sheet')
       .then(p => { if (alive) { setPreview(p); setPreviewError('') } })
       .catch(e => { if (alive) { setPreview(null); setPreviewError(errorMessage(e)) } })
-    planRun(campaignId, 'look')
+    planRun(campaignId, 'cast_sheet')
       .then(p => { if (alive) setPlan(p) })
       .catch(() => { if (alive) setPlan(null) })
     return () => { alive = false }
   }, [campaignId, refreshKey])
 
   const candidates = useMemo(
-    () => artifacts.filter(a => a.step_key === 'look' && a.kind === 'image')
+    () => artifacts.filter(a => a.step_key === 'cast_sheet' && a.kind === 'image')
       .sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [artifacts],
   )
@@ -80,27 +82,26 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
   const needsRun = element?.state === 'missing' || stale || (element?.state === 'blocked' && !!plan && plan.runnable > 0)
   const gateBadge = describeGate(element?.gate ?? null)
   const lastError = element?.last_run?.state === 'error' ? element.last_run.error : ''
+  const realFace = String(profile.real_face ?? '') === 'yes'
 
-  const generateNew = () => void guard(async () => {         // ảnh mới với cùng đầu vào = tăng nonce rồi chạy
-    await reroll(campaignId, 'look')
-    await onRun('look')
-  })
+  const setProfile = (patch: Record<string, unknown>) => void guard(() => setParams(campaignId, 'cast_profile', patch))
+  const generateNew = () => void guard(async () => { await reroll(campaignId, 'cast_sheet'); await onRun('cast_sheet') })
   const copyPrompt = async () => {
     if (!preview) return
     try { await navigator.clipboard.writeText(preview.prompt); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* bỏ qua */ }
   }
   const reject = (artifactId: string) => void guard(async () => {
-    await decideGate(campaignId, 'look', 'reject', { artifactId, note: note.trim() })
+    await decideGate(campaignId, 'cast_sheet', 'reject', { artifactId, note: note.trim() })
     setRejecting(false)
     setNote('')
   })
 
   return (
-    <section className="cp-card" data-testid="look-panel">
+    <section className="cp-card" data-testid="cast-sheet-panel">
       <header className="cp-card-head">
         <div className="cp-head-title">
-          <h3>Ảnh mẫu mặc áo (look sheet)<HelpHint hint="campaign.look" /></h3>
-          <span className="cp-head-sub">Chân dung bên trái, áo xoay 3 góc bên phải. Mọi khối sau chỉ dùng ảnh đã duyệt.</span>
+          <h3>Cast sheet (nhân vật + trang phục)<HelpHint hint="campaign.cast" /></h3>
+          <span className="cp-head-sub">Mặt 3 góc hàng trên, trang phục 3 góc hàng dưới, nền trơn · ảnh tham chiếu nhân dạng của mọi khung chốt và clip.</span>
         </div>
         <div className="cp-head-actions">
           <Badge badge={describeElement(element)} />
@@ -111,8 +112,8 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
               <button type="button" className="btn-g cp-small" onClick={() => void guard(() => cancelRun(campaignId))}><Square size={13} /> Hủy</button>
             </>
           ) : needsRun || !hasResult ? (
-            <button type="button" className="btn-p cp-small" disabled={busy || blocked} onClick={() => void onRun('look')} title={planSummary(plan) || undefined}>
-              <Sparkles size={14} /> {stale ? 'Tạo lại (đầu vào đã đổi)' : 'Tạo ảnh mẫu'}
+            <button type="button" className="btn-p cp-small" disabled={busy || blocked} onClick={() => void onRun('cast_sheet')} title={planSummary(plan) || undefined}>
+              <Sparkles size={14} /> {stale ? 'Tạo lại (đầu vào đã đổi)' : 'Tạo cast sheet'}
             </button>
           ) : (
             <button type="button" className="btn-g cp-small" disabled={busy} onClick={generateNew} title={planSummary(plan) || undefined}>
@@ -122,27 +123,38 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
         </div>
       </header>
 
-      <div className="cp-toolbar">
-        <label className="cp-label" htmlFor="look-count">Số ảnh mỗi lần tạo</label>
-        <select id="look-count" value={Number(params.count || 1)} disabled={running}
-                onChange={e => void guard(() => setParams(campaignId, 'look', { count: Number(e.target.value) }))}>
+      <div className="cp-toolbar" data-testid="cast-profile">
+        <label className="cp-label" htmlFor="cast-presentation">Gọi nhân vật là</label>
+        <select id="cast-presentation" value={String(profile.presentation ?? 'person')} disabled={running} onChange={e => setProfile({ presentation: e.target.value })}>
+          {Object.entries(PRESENTATION_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <label className="cp-switch">
+          <input type="checkbox" checked={realFace} disabled={running} onChange={e => setProfile({ real_face: e.target.checked ? 'yes' : 'no' })} />
+          Ảnh nhân vật là người thật
+        </label>
+        <label className="cp-label" htmlFor="sheet-count">Số ảnh mỗi lần</label>
+        <select id="sheet-count" value={Number(params.count || 1)} disabled={running}
+                onChange={e => void guard(() => setParams(campaignId, 'cast_sheet', { count: Number(e.target.value) }))}>
           {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n}</option>)}
         </select>
-        <span className="cp-note">Tỉ lệ {preview?.aspect ?? '16:9'} · mỗi ảnh khoảng 40–60 giây · {planSummary(plan) || 'đã có kết quả cho đầu vào hiện tại'}</span>
       </div>
+      {realFace && (
+        <p className="cp-warn"><AlertTriangle size={13} /> Flow có bộ lọc người nổi tiếng: clip làm từ mặt người thật có thể bị chặn (không mất credit nhưng mất lượt ảnh).
+          Cân nhắc tạo nhân vật AI từ ảnh này bằng node “Tạo Ảnh Nhân Vật Mới” ở Canvas AI → Motion Control rồi dùng ảnh đó làm nhân vật.</p>
+      )}
 
-      {blocked && <p className="cp-empty">Cần ảnh sản phẩm (khối 1) và ảnh nhân vật (khối 2) trước.</p>}
+      {blocked && <p className="cp-empty">Cần ảnh sản phẩm (khối 1) và ảnh nhân vật (bên trái) trước.</p>}
       {lastError && <p className="cp-error-inline">Lần chạy gần nhất lỗi: {lastError}</p>}
-      {stale && <p className="cp-note">Đổi: {element!.reasons.map(reasonText).join(', ')}. Các khối sau vẫn dùng ảnh đã duyệt cho tới khi bạn duyệt ảnh mới.</p>}
-      {preview && preview.warnings.length > 0 && (
-        <div className="cp-riskline">{preview.warnings.map(w => <span key={w.code} className="cp-warn-chip"><AlertTriangle size={12} /> {w.message}</span>)}</div>
+      {stale && <p className="cp-note">Đổi: {element!.reasons.map(reasonText).join(', ')}. Các khối sau vẫn dùng bản đã duyệt cho tới khi bạn duyệt bản mới.</p>}
+      {preview && preview.warnings.filter(w => w.code !== 'real_face').length > 0 && (
+        <div className="cp-riskline">{preview.warnings.filter(w => w.code !== 'real_face').map(w => <span key={w.code} className="cp-warn-chip"><AlertTriangle size={12} /> {w.message}</span>)}</div>
       )}
 
       {shown ? (
         <div className="cp-viewer">
           <div className="cp-viewer-stage">
             <button type="button" className="cp-viewer-img" onClick={() => onPreview(artifactUrl(shown.id))} title="Xem lớn">
-              <img src={artifactUrl(shown.id)} alt="Look sheet đang xem" />
+              <img src={artifactUrl(shown.id)} alt="Cast sheet đang xem" />
             </button>
             <div className="cp-viewer-bar">
               <span className="cp-viewer-label">
@@ -150,10 +162,10 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
                 {shown.meta?.template?.name && <small> · {shown.meta.template.name} v{shown.meta.template.version}{shown.meta?.seconds ? ` · ${shown.meta.seconds}s` : ''}</small>}
               </span>
               {!shownSelected && (
-                <button type="button" className="btn-g cp-small" disabled={busy || running} onClick={() => void guard(() => selectArtifact(campaignId, 'look', shown.id))}>Chọn ảnh này</button>
+                <button type="button" className="btn-g cp-small" disabled={busy || running} onClick={() => void guard(() => selectArtifact(campaignId, 'cast_sheet', shown.id))}>Chọn ảnh này</button>
               )}
               <button type="button" className="btn-p cp-small" disabled={busy || running || shownApproved}
-                      onClick={() => void guard(() => decideGate(campaignId, 'look', 'approve', { artifactId: shown.id }))}>
+                      onClick={() => void guard(() => decideGate(campaignId, 'cast_sheet', 'approve', { artifactId: shown.id }))}>
                 <Check size={13} /> {shownApproved ? 'Đã duyệt' : 'Duyệt ảnh này'}
               </button>
               {shownSelected && (
@@ -170,7 +182,7 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
                 <button type="button" className="btn-p cp-small" onClick={() => reject(shown.id)}>Xác nhận từ chối</button>
               </div>
             )}
-            {element?.gate === 'need_approval' && <p className="cp-note">Soi logo, chữ, tay áo và độ dài trước khi duyệt.</p>}
+            {element?.gate === 'need_approval' && <p className="cp-note">Soi mặt (3 góc giống nhau?), logo, chữ, tay áo và độ dài trước khi duyệt.</p>}
           </div>
           {candidates.length > 1 && (
             <ul className="cp-strip" aria-label={`Các ảnh đã tạo (${candidates.length})`}>
@@ -178,7 +190,7 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
                 <li key={a.id}>
                   <button type="button" className={`cp-strip-item ${a.id === shown.id ? 'is-viewing' : ''} ${a.id === selectedId ? 'is-chosen' : ''}`}
                           onClick={() => setViewId(a.id)} title={a.id === selectedId ? 'Ảnh đang chọn' : 'Xem ứng viên này'}>
-                    <img src={artifactUrl(a.id)} alt="Ứng viên look sheet" loading="lazy" />
+                    <img src={artifactUrl(a.id)} alt="Ứng viên cast sheet" loading="lazy" />
                     {a.id === selectedId && <span className="cp-strip-flag"><Check size={10} strokeWidth={3} /></span>}
                   </button>
                 </li>
@@ -187,13 +199,14 @@ export function LookPanel({ campaignId, state, artifacts, busy, onChanged, onRun
           )}
         </div>
       ) : !blocked && (
-        <div className="cp-placeholder cp-placeholder-wide">{running ? <Loader2 size={20} className="spinning" /> : 'Chưa có ảnh mẫu. Bấm “Tạo ảnh mẫu”.'}</div>
+        <div className="cp-placeholder cp-placeholder-wide">{running ? <Loader2 size={20} className="spinning" /> : 'Chưa có cast sheet. Bấm “Tạo cast sheet” (1 lượt ảnh ChatGPT, 0 credit Flow).'}</div>
       )}
 
-      <Fold title="Nâng cao: prompt và ảnh tham chiếu" className="cp-fold-quiet" testId="look-advanced"
-            meta={preview ? `${preview.ref_order.length} ảnh tham chiếu · mẫu ${params.prompt?.template_id && params.prompt.template_id !== 'system:look_sheet' ? 'riêng' : 'mặc định'}` : previewError}>
-        <PromptEditor campaignId={campaignId} stepKey="look" kind="look_sheet" defaultTemplateId="system:look_sheet"
+      <Fold title="Nâng cao: mẫu prompt và ảnh tham chiếu" className="cp-fold-quiet" testId="cast-advanced"
+            meta={preview ? `${preview.ref_order.length} ảnh tham chiếu · mẫu ${params.prompt?.template_id && params.prompt.template_id !== 'system:cast_sheet' ? 'riêng' : '3×2 (mặc định)'}` : previewError}>
+        <PromptEditor campaignId={campaignId} stepKey="cast_sheet" kind="cast_sheet" defaultTemplateId="system:cast_sheet"
                       prompt={params.prompt} onChanged={onChanged} onError={onError} />
+        <p className="cp-note">Có hai mẫu hệ thống: “3×2” (mặc định) và “cổ điển” (chân dung + turnaround). Chưa đo được Omni thích mẫu nào hơn: thử cả hai trên một clip 360p rồi chọn.</p>
         {previewError && <p className="cp-empty">{previewError}</p>}
         {preview && (
           <div className="cp-preview">

@@ -1,36 +1,35 @@
-"""Executor thật của từng bước. Mỗi giai đoạn thêm một executor vào đây."""
+"""Executor thật của từng bước (v3). Mỗi bước compute có executor ở đây; bước nào thiếu sẽ báo rõ khi chạy."""
 from __future__ import annotations
 
 from typing import Any, Callable
 
 from ..runner import register_executor
-from . import anchor, assemble, clip, fact_sheet, look, planning, storyboard, voice
+from . import assemble, cast_sheet, clip, export_pack, fact_sheet, scene_anchor, scene_plate, script, voice
 
 # Hàm dựng prompt dùng chung cho xem trước (UI) và lúc chạy: (prompts, params, inputs, note) -> dict
 PREVIEWERS: dict[str, Callable[..., dict[str, Any]]] = {
-    "look": look.build_request,
-    "anchor_frame": anchor.build_request,
     "fact_sheet": fact_sheet.build_request,
-    "storyboard": storyboard.build_request,
+    "cast_sheet": cast_sheet.build_request,
+    "scene_plate": scene_plate.build_request,
+    "script": script.build_request,
+    "scene_anchor": scene_anchor.build_request,
     "clip": clip.build_request,
-    **{key: (lambda prompts, params, inputs, note="", _spec=spec: planning.build_request(_spec, prompts, params, inputs, note))
-       for key, spec in planning.SPECS.items()},
 }
 
 # Chuẩn hóa kết quả JSON, chạy sau LLM VÀ sau khi người dùng sửa tay: (content, inputs, params) -> content
 NORMALIZERS: dict[str, Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]]] = {
     "fact_sheet": lambda content, inputs, params: fact_sheet.normalize(content),
-    **{key: spec.normalize for key, spec in planning.SPECS.items()},
+    "script": script.normalize_script,
 }
 
 
 def register_all() -> None:
-    register_executor("look", look.run_look)
-    register_executor("anchor_frame", anchor.run_anchor)
     register_executor("fact_sheet", fact_sheet.run_fact_sheet)
-    register_executor("storyboard", storyboard.run_storyboard)
+    register_executor("cast_sheet", cast_sheet.run_cast_sheet)
+    register_executor("scene_plate", scene_plate.run_scene_plate)
+    register_executor("script", script.run_script)
+    register_executor("scene_anchor", scene_anchor.run_scene_anchor)
     register_executor("clip", clip.run_clip)
     register_executor("voice", voice.run_voice)
     register_executor("assemble", assemble.run_assemble)
-    for key, spec in planning.SPECS.items():
-        register_executor(key, planning.make_executor(spec))
+    register_executor("export_pack", export_pack.run_export_pack)

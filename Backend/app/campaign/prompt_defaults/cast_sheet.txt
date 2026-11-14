@@ -1,0 +1,17 @@
+@Create image REFERENCE ROLES:
+- Image 1 = identity reference: the face, hairstyle, hair color and skin tone of the {{presentation}} shown.
+- Image 2 = outfit reference: the real garment (type, color, logo, print, fit, fabric).
+Priority: the reference images override any text description below.
+Do not redesign, restyle or substitute anything from the references. Reproduce every logo or printed text exactly as photographed.
+
+TASK: Create ONE photorealistic character reference sheet, 16:9, on a plain light-grey seamless studio background. No text, no labels, no borders, no watermark.
+LAYOUT: a 3 x 2 grid of equal cells, edge to edge.
+TOP ROW (identity): three head-and-shoulders portraits of the same {{presentation}} from Image 1: front view, three-quarter view, side profile. Same soft natural expression in all three, mouth relaxed, eyes open.
+BOTTOM ROW (outfit): three full-body views of the same {{presentation}} wearing EXACTLY the outfit from Image 2: front, three-quarter, back. Plain white sneakers. Relaxed standing pose, arms by the sides.
+LIGHTING: identical soft, even studio light in all six cells, no colored light, no shadows on the background.
+GARMENT: {{garment.summary}}
+{{#logo_rule}}LOGO RULE: {{logo_rule}}{{/logo_rule}}
+
+{{#changes}}
+[OPTIONAL CHANGES]: {{changes}}
+{{/changes}}

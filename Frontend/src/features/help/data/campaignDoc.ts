@@ -4,18 +4,18 @@ export const campaignDoc: HelpDoc = {
   pageId: 'Chiến dịch AI',
   title: 'Chiến dịch AI (video quảng cáo thời trang)',
   summary:
-    'Biến ảnh áo thật + ảnh người mẫu thành video quảng cáo hoàn chỉnh qua 8 khối: Sản phẩm → Người mẫu → Kế hoạch → Ảnh mẫu → Storyboard → Clip → Kiểm tra → Ghép & Xuất. Mỗi khâu quan trọng bạn duyệt trước khi sang khâu sau; chỉ khối Clip mới tốn credit.',
-  verifiedAt: '2026-11-12',
+    'Biến ảnh áo thật + ảnh người mẫu thành video quảng cáo hoàn chỉnh qua 6 khối: Sản phẩm → Nhân vật & Cảnh → Format & Kịch bản → Khung chốt cảnh → Clip → Ghép & Xuất. Bạn chọn một format quảng cáo, app dựng sẵn khung shot; bạn duyệt cast sheet, khung chốt từng cảnh và từng clip. Chỉ khối Clip mới tốn credit.',
+  verifiedAt: '2026-11-14',
   requires: [
     {
-      label: 'Tài khoản ChatGPT (viết chữ và tạo ảnh)',
+      label: 'Tài khoản ChatGPT (tạo ảnh)',
       fixPage: 'Cài đặt',
-      fixHint: 'Ảnh mẫu, Khung mẫu và Storyboard được vẽ qua tài khoản ChatGPT web; phần viết kế hoạch cũng đi đường này.',
+      fixHint: 'Cast sheet, ảnh bối cảnh và khung chốt cảnh được vẽ qua tài khoản ChatGPT web.',
     },
     {
-      label: 'Gemini đã đăng nhập (đọc ảnh áo)',
+      label: 'Gemini đã đăng nhập (đọc ảnh áo, viết kịch bản)',
       fixPage: 'Cài đặt',
-      fixHint: '“Hồ sơ áo” do Gemini đọc từ ảnh thật và là nguồn sự thật cho mọi bước sau.',
+      fixHint: '“Hồ sơ áo” do Gemini đọc từ ảnh thật; kịch bản cũng do Gemini viết.',
     },
     {
       label: 'Khối Clip: extension Flow đang chạy và đã đăng nhập Google Flow',
@@ -31,37 +31,45 @@ export const campaignDoc: HelpDoc = {
   start: [
     {
       title: 'Tạo chiến dịch',
-      do: 'Cột trái “Chiến dịch”: nhập tên (ví dụ “Áo Haim”) rồi bấm “Tạo”. Mỗi chiến dịch là một video quảng cáo cho một mẫu áo.',
+      do: 'Cột trái “Chiến dịch”: bấm “+”, nhập tên (ví dụ “Áo Haim”) rồi bấm “Tạo”. Mỗi chiến dịch là một video quảng cáo cho một mẫu áo.',
     },
     {
-      title: 'Khối 1–2: nạp ảnh',
-      do: 'Tải ảnh áo thật (mặt trước, mặt sau, chi tiết/logo, nhãn) và một ảnh nhân vật rõ mặt, rõ tóc. Đặt bối cảnh chung ở “Phong cách”.',
+      title: 'Khối 1: nạp ảnh áo',
+      do: 'Tải ảnh áo thật (mặt trước, mặt sau, chi tiết/logo, nhãn), bấm “Lưu ảnh” rồi “Phân tích bằng Gemini”.',
       result: 'Hồ sơ áo được Gemini đọc ra, bạn có thể sửa.',
     },
     {
-      title: 'Khối 3–4: lên kế hoạch và duyệt ảnh mẫu',
-      do: 'Chọn Góc kể, Hook, danh sách shot, lời thoại. Bấm “Tạo ảnh mẫu”, chọn ảnh ưng ý và “Duyệt ảnh này”, rồi duyệt “Khung mẫu” bối cảnh.',
+      title: 'Khối 3 trước: chọn format',
+      do: 'Điền Brief và chọn một “Format quảng cáo” (ví dụ Fit check / OOTD). Format quyết định số cảnh, số shot, thời lượng và máy quay.',
     },
     {
-      title: 'Khối 5: duyệt storyboard từng shot',
-      do: 'Mỗi shot được vẽ thành một ảnh 2–4 khung. Xem, “Duyệt” hoặc từ chối kèm lý do để vẽ lại.',
+      title: 'Khối 2: nhân vật và cảnh',
+      do: 'Tải một ảnh nhân vật, bấm “Tạo cast sheet” và “Duyệt ảnh này”. Thêm đủ số cảnh mà format cần (mẫu nhanh hoặc “Gợi ý bằng Gemini”), “Lưu”, rồi tạo ảnh bối cảnh.',
     },
     {
-      title: 'Khối 6: tạo clip (tốn credit)',
-      do: 'Chọn độ phân giải 360p (rẻ) hoặc 720p (nét), kiểm tra giá dự kiến, rồi tạo clip cho từng shot. Nên thử 360p trước.',
+      title: 'Khối 3: viết kịch bản',
+      do: 'Bấm “Viết kịch bản”. Sửa beat, lời thoại, chữ của từng shot nếu cần rồi “Lưu chỉnh sửa”.',
+    },
+    {
+      title: 'Khối 4: duyệt khung chốt từng cảnh',
+      do: 'Bấm “Tạo khung chốt”, xem từng cảnh rồi “Duyệt”, hoặc từ chối kèm lý do để tạo lại.',
+    },
+    {
+      title: 'Khối 5: tạo clip (tốn credit)',
+      do: 'Chọn 360p (rẻ) hoặc 720p (nét), kiểm tra giá, rồi tạo clip cho từng shot. Nên thử một shot 360p trước.',
       result: 'Mỗi shot có một clip để duyệt.',
     },
     {
-      title: 'Khối 7–8: kiểm tra, ghép và xuất',
-      do: 'Xem phần kiểm tra, chọn giọng đọc/nhạc/phụ đề/kiểu dựng rồi bấm “Ghép & Xuất”. Tải video ở menu Tải xuống.',
-      result: 'Video hoàn chỉnh kèm caption và hashtag.',
+      title: 'Khối 6: ghép và xuất',
+      do: 'Chọn giọng đọc, “Đọc lời thoại”, rồi “Ghép video hoàn chỉnh”. Bấm “Tạo gói đăng” để lấy caption, hashtag và checklist.',
+      result: 'Video hoàn chỉnh có chữ mở màn, thẻ kết và nhãn AI.',
     },
   ],
   areas: [
     {
       id: 'danh-sach-chien-dich',
       name: 'Danh sách chiến dịch và đầu trang',
-      what: 'Bên trái: tìm, tạo, chọn chiến dịch. Đầu trang: “Đổi tên”, “Trần credit Flow” và “Sơ đồ 8 khối” cho biết khối nào đang ở trạng thái nào.',
+      what: 'Bên trái: tìm, tạo, chọn chiến dịch. Đầu trang: “Đổi tên”, “Trần credit Flow” và sơ đồ 6 khối cho biết khối nào đang ở trạng thái nào.',
       how: [
         'Trần credit: nhập số nguyên không âm; lần chạy vượt trần sẽ bị chặn. Để trống = không giới hạn.',
         'Đổi ảnh/đầu vào đã lưu sẽ làm các bước sau thành “Cũ”. Kết quả cũ không bị xóa; chỉ cần tạo lại bước nào bạn muốn.',
@@ -70,69 +78,71 @@ export const campaignDoc: HelpDoc = {
     {
       id: 'khoi-1-san-pham',
       name: 'Khối 1 — Sản phẩm',
-      what: 'Ảnh sản phẩm: mặt trước, mặt sau, chi tiết/logo, nhãn. Ảnh “Mặt trước” dùng cho look sheet; Gemini xem tất cả. Sau đó là “Hồ sơ áo” (loại sản phẩm, chất liệu nhìn thấy, họa tiết, cổ áo, dịp mặc, có logo/chữ in…).',
+      what: 'Ảnh sản phẩm: mặt trước, mặt sau, chi tiết/logo, nhãn. Ảnh “Mặt trước” dùng cho cast sheet và khung chốt; ảnh “Chi tiết / logo” dùng cho shot cận; Gemini xem tất cả. Sau đó là “Hồ sơ áo” (loại sản phẩm, chất liệu nhìn thấy, họa tiết, cổ áo, có logo/chữ in…).',
       how: [
-        'Sửa hồ sơ rồi “Lưu chỉnh sửa”; app cảnh báo các bước sẽ tính lại.',
-        'Không có ô trống nào được tự điền thêm: chỗ nào bạn chưa điền sẽ để trống.',
+        'Sửa hồ sơ rồi “Lưu chỉnh sửa”; điểm rủi ro tính lại sau khi lưu và giới hạn mức chuyển động của các shot.',
       ],
     },
     {
-      id: 'khoi-2-nguoi-mau',
-      name: 'Khối 2 — Người mẫu & Phong cách',
-      what: 'Một ảnh nhân vật rõ mặt và tóc (tránh ảnh có chữ/phụ đề cứng vì có thể lọt vào ảnh tạo ra). Thư viện nhân vật dùng lại giữa các chiến dịch. “Phong cách” chọn một bối cảnh chung (một nơi quay, một kiểu ánh sáng) cho mọi storyboard và clip, có mẫu nhanh và mục “Luôn tránh”.',
-    },
-    {
-      id: 'khoi-3-ke-hoach',
-      name: 'Khối 3 — Kế hoạch',
-      what: 'Brief (ngôn ngữ, nền tảng đăng, khuyến mãi…), Góc kể, Hook (3–6 giây đầu), Danh sách shot và Lời thoại & caption (kèm hashtag). Danh sách shot do AI đề xuất số shot, thời lượng 3–15 giây và các nhịp của từng shot; bạn sửa được.',
-      tip: 'Danh sách shot nhìn thấy ảnh mẫu đã duyệt và hook đã chọn, nên duyệt ảnh mẫu càng sớm càng tốt.',
-    },
-    {
-      id: 'khoi-4-anh-mau',
-      name: 'Khối 4 — Ảnh mẫu & Khung mẫu',
-      what: 'Look sheet: chân dung bên trái, áo xoay 3 góc bên phải. “Tạo ảnh mẫu” có thể ra nhiều ứng viên; soi logo, chữ, tay áo, độ dài trước khi “Duyệt ảnh này”. Khung mẫu bối cảnh chốt mặt, áo, nơi quay, ánh sáng và là ảnh tham chiếu số 1 của clip; chỉ có một ảnh cho cả chiến dịch.',
+      id: 'khoi-2-nhan-vat-canh',
+      name: 'Khối 2 — Nhân vật & Cảnh',
+      what: 'Một ảnh nhân vật rõ mặt và tóc; Thư viện nhân vật dùng lại giữa các chiến dịch. “Cast sheet” là ảnh tham chiếu nhân dạng + trang phục trên nền trơn (mặt 3 góc, trang phục 3 góc), phải duyệt. “Các cảnh” là 1–3 nơi quay, mỗi cảnh có tên, nơi quay, thời điểm, ánh sáng, không khí và việc người mẫu làm; mỗi cảnh có một ảnh bối cảnh không người.',
       how: [
-        'Từ chối thì nhập lý do (ví dụ “logo bị méo”); ghi chú được gắn vào prompt lần tạo lại.',
-        '“Nâng cao: prompt và ảnh tham chiếu” cho xem và sửa prompt cuối cùng sẽ gửi.',
-        'Mọi khối sau chỉ dùng ảnh đã duyệt.',
+        'Chọn “Gọi nhân vật là” (Nữ / Nam / Không ghi giới tính) để prompt gọi đúng.',
+        'Tick “Ảnh nhân vật là người thật” nếu đúng: app cảnh báo vì Flow có bộ lọc người nổi tiếng, clip có thể bị chặn.',
+        'Thêm cảnh bằng mẫu nhanh, “Cảnh trống” hoặc “Gợi ý bằng Gemini” (gợi ý đúng số cảnh của format), rồi “Lưu”.',
+        'Sửa một cảnh chỉ làm “Cũ” ảnh bối cảnh, khung chốt và clip của cảnh đó.',
+      ],
+      tip: 'Mỗi cảnh chỉ ghi một nơi; áo trắng nên chọn nền có chiều sâu và tương phản, không phải tường trắng phẳng.',
+    },
+    {
+      id: 'khoi-3-format-kich-ban',
+      name: 'Khối 3 — Format & Kịch bản',
+      what: 'Brief (đối tượng, dịp mặc, giá, khuyến mãi, ngôn ngữ, nền tảng đăng). “Format quảng cáo” là bản thiết kế có sẵn: Fit check / OOTD, Cận chi tiết trước, 1 món nhiều cách phối, 1 set 3 dịp, GRWM rút gọn; mỗi format ghi số cảnh, số shot và tổng giây. “Kịch bản” do Gemini viết một lượt theo khung format: ý tưởng, kiểu hook, chữ mở màn, và với từng shot là các beat (hành động theo thời gian), biểu cảm, lời thoại, chữ trên màn hình; cuối cùng là caption, hashtag và kêu gọi hành động.',
+      how: [
+        'Đổi format hoặc brief làm kịch bản thành “Cũ”; bấm “Viết lại” khi muốn.',
+        'Từng shot sửa được: cảnh, thời lượng, chuyển động, ảnh áo dùng cho clip, góc máy, ống kính, chuyển động máy, beat.',
+        'Bộ đếm lời thoại tính theo âm tiết (khoảng 3,7 âm tiết mỗi giây); vượt mức sẽ có cảnh báo.',
+        'Sửa lời thoại và chữ không làm “Cũ” clip; sửa cảnh, thời lượng, máy quay, beat, chuyển động hay ảnh áo thì có.',
       ],
     },
     {
-      id: 'khoi-5-storyboard',
-      name: 'Khối 5 — Storyboard',
-      what: 'Mỗi shot một ảnh gồm 2–4 khung (các nhịp). Duyệt từng shot, từ chối kèm lý do để vẽ lại; chọn Tỉ lệ video; có mẫu prompt storyboard riêng ở “Nâng cao”.',
+      id: 'khoi-4-khung-chot',
+      name: 'Khối 4 — Khung chốt cảnh',
+      what: 'Mỗi cảnh một ảnh người mẫu mặc đúng áo đứng trong bối cảnh, ghép từ cast sheet, ảnh áo thật và ảnh bối cảnh. Duyệt một lần mỗi cảnh; bản duyệt là ảnh tham chiếu bối cảnh của mọi clip trong cảnh đó. “Tỉ lệ video” ở đây dùng chung cho ảnh bối cảnh, khung chốt và clip.',
+      how: [
+        'Từ chối thì nhập lý do (ví dụ “mặt khác cast sheet”); ghi chú được gắn vào prompt lần tạo lại.',
+        '“Prompt và ảnh tham chiếu sẽ gửi” cho xem đúng thứ sẽ gửi cho ChatGPT.',
+      ],
     },
     {
-      id: 'khoi-6-clip',
-      name: 'Khối 6 — Clip (tốn credit Flow)',
-      what: 'Omni 1.2 nhận 3 ảnh: khung mẫu, storyboard đã duyệt, ảnh áo thật; các nhịp của storyboard thành mốc thời gian [0–3s]… Chọn thời lượng 3–15 giây và độ phân giải. Giá dự kiến: 360p ≈ 1 credit/giây tới 10 giây rồi 2 credit/giây; 720p ≈ 3 credit/giây tới 10 giây rồi 6 credit/giây.',
+      id: 'khoi-5-clip',
+      name: 'Khối 5 — Clip (tốn credit Flow)',
+      what: 'Omni 1.2 nhận 3 ảnh theo vai: cast sheet, ảnh áo thật, khung chốt của cảnh mà shot dùng; các beat thành mốc thời gian [0–2s]… trong prompt cùng máy quay, diễn xuất và âm thanh. Chọn thời lượng 3–15 giây và độ phân giải. Giá: 360p khoảng 1 credit/giây tới 10 giây rồi 2 credit/giây; 720p khoảng 3 credit/giây tới 10 giây rồi 6 credit/giây.',
       how: [
-        '“Tạo clip mới cho shot này (tốn credit)” là lệnh duy nhất gửi lên Flow. App không bao giờ tự gửi lại.',
+        '“Tạo lại (tốn credit)” và “Tạo clip … shot này” là các lệnh gửi lên Flow. App không bao giờ tự gửi lại.',
         'Nếu Flow hủy request nhưng video vẫn có thể đã được tạo, clip báo “Chưa rõ kết quả — KHÔNG gửi lại”. Hãy kiểm tra trong Flow thay vì tạo lại.',
-        'Sổ chạy (“Xác nhận chưa gửi”): xác nhận một lần chạy chưa hề gửi lên Flow thì mới chạy lại được.',
+        '“Xác nhận chưa gửi”: xác nhận một lần chạy chưa hề gửi lên Flow thì mới chạy lại được.',
+        'Duyệt lại khung chốt của một cảnh chỉ làm “Cũ” clip của cảnh đó.',
       ],
       tip: 'Dùng 360p (rẻ) để thử chuyển động, hài lòng rồi mới tạo 720p. 720p có thể tạo thẳng, không bắt buộc qua 360p.',
     },
     {
-      id: 'khoi-7-kiem-tra',
-      name: 'Khối 7 — Kiểm tra',
-      what: 'Kiểm tra ảnh mẫu, kiểm tra clip và tuân thủ nền tảng (theo nền tảng đăng bạn chọn ở Brief). Đây chỉ là gợi ý để bạn xem, không chặn bạn đi tiếp.',
-    },
-    {
-      id: 'khoi-8-ghep-xuat',
-      name: 'Khối 8 — Ghép & Xuất',
-      what: 'Giọng đọc (bắt buộc, video luôn kèm tiếng đọc), Phụ đề (không phụ đề / chữ trắng / chữ vàng / chữ viền + đổ bóng — khuyên dùng), Nhạc nền (tự lặp cho đủ độ dài, tự nhỏ khi có tiếng đọc và mờ dần cuối), Kiểu dựng và Chuyển cảnh (Cắt cứng kiểu TikTok, Mờ chồng, Trượt). “Giữ trọn từng shot” cho video dài bằng tổng thời lượng các clip; “Cắt nhanh theo nhịp nhạc” là kiểu beat-cut.',
+      id: 'khoi-6-ghep-xuat',
+      name: 'Khối 6 — Ghép & Xuất',
+      what: 'Giọng đọc (bắt buộc), Phụ đề (chữ viền + đổ bóng, hộp đen hoặc không phụ đề), Kiểu dựng (“Giữ trọn từng shot” là mặc định; “Cắt nhanh theo nhịp nhạc” cho video ngắn hơn tổng thời lượng clip), Chuyển cảnh, Nhạc nền. Ba tùy chọn bật sẵn: “Chữ hook mở màn”, “Thẻ kết với CTA” và “Nhãn “Hình ảnh tạo bằng AI””.',
       how: [
-        '“Ghép & Xuất” tạo video; “Ghép lại” khi bạn đổi tùy chọn.',
-        'Menu Tải xuống có bản chính và các bản phụ (ví dụ bản không nhạc nền, chỉ giữ tiếng đọc và phụ đề để gắn nhạc trên TikTok; bản xóa watermark). Bản phụ dựng lại đúng video này, tạo một lần (0 credit), lần sau tải ngay.',
-        'Gói xuất kèm caption bài đăng và hashtag. Nền tảng đăng (TikTok, Facebook/Instagram Reels hoặc Shopee Video) và ngôn ngữ (Tiếng Việt / English) chọn ở Brief của khối 3.',
+        '“Ghép video hoàn chỉnh” tạo video; “Ghép lại video” khi bạn đổi tùy chọn.',
+        'Menu tải có bản chính và các bản phụ (bản xóa watermark, bản tách nhạc nền). Bản phụ tạo một lần (0 credit), lần sau tải ngay.',
+        '“Tạo gói đăng” cho caption + hashtag + dòng khai báo AI để dán khi đăng, kèm checklist theo nền tảng đăng chọn ở Brief.',
       ],
     },
   ],
   concepts: [
-    { term: 'Look sheet (ảnh mẫu)', meaning: 'Một ảnh người mẫu mặc đúng áo: chân dung và áo xoay 3 góc. Là chuẩn nhận dạng cho mọi khối sau.' },
-    { term: 'Khung mẫu (anchor frame)', meaning: 'Ảnh khóa mặt, áo, nơi quay và ánh sáng; luôn là ảnh tham chiếu số 1 của clip.' },
-    { term: 'Shot / Nhịp', meaning: 'Shot là một cảnh quay 3–15 giây; nhịp là các khung nhỏ (2–4) bên trong storyboard, thành mốc thời gian trong clip.' },
+    { term: 'Format', meaning: 'Bản thiết kế của một kiểu video quảng cáo: số cảnh, danh sách shot với vai, thời lượng và máy quay. Kịch bản chỉ điền nội dung vào khung này.' },
+    { term: 'Cast sheet', meaning: 'Một ảnh nền trơn có mặt nhân vật 3 góc và trang phục 3 góc. Là chuẩn nhận dạng cho mọi khối sau.' },
+    { term: 'Cảnh / Khung chốt cảnh', meaning: 'Cảnh là một nơi quay; khung chốt là ảnh người mẫu đứng trong cảnh đó, khóa mặt, áo, nơi quay và ánh sáng cho mọi clip của cảnh.' },
+    { term: 'Shot / Beat', meaning: 'Shot là một clip 3–15 giây; beat là từng nhịp hành động bên trong shot, thành mốc thời gian trong prompt clip.' },
     { term: 'Duyệt (cổng)', meaning: 'Bước bạn xác nhận ảnh/clip đạt thì khối sau mới dùng; từ chối kèm lý do để tạo lại.' },
     { term: 'Cũ (stale)', meaning: 'Kết quả được tạo từ đầu vào cũ. Không bị xóa, chỉ được đánh dấu để bạn quyết định có tạo lại không.' },
     { term: 'Trần credit', meaning: 'Hạn mức credit Flow tối đa cho một chiến dịch; lần chạy vượt hạn mức bị chặn.' },
@@ -140,7 +150,7 @@ export const campaignDoc: HelpDoc = {
   problems: [
     {
       symptom: '“Chưa đủ đầu vào” ở một khối',
-      fix: 'Khối đó cần kết quả của khối trước (ví dụ Ảnh mẫu cần ảnh sản phẩm ở khối 1 và ảnh nhân vật ở khối 2). Hoàn thành và duyệt khối trước.',
+      fix: 'Khối đó cần kết quả của khối trước (ví dụ khung chốt cần cast sheet đã duyệt, hồ sơ áo và ảnh bối cảnh). Hoàn thành và duyệt khối trước.',
     },
     {
       symptom: 'Clip báo “Chưa rõ kết quả — KHÔNG gửi lại”',
@@ -149,12 +159,21 @@ export const campaignDoc: HelpDoc = {
       link: 'Veo Studio',
     },
     {
-      symptom: 'Lần chạy bị chặn vì vượt trần credit',
-      fix: 'Bấm “Trần credit Flow” ở đầu trang để tăng hạn mức hoặc để trống không giới hạn.',
+      symptom: 'Clip lỗi vì bộ lọc người nổi tiếng',
+      cause: 'Flow nhận diện khuôn mặt người thật trong ảnh tham chiếu.',
+      fix: 'Đừng chạy lại y nguyên. Dùng nhân vật AI (ảnh tạo mới, không phải ảnh người thật), tạo lại cast sheet và khung chốt.',
     },
     {
-      symptom: 'Ảnh tạo ra bị méo logo hoặc sai chữ',
-      fix: 'Từ chối ảnh kèm lý do cụ thể (ví dụ “logo bị méo”) để ghi chú đi vào prompt lần tạo lại; kiểm tra ảnh chi tiết/logo ở khối 1 đã rõ chưa.',
+      symptom: 'Lần chạy bị chặn vì vượt trần credit',
+      fix: 'Bấm ô “Credit Flow đã dùng” ở đầu trang để tăng hạn mức hoặc để trống không giới hạn.',
+    },
+    {
+      symptom: 'Ảnh tạo ra bị méo logo hoặc sai mặt',
+      fix: 'Từ chối ảnh kèm lý do cụ thể để ghi chú đi vào prompt lần tạo lại; kiểm tra ảnh chi tiết/logo ở khối 1 đã rõ chưa.',
+    },
+    {
+      symptom: 'Kịch bản lỗi “JSON của Gemini không hợp lệ”',
+      fix: 'App đã tự sửa và thử lại một lần; nếu vẫn lỗi, bấm “Viết kịch bản” lần nữa.',
     },
     {
       symptom: 'Không ghép được vì thiếu giọng đọc hoặc nhạc',
@@ -162,8 +181,23 @@ export const campaignDoc: HelpDoc = {
       link: 'Thư viện nhạc',
     },
     {
-      symptom: 'Báo “Backend đang chạy là bản cũ, chưa có bản tải phụ”',
+      symptom: 'Báo “Backend chưa cập nhật”',
       fix: 'Khởi động lại bằng npm start để backend nạp bản mới.',
+    },
+    {
+      symptom: 'Ảnh bối cảnh báo “ChatGPT không tạo ảnh cho yêu cầu này mà trả lời bằng chữ”',
+      cause: 'ChatGPT hiểu nhầm yêu cầu (ví dụ thành sửa ảnh) nên trả lời bằng chữ thay vì vẽ. Tài khoản vẫn dùng được.',
+      fix: 'Bấm “Tạo ảnh” lại. Nếu vẫn lỗi, viết “Nơi quay” ngắn gọn, chỉ tả nơi (không nhắc áo hay người mẫu).',
+    },
+    {
+      symptom: 'Tạo ảnh báo ChatGPT “tạm chặn vì hoạt động bất thường”',
+      cause: 'ChatGPT chặn ngắn hạn khi tài khoản gửi nhiều yêu cầu tạo ảnh liên tục.',
+      fix: 'Chờ vài phút rồi bấm tạo lại. Không cần thêm tài khoản.',
+    },
+    {
+      symptom: 'Khối “Format & Kịch bản” báo kịch bản tạo ở phiên bản cũ',
+      cause: 'Chiến dịch tạo trước khi có Format giữ kịch bản dạng cũ, không sửa được trong khung shot mới.',
+      fix: 'Chọn một format rồi bấm “Viết lại”. Bản cũ vẫn được giữ.',
     },
     {
       symptom: 'Bản xóa watermark không dùng được',
@@ -171,8 +205,10 @@ export const campaignDoc: HelpDoc = {
       link: 'Xóa Watermark',
     },
   ],
-  related: ['Veo Studio', 'Voices', 'Thư viện nhạc', 'Cài đặt', 'Lên lịch Youtube'],
+  related: ['Veo Studio', 'Canvas AI', 'Voices', 'Thư viện nhạc', 'Cài đặt', 'Lên lịch Youtube'],
   changes: [
+    { date: '2026-11-14', text: 'Sửa: mở khối Format & Kịch bản của chiến dịch cũ không còn làm trắng màn hình; ảnh bối cảnh không còn bị ChatGPT từ chối; thông báo lỗi tạo ảnh nói đúng lý do.' },
+    { date: '2026-11-14', text: 'Quy trình mới 6 khối: chọn format quảng cáo, nhiều cảnh, cast sheet nền trơn, khung chốt theo cảnh, kịch bản một lượt, clip theo beat; video có chữ mở màn, thẻ kết, nhãn AI và gói đăng. Bỏ bước vẽ bảng phân cảnh từng shot.' },
     { date: '2026-11-12', text: 'Chiến dịch AI có tài liệu hướng dẫn lần đầu.' },
   ],
 }

@@ -1,0 +1,18 @@
+{
+  "id": "detail_first",
+  "name_vi": "Cận chi tiết trước (result-first)",
+  "desc_vi": "0–2 giây đầu là cận logo/chất liệu đang chuyển động, rồi mới ra toàn thân. Hợp áo có logo hoặc chất liệu đẹp.",
+  "best_for_vi": "Áo có logo thêu, họa tiết hoặc chất vải nổi bật",
+  "scenes": 1,
+  "hook_types": ["surprise_visual", "number_signal"],
+  "shots": [
+    {"role": "hook", "scene": 1, "duration": 3, "camera": {"angle": "eye-level", "lens": "85mm macro", "move": "slow push in"}, "needs_face": false, "garment_ref": "detail", "motion": "minimal",
+     "beat_hint": "extreme close-up of the logo or fabric as the person breathes and shifts; the camera creeps in"},
+    {"role": "proof", "scene": 1, "duration": 5, "camera": {"angle": "eye-level", "lens": "35mm", "move": "slow dolly out"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "the camera pulls back from the detail to reveal the whole person and outfit"},
+    {"role": "proof", "scene": 1, "duration": 5, "camera": {"angle": "eye-level", "lens": "35mm", "move": "slow arc around the subject"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "a turn to show the side and back; fabric moves with the body"},
+    {"role": "cta", "scene": 1, "duration": 4, "camera": {"angle": "eye-level", "lens": "50mm", "move": "static with gentle handheld drift"}, "needs_face": true, "garment_ref": "front", "motion": "gentle",
+     "beat_hint": "a final pose that keeps the detail visible, a small nod to camera"}
+  ]
+}

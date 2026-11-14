@@ -1,4 +1,4 @@
-/** Kiểu dữ liệu của Campaign engine (khớp Backend/app/campaign). */
+/** Kiểu dữ liệu của Campaign engine v3 (khớp Backend/app/campaign). */
 
 export type StepStateName = 'blocked' | 'missing' | 'fresh' | 'stale' | 'pinned'
 export type GateState = 'approved' | 'need_approval' | 'rejected' | null
@@ -81,6 +81,7 @@ export interface PlanItem {
   fingerprint: string | null
   lane: string
   credit: number | null
+  credit_estimate?: number | null
   images: number
   llm_calls: number
   estimate: boolean
@@ -173,33 +174,45 @@ export interface FactSheet {
 
 export interface PlanWarning { where: string; code: string; message: string }
 export type Motion = 'minimal' | 'gentle' | 'free'
-export interface AngleItem { key: string; id: string; title_vi: string; pitch_vi: string; needs_motion: Motion; risk_note: string }
-export interface AngleDoc { items: AngleItem[]; chosen: string; warnings?: PlanWarning[] }
-export interface HookItem { key: string; type: string; voiceover: string; on_screen_text: string; visual: string; seconds: number; needs_unavailable_visual?: boolean }
-export interface HookDoc { items: HookItem[]; chosen?: string; warnings?: PlanWarning[] }
-export type Archetype = 'hero' | 'detail' | 'motion' | 'cta'
-export type Framing = 'wide' | 'medium' | 'closeup'
-export type CameraMove = 'static' | 'push_in' | 'pull_out' | 'pan' | 'orbit'
-export type FacePolicy = 'visible' | 'none'
-export type BoardType = 'hero_walk' | 'turn_reveal' | 'pose_sequence' | 'detail_macro' | 'fabric_touch' | 'still_life' | 'closer_cta'
-export interface ShotPanel { framing: Framing; action: string }
-export interface ShotItem {
-  key: string; role: 'hook' | 'benefit' | 'cta'; duration: number; motion: Motion; motion_adjusted: boolean
-  on_screen_text: string; voiceover: string; board_type: BoardType; panels: ShotPanel[]
-  archetype: Archetype; framing: Framing; camera_move: CameraMove; face_policy: FacePolicy; expression?: string; motion_cap?: Motion
-  keyframe_start?: string; end_delta?: string
-}
-export interface ShotPlanDoc { items: ShotItem[]; motion_limit: Motion; warnings?: PlanWarning[] }
-export interface ScriptItem { shot: string; voiceover: string; on_screen_text: string }
-export interface ScriptDoc { items: ScriptItem[]; caption: string; hashtags: string[]; cta: string; warnings?: PlanWarning[] }
+export type ShotRole = 'hook' | 'proof' | 'detail' | 'cta'
+export type GarmentRef = 'front' | 'detail' | 'back'
+export type HookType = 'direct' | 'pain_question' | 'surprise_visual' | 'number_signal' | 'story'
 
-export interface StoryboardPreview {
+/** Một cảnh (nơi quay) trong tham số bước `scene_set`. */
+export interface SceneItem { key: string; name: string; place: string; time: string; light: string; mood: string; action: string }
+
+export interface ShotCamera { angle: string; lens: string; move: string }
+/** Một shot trong kịch bản v3: khung do format quyết, nội dung do Gemini/người dùng điền. */
+export interface ScriptShot {
+  key: string; role: ShotRole; scene: string; duration: number; camera: ShotCamera; needs_face: boolean; garment_ref: GarmentRef
+  motion: Motion; motion_cap?: Motion; beats: string[]; expression: string; voiceover: string; on_screen_text: string; max_syllables: number
+}
+export interface ScriptDoc {
+  format_id: string
+  angle_vi: string
+  hook: { type: HookType | string; on_screen_text: string }
+  items: ScriptShot[]
+  caption: string
+  hashtags: string[]
+  cta: string
+  motion_limit: Motion
+  total_seconds: number
+  warnings?: PlanWarning[]
+}
+
+/** GET /api/campaigns/formats: bản thiết kế video có sẵn. */
+export interface FormatShot { role: ShotRole; scene: number; duration: number; needs_face: boolean; camera: ShotCamera; garment_ref: GarmentRef; motion: Motion }
+export interface FormatSummary {
+  id: string; name_vi: string; desc_vi: string; best_for_vi: string; scenes: number; shots: number; total_seconds: number
+  hook_types: string[]; shot_list: FormatShot[]
+}
+
+export interface ScenePreview {
   prompt: string
-  ref_order: { role: string; label?: string; artifact_id?: string }[]
+  ref_order: { role: string; label?: string; artifact_id?: string; path?: string }[]
   warnings: PromptWarning[]
   aspect: string
-  panels: number
-  shot: string
+  scene: string
   template: { template_id: string; version: number; name: string }
 }
 export interface ClipPreview {
@@ -217,10 +230,17 @@ export interface ClipPreview {
   credit_known: boolean
   credit_estimate: number | null
   shot: string
+  scene: string
+}
+
+/** Gói xuất (bước `export_pack`): chữ dán khi đăng + checklist theo nền tảng. */
+export interface ExportPack {
+  platform: string; platform_label: string; language: string; caption: string; hashtags: string[]; cta: string
+  disclosure: string; post_text: string; checklist: string[]; video_seconds: number | null
 }
 
 export interface SuggestResult {
-  suggestion: Record<string, string>
+  suggestion: Record<string, any>
   note: string
   provider: string
   images: number

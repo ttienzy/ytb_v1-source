@@ -110,18 +110,36 @@ class Engine:
         """Phần tử của bước map: {element_key: item}. None nếu artifact nguồn chưa có."""
         if not sd.map_from:
             return {"": {}}
-        art = self._selected(s, cid, sd.map_from)
-        if art is None:
-            return None
-        data = self.store.load_json(art)
-        raw = data.get("items") if isinstance(data, dict) else None
+        return self.map_items(s, cid, sd.map_from)
+
+    def map_items(self, s: Session, cid: str, source_key: str) -> dict[str, dict[str, Any]] | None:
+        """Phần tử của một bước NGUỒN: artifact JSON {"items":[...]} của bước compute, hoặc params["items"] của bước input_params
+        (vd. danh sách cảnh người dùng nhập). None = nguồn chưa có."""
+        src = graph.get_step(source_key)
+        if src.kind == "input_params":
+            raw = self.get_params(s, cid, source_key).get("items")
+        else:
+            art = self._selected(s, cid, source_key)
+            if art is None:
+                return None
+            data = self.store.load_json(art)
+            raw = data.get("items") if isinstance(data, dict) else None
         if not isinstance(raw, list):
             return {}
+        prefix = "scene" if src.kind == "input_params" else "item"
         out: dict[str, dict[str, Any]] = {}
         for i, item in enumerate(raw):
             item = item if isinstance(item, dict) else {"value": item}
-            out[str(item.get("key") or f"item:{i + 1}")] = item
+            out[str(item.get("key") or f"{prefix}:{i + 1}")] = item
         return out
+
+    def dep_targets(self, s: Session, cid: str, sd: StepDef, element_key: str) -> dict[str, str | None]:
+        """{dep: phần tử đích} cho các dep khai báo `dep_element` (None = phần tử hiện tại không ghi trường đó)."""
+        if not sd.dep_element or not element_key:
+            return {}
+        items = self.items_of(s, cid, sd) or {}
+        item = items.get(element_key) or {}
+        return {dep: (str(item.get(field)) if item.get(field) not in (None, "") else None) for dep, field in sd.dep_element}
 
     def elements(self, s: Session, cid: str, sd: StepDef) -> list[str] | None:
         items = self.items_of(s, cid, sd)
@@ -146,7 +164,10 @@ class Engine:
             dd = graph.get_step(dep)
             if not dd.gate:
                 continue
-            if dd.map_from:
+            targets = self.dep_targets(s, cid, sd, element_key)
+            if dd.map_from and dep in targets:
+                elems = [targets[dep]] if targets[dep] else []
+            elif dd.map_from:
                 elems = [element_key] if (sd.map_from == dd.map_from and element_key) else (self.elements(s, cid, dd) or [])
             else:
                 elems = [""]
@@ -176,11 +197,29 @@ class Engine:
             return {"artifact_id": art.id, "element_key": element, "content_hash": art.content_hash,
                     "kind": art.kind, "path": str(self.store.abs_path(art)), "meta": ArtifactStore.meta(art)}
 
+        targets = self.dep_targets(s, cid, sd, element_key)
         for dep in sd.deps:
             dd = graph.get_step(dep)
-            if dd.kind == "input_params":
-                inputs[dep] = sha(canonical(self.get_params(s, cid, dep)))
-                refs[dep] = [{"params": self.get_params(s, cid, dep)}]
+            if dep in targets:
+                # Bước map dùng ĐÚNG MỘT phần tử của bước map/danh sách khác (vd. clip -> khung chốt của cảnh mà shot dùng).
+                target = targets[dep]
+                if not target:
+                    block(dep, f"phần tử chưa ghi trường '{sd.dep_elements[dep]}'")
+                    continue
+                if dd.kind == "input_params":
+                    scene_items = self.map_items(s, cid, dep) or {}
+                    if target not in scene_items:
+                        block(dep, f"không có phần tử '{target}' trong danh sách")
+                        continue
+                    inputs[f"{dep}[{target}]"] = sha(canonical(scene_items[target]))
+                    refs[dep] = [{"item": scene_items[target], "element_key": target}]
+                else:
+                    art, why = self._resolve_dep(s, cid, dd, target)
+                    if art is None:
+                        block(dep, f"{target}: {why}")
+                        continue
+                    inputs[f"{dep}[{target}]"] = art.content_hash
+                    refs[dep] = self._expand(s, art, lambda a, _e=target: ref(a, _e))
             elif sd.map_from and dep == sd.map_from:
                 items = self.items_of(s, cid, sd)
                 if items is None or element_key not in items:
@@ -190,6 +229,9 @@ class Engine:
                 hashed = item if sd.item_fields is None else {k: item.get(k) for k in sd.item_fields}
                 inputs[f"{dep}[{element_key}]"] = sha(canonical(hashed))
                 refs[dep] = [{"item": item, "element_key": element_key}]
+            elif dd.kind == "input_params":
+                inputs[dep] = sha(canonical(self.get_params(s, cid, dep)))
+                refs[dep] = [{"params": self.get_params(s, cid, dep)}]
             elif dd.map_from:
                 if sd.map_from == dd.map_from and element_key:
                     art, why = self._resolve_dep(s, cid, dd, element_key)
@@ -407,7 +449,7 @@ class Engine:
             step_items: list[PlanItem] = []
             if elems is None:
                 if self._pending_for(pending, sd, sd.map_from or "", ""):
-                    expected = int(self.get_params(s, cid, sd.key).get("expected_elements") or 3)
+                    expected = int(self.get_params(s, cid, sd.key).get("expected_elements") or self._expected_elements(s, cid, sd))
                     it = self._item(sd, "*", "run", "danh sách phần tử sẽ có sau khi bước trước chạy", s, cid, tier, None, estimate=True)
                     self._scale(it, expected)
                     step_items.append(it)
@@ -451,19 +493,20 @@ class Engine:
             if g is None or g.state != "approved":
                 return self._item(sd, e, "skip_not_approved", "chưa duyệt bản nháp nên không chạy final", s, cid, tier, st)
 
+        mapped = {k: v for k, v in self.dep_targets(s, cid, sd, e).items() if v}
         if st.blockers:
-            unresolved = [b for b in st.blockers if self._pending_for(pending, sd, b["dep"], e) is None]
+            unresolved = [b for b in st.blockers if self._pending_for(pending, sd, b["dep"], e, mapped) is None]
             if unresolved:
                 return self._item(sd, e, "blocked", "; ".join(f"{b['dep']}: {b['reason']}" for b in unresolved),
                                   s, cid, tier, st)
-            if any(self._pending_for(pending, sd, b["dep"], e) == "approval" for b in st.blockers):
+            if any(self._pending_for(pending, sd, b["dep"], e, mapped) == "approval" for b in st.blockers):
                 return self._item(sd, e, "waiting", "chờ duyệt bước trước", s, cid, tier, st)
             return self._item(sd, e, "run", "chạy sau bước trước", s, cid, tier, st, estimate=True)
 
-        dep_runs = [d for d in sd.deps if self._pending_for(pending, sd, d, e) == "run"]
+        dep_runs = [d for d in sd.deps if self._pending_for(pending, sd, d, e, mapped) == "run"]
         if st.state in ("missing", "stale"):
             waiting = self.awaiting_approval(s, cid, sd, e) or [
-                d for d in sd.deps if self._pending_for(pending, sd, d, e) == "approval"]
+                d for d in sd.deps if self._pending_for(pending, sd, d, e, mapped) == "approval"]
             if waiting:
                 return self._item(sd, e, "waiting", "chờ duyệt: " + ", ".join(waiting), s, cid, tier, st)
             if st.cached_artifact_id and not dep_runs:
@@ -477,11 +520,14 @@ class Engine:
         return self._item(sd, e, "fresh", "", s, cid, tier, st)
 
     @staticmethod
-    def _pending_for(pending: dict[tuple[str, str], str], sd: StepDef, dep: str, element_key: str) -> str | None:
+    def _pending_for(pending: dict[tuple[str, str], str], sd: StepDef, dep: str, element_key: str,
+                     mapped: dict[str, str] | None = None) -> str | None:
         """Bước `dep` có đang chờ chạy/duyệt trong kế hoạch không, xét đúng phần tử mà `sd` phụ thuộc."""
         dd = graph.STEP_BY_KEY.get(dep)
         if dd is None:                                  # blocker không phải bước (prompt, run...)
             return None
+        if mapped and dep in mapped:
+            return pending.get((dep, mapped[dep]))      # phụ thuộc đúng một phần tử của danh sách khác (dep_element)
         if dd.map_from and sd.map_from == dd.map_from and element_key:
             return pending.get((dep, element_key))      # phụ thuộc theo từng phần tử
         values = [v for (k, _), v in pending.items() if k == dep]
@@ -508,6 +554,16 @@ class Engine:
         else:
             it.credit = 0
         return it
+
+    def _expected_elements(self, s: Session, cid: str, sd: StepDef) -> int:
+        """Số phần tử dự kiến của bước map khi nguồn chưa chạy: số shot của format đã chọn, không thì 3."""
+        if sd.map_from == "script":
+            try:
+                from .formats import resolve
+                return len(resolve(self.get_params(s, cid, "format"))["shots"])
+            except Exception:  # noqa: BLE001
+                return 3
+        return 3
 
     @staticmethod
     def _scale(it: PlanItem, n: int) -> None:

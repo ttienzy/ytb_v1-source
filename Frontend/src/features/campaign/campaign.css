@@ -503,6 +503,9 @@ button.cp-budget:hover { border-color: #a5b4fc; }
 .cp-running { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #1e3a8a; }
 .cp-plan { font-size: 13px; color: #475569; }
 .cp-error-inline { margin: 0; font-size: 12px; color: #991b1b; }
+.cp-error-box { margin: 0; padding: 8px 10px; border: 1px solid #fecaca; background: #fef2f2; border-radius: 8px; font-size: 12px; line-height: 1.5; color: #991b1b; overflow-wrap: anywhere; }
+.cp-error-box summary { cursor: pointer; }
+.cp-error-box p { margin: 6px 0 0; }
 
 /* ứng viên */
 .cp-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -600,3 +603,19 @@ button.cp-budget:hover { border-color: #a5b4fc; }
 .cp-beats { flex: 1 1 220px; margin: 0; padding-left: 18px; font-size: 12px; color: #475569; line-height: 1.5; }
 .cp-grow { flex: 1 1 240px; min-width: 0; }
 .cp-board .cp-frame-empty { height: 200px; width: 100%; }
+
+/* ── v3: format, cảnh, kịch bản ───────────────────────────────────────────── */
+.cp-tl-proof { box-shadow: inset 0 3px 0 #3b82f6; }
+.cp-tl-detail { box-shadow: inset 0 3px 0 #a855f7; }
+.cp-scene { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.cp-scene-plate { display: flex; flex-direction: column; gap: 6px; }
+.cp-scene-img { width: 150px; aspect-ratio: 9 / 16; border-radius: 8px; overflow: hidden; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-size: 11.5px; color: #64748b; text-align: center; padding: 0; border: 0; cursor: pointer; }
+.cp-scene-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-scene-form { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cp-scene-msgs { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+.cp-beats-plain li { grid-template-columns: 22px minmax(0, 1fr) 30px; }
+.cp-field.cp-switch { flex-direction: column; align-items: flex-start; }
+@media (max-width: 720px) {
+  .cp-scene { grid-template-columns: minmax(0, 1fr); }
+  .cp-scene-img { width: 100%; max-width: 200px; }
+}

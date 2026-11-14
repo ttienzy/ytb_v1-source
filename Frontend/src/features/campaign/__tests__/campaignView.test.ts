@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  beatsFor, countSyllables, elementLabel, maxSyllables, sceneItems, sceneName,
   blockBadge, bundleMembers, describeElement, describeGate, backendMismatch, errorMessage, fillEmpty, httpErrorMessage, isRunning, nothingToRunMessage, planBlocker, progressText, linesToList, listToLines, planSummary, reasonText, riskBadge,
   runStateBadge,
 } from '../services/campaignView.ts'
@@ -22,6 +23,7 @@ test('describeElement explains why a step is stale in Vietnamese', () => {
   const b = describeElement(el({ state: 'stale', stale: true, reasons: ['prompt', 'inputs.cast'] }))
   assert.equal(b.label, 'Cũ')
   assert.equal(b.hint, 'Đổi: prompt, ảnh nhân vật')
+  assert.equal(reasonText('inputs.scene_anchor[scene:2]'), 'khung chốt cảnh đã duyệt (cảnh 2)')
   assert.equal(describeElement(el({ state: 'missing' })).label, 'Chưa có')
   assert.equal(describeElement(el({ state: 'pinned', stale: true })).label, 'Ghim (đã cũ)')
   assert.equal(describeElement(el({ active_run: 'r1' })).tone, 'info')
@@ -29,9 +31,9 @@ test('describeElement explains why a step is stale in Vietnamese', () => {
 })
 
 test('blocked shows what is missing', () => {
-  const b = describeElement(el({ state: 'blocked', blockers: [{ dep: 'look', reason: 'chưa duyệt' }] }))
+  const b = describeElement(el({ state: 'blocked', blockers: [{ dep: 'cast_sheet', reason: 'chưa duyệt' }] }))
   assert.equal(b.label, 'Chờ đầu vào')
-  assert.equal(b.hint, 'look: chưa duyệt')
+  assert.equal(b.hint, 'cast_sheet: chưa duyệt')
 })
 
 test('gate badges', () => {
@@ -42,13 +44,19 @@ test('gate badges', () => {
 })
 
 test('blockBadge ignores steps that are not implemented yet', () => {
-  assert.equal(blockBadge(block(7, [{ key: 'clip_check', elements: [el({ state: 'blocked' })] }])).label, 'Sắp có (GĐ8)')
-  const look = block(4, [{ key: 'look', elements: [el({ gate: 'need_approval' })] }])
+  assert.equal(blockBadge(block(7, [{ key: 'clip_check', elements: [el({ state: 'blocked' })] }])).label, 'Sắp có')
+  const look = block(4, [{ key: 'cast_sheet', elements: [el({ gate: 'need_approval' })] }])
   assert.equal(blockBadge(look).label, 'Cần duyệt')
-  assert.equal(blockBadge(block(4, [{ key: 'look', elements: [el({ state: 'stale' })] }])).label, 'Cũ')
-  assert.equal(blockBadge(block(4, [{ key: 'look', elements: [el({ active_run: 'r' })] }])).label, 'Đang chạy')
-  assert.equal(blockBadge(block(4, [{ key: 'look', elements: [el({ gate: 'approved' })] }])).label, 'Xong')
+  assert.equal(blockBadge(block(4, [{ key: 'cast_sheet', elements: [el({ state: 'stale' })] }])).label, 'Cũ')
+  assert.equal(blockBadge(block(4, [{ key: 'cast_sheet', elements: [el({ active_run: 'r' })] }])).label, 'Đang chạy')
+  assert.equal(blockBadge(block(4, [{ key: 'cast_sheet', elements: [el({ gate: 'approved' })] }])).label, 'Xong')
   assert.equal(blockBadge(block(1, [{ key: 'garment_source', elements: [el({ state: 'missing' })] }])).label, 'Chưa có')
+})
+
+test('blockBadge: khối chưa có phần tử nào không báo nhầm "Xong" (khung chốt cảnh khi chưa có cảnh)', () => {
+  const b = blockBadge(block(4, [{ key: 'scene_anchor', elements: [] }]))
+  assert.equal(b.label, 'Chờ đầu vào')
+  assert.notEqual(b.tone, 'ok')
 })
 
 test('planSummary', () => {
@@ -111,20 +119,20 @@ test('progressText shows the phase and elapsed time', () => {
 })
 
 test('isRunning also trusts element run state so polling never stops on an inconsistent snapshot', () => {
-  const idle = { active_exec: null, blocks: [block(4, [{ key: 'look', elements: [el()] }])] }
+  const idle = { active_exec: null, blocks: [block(4, [{ key: 'cast_sheet', elements: [el()] }])] }
   assert.equal(isRunning(idle), false)
   assert.equal(isRunning({ ...idle, active_exec: 'e1' }), true)
-  assert.equal(isRunning({ active_exec: null, blocks: [block(4, [{ key: 'look', elements: [el({ active_run: 'r1' })] }])] }), true)
+  assert.equal(isRunning({ active_exec: null, blocks: [block(4, [{ key: 'cast_sheet', elements: [el({ active_run: 'r1' })] }])] }), true)
   assert.equal(isRunning(null), false)
 })
 
 test('backendMismatch tells which parts of an old backend are missing', () => {
-  const ok = { executors: ['fact_sheet', 'angle', 'hook', 'shot_plan', 'script', 'look', 'anchor_frame', 'storyboard', 'clip', 'voice', 'assemble'], gated_steps: ['look', 'anchor_frame', 'storyboard', 'clip'] }
+  const ok = { executors: ['fact_sheet', 'cast_sheet', 'scene_plate', 'script', 'scene_anchor', 'clip', 'voice', 'assemble', 'export_pack'], gated_steps: ['cast_sheet', 'scene_anchor', 'clip'] }
   assert.equal(backendMismatch(ok), null)
   const old = { executors: ['fact_sheet', 'angle', 'hook', 'shot_plan', 'script', 'look'], gated_steps: ['look', 'clip'] }
   const msg = backendMismatch(old) ?? ''
-  assert.match(msg, /chưa có bước chạy: anchor_frame, storyboard, clip, voice, assemble/)
-  assert.match(msg, /chưa có cổng duyệt: anchor_frame, storyboard/)
+  assert.match(msg, /chưa có bước chạy: cast_sheet, scene_plate, scene_anchor, clip, voice, assemble, export_pack/)
+  assert.match(msg, /chưa có cổng duyệt: cast_sheet, scene_anchor/)
   assert.match(msg, /đã chạy sẵn/)
   assert.match(backendMismatch(null) ?? '', /bản cũ/)
 })
@@ -141,4 +149,63 @@ test('planBlocker and nothingToRunMessage explain a run that cannot start', () =
   assert.equal(planBlocker(null, 'clip', 'shot:1'), null)
   assert.equal(nothingToRunMessage(plan, 'clip'), 'Chưa chạy được (chờ duyệt: keyframe).')
   assert.match(nothingToRunMessage({ ...plan, items: [item('shot:2', 'fresh', '')] }, 'clip'), /Không có gì cần chạy/)
+})
+
+test('v3: luật âm tiết tiếng Việt, số beat, cảnh', () => {
+  assert.equal(countSyllables('Đồ tối giản nhưng thần thái street style không lẫn vào đâu được.'), 13)
+  assert.equal(maxSyllables(4), 17)
+  assert.equal(maxSyllables(6), 26)
+  assert.deepEqual([beatsFor(4), beatsFor(8), beatsFor(12)], [2, 3, 4])
+  assert.equal(elementLabel('scene:2'), 'cảnh 2')
+  assert.equal(elementLabel('shot:3'), 'shot 3')
+  const scenes = sceneItems({ items: [{ name: 'Phố', place: 'a street' }, null, { place: 'a cafe' }] })
+  assert.deepEqual(scenes.map(s => s.key), ['scene:1', 'scene:2'])
+  assert.equal(sceneName(scenes, 'scene:1'), 'Phố')
+  assert.equal(sceneName(scenes, 'scene:2'), 'a cafe')
+  assert.equal(sceneName(scenes, 'scene:9'), 'cảnh 9')
+  assert.deepEqual(sceneItems(undefined), [])
+})
+
+// ── kịch bản: dạng cũ (v2) không được làm vỡ trang ───────────────────────────
+test('adaptScriptDoc: kịch bản dạng cũ (v1/v2) → null để giao diện báo rõ thay vì trắng trang', async () => {
+  const { adaptScriptDoc, LEGACY_SCRIPT_MSG } = await import('../services/campaignView.ts')
+  // Đúng dạng artifact thật của chiến dịch v2.4 (5d27a03c3a42): shot chỉ có shot/voiceover/on_screen_text
+  const legacy = { caption: 'c', cta: 'mua', hashtags: ['#a'], items: [{ shot: 'shot:1', voiceover: 'xin chào', on_screen_text: 'NY' }] }
+  assert.equal(adaptScriptDoc(legacy), null)
+  assert.equal(adaptScriptDoc(null), null)
+  assert.equal(adaptScriptDoc('abc'), null)
+  assert.match(LEGACY_SCRIPT_MSG, /Viết lại/)
+})
+
+test('adaptScriptDoc: kịch bản v3 thiếu trường được bù mặc định (không còn undefined.length)', async () => {
+  const { adaptScriptDoc, beatsFor } = await import('../services/campaignView.ts')
+  const doc = adaptScriptDoc({
+    format_id: 'fit_check', angle_vi: 'ý', hook: { type: 'direct', on_screen_text: 'Hook' }, caption: '', hashtags: ['#x'], cta: '',
+    motion_limit: 'gentle', total_seconds: 9,
+    items: [
+      { key: 'shot:1', role: 'hook', scene: 'scene:1', duration: 4, camera: { angle: 'eye-level', lens: '35mm', move: 'static' },
+        needs_face: true, garment_ref: 'front', motion: 'gentle', beats: ['a', 'b'], expression: '', voiceover: 'v', on_screen_text: 't', max_syllables: 17 },
+      { key: 'shot:2', beats: ['x'] }, // sửa tay/Gemini bỏ sót gần hết trường
+    ],
+  })
+  assert.ok(doc)
+  const s2 = doc!.items[1]
+  assert.deepEqual(s2.camera, { angle: '', lens: '', move: '' })
+  assert.equal(s2.voiceover, '')
+  assert.equal(s2.on_screen_text, '')
+  assert.equal(s2.needs_face, true)
+  assert.equal(s2.garment_ref, 'front')
+  assert.equal(s2.motion, 'gentle')
+  assert.equal(s2.duration, 5)
+  assert.equal(typeof beatsFor(s2.duration), 'number')
+  assert.equal(doc!.items[0].camera.lens, '35mm') // trường có sẵn giữ nguyên
+  assert.equal(doc!.motion_limit, 'gentle')
+})
+
+test('adaptScriptDoc: kịch bản v3 chưa có shot vẫn hợp lệ (giao diện hiện "chưa có shot")', async () => {
+  const { adaptScriptDoc } = await import('../services/campaignView.ts')
+  const doc = adaptScriptDoc({ format_id: 'grwm', items: [] })
+  assert.ok(doc)
+  assert.deepEqual(doc!.items, [])
+  assert.deepEqual(doc!.hook, { type: 'direct', on_screen_text: '' })
 })

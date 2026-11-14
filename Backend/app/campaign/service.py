@@ -390,7 +390,7 @@ class CampaignService:
 
     # ── gợi ý điền form ──────────────────────────────────────────────────────
     def suggest_params(self, cid: str, step_key: str) -> dict[str, Any]:
-        """Gemini đọc ảnh áo + hồ sơ áo và gợi ý giá trị cho form Brief/Phong cách. Không lưu gì."""
+        """Gemini đọc ảnh áo + hồ sơ áo (+ format đã chọn) và gợi ý giá trị cho form Brief / Các cảnh & phong cách. Không lưu gì."""
         from .executors import suggest
         if step_key not in suggest.SPECS:
             raise CampaignError(f"Bước '{step_key}' chưa có gợi ý tự động.")
@@ -407,10 +407,18 @@ class CampaignService:
             fs = self.store.selected(s, cid, "fact_sheet")
             garment = self.store.load_json(fs) if fs is not None else {}
             brief = self.engine.get_params(s, cid, "brief")
-            existing = {k: v for k, v in self.engine.get_params(s, cid, step_key).items() if v not in (None, "")}
-        out = suggest.suggest(self.prompts, step_key, garment=garment, brief=brief, existing=existing, image_paths=paths)
+            fmt = self.engine.get_params(s, cid, "format")
+            existing = {k: v for k, v in self.engine.get_params(s, cid, step_key).items() if v not in (None, "", [])}
+            if step_key == "scene_set":
+                existing.update({k: v for k, v in self.engine.get_params(s, cid, "style").items() if v not in (None, "")})
+        out = suggest.suggest(self.prompts, step_key, garment=garment, brief=brief, existing=existing, image_paths=paths, format_params=fmt)
         out["used_fact_sheet"] = bool(garment)
         return out
+
+    @staticmethod
+    def list_formats() -> list[dict[str, Any]]:
+        from . import formats
+        return formats.list_formats()
 
     # ── kế hoạch / chạy ──────────────────────────────────────────────────────
     def _check_elements(self, cid: str, target: str | None, elements: list[str] | None) -> None:

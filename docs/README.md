@@ -2,7 +2,7 @@
 
 Điểm vào để tìm tài liệu của dự án. Cài đặt/chạy/test/phát hành nằm ở [README gốc](../README.md); file này trả lời **"tài liệu về X nằm ở đâu và còn đúng không"**.
 
-Cập nhật lần cuối: 2026-11-12. **Dev mới: bắt đầu ở [onboarding.md](onboarding.md).**
+Cập nhật lần cuối: 2026-11-14. **Dev mới: bắt đầu ở [onboarding.md](onboarding.md).**
 
 ## Cách đọc trạng thái
 
@@ -44,6 +44,7 @@ Khi tài liệu và code lệch nhau, **tin code** (và sửa tài liệu).
 | Đọc | Trạng thái |
 |---|---|
 | [campaign-engine.md](campaign-engine.md): artifact/fingerprint/gate, 19 bước, luồng chạy, `unknown`, giá credit, API, UI, cách thêm bước | **Hiện hành** |
+| [PLAN_campaign_v3_format_director.md](PLAN_campaign_v3_format_director.md): thẩm định v2.4 trên chiến dịch thật, khảo sát format/prompt 2026, quy trình 6 khối "format + đạo diễn theo cảnh", ma trận thử nghiệm GĐ0 | **Backlog** (đề xuất 2026-11-14, chưa code) |
 | [PLAN_campaign_v24_storyboard_ingredients.md](PLAN_campaign_v24_storyboard_ingredients.md): lý do chuyển sang `anchor_frame` + `storyboard` + Ingredients | **Hiện hành** (quyết định) |
 | [PLAN_ai_workflow_campaign.md](PLAN_ai_workflow_campaign.md), [AI_WORKFLOW_FASHION_DESIGN.md](AI_WORKFLOW_FASHION_DESIGN.md) | Tham chiếu (bỏ phần Keyframe) |
 | [archive/PLAN_campaign_v22_visual_quality.md](archive/PLAN_campaign_v22_visual_quality.md), [archive/PLAN_campaign_v23_editing_continuity.md](archive/PLAN_campaign_v23_editing_continuity.md) | Lưu trữ |

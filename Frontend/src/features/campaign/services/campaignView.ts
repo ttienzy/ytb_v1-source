@@ -1,20 +1,20 @@
-/** Hàm thuần dựng nhãn/huy hiệu từ trạng thái engine. Không gọi mạng, không React: dễ test. */
-import type { ArtifactView, BlockView, BundleMember, ElementState, Plan, PlanItem, RiskLevel } from '../types.ts'
+/** Hàm thuần dựng nhãn/huy hiệu từ trạng thái engine v3. Không gọi mạng, không React: dễ test. */
+import type { ArtifactView, BlockView, BundleMember, ElementState, GarmentRef, Motion, Plan, PlanItem, RiskLevel, SceneItem, ScriptDoc, ScriptShot, ShotRole } from '../types.ts'
 
 export type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'muted'
 export interface Badge { label: string; tone: Tone; hint?: string }
 
-/** Bước đã có thực thi thật. Khối nào không có bước ở đây sẽ hiện "Sắp có". */
 /** Đang có việc chạy: có lượt thực thi, HOẶC bất kỳ phần tử nào còn run đang chạy (phòng ảnh chụp trạng thái lệch nhau). */
 export function isRunning(state: { active_exec: string | null; blocks: BlockView[] } | null | undefined): boolean {
   if (!state) return false
   return !!state.active_exec || state.blocks.some(b => b.steps.some(s => s.elements.some(e => !!e.active_run)))
 }
 
-export const IMPLEMENTED_STEPS = new Set(['garment_source', 'fact_sheet', 'cast', 'style', 'brief', 'angle', 'hook', 'shot_plan', 'script', 'look', 'anchor_frame', 'storyboard', 'clip', 'voice', 'assemble'])
-
-/** Khối chưa làm -> giai đoạn dự kiến (docs/PLAN_ai_workflow_campaign.md). */
-export const BLOCK_PHASE: Record<number, string> = { 1: 'GĐ3', 2: 'GĐ3', 3: 'GĐ5', 4: 'GĐ4', 5: 'GĐ6', 6: 'GĐ7', 7: 'GĐ8', 8: 'GĐ8' }
+/** Mọi bước của đồ thị v3 đều có thực thi; danh sách này giữ để huy hiệu khối bỏ qua bước lạ của backend cũ. */
+export const IMPLEMENTED_STEPS = new Set([
+  'garment_source', 'fact_sheet', 'cast', 'cast_profile', 'cast_sheet', 'scene_set', 'style', 'scene_plate',
+  'brief', 'format', 'script', 'scene_anchor', 'clip', 'voice', 'assemble', 'export_pack',
+])
 
 const REASON_TEXT: Record<string, string> = {
   prompt: 'prompt',
@@ -22,19 +22,36 @@ const REASON_TEXT: Record<string, string> = {
   logic: 'phiên bản logic bước',
   'params.count': 'số ảnh',
   'params.aspect': 'tỉ lệ',
+  'params.duration': 'thời lượng',
   'params._nonce': 'yêu cầu tạo lại',
   'inputs.garment_source': 'ảnh sản phẩm',
   'inputs.cast': 'ảnh nhân vật',
+  'inputs.cast_profile': 'hồ sơ nhân vật',
+  'inputs.cast_sheet': 'cast sheet đã duyệt',
+  'inputs.scene_set': 'các cảnh',
   'inputs.style': 'phong cách',
+  'inputs.scene_plate': 'ảnh bối cảnh',
+  'inputs.scene_anchor': 'khung chốt cảnh đã duyệt',
   'inputs.brief': 'brief',
-  'inputs.look': 'ảnh mẫu đã duyệt',
-  'inputs.storyboard': 'storyboard đã duyệt',
-  'inputs.anchor_frame': 'khung mẫu đã duyệt',
-  'inputs.shot_plan': 'danh sách shot',
+  'inputs.format': 'format',
+  'inputs.fact_sheet': 'hồ sơ áo',
+  'inputs.script': 'kịch bản',
+  'inputs.clip': 'clip đã duyệt',
+  'inputs.voice': 'giọng đọc',
 }
 
+/** "inputs.scene_anchor[scene:2]" -> "khung chốt cảnh đã duyệt (cảnh 2)". */
 export function reasonText(reason: string): string {
+  const m = /^(.*)\[([^\]]+)\]$/.exec(reason)
+  if (m) return `${REASON_TEXT[m[1]] ?? m[1]} (${elementLabel(m[2])})`
   return REASON_TEXT[reason] ?? reason
+}
+
+/** "scene:2" -> "cảnh 2", "shot:3" -> "shot 3". */
+export function elementLabel(key: string): string {
+  const m = /^(scene|shot):(\d+)$/.exec(key)
+  if (!m) return key
+  return `${m[1] === 'scene' ? 'cảnh' : 'shot'} ${m[2]}`
 }
 
 export function describeElement(el: ElementState | undefined): Badge {
@@ -61,25 +78,16 @@ export function describeGate(gate: ElementState['gate']): Badge | null {
 /** Huy hiệu của cả khối, chỉ xét các bước đã có thực thi. */
 export function blockBadge(block: BlockView): Badge {
   const steps = block.steps.filter(s => IMPLEMENTED_STEPS.has(s.key))
-  if (steps.length === 0) return { label: `Sắp có (${BLOCK_PHASE[block.block] ?? ''})`.trim(), tone: 'muted' }
+  if (steps.length === 0) return { label: 'Sắp có', tone: 'muted' }
   const els = steps.flatMap(s => s.elements)
+  // Chưa có phần tử nào (vd. khung chốt cảnh khi chưa có cảnh): trước đây rơi xuống cuối và báo nhầm "Xong".
+  if (els.length === 0) return { label: 'Chờ đầu vào', tone: 'muted' }
   if (els.some(e => e.active_run)) return { label: 'Đang chạy', tone: 'info' }
   if (els.some(e => e.gate === 'need_approval')) return { label: 'Cần duyệt', tone: 'warn' }
   if (els.some(e => e.state === 'stale')) return { label: 'Cũ', tone: 'warn' }
   if (els.some(e => e.state === 'missing')) return { label: 'Chưa có', tone: 'muted' }
   if (els.some(e => e.state === 'blocked')) return { label: 'Chờ đầu vào', tone: 'muted' }
   return { label: 'Xong', tone: 'ok' }
-}
-
-export const BOARD_LABEL: Record<string, string> = {
-  hero_walk: 'Bước tới', turn_reveal: 'Xoay khoe dáng', pose_sequence: 'Chuỗi tạo dáng', detail_macro: 'Cận chi tiết',
-  fabric_touch: 'Chạm vải', still_life: 'Tĩnh vật', closer_cta: 'Kết',
-}
-
-/** Các nhịp của shot; kế hoạch tạo trước v2.4 chưa có `panels` thì lấy từ mô tả khung đầu/khác biệt cũ (như backend). */
-export function shotPanels(s: { panels?: { framing: string; action: string }[]; framing?: string; keyframe_start?: string; end_delta?: string }): { framing: string; action: string }[] {
-  if (s.panels?.length) return s.panels
-  return [s.keyframe_start, s.end_delta].filter((a): a is string => !!a).map(action => ({ framing: s.framing ?? 'medium', action }))
 }
 
 export function planSummary(plan: Plan | null): string {
@@ -195,16 +203,90 @@ export const PATTERN_LABEL: Record<string, string> = {
 export const linesToList = (text: string): string[] => text.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
 export const listToLines = (list: string[] | undefined): string => (list ?? []).join(String.fromCharCode(10))
 
-export const ROLE_LABEL: Record<string, string> = { hook: 'Hook', benefit: 'Lợi ích', cta: 'Kêu gọi (CTA)' }
+export const ROLE_LABEL: Record<string, string> = { hook: 'Hook', proof: 'Thấy rõ', detail: 'Cận chi tiết', cta: 'Kết (CTA)' }
 export const HOOK_TYPE_LABEL: Record<string, string> = {
-  contrast: 'Đối lập', direct: 'Nói thẳng vào máy', pain_question: 'Câu hỏi nỗi đau', surprise_visual: 'Hình ảnh bất ngờ',
-  number_signal: 'Con số', other: 'Khác',
+  direct: 'Nói thẳng vào máy', pain_question: 'Câu hỏi nỗi đau', surprise_visual: 'Hình ảnh bất ngờ', number_signal: 'Con số', story: 'Tình huống',
 }
 export const MOTION_LABEL: Record<string, string> = { minimal: 'Tối thiểu', gentle: 'Nhẹ', free: 'Tự do' }
+export const GARMENT_REF_LABEL: Record<string, string> = { front: 'Ảnh mặt trước', detail: 'Ảnh cận chi tiết', back: 'Ảnh mặt sau' }
+export const PRESENTATION_LABEL: Record<string, string> = { woman: 'Nữ', man: 'Nam', person: 'Không ghi giới tính' }
 
-/** Số từ lời thoại tối đa hợp với số giây (khoảng 3 từ/giây, khớp luật backend). */
-export const maxWords = (seconds: number): number => Math.max(0, Math.round(seconds)) * 3
-export const countWords = (text: string): number => (text.match(/\S+/g) ?? []).length
+/** Luật lời thoại tiếng Việt đo trên giọng VieNeu: ≈3,7 âm tiết/giây, dung sai 15 % (khớp backend `max_syllables`). */
+export const SYLLABLES_PER_SECOND = 3.7
+export const maxSyllables = (seconds: number): number => Math.max(1, Math.round(Math.max(0, Number(seconds) || 0) * SYLLABLES_PER_SECOND * 1.15))
+export const countSyllables = (text: string): number => (text.match(/[\p{L}\p{N}'’-]+/gu) ?? []).length
+
+/** Số beat nên có theo thời lượng (khớp backend `beats_for`). */
+export const beatsFor = (seconds: number): number => (seconds <= 5 ? 2 : seconds <= 10 ? 3 : 4)
+
+/** Kịch bản do phiên bản cũ (v1/v2, trước "format") tạo: shot không có `beats`/`key` (chỉ shot, voiceover, chữ). */
+export const LEGACY_SCRIPT_MSG =
+  'Kịch bản này được tạo ở phiên bản cũ (trước khi có Format), không sửa được trong khung shot mới. ' +
+  'Chọn format rồi bấm “Viết lại” để tạo kịch bản mới; bản cũ vẫn được giữ trong lịch sử.'
+
+const asStr = (v: unknown, d = ''): string => (typeof v === 'string' ? v : v == null ? d : String(v))
+const asNum = (v: unknown, d: number): number => (Number.isFinite(Number(v)) && v !== '' && v != null ? Number(v) : d)
+
+/**
+ * Chuẩn hóa kịch bản đọc từ artifact trước khi đưa lên giao diện sửa.
+ * - `null`: kịch bản dạng cũ (không shot nào có `beats`) → giao diện báo rõ thay vì vỡ trang
+ *   (lỗi thật 2026-11-14: `s.beats.length` trên kịch bản v2 làm trắng toàn bộ app).
+ * - Kịch bản v3 thiếu trường (sửa tay, Gemini bỏ sót) → bù giá trị mặc định cho mọi trường giao diện đọc.
+ */
+export function adaptScriptDoc(raw: unknown): ScriptDoc | null {
+  if (!raw || typeof raw !== 'object') return null
+  const doc = raw as Record<string, unknown>
+  const items = Array.isArray(doc.items) ? (doc.items as Record<string, unknown>[]).filter(x => x && typeof x === 'object') : []
+  if (items.length > 0 && !items.some(x => Array.isArray(x.beats))) return null
+  const hook = (doc.hook && typeof doc.hook === 'object' ? doc.hook : {}) as Record<string, unknown>
+  return {
+    ...(doc as unknown as ScriptDoc),
+    format_id: asStr(doc.format_id),
+    angle_vi: asStr(doc.angle_vi),
+    hook: { type: asStr(hook.type, 'direct') || 'direct', on_screen_text: asStr(hook.on_screen_text) },
+    caption: asStr(doc.caption),
+    cta: asStr(doc.cta),
+    hashtags: Array.isArray(doc.hashtags) ? doc.hashtags.map(h => asStr(h)) : [],
+    motion_limit: (['minimal', 'gentle', 'free'].includes(asStr(doc.motion_limit)) ? doc.motion_limit : 'free') as Motion,
+    total_seconds: asNum(doc.total_seconds, 0),
+    items: items.map((x, i) => {
+      const cam = (x.camera && typeof x.camera === 'object' ? x.camera : {}) as Record<string, unknown>
+      const duration = asNum(x.duration, 5)
+      return {
+        ...(x as unknown as ScriptShot),
+        key: asStr(x.key) || `shot:${i + 1}`,
+        role: (asStr(x.role) || 'proof') as ShotRole,
+        scene: asStr(x.scene) || 'scene:1',
+        duration,
+        camera: { angle: asStr(cam.angle), lens: asStr(cam.lens), move: asStr(cam.move) },
+        needs_face: x.needs_face == null ? true : !!x.needs_face,
+        garment_ref: (['front', 'detail', 'back'].includes(asStr(x.garment_ref)) ? x.garment_ref : 'front') as GarmentRef,
+        motion: (['minimal', 'gentle', 'free'].includes(asStr(x.motion)) ? x.motion : 'gentle') as Motion,
+        beats: Array.isArray(x.beats) ? x.beats.map(b => asStr(b)) : [],
+        expression: asStr(x.expression),
+        voiceover: asStr(x.voiceover),
+        on_screen_text: asStr(x.on_screen_text),
+        max_syllables: asNum(x.max_syllables, maxSyllables(duration)),
+      }
+    }),
+  }
+}
+
+/** Các cảnh trong tham số bước `scene_set` (bỏ phần tử hỏng, cấp khóa nếu thiếu). */
+export function sceneItems(params: Record<string, any> | undefined): SceneItem[] {
+  const raw = params?.items
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x: unknown) => x && typeof x === 'object').map((x: any, i: number) => ({
+    key: String(x.key || `scene:${i + 1}`), name: String(x.name ?? ''), place: String(x.place ?? ''), time: String(x.time ?? ''),
+    light: String(x.light ?? ''), mood: String(x.mood ?? ''), action: String(x.action ?? ''),
+  }))
+}
+
+/** Tên hiển thị của một cảnh: tên người dùng đặt, không thì nơi quay, không thì "cảnh N". */
+export function sceneName(scenes: SceneItem[], key: string): string {
+  const s = scenes.find(x => x.key === key)
+  return s?.name.trim() || s?.place.trim() || elementLabel(key)
+}
 
 /** Điền gợi ý vào các ô đang TRỐNG (không ghi đè điều người dùng đã gõ). Trả form mới + danh sách ô đã điền. */
 export function fillEmpty(draft: Record<string, string>, suggestion: Record<string, string>, keys: string[]):
@@ -235,11 +317,11 @@ export function progressText(progress: { message: string; started_at: number } |
   return `${progress.message} · đã ${elapsed}`
 }
 
-/** Giao diện cần backend có các executor/cổng này; thiếu = backend đang chạy là bản cũ. */
-export const EXPECTED_EXECUTORS = ['fact_sheet', 'angle', 'hook', 'shot_plan', 'script', 'look', 'anchor_frame', 'storyboard', 'clip', 'voice', 'assemble']
-export const EXPECTED_GATES = ['look', 'anchor_frame', 'storyboard', 'clip']
+/** Giao diện cần backend có các executor/cổng này; thiếu = backend đang chạy là bản cũ (v2). */
+export const EXPECTED_EXECUTORS = ['fact_sheet', 'cast_sheet', 'scene_plate', 'script', 'scene_anchor', 'clip', 'voice', 'assemble', 'export_pack']
+export const EXPECTED_GATES = ['cast_sheet', 'scene_anchor', 'clip']
 
-export interface BackendMeta { executors: string[]; gated_steps: string[] }
+export interface BackendMeta { executors: string[]; gated_steps: string[]; features?: string[] }
 
 /** Trả thông báo tiếng Việt nếu backend đang chạy thiếu chức năng giao diện cần; null nếu ổn. meta=null: không có /meta (backend rất cũ). */
 export function backendMismatch(meta: BackendMeta | null): string | null {

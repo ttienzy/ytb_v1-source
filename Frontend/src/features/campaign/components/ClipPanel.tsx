@@ -4,11 +4,11 @@ import {
   artifactUrl, cancelRun, decideGate, fetchArtifactJson, planRun, previewStepPrompt, reroll, resolveRun, selectArtifact, setParams,
 } from '../services/campaignApi.ts'
 import {
-  BOARD_LABEL, describeElement, describeGate, errorMessage, planBlocker, planSummary, progressText, reasonText, ROLE_LABEL,
+  ROLE_LABEL, describeElement, describeGate, elementLabel, errorMessage, planBlocker, planSummary, progressText, reasonText, sceneItems, sceneName,
   type Badge as BadgeData,
 } from '../services/campaignView.ts'
-import type { ArtifactView, CampaignState, ClipPreview, ElementState, Plan, ShotPlanDoc, Tier } from '../types.ts'
-import { Badge, Fold } from './Common.tsx'
+import type { ArtifactView, CampaignState, ClipPreview, ElementState, Plan, ScriptDoc, Tier } from '../types.ts'
+import { Badge, Fold, RunError } from './Common.tsx'
 import { PromptEditor } from './PromptEditor.tsx'
 import { HelpHint } from '../../help/components/HelpHint'
 
@@ -26,21 +26,23 @@ interface Props {
 }
 
 const TIER_INFO: Record<Tier, { title: string; res: string; hint: string }> = {
-  draft: { title: '360p (rẻ)', res: '360p', hint: '1 credit/giây tới 10 giây, 2 credit/giây sau đó (dự kiến). Rẻ, hợp để thử chuyển động.' },
-  final: { title: '720p (nét)', res: '720p', hint: '3 credit/giây tới 10 giây, 6 credit/giây sau đó (dự kiến). Tạo thẳng được, không cần bản 360p trước.' },
+  draft: { title: '360p (rẻ)', res: '360p', hint: '1 credit/giây tới 10 giây, 2 credit/giây sau đó (dự kiến; 15 s = 20 đã đo). Rẻ, hợp để thử chuyển động.' },
+  final: { title: '720p (nét)', res: '720p', hint: '3 credit/giây tới 10 giây (6 s = 18, 8 s = 24, 10 s = 30 đã đo), 6 credit/giây sau đó. Tạo thẳng được, không cần bản 360p trước.' },
 }
+const REF_TITLE: Record<string, string> = { sheet: 'Cast sheet', photo: 'Ảnh áo thật', anchor: 'Khung chốt cảnh' }
 
-/** Khối 6: mỗi shot một clip Ingredients từ khung mẫu, storyboard và ảnh áo thật. TỐN CREDIT FLOW: luôn xem ước tính. 360p/720p chỉ là độ phân giải user chọn. */
+/** Khối 5: mỗi shot một clip Ingredients từ cast sheet, ảnh áo thật và khung chốt của cảnh shot dùng. TỐN CREDIT FLOW: luôn xem ước tính. */
 export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, onChanged, onRun, onError, onPreview }: Props) {
   const steps = useMemo(() => state.blocks.flatMap(b => b.steps), [state])
   const step = steps.find(s => s.key === 'clip')
-  const boardEls = steps.find(s => s.key === 'storyboard')?.elements ?? []
-  const shotPlanEl = steps.find(s => s.key === 'shot_plan')?.elements[0]
+  const anchorEls = steps.find(s => s.key === 'scene_anchor')?.elements ?? []
+  const scriptEl = steps.find(s => s.key === 'script')?.elements[0]
+  const scenes = sceneItems(steps.find(s => s.key === 'scene_set')?.params)
   const params = step?.params ?? {}
   const elements: ElementState[] = (step?.elements ?? []).filter(e => e.element_key)
   const running = !!state.active_exec || elements.some(e => e.active_run)
 
-  const [shots, setShots] = useState<ShotPlanDoc | null>(null)
+  const [doc, setDoc] = useState<ScriptDoc | null>(null)
   const [plan, setPlan] = useState<Plan | null>(null)
   const [selectedShot, setSelectedShot] = useState('')
   const [preview, setPreview] = useState<ClipPreview | null>(null)
@@ -50,18 +52,17 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
 
   useEffect(() => {
     let alive = true
-    const id = shotPlanEl?.selected_artifact_id
-    if (!id) { setShots(null); return }
-    fetchArtifactJson<ShotPlanDoc>(id).then(d => { if (alive) setShots(d) }).catch(() => { if (alive) setShots(null) })
+    const id = scriptEl?.selected_artifact_id
+    if (!id) { setDoc(null); return }
+    fetchArtifactJson<ScriptDoc>(id).then(d => { if (alive) setDoc(d) }).catch(() => { if (alive) setDoc(null) })
     return () => { alive = false }
-  }, [shotPlanEl?.selected_artifact_id])
+  }, [scriptEl?.selected_artifact_id])
 
-  // Mặc định mở shot cần chú ý nhất: chưa rõ kết quả > đang chờ duyệt > shot đầu.
   const defaultKey = (elements.find(e => e.last_run?.state === 'unknown') ?? elements.find(e => e.gate === 'need_approval') ?? elements[0])?.element_key ?? ''
   useEffect(() => { if (!selectedShot || !elements.some(e => e.element_key === selectedShot)) setSelectedShot(defaultKey) }, [defaultKey, elements, selectedShot])
 
   const selected = elements.find(e => e.element_key === selectedShot)
-  const refreshKey = JSON.stringify([params, tier, selectedShot, elements.map(e => e.state + e.gate + (e.blockers.length ? 'b' : '')), boardEls.map(e => e.gate + e.selected_artifact_id), elements.map(e => JSON.stringify(e.params ?? {}))])
+  const refreshKey = JSON.stringify([params, tier, selectedShot, elements.map(e => e.state + e.gate + (e.blockers.length ? 'b' : '')), anchorEls.map(e => e.gate + e.selected_artifact_id), elements.map(e => JSON.stringify(e.params ?? {}))])
   useEffect(() => {
     let alive = true
     planRun(campaignId, 'clip', tier).then(p => { if (alive) setPlan(p) }).catch(() => { if (alive) setPlan(null) })
@@ -81,12 +82,11 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
     try { await fn(); await onChanged() } catch (e) { onError(errorMessage(e)) }
   }, [onChanged, onError])
 
-  const info = (key: string) => shots?.items.find(s => s.key === key)
+  const info = (key: string) => doc?.items.find(s => s.key === key)
   const videoOf = (el: ElementState) => artifacts.find(a => a.id === el.selected_artifact_id && a.kind === 'video')
-  const boardOf = (key: string) => boardEls.find(e => e.element_key === key)?.selected_artifact_id ?? null
+  const anchorOf = (key: string) => anchorEls.find(e => e.element_key === (info(key)?.scene ?? ''))?.selected_artifact_id ?? null
   const history = (key: string) => artifacts.filter(a => a.step_key === 'clip' && a.element_key === key && a.kind === 'video')
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
-  // Shot đã có clip ở độ phân giải kia, chỉ chưa có bản ở độ phân giải đang chọn: không phải "cũ", chỉ là chưa tạo.
   const otherResOnly = (el: ElementState) => el.state === 'stale' && el.reasons.length === 1 && el.reasons[0] === 'tier'
   const statusOf = (el: ElementState): BadgeData => {
     if (el.active_run) return { label: 'Đang tạo…', tone: 'info' }
@@ -115,12 +115,12 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
   const key = el?.element_key ?? ''
   const shot = el ? info(key) : undefined
   const video = el ? videoOf(el) : undefined
-  const boardId = key ? boardOf(key) : null
-  const seconds = Number(el?.params?.duration ?? shot?.duration ?? 6)
+  const anchorId = key ? anchorOf(key) : null
+  const seconds = Number(el?.params?.duration ?? shot?.duration ?? 5)
   const hist = key ? history(key) : []
   const unknown = el?.last_run?.state === 'unknown'
-  const blocker = key ? planBlocker(plan, 'clip', key) : null      // chỉ blockers của state là chưa đủ: storyboard mới chưa duyệt nằm ở kế hoạch
-  const waitingBoard = !!el && (blocker?.action === 'waiting' || (!video && el.blockers.some(b => b.dep === 'storyboard')))
+  const blocker = key ? planBlocker(plan, 'clip', key) : null
+  const waitingAnchor = !!el && (blocker?.action === 'waiting' || (!video && el.blockers.some(b => b.dep === 'scene_anchor')))
   const idx = elements.findIndex(e => e.element_key === key)
 
   return (
@@ -128,7 +128,7 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
       <header className="cp-card-head">
         <div className="cp-head-title">
           <h3>Clip Ingredients của từng shot <span className="cp-tag cp-tag-warn">Tốn credit Flow</span><HelpHint hint="campaign.clip" /></h3>
-          <span className="cp-head-sub">Omni 1.2 nhận 3 ảnh: khung mẫu, storyboard đã duyệt, ảnh áo thật. Không bao giờ tự gửi lại lệnh tạo video.</span>
+          <span className="cp-head-sub">Omni 1.2 nhận 3 ảnh theo vai: cast sheet, ảnh áo thật, khung chốt của cảnh shot dùng. Không bao giờ tự gửi lại lệnh tạo video.</span>
         </div>
         <div className="cp-head-actions">
           <div className="cp-seg" role="group" aria-label="Độ phân giải">
@@ -150,7 +150,7 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
 
       <div className="cp-toolbar">
         <span className="cp-note">{TIER_INFO[tier].hint}</span>
-        <span className="cp-note cp-push">{[planSummary(plan), `${approvedCount}/${elements.length} clip đã duyệt`, waitingCount ? `${waitingCount} shot chờ duyệt storyboard` : ''].filter(Boolean).join(' · ')}</span>
+        <span className="cp-note cp-push">{[planSummary(plan), `${approvedCount}/${elements.length} clip đã duyệt`, waitingCount ? `${waitingCount} shot chờ duyệt khung chốt` : ''].filter(Boolean).join(' · ')}</span>
       </div>
       {running && <p className="cp-running-note"><Loader2 size={13} className="spinning" /> Đang tạo clip… khoảng 1–3 phút mỗi clip; lệnh đã gửi thì không hủy được.</p>}
       {plan && plan.unknown_cost_items > 0 && (
@@ -169,7 +169,7 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
           </div>
         </div>
       )}
-      {elements.length === 0 && <p className="cp-warn"><AlertTriangle size={13} /> Chưa có danh sách shot (khối 3).</p>}
+      {elements.length === 0 && <p className="cp-warn"><AlertTriangle size={13} /> Chưa có kịch bản (khối 3).</p>}
 
       {elements.length > 0 && (
         <div className="cp-md">
@@ -178,18 +178,18 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
               const k = e.element_key
               const it = info(k)
               const v = videoOf(e)
-              const b = boardOf(k)
+              const a = anchorOf(k)
               const st = statusOf(e)
               return (
                 <li key={k}>
                   <button type="button" className={`cp-md-item ${selectedShot === k ? 'is-active' : ''}`} onClick={() => setSelectedShot(k)} data-testid={`clip-${k}`}>
                     <span className="cp-md-thumb cp-md-thumb-tall">
-                      {b ? <img src={artifactUrl(b)} alt="" loading="lazy" /> : null}
+                      {a ? <img src={artifactUrl(a)} alt="" loading="lazy" /> : null}
                       {v && <span className="cp-md-res">{String(v.meta?.resolution ?? '')}</span>}
                     </span>
                     <span className="cp-md-text">
-                      <strong>{k}</strong>
-                      <small>{it ? `${ROLE_LABEL[it.role] ?? it.role} · ${Number(e.params?.duration ?? it.duration)}s · ${BOARD_LABEL[it.board_type] ?? ''}` : ''}</small>
+                      <strong>{elementLabel(k)}</strong>
+                      <small>{it ? `${ROLE_LABEL[it.role] ?? it.role} · ${Number(e.params?.duration ?? it.duration)}s · ${sceneName(scenes, it.scene)}` : ''}</small>
                       <span className={`cp-md-status cp-tone-text-${st.tone}`}>{st.label}</span>
                     </span>
                   </button>
@@ -201,8 +201,9 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
           {el && (
             <div className="cp-md-detail" data-testid="clip-detail">
               <div className="cp-row">
-                <strong className="cp-shot-key">{key}</strong>
+                <strong className="cp-shot-key">{elementLabel(key)}</strong>
                 {shot && <span className="cp-tag">{ROLE_LABEL[shot.role] ?? shot.role}</span>}
+                {shot && <span className="cp-tag">{sceneName(scenes, shot.scene)}</span>}
                 {video && <span className="cp-tag">{String(video.meta?.resolution ?? '') || 'clip'}</span>}
                 <Badge badge={statusOf(el)} />
                 <span className="cp-row cp-push">
@@ -238,11 +239,16 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
                       {Array.from({ length: 13 }, (_, i) => i + 3).map(n => <option key={n} value={n}>{n} giây{n > 10 ? ' (đắt hơn)' : ''}</option>)}
                     </select>
                   </label>
+                  {shot && shot.beats.length > 0 && (
+                    <ol className="cp-beat-list" aria-label="Beat của shot">
+                      {shot.beats.map((b, i) => <li key={i}><span className="cp-beat-num">{i + 1}</span><span>{b}</span></li>)}
+                    </ol>
+                  )}
                   {el.active_run && <p className="cp-running-note"><Loader2 size={13} className="spinning" /> {progressText(el.progress) || 'Đang chạy…'}</p>}
-                  {waitingBoard && <p className="cp-warn"><AlertTriangle size={13} /> Storyboard mới nhất chưa được duyệt. Sang khối 5 duyệt rồi quay lại.</p>}
-                  {blocker && !waitingBoard && !unknown && <p className="cp-note">{blocker.reason}</p>}
+                  {waitingAnchor && <p className="cp-warn"><AlertTriangle size={13} /> Khung chốt của cảnh này chưa được duyệt. Sang khối 4 duyệt rồi quay lại.</p>}
+                  {blocker && !waitingAnchor && !unknown && <p className="cp-note">{blocker.reason}</p>}
                   {el.stale && el.reasons.length > 0 && !otherResOnly(el) && <p className="cp-note">Đổi: {el.reasons.map(reasonText).join(', ')}</p>}
-                  {el.last_run?.state === 'error' && <p className="cp-error-inline">Lỗi: {el.last_run.error}</p>}
+                  {el.last_run?.state === 'error' && <RunError prefix="Tạo clip lỗi" text={el.last_run.error ?? ''} />}
 
                   <div className="cp-btn-col">
                     {!video ? (
@@ -279,10 +285,10 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
                     </div>
                   )}
 
-                  {boardId && (
-                    <button type="button" className="cp-clip-board" onClick={() => onPreview(artifactUrl(boardId))} title="Xem storyboard lớn">
-                      <img src={artifactUrl(boardId)} alt={`Storyboard ${key}`} loading="lazy" />
-                      <span>Storyboard đã dùng</span>
+                  {anchorId && (
+                    <button type="button" className="cp-clip-board" onClick={() => onPreview(artifactUrl(anchorId))} title="Xem khung chốt lớn">
+                      <img src={artifactUrl(anchorId)} alt={`Khung chốt của ${key}`} loading="lazy" />
+                      <span>Khung chốt cảnh đã dùng</span>
                     </button>
                   )}
                 </div>
@@ -309,13 +315,13 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
                   <>
                     <p className="cp-note">
                       Model <code>{preview.model}</code> · {preview.duration}s · {preview.aspect} · chuyển động “{preview.motion}” ·{' '}
-                      {preview.credit_known ? <strong>{preview.credit} credit</strong> : <strong>dự kiến {preview.credit_estimate} credit (chưa đo được giá)</strong>}
+                      {preview.credit_known ? <strong>{preview.credit} credit (đã đo)</strong> : <strong>dự kiến {preview.credit_estimate} credit (chưa đo được giá)</strong>}
                     </p>
                     <div className="cp-refs" data-testid="clip-refs">
                       {preview.ref_order.map(r => (
                         <figure key={r.role}>
                           <button type="button" onClick={() => onPreview(artifactUrl(r.artifact_id))}><img src={artifactUrl(r.artifact_id)} alt={r.label ?? r.role} loading="lazy" /></button>
-                          <figcaption>{r.label ?? r.role}</figcaption>
+                          <figcaption>{REF_TITLE[r.role] ?? r.label ?? r.role}</figcaption>
                         </figure>
                       ))}
                     </div>
@@ -330,8 +336,8 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
       )}
 
       <Fold title="Nâng cao: mẫu prompt video" className="cp-fold-quiet"
-            meta={params.prompt?.template_id && params.prompt.template_id !== 'system:clip_ingredients' ? 'đang dùng mẫu riêng' : 'mặc định, chưa hiệu chỉnh bằng clip thật'}>
-        <PromptEditor campaignId={campaignId} stepKey="clip" kind="clip_ingredients" defaultTemplateId="system:clip_ingredients"
+            meta={params.prompt?.template_id && params.prompt.template_id !== 'system:clip_v3' ? 'đang dùng mẫu riêng' : 'mặc định v3'}>
+        <PromptEditor campaignId={campaignId} stepKey="clip" kind="clip" defaultTemplateId="system:clip_v3"
                       prompt={params.prompt} onChanged={onChanged} onError={onError} />
       </Fold>
     </section>

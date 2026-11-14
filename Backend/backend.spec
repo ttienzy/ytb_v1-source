@@ -16,6 +16,7 @@ a = Analysis(
         (str(backend_dir / 'prompts'), 'prompts'),
         (str(backend_dir / 'resources'), 'resources'),
         (str(backend_dir / 'app' / 'campaign' / 'prompt_defaults'), 'app/campaign/prompt_defaults'),
+        (str(backend_dir / 'app' / 'campaign' / 'formats'), 'app/campaign/formats'),
     ],
     hiddenimports=collect_submodules('app') + [
         'uvicorn',

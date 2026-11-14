@@ -11,7 +11,7 @@ interface Props {
 /** Thanh 8 bước gọn trên một hàng: số thứ tự (dấu tích khi xong), tên khối và trạng thái ngắn. */
 export function BlockMap({ blocks, active, onSelect }: Props) {
   return (
-    <nav className="cp-steps" aria-label="Sơ đồ 8 khối">
+    <nav className="cp-steps" aria-label="Sơ đồ 6 khối">
       {blocks.map(b => {
         const badge = blockBadge(b)
         const done = badge.tone === 'ok'

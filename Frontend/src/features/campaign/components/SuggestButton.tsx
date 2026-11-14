@@ -6,7 +6,7 @@ import type { CampaignState, SuggestResult } from '../types.ts'
 
 interface Props {
   campaignId: string
-  step: 'brief' | 'style'
+  step: 'brief' | 'scene_set'
   state: CampaignState
   onResult: (result: SuggestResult) => void
   onError: (message: string) => void

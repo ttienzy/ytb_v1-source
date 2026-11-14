@@ -115,6 +115,14 @@ class GptImageClient:
     @staticmethod
     def _classify(err: Exception) -> str:
         m = str(err).lower()
+        # ChatGPT trả lời bằng chữ thay vì ảnh: do NỘI DUNG yêu cầu, tài khoản vẫn tốt (xét trước "limit" vì lời giải thích
+        # có thể chứa chữ đó; câu báo hết lượt thật đã bị check_limit_refusal bắt thành rate_limit từ trước).
+        if "no_image:" in m:
+            return "content"
+        # ChatGPT chặn tạm thời (HTTP 403 "Unusual activity has been detected from your device. Try again later."), thường
+        # khi gửi nhiều yêu cầu liên tục. Hết sau vài phút: KHÔNG phải cookie hỏng, cũng không phải hết lượt 3 giờ.
+        if "unusual activity" in m:
+            return "throttled"
         if any(k in m for k in ("accesstoken", "cookies expired", "401", "revoked", "sign in", "unauthorized")):
             return "auth"
         # Không dùng chữ "rate" trần: nó khớp nhầm "generate", "moderate"... và đánh dấu oan tài khoản hết lượt.
@@ -201,6 +209,10 @@ class GptImageClient:
         last_err = None
         while True:
             acc = self._lease_account(frozenset(tried))
+            if acc is None and last_err is not None and self._classify(last_err) == "throttled":
+                raise GptImageError(
+                    "ChatGPT tạm chặn vì phát hiện \"hoạt động bất thường\" (gửi nhiều yêu cầu tạo ảnh liên tục). "
+                    "Chờ vài phút rồi bấm tạo lại; không cần thêm tài khoản.") from last_err
             if acc is None:
                 err_str = str(last_err)
                 if "rate_limit:" in err_str:
@@ -221,6 +233,17 @@ class GptImageClient:
                 except Exception as exc:  # noqa: BLE001
                     last_err = exc
                     kind = self._classify(exc)
+                    if kind == "content":
+                        # Không đổi trạng thái tài khoản (trước đây bị đánh "error" oan rồi bị loại khỏi pool) và không thử
+                        # tài khoản khác: cùng prompt sẽ bị trả lời y hệt, chỉ tốn thêm lượt ảnh.
+                        said = str(exc).split("no_image:", 1)[1].strip()
+                        raise GptImageError(
+                            "ChatGPT không tạo ảnh cho yêu cầu này mà trả lời bằng chữ (tài khoản vẫn dùng được, "
+                            f"thường do prompt). ChatGPT nói: {said}") from exc
+                    if kind == "throttled":
+                        # Chặn ngắn hạn: giữ nguyên trạng thái tài khoản, thử tài khoản khác (nếu có).
+                        tried.add(acc["id"])
+                        continue
                     if kind == "auth":
                         if self._heal_account(acc):
                             fresh = self._store.get_account(acc["id"]) or acc
