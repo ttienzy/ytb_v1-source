@@ -49,6 +49,8 @@ Frontend (`Frontend/src/features/studio/audio/`): khối gập **Âm thanh & hi�
 
 Dọn CSS: xóa 501 rule chết (≈60 KB) của trang Video/Audio cũ; so sánh ảnh chụp 17 trang trước/sau: 16 trang giống hệt từng điểm ảnh, 1 trang (Khám Phá Kênh) lệch trong mức nhiễu dữ liệu mạng. Còn ~190 class chết thuộc trang khác (Watermark, Veo, Pippit…), chưa động tới.
 
+> **Phase 2–3 bên dưới đã được thay bằng [PLAN_audio_story_v2.md](PLAN_audio_story_v2.md)** (2026-11-14): khảo sát kênh thật cho thấy đơn vị nên là cả truyện / video FULL 16:9, và đã đo được phụ đề theo dòng không tốn thêm thời gian TTS. Giữ phần dưới để tham khảo.
+
 ## 4. Phase 2 — đề xuất tiếp (ưu tiên theo giá trị / công sức)
 
 1. **Phụ đề cứng (F)** — giá trị cao nhất còn thiếu.

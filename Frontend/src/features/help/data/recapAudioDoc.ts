@@ -4,8 +4,8 @@ export const recapAudioDoc: HelpDoc = {
   pageId: 'Recap & Audio',
   title: 'Recap & Audio',
   summary:
-    'Hai xưởng làm video có giọng đọc AI. Workflow YouTube: link YouTube → Gemini viết kịch bản recap → cắt cảnh + lồng tiếng → ghép thành video. Workflow Audio: truyện đã crawl → đọc từng chương bằng giọng AI → ghép với video nền → mỗi chương một video.',
-  verifiedAt: '2026-11-12',
+    'Hai xưởng làm video có giọng đọc AI. Workflow YouTube: link YouTube → Gemini viết kịch bản recap → cắt cảnh + lồng tiếng → ghép thành video. Workflow Audio: truyện đã crawl → đọc từng câu bằng giọng AI → video có ảnh bìa + phụ đề → mỗi truyện một video FULL (hoặc mỗi chương một video).',
+  verifiedAt: '2026-11-15',
   requires: [
     {
       label: 'Có ít nhất một giọng đọc',
@@ -18,9 +18,9 @@ export const recapAudioDoc: HelpDoc = {
       fixHint: 'Kịch bản recap do Gemini viết qua cookie web. Hết hạn thì job dừng ở bước “Kiểm tra cookie Gemini”.',
     },
     {
-      label: 'Workflow Audio: truyện đã crawl, có thumbnail',
+      label: 'Workflow Audio: truyện đã crawl',
       fixPage: 'Crawl truyện',
-      fixHint: 'Truyện phải có chương với nội dung không rỗng và một ảnh thumbnail trước khi chạy.',
+      fixHint: 'Truyện phải có chương với nội dung không rỗng. Ảnh bìa nguồn được dùng tự động; không có thì video dùng ảnh thay thế.',
     },
     {
       label: 'Nhạc nền (tùy chọn): có bài trong Thư viện nhạc',
@@ -43,8 +43,8 @@ export const recapAudioDoc: HelpDoc = {
       do: 'YouTube: dán link vào ô “Link YouTube” (hoặc chuyển từ Khám Phá Kênh). Audio: chọn một truyện ở danh sách bên trái, bấm chọn các chương.',
     },
     {
-      title: 'Chọn giọng, nhạc nền và (với Audio) video nền',
-      do: 'Chọn giọng đọc, bật/tắt nhạc nền. Workflow Audio cần thêm video nền (khối “Video”) hoặc chuyển sang nền “Ảnh bìa truyện”.',
+      title: 'Chọn giọng, nhạc nền và (với Audio) kiểu video, bố cục',
+      do: 'Chọn giọng đọc, bật/tắt nhạc nền. Workflow Audio: chọn “Cả truyện” hoặc “Từng chương”, khổ video và bố cục (“Ảnh bìa + phụ đề” không cần video nền; “Nền video” cần thư viện video nền).',
     },
     {
       title: 'Bấm chạy và theo dõi',
@@ -102,15 +102,15 @@ export const recapAudioDoc: HelpDoc = {
     {
       id: 'workflow-audio',
       name: 'Workflow Audio — quy trình tổng',
-      what: 'Mỗi chương truyện thành một video: ảnh thumbnail → giọng đọc → đo thời lượng → ghép với video nền → (lớp phủ) → trộn tiếng → (nhạc nền) → xong. Mỗi lần chạy tối đa 10 truyện, không giới hạn số chương.',
+      what: 'Mỗi truyện thành một video FULL có mốc chương (“Cả truyện”; truyện dài hơn 120 phút tự chia tập ở ranh giới chương) hoặc mỗi chương một video (“Từng chương”). Các bước của một video: Chuẩn bị → Giọng đọc → Dựng hình → Ghép âm thanh → Thumbnail & mô tả → (Upload Drive). Mỗi lần chạy tối đa 10 truyện, không giới hạn số chương.',
       flow: [
         'Chọn truyện ở Kho truyện',
         'Chọn chương (Shift+click chọn dải)',
-        'Cài giọng, khổ video, nền, nhạc',
+        'Chọn kiểu video, giọng, khổ, bố cục',
         'Bấm “Bắt đầu”',
-        'Xem “Video đã hoàn tất”',
+        'Xem “Video đã hoàn tất”, chép tiêu đề/mô tả',
       ],
-      tip: 'Chạy thử trước bằng “Xem thử 6 giây” trong khối “Âm thanh & hiệu ứng” trước khi chạy cả lô.',
+      tip: 'Giọng đọc của từng chương được lưu lại: đổi bố cục, phụ đề hay nhạc rồi chạy lại thì không phải đọc lại (chỉ mất phần dựng hình, khoảng 1–2 phút). Xem thử 6 giây ở khối “Âm thanh & hiệu ứng” trước khi chạy cả lô.',
     },
     {
       id: 'kho-truyen',
@@ -118,7 +118,7 @@ export const recapAudioDoc: HelpDoc = {
       what: 'Danh sách truyện đã crawl. Ô tìm kiếm không phân biệt dấu. Lọc nhanh: Chưa xong, Tất cả, Làm dở, Đã xong, Trong hàng đợi, và đánh dấu truyện đã có tóm tắt.',
       how: [
         'Chọn một truyện để hiện danh sách chương. “Chưa làm” chọn mọi chương chưa làm; Shift+click chọn dải, Ctrl+click chỉ để đọc.',
-        'Truyện chưa có thumbnail thì phải “Thêm ảnh” (hoặc “Đổi thumbnail”) trước khi chạy.',
+        'Mỗi truyện hiện ảnh bìa nguồn và thời lượng ước tính. Ảnh bìa nguồn được dùng làm hình video và thumbnail; muốn thay thì bấm “Đổi ảnh” ở đầu khung chương. Ảnh bìa nguồn nhiều khi không liên quan tới truyện — nên xem trước khi đăng.',
       ],
     },
     {
@@ -130,12 +130,13 @@ export const recapAudioDoc: HelpDoc = {
     {
       id: 'hang-doi',
       name: 'Hàng đợi (cột phải)',
-      what: 'Những chương sẽ chạy, gom theo truyện (bấm tên để quay lại truyện, có nút xóa từng mục và “Xóa toàn bộ hàng đợi”). Bên dưới là cài đặt nhanh của lần chạy.',
+      what: 'Những chương sẽ chạy, gom theo truyện; mỗi dòng cho biết sẽ ra bao nhiêu video và dài khoảng bao lâu (bấm tên để quay lại truyện, có nút xóa từng mục và “Xóa toàn bộ hàng đợi”). Bên dưới là cài đặt của lần chạy; nút “Bắt đầu” ghi tổng số video và thời lượng ước tính.',
       how: [
+        'Kiểu video: “Cả truyện” (mỗi truyện một video FULL, có mốc chương trong mô tả) hoặc “Từng chương” (mỗi chương một video — hợp Shorts/TikTok).',
         'Giọng đọc: nhóm Preset VieNeu và Giọng đã clone.',
-        'Khổ video: Dọc 9:16 hoặc Ngang 16:9 (chỉ cần chọn khổ; video nền tự khớp).',
-        'Nền video: tóm tắt số video nền sẵn sàng. “Quản lý nền” mở khối Video. Chọn “Lấp đầy” (phóng và cắt giữa, không viền) hoặc “Nền mờ” (giữ trọn hình, phần thừa lấp bằng nền mờ).',
-        'Nhạc nền: chọn ngẫu nhiên một bài trong Thư viện nhạc, mix nhỏ dưới giọng đọc.',
+        'Khổ video: Ngang 16:9 (YouTube) hoặc Dọc 9:16 (Shorts/TikTok/Reels).',
+        'Bố cục: “Ảnh bìa + phụ đề” (nền mờ, ảnh bìa ở giữa, tên truyện, nhãn chương, phụ đề, lời nhắc đăng ký — không cần video nền) hoặc “Nền video” (video thư viện phủ kín khung; “Quản lý nền” mở khối Video; “Lấp đầy” cắt giữa, “Nền mờ” giữ trọn hình).',
+        'Nhạc nền: một bài trong Thư viện nhạc (ngẫu nhiên hoặc bài đã chọn), tự hạ khi giọng đang đọc.',
         '“Tự upload Drive rồi xóa file local”: sau khi xong sẽ đẩy lên Drive và xóa bản local.',
         'Dưới nút “Bắt đầu” có đường dẫn nơi video được lưu.',
       ],
@@ -143,22 +144,22 @@ export const recapAudioDoc: HelpDoc = {
     {
       id: 'am-thanh-hieu-ung',
       name: 'Âm thanh & hiệu ứng (khối gập)',
-      what: 'Ba tab: Âm thanh, Lớp phủ, Nền. Có “Xem thử 6 giây” và “Đặt lại mặc định”; đổi cấu hình thì phải xem thử lại để thấy kết quả mới.',
+      what: 'Ba tab: Âm thanh, Chữ & logo, Bố cục Nền video. Có “Xem thử 6 giây” (đúng bố cục đang chọn, dùng ảnh bìa của truyện đang xem) và “Đặt lại mặc định”; đổi cấu hình thì phải xem thử lại để thấy kết quả mới.',
       how: [
         'Âm thanh: tốc độ đọc 0,7–1,5×; chọn bài nhạc nền; mức hạ nhạc khi có giọng (Tắt / Vừa / Mạnh); nhỏ dần cuối video; chuẩn hóa âm lượng (≈ −16 LUFS).',
-        'Lớp phủ: thẻ tiêu đề chương (Tắt / Đầu video / Luôn hiện), waveform theo giọng đọc, logo kênh (chọn ảnh, góc, cỡ, độ mờ).',
-        'Nền: nguồn hình nền là “Video trong thư viện” hoặc “Ảnh bìa truyện” (zoom chậm, không cần video nền), mức làm tối nền để chữ/waveform/logo dễ đọc.',
+        'Chữ & logo (cả hai bố cục): “Phụ đề theo lời đọc”, nhãn “Chương N”, “Lời nhắc đăng ký” (sửa được nội dung, hiện vài giây mỗi 2,5 phút), logo kênh (chọn ảnh, góc, cỡ, độ đậm).',
+        'Bố cục Nền video (chỉ có tác dụng khi chọn bố cục đó): nguồn hình nền “Video trong thư viện” hoặc “Ảnh bìa zoom chậm”, làm tối nền, thẻ tiêu đề chương, waveform.',
       ],
     },
     {
       id: 'video-nen',
       name: 'Video nền (khối “Video”)',
-      what: 'Chính là trang Video thu gọn. Thêm video local hoặc link YouTube vào kho; app tự chuẩn hóa nên không phân biệt video dọc hay ngang. Mỗi chương ghép ngẫu nhiên các video trong thư viện.',
+      what: 'Chính là trang Video thu gọn, chỉ cần khi dùng bố cục “Nền video”. Thêm video local hoặc link YouTube vào kho; app tự chuẩn hóa nên không phân biệt video dọc hay ngang. Mỗi video ghép ngẫu nhiên các clip trong thư viện.',
     },
     {
       id: 'video-hoan-tat',
       name: 'Video đã hoàn tất',
-      what: 'Danh sách video Audio đã làm (lưu theo dạng Audio / Tên truyện / video.mp4). Chọn tất cả hoặc từng video, “Đẩy lên Drive”, “Xóa ở local”.',
+      what: 'Danh sách video Audio đã làm, gom theo truyện. Mở một truyện để xem video kèm tiêu đề và mô tả gợi ý (mô tả có mốc chương và hashtag theo thể loại) — “Chép tiêu đề”, “Chép mô tả” để dán khi đăng. “Đẩy lên Drive” (lưu dạng Audio / Tên truyện / video.mp4), “Xóa ở local”.',
     },
   ],
   concepts: [
@@ -166,17 +167,20 @@ export const recapAudioDoc: HelpDoc = {
     { term: 'Bot-Wall', meaning: 'YouTube bắt xác thực tài khoản để chống tải tự động; cần đăng nhập qua Chrome để lưu cookie.' },
     { term: 'Hạ nhạc (ducking)', meaning: 'Nhạc nền tự nhỏ xuống khi giọng đang đọc, to lại khi giọng nghỉ.' },
     { term: 'Lấp đầy / Nền mờ', meaning: 'Hai cách đặt video nền vào khung: cắt giữa cho đầy, hoặc giữ trọn hình và lấp phần thừa bằng nền mờ.' },
+    { term: 'Video FULL / Tập', meaning: 'Cả truyện trong một video; truyện dài hơn 120 phút được chia thành nhiều tập, mỗi tập gồm trọn vẹn các chương.' },
+    { term: 'Mốc chương', meaning: 'Dòng “00:00 Chương 1”, “03:45 Chương 2”… trong mô tả — YouTube dùng để chia chương trên thanh thời gian.' },
   ],
   problems: [
     {
       symptom: 'Bấm “Bắt đầu” báo chưa có video nền',
       cause: 'Thư viện video nền trống hoặc chưa video nào sẵn sàng.',
-      fix: 'Mở khối “Video” để thêm ít nhất một video, hoặc đổi “Nguồn hình nền” sang “Ảnh bìa truyện” trong tab Nền.',
+      fix: 'Chỉ xảy ra với bố cục “Nền video”. Mở khối “Video” để thêm ít nhất một video, hoặc chọn bố cục “Ảnh bìa + phụ đề” ở cột Hàng đợi.',
       link: 'Video',
     },
     {
-      symptom: 'Báo “Truyện … chưa có thumbnail”',
-      fix: 'Chọn truyện rồi bấm “Thêm ảnh” để tải ảnh PNG/JPG/WEBP lên, sau đó chạy lại.',
+      symptom: 'Video dùng ảnh “AUDIO” thay vì ảnh bìa, hoặc tiến trình báo “Không dùng được ảnh bìa”',
+      cause: 'Truyện không có ảnh bìa nguồn, hoặc không tải được ảnh từ trang nguồn lúc chạy (mạng chập chờn).',
+      fix: 'Chạy lại (ảnh bìa tải được một lần là được lưu lại), hoặc chọn truyện rồi bấm “Đổi ảnh”/“Thêm ảnh” để dùng ảnh của bạn.',
     },
     {
       symptom: 'Báo “Nội dung chương N đang rỗng”',
@@ -185,13 +189,13 @@ export const recapAudioDoc: HelpDoc = {
       link: 'Crawl truyện',
     },
     {
-      symptom: 'Lỗi “Queue Audio phải có từ 1 đến 10 truyện”',
+      symptom: 'Lỗi “Hàng đợi phải có từ 1 đến 10 truyện”',
       fix: 'Hàng đợi trống hoặc quá 10 truyện. Bỏ bớt hoặc chia làm nhiều lần chạy.',
     },
     {
       symptom: 'Workflow Audio dừng giữa chừng',
-      cause: 'Chạy dừng sau 3 chương lỗi liên tiếp để khỏi tốn thời gian.',
-      fix: 'Xem thông báo lỗi ở thanh tiến độ phía trên (thường là giọng đọc hoặc nền), sửa rồi chạy lại các chương chưa xong.',
+      cause: 'Chạy dừng sau 3 video lỗi liên tiếp để khỏi tốn thời gian.',
+      fix: 'Xem thông báo lỗi ở thanh tiến độ phía trên (thường là giọng đọc hoặc nền), sửa rồi bấm “Bắt đầu”: chương chưa xong vẫn nằm trong hàng đợi, chương đã đọc giọng xong được dùng lại.',
     },
     {
       symptom: 'Lỗi voice-service bận hoặc quá lâu (timeout)',
@@ -222,5 +226,6 @@ export const recapAudioDoc: HelpDoc = {
   changes: [
     { date: '2026-11-12', text: 'Đổi tên từ “Workflow” thành “Recap & Audio”.' },
     { date: '2026-11-12', text: 'Workflow Audio thiết kế lại: kho truyện, đọc chương, tóm tắt Gemini, video nền gộp vào, tab Âm thanh/Lớp phủ/Nền.' },
+    { date: '2026-11-15', text: 'Workflow Audio v2: video cả truyện (FULL, tự chia tập) hoặc từng chương; bố cục “Ảnh bìa + phụ đề”; phụ đề khớp từng câu; ảnh bìa nguồn tự dùng làm hình + thumbnail (không còn bắt buộc tải thumbnail); tiêu đề/mô tả có mốc chương; giọng đọc được lưu để làm lại nhanh.' },
   ],
 }

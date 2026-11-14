@@ -10,7 +10,7 @@ export interface HelpHintTarget {
 }
 
 export const HINTS = {
-  'audio.queue': { pageId: 'Recap & Audio', anchor: 'hang-doi', label: 'Hàng đợi và nền video' },
+  'audio.queue': { pageId: 'Recap & Audio', anchor: 'hang-doi', label: 'Kiểu video, bố cục và hàng đợi' },
   'audio.style': { pageId: 'Recap & Audio', anchor: 'am-thanh-hieu-ung', label: 'Âm thanh & hiệu ứng' },
   'recap.raw': { pageId: 'Recap & Audio', anchor: 'raw-transcript', label: 'Raw transcript' },
   'recap.botwall': { pageId: 'Recap & Audio', anchor: 'youtube-botwall', label: 'YouTube Bot-Wall' },

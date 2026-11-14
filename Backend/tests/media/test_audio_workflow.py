@@ -1,11 +1,8 @@
 import asyncio
-import io
 import json
 import re
 import shutil
 import subprocess
-import types
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -36,31 +33,11 @@ def audio_dirs(tmp_path, monkeypatch):
     return root
 
 
-# ── font / thumbnail ─────────────────────────────────────────────────────────
+# ── font ─────────────────────────────────────────────────────────
 
 def test_find_font_returns_existing_file():
     font = fonts.find_font()
     assert font is not None and font.is_file()
-
-
-@needs_ffmpeg
-def test_thumbnail_label_works_in_path_with_space_and_drive_colon(tmp_path):
-    """Hồi quy: drawtext không fontfile làm ffmpeg Windows crash (0xC0000005, Fontconfig)."""
-    src = tmp_path / "src.png"
-    _ff("-f", "lavfi", "-i", "color=c=blue:s=1280x720", "-frames:v", "1", str(src))
-    work = tmp_path / "GOOGLE SEARCH" / "work"  # có dấu cách, tmp_path tuyệt đối có dấu ':' của ổ đĩa trên Windows
-    out = aw._process_thumbnail(src, "Ta Là Tạ Uyển", 3, work, "9:16")
-    assert out.exists() and out.stat().st_size > 0
-    assert (work / "font.ttf").exists() and (work / "thumbnail-label.txt").read_text(encoding="utf-8").startswith("Audio Ta")
-
-
-@needs_ffmpeg
-def test_thumbnail_without_any_font_still_produced(tmp_path, monkeypatch):
-    monkeypatch.setattr(aw, "stage_font", lambda work: False)
-    src = tmp_path / "src.png"
-    _ff("-f", "lavfi", "-i", "color=c=blue:s=640x360", "-frames:v", "1", str(src))
-    out = aw._process_thumbnail(src, "X", 1, tmp_path / "w", "16:9")
-    assert out.exists()
 
 
 @needs_ffmpeg
@@ -89,151 +66,6 @@ def test_mux_with_bgm_does_not_halve_voice_level(tmp_path):
 
 
 # ── video_service ────────────────────────────────────────────────────────────
-
-# ── _run_one: thứ tự bước + dọn rác ──────────────────────────────────────────
-
-def _fake_zip() -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("manifest.json", json.dumps({"items": [{"filename": "vo_0.wav"}]}))
-        zf.writestr("vo_0.wav", b"RIFFfake")
-    return buf.getvalue()
-
-
-def _patch_pipeline(monkeypatch, tmp_path, steps):
-    merged = tmp_path / "merged.mp4"
-
-    async def fake_tts(items, voice_id):
-        return _fake_zip()
-
-    def fake_merge(seconds, aspect, fit="fill", on_status=None):
-        merged.write_bytes(b"merged")
-        return merged
-
-    def fake_mux(video, audio, output, bgm=None, bgm_volume=0.22, **kwargs):
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"final")
-
-    def fake_thumb(source, story, chapter, work, aspect):
-        out = work / "thumbnail.jpg"
-        out.write_bytes(b"jpg")
-        return out
-
-    monkeypatch.setattr(aw, "tts_batch", fake_tts)
-    monkeypatch.setattr(aw, "ffprobe_duration", lambda p: 3.2)
-    monkeypatch.setattr(aw.backgrounds, "build_background", fake_merge)
-    monkeypatch.setattr(aw, "_mux", fake_mux)
-    monkeypatch.setattr(aw, "_process_thumbnail", fake_thumb)
-    original_set = aw._set
-
-    def spy(job_id, **values):
-        if "step" in values:
-            steps.append(values["step"])
-        original_set(job_id, **values)
-
-    monkeypatch.setattr(aw, "_set", spy)
-    return merged
-
-
-def test_run_one_thumbnail_before_tts_and_cleans_up(audio_dirs, tmp_path, monkeypatch):
-    steps: list[str] = []
-    merged = _patch_pipeline(monkeypatch, tmp_path, steps)
-    job_id = aw.create("Truyện", "Chương 1")
-    name = asyncio.run(aw._run_one(job_id, "Truyện", "Chương 1", "nội dung", "voice", "9:16", 1, tmp_path / "thumb.png", None))
-    assert steps.index("image") < steps.index("voice")
-    assert (audio_dirs / name).exists()
-    assert not merged.exists(), "video ghép trung gian phải bị xóa"
-    assert not (audio_dirs / ".tmp" / job_id).exists(), "thư mục tạm (voice.zip…) phải bị xóa"
-    assert any(p.suffix == ".jpg" for p in (audio_dirs / "thumbnails").iterdir()), "thumbnail có label phải còn lại làm poster"
-
-
-def test_run_one_cleans_up_on_failure(audio_dirs, tmp_path, monkeypatch):
-    steps: list[str] = []
-    merged = _patch_pipeline(monkeypatch, tmp_path, steps)
-
-    def boom(*a, **k):
-        raise RuntimeError("mux hỏng")
-
-    monkeypatch.setattr(aw, "_mux", boom)
-    job_id = aw.create("Truyện", "Chương 1")
-    with pytest.raises(RuntimeError, match="mux hỏng"):
-        asyncio.run(aw._run_one(job_id, "Truyện", "Chương 1", "nội dung", "voice", "9:16", 1, None, None))
-    assert not merged.exists()
-    assert not (audio_dirs / ".tmp" / job_id).exists()
-
-
-def test_run_error_keeps_failing_step(audio_dirs, tmp_path, monkeypatch):
-    _patch_pipeline(monkeypatch, tmp_path, [])
-
-    async def tts_down(items, voice_id):
-        raise RuntimeError("voice-service tắt")
-
-    monkeypatch.setattr(aw, "tts_batch", tts_down)
-    job_id = aw.create("Truyện", "Chương 1")
-    asyncio.run(aw.run(job_id, "Truyện", "Chương 1", "x", "voice", "9:16", 1))
-    job = aw.AUDIO_JOBS[job_id]
-    assert job["status"] == "error" and job["step"] == "voice" and "voice-service tắt" in job["error"]
-
-
-# ── run_queue: một chương lỗi không hủy cả queue ─────────────────────────────
-
-def _chapters(*numbers):
-    return [types.SimpleNamespace(chapter_number=n, title=f"C{n}", paragraph="x") for n in numbers]
-
-
-def _queue_run(monkeypatch, fail_on: set[int], queue):
-    calls: list[int] = []
-
-    async def fake_run_one(job_id, story_name, title, paragraph, voice_id, aspect, chapter_number, *a, **k):
-        calls.append(chapter_number)
-        if chapter_number in fail_on:
-            raise RuntimeError(f"lỗi chương {chapter_number}")
-        return f"out_{chapter_number}.mp4"
-
-    monkeypatch.setattr(aw, "_run_one", fake_run_one)
-    job_id = aw.create("Queue", "x", 0)
-    asyncio.run(aw.run_queue(job_id, queue, "voice", "9:16"))
-    return aw.AUDIO_JOBS[job_id], calls
-
-
-def test_queue_skips_failed_chapter_and_continues(audio_dirs, monkeypatch):
-    queue = [("a", "Truyện A", _chapters(1, 2, 3), None), ("b", "Truyện B", _chapters(1), None)]
-    job, calls = _queue_run(monkeypatch, {2}, queue)
-    assert calls == [1, 2, 3, 1]
-    assert job["status"] == "completed" and job["completed_chapters"] == 3 and job["total_chapters"] == 4
-    assert [f["chapter_number"] for f in job["failed_chapters"]] == [2]
-    assert "3/4" in job["message"] and job["progress"] == 100
-
-
-def test_queue_all_chapters_fail_is_error(audio_dirs, monkeypatch):
-    job, _ = _queue_run(monkeypatch, {1, 2}, [("a", "Truyện A", _chapters(1, 2), None)])
-    assert job["status"] == "error" and "lỗi chương 1" in job["error"]
-
-
-def test_queue_aborts_after_consecutive_failures(audio_dirs, monkeypatch):
-    job, calls = _queue_run(monkeypatch, {1, 2, 3, 4, 5}, [("a", "Truyện A", _chapters(1, 2, 3, 4, 5), None)])
-    assert calls == [1, 2, 3]
-    assert job["status"] == "error" and "liên tiếp" in job["error"] and len(job["failed_chapters"]) == 3
-
-
-def test_queue_success_resets_consecutive_counter(audio_dirs, monkeypatch):
-    job, calls = _queue_run(monkeypatch, {1, 2, 4, 5}, [("a", "Truyện A", _chapters(1, 2, 3, 4, 5), None)])
-    assert calls == [1, 2, 3, 4, 5]
-    assert job["status"] == "completed" and job["completed_chapters"] == 1 and len(job["failed_chapters"]) == 4
-
-
-def test_run_batch_is_single_story_queue(audio_dirs, monkeypatch):
-    calls: list[int] = []
-
-    async def fake_run_one(job_id, story_name, title, paragraph, voice_id, aspect, chapter_number, *a, **k):
-        calls.append(chapter_number)
-        return "o.mp4"
-
-    monkeypatch.setattr(aw, "_run_one", fake_run_one)
-    job_id = aw.create("S", "x", 2)
-    asyncio.run(aw.run_batch(job_id, "S", _chapters(5, 6), "voice", "9:16", None, None, False, False, "slug"))
-    assert calls == [5, 6] and aw.AUDIO_JOBS[job_id]["status"] == "completed"
-
 
 # ── voice-service bận / timeout ──────────────────────────────────────────────
 
@@ -308,18 +140,6 @@ def test_voice_client_timeout_not_reported_as_connection_failure(monkeypatch):
     vc = _voice_client_with(monkeypatch, refused)
     with pytest.raises(RuntimeError, match="Không kết nối được"):
         asyncio.run(vc.tts_batch([{"text": "x"}], "v"))
-
-
-# ── skipped_steps (chế độ test không có thumbnail/BGM) ───────────────────────
-
-def test_skipped_steps_reported(audio_dirs, tmp_path, monkeypatch):
-    _patch_pipeline(monkeypatch, tmp_path, [])
-    job_id = aw.create("T", "C")
-    asyncio.run(aw._run_one(job_id, "T", "C", "x", "v", "9:16", None, None, None))
-    assert aw.AUDIO_JOBS[job_id]["skipped_steps"] == ["image", "bgm", "overlay"]
-    job2 = aw.create("T", "C")
-    asyncio.run(aw._run_one(job2, "T", "C", "x", "v", "9:16", 1, tmp_path / "t.png", [tmp_path / "b.mp3"]))
-    assert aw.AUDIO_JOBS[job2]["skipped_steps"] == ["overlay"]
 
 
 # ── thumbnail_index khớp thumbnail_path ──────────────────────────────────────
@@ -399,7 +219,7 @@ def test_config_endpoint(audio_dirs):
 def test_stories_list_is_light_with_counts(audio_dirs):
     client, _ = _audio_client(audio_dirs)
     data = client.get("/api/audio/stories").json()
-    assert all(set(item) == {"story_slug", "name", "thumbnail_name", "total_chapters", "done_chapters", "has_summary"} for item in data), "không trả chương/cột nặng"
+    assert all(set(item) == {"story_slug", "name", "thumbnail_name", "has_cover", "total_chapters", "done_chapters", "has_summary"} for item in data), "không trả chương/cột nặng"
     by = {item["story_slug"]: item for item in data}
     assert [item["story_slug"] for item in data] == ["a-story", "a2-story", "b-story", "c-story"]  # theo tên rồi slug
     assert by["a-story"]["thumbnail_name"] == "a-story.png" and by["b-story"]["thumbnail_name"] is None

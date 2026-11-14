@@ -15,7 +15,16 @@ class AudioOptions(BaseModel):
     fade_out_sec: float = Field(1.5, ge=0.0, le=6.0, description="Nhỏ dần âm thanh ở cuối video")
     loudnorm: bool = Field(True, description="Chuẩn hóa âm lượng (~-16 LUFS) để các video đồng đều")
 
-    # ── Nền ──────────────────────────────────────────────────────────────────
+    # ── Bố cục + chữ trên video ──────────────────────────────────────────────
+    # cover_center: nền mờ + thẻ ảnh bìa giữa khung + tên truyện + phụ đề (kiểu kênh "Truyện Audio Full"); không cần video nền.
+    # classic: nền toàn khung (video thư viện hoặc ảnh bìa zoom, xem bg_mode) + các lớp phủ bên dưới.
+    layout: Literal["cover_center", "classic"] = "cover_center"
+    subtitles: bool = Field(True, description="Phụ đề chạy theo từng câu đọc")
+    chapter_label: bool = Field(True, description="Nhãn 'Chương N' đổi theo đoạn đang đọc")
+    cta: bool = Field(True, description="Lời nhắc đăng ký/thích hiện định kỳ")
+    cta_text: str = Field("Đăng ký kênh · Bấm thích · Chia sẻ", min_length=1, max_length=60)
+
+    # ── Nền (bố cục classic) ─────────────────────────────────────────────────
     bg_mode: Literal["library", "cover"] = "library"  # library: video trong thư viện nền; cover: ảnh bìa truyện zoom chậm
 
     # ── Lớp phủ (chỉ khi bật mới phải mã hóa lại video, còn không vẫn nối stream copy) ──

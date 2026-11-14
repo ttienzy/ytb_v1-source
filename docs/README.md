@@ -53,7 +53,8 @@ Khi tài liệu và code lệch nhau, **tin code** (và sửa tài liệu).
 | Đọc | Trạng thái |
 |---|---|
 | [recap.md](recap.md): pipeline, chạy chồng, lưu trữ và rehydrate, frontend, bẫy | **Hiện hành** |
-| [PLAN_audio_story_studio.md](PLAN_audio_story_studio.md): Phase 1 đã làm; Phase 2–3 còn lại | Hiện hành + Backlog |
+| [PLAN_audio_story_v2.md](PLAN_audio_story_v2.md): khảo sát kênh truyện audio + dữ liệu kho truyện, thiết kế lại "1 truyện → 1 video FULL", phụ đề theo dòng, bố cục ảnh bìa, lộ trình P0–P4 | **Hiện hành** (đã làm P0 + lõi P1/P2, xem mục Tiến độ) + Backlog |
+| [PLAN_audio_story_studio.md](PLAN_audio_story_studio.md): Phase 1 (tùy chọn âm thanh, lớp phủ, nền ảnh bìa, xem thử) | Hiện hành (Phase 2–3 thay bằng v2) |
 | [archive/RECAP_PIPELINE_PLAN.md](archive/RECAP_PIPELINE_PLAN.md), [RECAP_IMPLEMENTATION_PLAN](archive/RECAP_IMPLEMENTATION_PLAN.md), [RECAP_STUDIO_REDESIGN](archive/RECAP_STUDIO_REDESIGN.md), [RECAP_VIDEO_SYNC_AND_CUT_ISSUES](archive/RECAP_VIDEO_SYNC_AND_CUT_ISSUES.md), [STUDIO_POLISH_WATERMARK_BGM](archive/STUDIO_POLISH_WATERMARK_BGM.md) | Lưu trữ |
 
 ### Giọng đọc (Voice service)

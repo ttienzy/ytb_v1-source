@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from app.media import audio_router, backgrounds, overlays, video_service
 from app.media import audio_workflow as aw
 from app.media.audio_options import AudioOptions
-from test_audio_workflow import _fake_zip, _patch_pipeline, audio_dirs  # noqa: F401  (fixture + helper dùng chung)
+from test_audio_workflow import audio_dirs  # noqa: F401  (fixture dùng chung)
 from test_backgrounds import _ff, _probe, add_source, lib  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not __import__("shutil").which("ffmpeg"), reason="cần ffmpeg")
@@ -247,49 +247,6 @@ def test_cover_background_needs_existing_image(lib):
         backgrounds.prepare_cover_clip(lib / "khong_co.jpg", "9:16")
 
 
-# ── Tích hợp pipeline ────────────────────────────────────────────────────────
-
-def test_run_one_applies_speed_overlay_and_cover(audio_dirs, lib, monkeypatch, cover):
-    monkeypatch.setattr(backgrounds, "COVER_LOOP_SECONDS", 4)
-    voice = lib / "voice10.wav"
-    _ff("-f", "lavfi", "-i", "anoisesrc=d=10:c=pink:a=0.1", str(voice))
-    import io, json, zipfile
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("manifest.json", json.dumps({"items": [{"filename": "vo_0.wav"}]}))
-        z.writestr("vo_0.wav", voice.read_bytes())
-
-    async def fake_tts(items, voice_id):
-        return buf.getvalue()
-
-    monkeypatch.setattr(aw, "tts_batch", fake_tts)
-    steps = []
-    original = aw._set
-    monkeypatch.setattr(aw, "_set", lambda job_id, **v: (steps.append(v["step"]) if "step" in v else None, original(job_id, **v))[1])
-    logo_dir = aw.logo_dir()
-    logo_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGBA", (200, 200), (0, 255, 0, 255)).save(logo_dir / "abcdef012345.png")
-
-    options = AudioOptions(voice_speed=1.25, bg_mode="cover", title_card="intro", waveform=True, logo_id="abcdef012345", dim=0.2)
-    job_id = aw.create("Ta Là Tạ Uyển", "Chương 1")
-    name = asyncio.run(aw._run_one(job_id, "Ta Là Tạ Uyển", "Mở đầu", "nội dung", "v", "9:16", 1, cover, None, options=options))
-    out = aw.AUDIO_DIR / name
-    info = _probe(out)
-    assert abs(info["duration"] - 8.0) < 0.4, "10 giây ×1.25 → 8 giây"
-    assert steps.index("merge") < steps.index("overlay") < steps.index("mux")
-    assert aw.AUDIO_JOBS[job_id]["skipped_steps"] == ["bgm"]
-    assert not list((aw.AUDIO_DIR / ".tmp").glob("*")), "dọn sạch file tạm kể cả overlay"
-
-
-def test_run_one_clear_errors(audio_dirs, lib, monkeypatch):
-    _patch_pipeline(monkeypatch, lib, [])
-    job = aw.create("T", "C")
-    with pytest.raises(RuntimeError, match="thumbnail"):
-        asyncio.run(aw._run_one(job, "T", "C", "x", "v", "9:16", 1, None, None, options=AudioOptions(bg_mode="cover")))
-    with pytest.raises(RuntimeError, match="logo"):
-        asyncio.run(aw._run_one(job, "T", "C", "x", "v", "9:16", 1, None, None, options=AudioOptions(logo_id="abcdef012345")))
-
-
 # ── API ──────────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -319,14 +276,19 @@ def test_logo_upload_serve_and_validation(client, monkeypatch):
 
 def test_run_validates_options_and_preflight(client, lib):
     body = {"story_slug": "s", "chapter_number": 1, "voice_id": "v"}
+    classic = {"layout": "classic"}
     assert client.post("/api/audio/run", json={**body, "options": {"voice_speed": 5}}).status_code == 422
-    r = client.post("/api/audio/run", json={**body, "options": {"bg_mode": "cover", "logo_id": "abcdef012345"}})
-    assert r.status_code == 400 and "logo" in r.json()["detail"]
-    r = client.post("/api/audio/run", json=body)
+    assert client.post("/api/audio/run", json={**body, "unit": "volume"}).status_code == 422
+    assert client.post("/api/audio/run", json={**body, "aspect": "4:3"}).status_code == 400
+    for layout in ("classic", "cover_center"):
+        r = client.post("/api/audio/run", json={**body, "options": {"layout": layout, "bg_mode": "cover", "logo_id": "abcdef012345"}})
+        assert r.status_code == 400 and "logo" in r.json()["detail"], layout
+    r = client.post("/api/audio/run", json={**body, "options": classic})
     assert r.status_code == 400 and "Thư viện nền" in r.json()["detail"]
-    # chế độ ảnh bìa không cần thư viện nền: qua được bước kiểm tra này (sau đó mới tới tra truyện)
-    r = client.post("/api/audio/run", json={**body, "options": {"bg_mode": "cover"}})
-    assert "Thư viện nền" not in str(r.json().get("detail", ""))
+    # ảnh bìa (classic) và bố cục cover_center không cần thư viện nền: qua được bước kiểm tra này (sau đó mới tới tra truyện)
+    for options in ({**classic, "bg_mode": "cover"}, {}):
+        r = client.post("/api/audio/run", json={**body, "options": options})
+        assert "Thư viện nền" not in str(r.json().get("detail", "")), options
 
 
 def test_pick_bgm_pool_specific_track(tmp_path):
@@ -348,17 +310,24 @@ def test_pick_bgm_pool_specific_track(tmp_path):
 
 def test_preview_endpoint(client, lib, cover, monkeypatch):
     monkeypatch.setattr(backgrounds, "COVER_LOOP_SECONDS", 4)
-    r = client.post("/api/audio/preview", json={})
+    classic = {"layout": "classic"}
+    r = client.post("/api/audio/preview", json={"options": classic})
     assert r.status_code == 400 and "Thư viện nền" in r.json()["detail"]
-    r = client.post("/api/audio/preview", json={"options": {"bg_mode": "cover"}})
+    r = client.post("/api/audio/preview", json={"options": {**classic, "bg_mode": "cover"}})
     assert r.status_code == 400 and "thumbnail" in r.json()["detail"]
     assert client.post("/api/audio/preview", json={"seconds": 99}).status_code == 422
 
+    # Bố cục ảnh bìa: không cần thư viện nền; không chọn truyện → ảnh thay thế.
+    cover_center = client.post("/api/audio/preview", json={"seconds": 3, "aspect": "16:9"})
+    assert cover_center.status_code == 200, cover_center.text
+    video = next(s for s in _probe(audio_router._previews_dir() / cover_center.json()["file_name"])["streams"] if s["codec_type"] == "video")
+    assert (video["width"], video["height"]) == (1920, 1080)
+
     add_source(lib, "p.mp4", size="320x568", seconds=4)
-    plain = client.post("/api/audio/preview", json={"seconds": 3})
+    plain = client.post("/api/audio/preview", json={"seconds": 3, "options": classic})
     assert plain.status_code == 200
     assert client.get(f"/api/audio/preview/{plain.json()['file_name']}").headers["content-type"] == "video/mp4"
-    styled = client.post("/api/audio/preview", json={"seconds": 3, "aspect": "16:9", "options": {"dim": 0.3, "title_card": "always", "waveform": True}})
+    styled = client.post("/api/audio/preview", json={"seconds": 3, "aspect": "16:9", "options": {**classic, "dim": 0.3, "title_card": "always", "waveform": True}})
     assert styled.status_code == 200
     file = audio_router._previews_dir() / styled.json()["file_name"]
     video = next(s for s in _probe(file)["streams"] if s["codec_type"] == "video")

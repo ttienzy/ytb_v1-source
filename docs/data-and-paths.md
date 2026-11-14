@@ -71,6 +71,6 @@ Ví dụ thực tế (một số mục có thể chưa có trên máy bạn):
 | `pippit_tasks.json`, `youtube_tasks.json`, `youtube_uploads/` | Lịch đăng | B |
 | `media/veo_outputs/`, `veo_images/`, `veo_uploads/`, `veo_jobs.json`, `veo_media_registry.json` | Video/ảnh Flow và sổ job | D |
 | `motion_long/` | Job Motion dài | D |
-| `Data/media/videos/Viaudio/` (ở **gốc repo**) | Audio Workflow | C |
+| `Data/media/videos/Viaudio/` (ở **gốc repo**) | Audio Workflow: video `*.mp4`, `outputs.json` (manifest, có tiêu đề/mô tả/mốc chương), `audio_history.json` ("đã làm" theo chương), `thumbnails/`, `covers/` (ảnh bìa nguồn đã tải), `.cache/voice/` (giọng đọc từng chương: wav + thời lượng từng dòng; xóa được, chỉ mất cache), `logos/`, `previews/` | C |
 | `temp_gdrive/` | File tạm khi đồng bộ Drive | E |
 | `backups/`, `test_cdp_profile/`, `logs/` | Bản sao tay, thử nghiệm, log | (thủ công) |

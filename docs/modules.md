@@ -36,7 +36,7 @@ Xem [campaign-engine.md](campaign-engine.md).
 
 ### Recap & Audio (`studio`) — *Sâu* (Recap), *Cấu trúc* (Audio)
 - Recap: [recap.md](recap.md).
-- **Audio Story Studio** (truyện → video audio): `app/media/audio_router.py` (`/api/audio`: `stories`, chapters, `run`, `preview`, `outputs`, `logo`), `audio_workflow.py` (pipeline TTS → nền → ghép → lớp phủ), `audio_options.py`, `overlays.py`, `backgrounds.py` + `background_router.py` (`/api/audio/backgrounds`). Frontend: `features/studio/audio/`. Kế hoạch và việc còn lại: [PLAN_audio_story_studio.md](PLAN_audio_story_studio.md).
+- **Audio Story Studio** (truyện → video audio): `app/media/audio_router.py` (`/api/audio`: `stories`, `stories/lengths`, `stories/{slug}/cover`, chapters, `run`, `preview`, `outputs`, `logo`), `story_video.py` (pipeline v2: video cả truyện/từng chương, prepare → voice → render → mix → package), `story_text.py` (làm sạch văn bản, mốc phụ đề, ASS, chia tập — hàm thuần), `narration.py` (TTS theo dòng + cache theo chương), `story_art.py` (ảnh bìa nguồn, khung bố cục ảnh bìa, thumbnail — Pillow), `audio_workflow.py` (phần dùng chung: job, lịch sử, ghép âm thanh, Drive), `audio_options.py`, `overlays.py`, `backgrounds.py` + `background_router.py` (`/api/audio/backgrounds`). Frontend: `features/studio/audio/`. Thiết kế: [PLAN_audio_story_v2.md](PLAN_audio_story_v2.md).
 
 ---
 

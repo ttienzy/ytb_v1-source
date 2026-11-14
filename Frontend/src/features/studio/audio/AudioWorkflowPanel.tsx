@@ -8,12 +8,13 @@ import { RunPanel, type Aspect } from './RunPanel'
 import { StoryBrowser } from './StoryBrowser'
 import { StyleStudio, type BgmTrack } from './StyleStudio'
 import { VideoSection } from './VideoSection'
-import { backgroundSummary, buildRunBody, buildStoryViews, DEFAULT_STYLE, hasBackgroundWork, mergeStyle, pruneCompleted, styleNeedsOverlay, validateQueue, type AudioChapter, type AudioStory, type AudioStyle, type BgFit, type BgItem, type QueueItem } from './audioModel'
+import { backgroundSummary, buildRunBody, buildStoryViews, DEFAULT_CHARS_PER_SECOND, DEFAULT_STYLE, hasBackgroundWork, mergeStyle, planQueue, pruneCompleted, validateQueue, type AudioChapter, type AudioStory, type AudioStyle, type BgFit, type BgItem, type QueueItem, type VideoUnit } from './audioModel'
 import './AudioWorkflow.css'
 
 const SETTINGS_KEY = 'audio_workflow_settings_v2'
 
 interface SavedSettings {
+  unit?: VideoUnit
   voice?: string
   aspect?: Aspect
   bgm?: boolean
@@ -48,7 +49,11 @@ export function AudioWorkflowPanel() {
   const [outputDir, setOutputDir] = useState('')
 
   const [voice, setVoice] = useState(saved.voice || '')
-  const [aspect, setAspect] = useState<Aspect>(saved.aspect === '16:9' ? '16:9' : '9:16')
+  const [unit, setUnit] = useState<VideoUnit>(saved.unit === 'chapter' ? 'chapter' : 'story')
+  const [aspect, setAspect] = useState<Aspect>(saved.aspect === '9:16' ? '9:16' : '16:9')
+  // Số ký tự mỗi truyện (tải riêng vì tính lâu hơn danh sách) → ước thời lượng video.
+  const [lengths, setLengths] = useState<Record<string, number>>({})
+  const [cps, setCps] = useState(DEFAULT_CHARS_PER_SECOND)
   const [bgm, setBgm] = useState(saved.bgm ?? true)
   const [drive, setDrive] = useState(saved.drive ?? false)
   const [bgFit, setBgFit] = useState<BgFit>(saved.bgFit === 'blur' ? 'blur' : 'fill')
@@ -112,6 +117,9 @@ export function AudioWorkflowPanel() {
       .catch(() => alive && setLoadError('Không tải được danh sách truyện đã crawl. Kiểm tra backend đang chạy.'))
       .finally(() => alive && setLoading(false))
     getJson<{ output_dir?: string }>('/api/audio/config').then(data => alive && setOutputDir(data.output_dir || '')).catch(() => {})
+    getJson<{ chars: Record<string, number>; chars_per_second?: number }>('/api/audio/stories/lengths')
+      .then(data => { if (alive) { setLengths(data.chars || {}); if (data.chars_per_second) setCps(data.chars_per_second) } })
+      .catch(() => {})
     Promise.allSettled([getJson<{ voices?: Voice[] } | Voice[]>('/api/voices'), getJson<Array<{ name: string; description?: string }>>('/api/voices/presets')]).then(([voicesResult, presetsResult]) => {
       if (!alive) return
       const cloneList = voicesResult.status === 'fulfilled' ? (Array.isArray(voicesResult.value) ? voicesResult.value : voicesResult.value.voices ?? []) : []
@@ -128,8 +136,8 @@ export function AudioWorkflowPanel() {
   }, [loadStories, loadOutputs])
 
   useEffect(() => {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ voice, aspect, bgm, drive, bgFit, style })) } catch { /* bỏ qua */ }
-  }, [voice, aspect, bgm, drive, bgFit, style])
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ unit, voice, aspect, bgm, drive, bgFit, style })) } catch { /* bỏ qua */ }
+  }, [unit, voice, aspect, bgm, drive, bgFit, style])
 
   // Danh sách nhạc nền để chọn một bài cụ thể; bài đã lưu mà không còn trong thư viện thì quay về "ngẫu nhiên".
   useEffect(() => {
@@ -151,6 +159,7 @@ export function AudioWorkflowPanel() {
 
   // Tải lúc mở tab và khi đổi cách khớp khung (mỗi cách có bộ clip chuẩn hóa riêng); còn clip đang chuẩn hóa thì hỏi lại mỗi 2 giây.
   useEffect(() => { loadBackgrounds().catch(() => {}) }, [loadBackgrounds])
+  const usesLibrary = style.layout === 'classic' && style.bg_mode === 'library'
   const bgBusy = hasBackgroundWork(bgItems)
   useEffect(() => {
     if (!bgBusy) return
@@ -164,14 +173,14 @@ export function AudioWorkflowPanel() {
   const preparedKey = useRef('')
   useEffect(() => {
     const total = bgSummary.total
-    if (style.bg_mode === 'cover' || !bgLoaded || total === 0 || bgSummary.ready + bgSummary.busy + bgSummary.failed >= total) return
+    if (!usesLibrary || !bgLoaded || total === 0 || bgSummary.ready + bgSummary.busy + bgSummary.failed >= total) return
     const key = `${aspect}|${bgFit}|${total}`
     if (preparedKey.current === key) return
     preparedKey.current = key
     fetch(`${API_URL}/api/audio/backgrounds/prepare`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fit: bgFit, aspects: [aspect] }) })
       .then(() => loadBackgrounds())
       .catch(() => {})
-  }, [style.bg_mode, bgLoaded, bgSummary, aspect, bgFit, loadBackgrounds])
+  }, [usesLibrary, bgLoaded, bgSummary, aspect, bgFit, loadBackgrounds])
 
   function openVideoBlock() {
     setVideoOpen(true)
@@ -192,10 +201,11 @@ export function AudioWorkflowPanel() {
 
   const validation = useMemo(() => {
     const base = validateQueue(queue, stories, voice)
-    // Chưa có video nền nào thì chạy chắc chắn thất bại ở bước ghép — chặn từ đầu.
-    if (style.bg_mode === 'library' && bgLoaded && bgItems.length === 0) base.errors.push('Chưa có video nền — mở khối "Video nền" bên dưới để thêm ít nhất 1 video.')
+    // Bố cục "Nền video" mà chưa có video nền thì chạy chắc chắn thất bại ở bước dựng hình — chặn từ đầu.
+    if (usesLibrary && bgLoaded && bgItems.length === 0) base.errors.push('Chưa có video nền — mở khối "Video nền" bên dưới để thêm, hoặc chọn bố cục "Ảnh bìa + phụ đề".')
     return base
-  }, [queue, stories, voice, bgLoaded, bgItems.length, style.bg_mode])
+  }, [queue, stories, voice, bgLoaded, bgItems.length, usesLibrary])
+  const plan = useMemo(() => planQueue(queue, stories, lengths, unit, cps), [queue, stories, lengths, unit, cps])
   const running = job?.status === 'queued' || job?.status === 'running'
 
   // Theo dõi job. Job nằm trong RAM backend: backend khởi động lại → 404 → coi là đã mất (không treo mãi).
@@ -256,7 +266,7 @@ export function AudioWorkflowPanel() {
     setError('')
     setJob(null)
     try {
-      await startJob('/api/audio/run', buildRunBody(queue, { voice, aspect, bgm, drive, bgFit, style }), 'Không thể khởi động workflow Audio')
+      await startJob('/api/audio/run', buildRunBody(queue, { unit, voice, aspect, bgm, drive, bgFit, style }), 'Không thể khởi động workflow Audio')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể khởi động workflow Audio.')
     } finally {
@@ -297,7 +307,7 @@ export function AudioWorkflowPanel() {
 
   return (
     <div className="aw">
-      {job && <JobBar job={job} bgm={bgm} drive={drive} overlay={styleNeedsOverlay(style)} onDismiss={() => setJob(null)} />}
+      {job && <JobBar job={job} onDismiss={() => setJob(null)} />}
 
       {(error || notice) && (
         <div className={`aw-banner ${error ? 'error' : ''}`} role="alert">
@@ -310,6 +320,8 @@ export function AudioWorkflowPanel() {
       <div className="aw-main">
         <StoryBrowser
           views={views}
+          lengths={lengths}
+          cps={cps}
           loading={loading}
           loadError={loadError}
           queue={queue}
@@ -328,6 +340,14 @@ export function AudioWorkflowPanel() {
           queue={queue}
           onQueueChange={setQueue}
           onFocus={setFocusedSlug}
+          unit={unit}
+          onUnit={setUnit}
+          layout={style.layout}
+          onLayout={layout => patchStyle({ layout })}
+          lengths={lengths}
+          cps={cps}
+          plan={plan}
+          noImage={validation.noImage}
           voice={voice}
           onVoice={setVoice}
           cloned={cloned}
@@ -362,7 +382,7 @@ export function AudioWorkflowPanel() {
         <summary><Headphones size={14} /> Test nhanh bằng text <small>— kiểm tra luồng mà không cần truyện</small></summary>
         <textarea value={testText} onChange={event => setTestText(event.target.value)} placeholder="Dán một đoạn văn bản ngắn để thử giọng + ghép video…" rows={4} disabled={testBusy} />
         <div className="aw-test-actions">
-          <small>Dùng giọng và khổ video đang chọn · không có thumbnail/nhạc nền nên 2 bước đó được bỏ qua.</small>
+          <small>Dùng giọng, khổ và bố cục đang chọn · ảnh thay thế, không nhạc nền · mỗi lần một video.</small>
           <button type="button" className="aw-ghost" onClick={runTest} disabled={testBusy || running || !testText.trim()}>
             {testBusy ? <Loader2 size={14} className="spin" /> : <Headphones size={14} />} Chạy test
           </button>

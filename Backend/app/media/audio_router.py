@@ -9,12 +9,12 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.stories.models import CrawledStory, CrawledChapter, StorySummary
-from app.media import audio_workflow, backgrounds, overlays
+from app.media import audio_workflow, backgrounds, overlays, story_art, story_text, story_video
 from app.media.audio_options import AudioOptions
 from app.media import service as bgm_service
 
@@ -26,7 +26,9 @@ class RunBody(BaseModel):
     chapter_numbers: list[int] | None = None
     batch_items: list[dict] | None = None
     voice_id: str
-    aspect: str = "9:16"
+    aspect: str = "16:9"
+    unit: Literal["story", "chapter"] = "story"  # story: mỗi truyện 1 video FULL (tự chia tập); chapter: mỗi chương 1 video
+    part_max_minutes: int = Field(120, ge=20, le=600)  # truyện dài hơn ngưỡng này chia thành nhiều tập (cắt ở ranh giới chương)
     bg_fit: str = "fill"  # cách khớp video nền vào khung: fill (lấp đầy, cắt giữa) | blur (giữ nguyên + nền mờ)
     bgm_random: bool = True
     bgm_enabled: bool = True
@@ -202,16 +204,16 @@ def stories(db: Session = Depends(get_db)):
 
     Trước đây trả luôn toàn bộ chương của mọi truyện (14K+ dòng, ~1,6 MB) và nạp cả các cột nặng của CrawledStory
     (description, raw_metadata…) dù chỉ cần tên."""
-    rows = db.query(CrawledStory.story_slug, CrawledStory.name).order_by(CrawledStory.name, CrawledStory.story_slug).all()
+    rows = db.query(CrawledStory.story_slug, CrawledStory.name, CrawledStory.image).order_by(CrawledStory.name, CrawledStory.story_slug).all()
     totals = dict(db.query(CrawledChapter.story_slug, func.count()).group_by(CrawledChapter.story_slug).all())
     thumbnails = audio_workflow.thumbnail_index()
     summarized = {slug for (slug,) in db.query(StorySummary.story_slug)}  # truyện đã có bản tóm tắt Gemini
 
     # Số chương đã làm: chỉ truyện có trong lịch sử mới cần tra số chương thật (thường là một phần rất nhỏ).
     history, record = _completion_lookup()
-    name_by_slug = {slug: name for slug, name in rows}
+    name_by_slug = {slug: name for slug, name, _ in rows}
     slugs_by_name: dict[str, list[str]] = {}
-    for slug, name in rows:
+    for slug, name, _ in rows:
         slugs_by_name.setdefault(name, []).append(slug)
     candidates: set[str] = set()
     for item in history:
@@ -227,10 +229,34 @@ def stories(db: Session = Depends(get_db)):
                 done[slug] = done.get(slug, 0) + 1
 
     return [
-        {"story_slug": slug, "name": name, "thumbnail_name": thumbnails.get(audio_workflow._safe_name(slug)),
-         "total_chapters": totals.get(slug, 0), "done_chapters": done.get(slug, 0), "has_summary": slug in summarized}
-        for slug, name in rows
+        {"story_slug": slug, "name": name.strip(), "thumbnail_name": thumbnails.get(audio_workflow._safe_name(slug)),
+         "has_cover": bool(image), "total_chapters": totals.get(slug, 0), "done_chapters": done.get(slug, 0), "has_summary": slug in summarized}
+        for slug, name, image in rows
     ]
+
+_LENGTHS_CACHE: dict = {"key": None, "value": {}}
+
+@router.get("/stories/lengths")
+def story_lengths(db: Session = Depends(get_db)):
+    """Tổng số ký tự mỗi truyện → giao diện ước thời lượng video. Tính một lần (~3 giây với 14K chương) rồi giữ trong RAM
+    tới khi số chương thay đổi (crawl thêm), nên tách khỏi /stories để danh sách hiện ngay."""
+    key = db.query(func.count(CrawledChapter.chapter_key), func.max(CrawledChapter.crawled_at)).one()
+    if _LENGTHS_CACHE["key"] != tuple(key):
+        rows = db.query(CrawledChapter.story_slug, func.sum(func.length(CrawledChapter.paragraph))).group_by(CrawledChapter.story_slug).all()
+        _LENGTHS_CACHE.update(key=tuple(key), value={slug: int(total or 0) for slug, total in rows})
+    return {"chars_per_second": story_text.CHARS_PER_SECOND, "chars": _LENGTHS_CACHE["value"]}
+
+@router.get("/stories/{story_slug}/cover")
+def story_cover(story_slug: str, db: Session = Depends(get_db)):
+    """Ảnh dùng cho video/thumbnail của truyện: ảnh tải lên tay (nếu có) → ảnh bìa nguồn (tải về cache lần đầu)."""
+    uploaded = audio_workflow.thumbnail_path(story_slug)
+    if uploaded:
+        return FileResponse(uploaded)
+    story = db.query(CrawledStory.image).filter(CrawledStory.story_slug == story_slug).first()
+    if not story: raise HTTPException(404, "Không tìm thấy truyện đã crawl.")
+    path = story_art.fetch_cover(story_video.cover_dir(), story_slug, story.image)
+    if path is None: raise HTTPException(404, "Truyện không có ảnh bìa hoặc không tải được ảnh bìa nguồn.")
+    return FileResponse(path, headers={"Cache-Control": "max-age=86400"})
 
 @router.get("/stories/{story_slug}/chapters")
 def story_chapters(story_slug: str, db: Session = Depends(get_db)):
@@ -274,78 +300,83 @@ def thumbnail(filename: str):
     if path.parent != audio_workflow.AUDIO_THUMBNAIL_DIR or not path.exists(): raise HTTPException(404, "Không tìm thấy thumbnail.")
     return FileResponse(path)
 
-@router.post("/run", status_code=202)
-async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    if body.aspect not in {"9:16", "16:9"}: raise HTTPException(400, "Khổ video không hợp lệ.")
-    _require_backgrounds(body.aspect, body.bg_fit, body.options)
+def _story_input(story: CrawledStory, chapters: list[CrawledChapter]) -> story_video.StoryInput:
+    categories = [c.get("categoryName", "") if isinstance(c, dict) else str(c) for c in (story.categories or [])]
+    return story_video.StoryInput(
+        slug=story.story_slug, name=story.name,
+        chapters=[story_video.ChapterInput(c.chapter_number, c.title or f"Chương {c.chapter_number}", c.paragraph or "") for c in chapters],
+        image=audio_workflow.thumbnail_path(story.story_slug), image_url=story.image,
+        description=story.description or "", categories=[c for c in categories if c],
+    )
+
+
+def _queue_items(body: RunBody) -> list[tuple[str, list[int] | None]]:
+    """(slug, số chương | None = mọi chương) theo cả hai dạng payload: một truyện hoặc batch_items."""
     if body.batch_items is not None:
         if not body.batch_items or len(body.batch_items) > 10:
-            raise HTTPException(400, "Queue Audio phải có từ 1 đến 10 truyện.")
-        queue: list[tuple[CrawledStory, list[CrawledChapter]]] = []
-        total_chapters = 0
+            raise HTTPException(400, "Hàng đợi phải có từ 1 đến 10 truyện.")
+        items = []
         for item in body.batch_items:
             slug = item.get("story_slug") if isinstance(item, dict) else None
             numbers = item.get("chapter_numbers") if isinstance(item, dict) else None
             if not slug or not isinstance(numbers, list) or not numbers:
-                raise HTTPException(400, "Mỗi truyện trong queue phải có ít nhất 1 chương.")
-            story = db.get(CrawledStory, slug)
-            if not story:
-                raise HTTPException(404, f"Không tìm thấy truyện đã crawl: {slug}.")
-            chapters = db.query(CrawledChapter).filter(
-                CrawledChapter.story_slug == slug,
-                CrawledChapter.chapter_number.in_(numbers),
-            ).order_by(CrawledChapter.chapter_number).all()
-            if not chapters:
-                raise HTTPException(404, f"Không tìm thấy chương đã chọn trong truyện {story.name}.")
-            empty = next((c for c in chapters if not c.paragraph.strip()), None)
-            if empty:
-                raise HTTPException(400, f"Nội dung chương {empty.chapter_number} của truyện {story.name} đang rỗng.")
-            queue.append((story, chapters))
-            total_chapters += len(chapters)
-        thumbnail_missing = next((story.name for story, _ in queue if audio_workflow.thumbnail_path(story.story_slug) is None), None)
-        if thumbnail_missing:
-            raise HTTPException(400, f"Truyện {thumbnail_missing} chưa có thumbnail.")
-        bgm_pool: list[Path] = []
-        if body.bgm_enabled:
-            bgm_pool = _pick_bgm_pool(db, body.options)
-        job_id = audio_workflow.create("Queue Audio", "Nhiều truyện", total_chapters)
-        queue_data = [(story.story_slug, story.name, chapters, audio_workflow.thumbnail_path(story.story_slug)) for story, chapters in queue]
-        background_tasks.add_task(audio_workflow.run_queue, job_id, queue_data, body.voice_id, body.aspect, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload, body.bg_fit, body.options)
-        return {"job_id": job_id}
-
-    story = db.get(CrawledStory, body.story_slug)
-    if not story: raise HTTPException(404, "Không tìm thấy truyện đã crawl.")
-    query = db.query(CrawledChapter).filter_by(story_slug=body.story_slug)
+                raise HTTPException(400, "Mỗi truyện trong hàng đợi phải có ít nhất 1 chương.")
+            items.append((slug, [int(n) for n in numbers]))
+        return items
     if body.chapter_numbers is not None:
-        if not body.chapter_numbers or len(body.chapter_numbers) > 10:
-            raise HTTPException(400, "Queue Audio phải có từ 1 đến 10 chương.")
-        query = query.filter(CrawledChapter.chapter_number.in_(body.chapter_numbers))
-    elif body.chapter_number is not None:
-        query = query.filter_by(chapter_number=body.chapter_number)
-    chapters = query.order_by(CrawledChapter.chapter_number).all()
-    if not chapters: raise HTTPException(404, "Không tìm thấy chương đã crawl.")
-    empty = next((c for c in chapters if not c.paragraph.strip()), None)
-    if empty: raise HTTPException(400, f"Nội dung chương {empty.chapter_number} đang rỗng.")
-    thumbnail = audio_workflow.thumbnail_path(story.story_slug)
-    if thumbnail is None: raise HTTPException(400, "Truyện chưa có thumbnail. Hãy chọn và tải lên 1 ảnh thumbnail trước.")
-    bgm_pool: list[Path] = []
-    if body.bgm_enabled:
-        bgm_pool = _pick_bgm_pool(db, body.options)
-    job_id = audio_workflow.create(story.name, chapters[0].title, len(chapters))
-    if len(chapters) == 1:
-        background_tasks.add_task(audio_workflow.run, job_id, story.name, chapters[0].title, chapters[0].paragraph, body.voice_id, body.aspect, chapters[0].chapter_number, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload, story.story_slug, body.bg_fit, body.options)
-    else:
-        background_tasks.add_task(audio_workflow.run_batch, job_id, story.name, chapters, body.voice_id, body.aspect, thumbnail, bgm_pool, body.auto_upload_drive, body.delete_local_after_upload, story.story_slug, body.bg_fit, body.options)
-    return {"job_id": job_id}
+        return [(body.story_slug, body.chapter_numbers)]
+    if body.chapter_number is not None:
+        return [(body.story_slug, [body.chapter_number])]
+    return [(body.story_slug, None)]
+
+
+def _check_render_inputs(body_aspect: str, bg_fit: str, options: AudioOptions) -> None:
+    if body_aspect not in {"9:16", "16:9"}: raise HTTPException(400, "Khổ video không hợp lệ.")
+    if options.layout == "classic":
+        _require_backgrounds(body_aspect, bg_fit, options)
+    elif options.logo_id and audio_workflow.logo_path(options.logo_id) is None:
+        raise HTTPException(400, "Không tìm thấy file logo đã chọn. Hãy chọn lại logo.")
+
+
+@router.post("/run", status_code=202)
+async def run(body: RunBody, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Tạo video: `unit="story"` → mỗi truyện một video FULL (tự chia tập), `unit="chapter"` → mỗi chương một video."""
+    _check_render_inputs(body.aspect, body.bg_fit, body.options)
+    stories: list[story_video.StoryInput] = []
+    for slug, numbers in _queue_items(body):
+        story = db.get(CrawledStory, slug)
+        if not story:
+            raise HTTPException(404, f"Không tìm thấy truyện đã crawl: {slug}.")
+        query = db.query(CrawledChapter).filter(CrawledChapter.story_slug == slug)
+        if numbers is not None:
+            query = query.filter(CrawledChapter.chapter_number.in_(numbers))
+        chapters = query.order_by(CrawledChapter.chapter_number).all()
+        if not chapters:
+            raise HTTPException(404, f"Không tìm thấy chương đã chọn trong truyện {story.name.strip()}.")
+        empty = next((c for c in chapters if not (c.paragraph or "").strip()), None)
+        if empty:
+            raise HTTPException(400, f"Nội dung chương {empty.chapter_number} của truyện {story.name.strip()} đang rỗng.")
+        stories.append(_story_input(story, chapters))
+    bgm_pool = _pick_bgm_pool(db, body.options) if body.bgm_enabled else []
+    spec = story_video.VideoSpec(unit=body.unit, voice_id=body.voice_id, aspect=body.aspect, bg_fit=body.bg_fit, options=body.options,
+                                 bgm_pool=bgm_pool, part_max_minutes=body.part_max_minutes, auto_upload_drive=body.auto_upload_drive,
+                                 delete_local_after_upload=body.delete_local_after_upload)
+    units = story_video.plan_units(stories, spec)
+    job_id = audio_workflow.create(stories[0].name.strip() if len(stories) == 1 else "Hàng đợi Audio", "", len(units))
+    audio_workflow.AUDIO_JOBS[job_id].update(steps=story_video.steps_for(spec), total_videos=len(units), completed_videos=0)
+    background_tasks.add_task(story_video.run_videos, job_id, stories, spec)
+    return {"job_id": job_id, "total_videos": len(units)}
 
 @router.post("/test-run", status_code=202)
 async def test_run(body: TestRunBody, background_tasks: BackgroundTasks):
-    """Chạy thử pipeline bằng text dán trực tiếp, không cần truyện/chương."""
+    """Chạy thử pipeline bằng text dán trực tiếp, không cần truyện/chương (ảnh bìa thay thế, không nhạc nền)."""
     if not body.text.strip(): raise HTTPException(400, "Text test đang rỗng.")
-    if body.aspect not in {"9:16", "16:9"}: raise HTTPException(400, "Khổ video không hợp lệ.")
-    _require_backgrounds(body.aspect, body.bg_fit, body.options)
+    _check_render_inputs(body.aspect, body.bg_fit, body.options)
+    story = story_video.StoryInput(slug=None, name="Test Workflow Audio", chapters=[story_video.ChapterInput(1, "Nội dung test", body.text.strip())])
+    spec = story_video.VideoSpec(unit="chapter", voice_id=body.voice_id, aspect=body.aspect, bg_fit=body.bg_fit, options=body.options)
     job_id = audio_workflow.create("Test Workflow Audio", "Nội dung test")
-    background_tasks.add_task(audio_workflow.run, job_id, "Test Workflow Audio", "Nội dung test", body.text.strip(), body.voice_id, body.aspect, None, None, False, False, None, body.bg_fit, body.options)
+    audio_workflow.AUDIO_JOBS[job_id].update(steps=story_video.steps_for(spec), total_videos=1, completed_videos=0)
+    background_tasks.add_task(story_video.run_videos, job_id, [story], spec)
     return {"job_id": job_id}
 
 @router.get("/jobs/{job_id}")
@@ -403,15 +434,64 @@ PREVIEW_KEEP = 6
 def _previews_dir() -> Path:
     return audio_workflow.AUDIO_DIR / "previews"
 
+def _keep_preview(produced: Path) -> str:
+    """Chuyển file xem thử vào thư mục previews (chỉ giữ PREVIEW_KEEP file mới nhất)."""
+    out_dir = _previews_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    file_name = f"preview_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.mp4"
+    shutil.move(str(produced), out_dir / file_name)
+    for old in sorted(out_dir.glob("preview_*.mp4"), key=lambda path: path.stat().st_mtime, reverse=True)[PREVIEW_KEEP:]:
+        old.unlink(missing_ok=True)
+    return file_name
+
+PREVIEW_LINES = [
+    "Đây là phụ đề mẫu, hiện đúng lúc giọng đọc câu này.",
+    "Câu dài hơn sẽ tự xuống dòng, tối đa hai dòng mỗi lần để người xem kịp đọc.",
+]
+
+
+def _preview_cover_center(story: CrawledStory | None, name: str, body: PreviewBody, work: Path) -> Path:
+    """Xem thử bố cục ảnh bìa: ảnh bìa thật của truyện (hoặc ảnh thay thế) + phụ đề mẫu + nhãn chương + lời nhắc (hiện ngay)."""
+    image = None
+    if story:
+        image, _ = story_video.resolve_image(_story_input(story, []))
+    image = image or story_art.placeholder_cover(story_video.cover_dir() / "_placeholder.png")
+    seconds = float(body.seconds)
+    half = seconds / 2
+    cues = [story_text.Cue(0.3, half - 0.2, PREVIEW_LINES[0]), story_text.Cue(half, seconds - 0.2, PREVIEW_LINES[1])]
+    options = body.options.model_copy(update={"cta": False})  # lời nhắc thật hiện từ giây 20 → thêm tay để thấy ngay
+    ass = story_video.build_ass(cues, [(0.0, "Chương 1"), (seconds, "Chương 2")], seconds, body.aspect, options)
+    if body.options.cta:
+        x, y = story_art.frame_layout(body.aspect)["cta_pos"]
+        ass += story_text.ass_event(0.5, seconds - 0.3, "Cta", body.options.cta_text.upper(), prefix=f"{{\\an5\\pos({x},{y})}}", layer=1)
+    font_ok = story_video.stage_font(work)
+    if font_ok:
+        (work / "subs.ass").write_text(ass, encoding="utf-8")
+    frame = story_art.compose_frame(image, body.aspect, story_text.clean_name(name), work / "frame_src.png")
+    return story_video.render_cover_center(frame, audio_workflow.logo_path(body.options.logo_id), work, aspect=body.aspect,
+                                           duration=seconds, options=body.options, has_ass=font_ok)
+
+
 @router.post("/preview")
 def preview(body: PreviewBody, db: Session = Depends(get_db)):
-    """Dựng video xem thử với đúng nền + lớp phủ đang chọn (giọng đọc thay bằng tiếng ồn hồng để waveform có chuyển động; không có tiếng)."""
-    _require_backgrounds(body.aspect, body.bg_fit, body.options)
+    """Dựng video xem thử với đúng bố cục + chữ/lớp phủ đang chọn (không có tiếng; bố cục Nền video dùng tiếng ồn hồng cho waveform)."""
+    _check_render_inputs(body.aspect, body.bg_fit, body.options)
     story = db.get(CrawledStory, body.story_slug) if body.story_slug else None
     if body.story_slug and not story: raise HTTPException(404, "Không tìm thấy truyện đã crawl.")
     name = story.name if story else "Tên truyện mẫu"
     thumbnail = audio_workflow.thumbnail_path(story.story_slug) if story else None
     options = body.options
+    if options.layout == "cover_center":
+        work = _previews_dir() / f".w_{uuid.uuid4().hex[:8]}"
+        work.mkdir(parents=True, exist_ok=True)
+        try:
+            try:
+                produced = _preview_cover_center(story, name, body, work)
+            except (ValueError, RuntimeError, subprocess.SubprocessError, OSError) as exc:
+                raise HTTPException(400, f"Không dựng được video xem thử: {exc}") from exc
+            return {"file_name": _keep_preview(produced)}
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
     if options.bg_mode == "cover" and thumbnail is None:
         raise HTTPException(400, "Nền ảnh bìa cần một truyện đã có thumbnail: hãy chọn truyện và thêm ảnh bìa trước khi xem thử.")
 
@@ -438,12 +518,7 @@ def preview(body: PreviewBody, db: Session = Depends(get_db)):
                 if done.returncode: raise RuntimeError(done.stderr[-400:])
         except (ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             raise HTTPException(400, f"Không dựng được video xem thử: {exc}") from exc
-        out_dir = _previews_dir()
-        file_name = f"preview_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.mp4"
-        shutil.move(str(produced), out_dir / file_name)
-        for old in sorted(out_dir.glob("preview_*.mp4"), key=lambda path: path.stat().st_mtime, reverse=True)[PREVIEW_KEEP:]:
-            old.unlink(missing_ok=True)
-        return {"file_name": file_name}
+        return {"file_name": _keep_preview(produced)}
     finally:
         if background: background.unlink(missing_ok=True)
         shutil.rmtree(work, ignore_errors=True)

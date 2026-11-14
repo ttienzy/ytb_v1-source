@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, ChevronDown, ChevronUp, HardDriveUpload, Loader2, Play, Trash2, X } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, ChevronUp, Copy, HardDriveUpload, Loader2, Play, Trash2, X } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 
 export interface AudioOutput {
@@ -11,6 +11,38 @@ export interface AudioOutput {
   chapter_number?: number
   chapter_title?: string
   thumbnail_name?: string | null
+  /** Video v2: tiêu đề/mô tả gợi ý để đăng (mô tả có mốc chương của video cả truyện). */
+  video_title?: string
+  video_description?: string
+  unit?: 'story' | 'chapter'
+  part?: number | null
+  chapters?: number[]
+  aspect?: '9:16' | '16:9'
+}
+
+function videoLabel(item: AudioOutput): string {
+  if (item.unit === 'story') return item.part ? `Tập ${item.part}` : 'FULL'
+  return item.chapter_number ? `Chương ${item.chapter_number}` : item.name
+}
+
+function formatClock(seconds: number): string {
+  const s = Math.round(seconds)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = String(s % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`
+}
+
+/** Nút sao chép nhỏ: đổi thành dấu tích 1,5 giây sau khi chép. */
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [done, setDone] = useState(false)
+  return (
+    <button type="button" className="aw-ghost small" onClick={() => {
+      navigator.clipboard.writeText(text).then(() => { setDone(true); window.setTimeout(() => setDone(false), 1500) }).catch(() => {})
+    }}>
+      {done ? <Check size={13} /> : <Copy size={13} />} {done ? 'Đã chép' : label}
+    </button>
+  )
 }
 
 interface DriveProgress {
@@ -116,7 +148,7 @@ export function AudioOutputs({ outputs, onChanged, onError }: AudioOutputsProps)
               <span className="aw-output-icon"><Play size={15} fill="currentColor" /></span>
               <span className="aw-output-copy">
                 <strong title={group.story_name}>{group.story_name}</strong>
-                <small>{group.videos.length} video · {group.videos.filter(video => video.chapter_number).map(video => `C${video.chapter_number}`).join(', ') || 'Video đã hoàn tất'}</small>
+                <small>{group.videos.length} video · {group.videos.map(videoLabel).join(', ')}</small>
               </span>
               <ArrowRight size={14} />
             </button>
@@ -135,9 +167,19 @@ export function AudioOutputs({ outputs, onChanged, onError }: AudioOutputsProps)
               {detail.videos.map(item => (
                 <div className="audio-story-video-item" key={item.file_name}>
                   <video controls preload="metadata" poster={item.thumbnail_name ? `${API_URL}/api/audio/thumbnails/${encodeURIComponent(item.thumbnail_name)}` : undefined} src={`${API_URL}/api/audio/outputs/${encodeURIComponent(item.file_name)}`} />
-                  <div>
-                    <strong>{item.chapter_number ? `Chương ${item.chapter_number}` : item.name}</strong>
-                    <small>{item.chapter_title || item.name} · {Math.round(item.duration_sec)} giây</small>
+                  <div className="audio-story-video-meta">
+                    <strong>{videoLabel(item)}{item.aspect ? ` · ${item.aspect}` : ''}</strong>
+                    <small>{item.unit === 'story' && item.chapters?.length ? `Chương ${item.chapters[0]}–${item.chapters[item.chapters.length - 1]} · ` : ''}{formatClock(item.duration_sec)}</small>
+                    {item.video_title && (
+                      <>
+                        <p className="audio-story-video-title" title="Tiêu đề gợi ý">{item.video_title}</p>
+                        {item.video_description && <pre className="audio-story-video-desc">{item.video_description}</pre>}
+                        <div className="audio-story-video-actions">
+                          <CopyButton text={item.video_title} label="Chép tiêu đề" />
+                          {item.video_description && <CopyButton text={item.video_description} label="Chép mô tả" />}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -172,7 +214,7 @@ export function AudioOutputs({ outputs, onChanged, onError }: AudioOutputsProps)
                         <label key={video.file_name} className="audio-drive-video">
                           <input type="checkbox" checked={driveSelected.includes(video.file_name)} onChange={() => setDriveSelected(current => (current.includes(video.file_name) ? current.filter(name => name !== video.file_name) : [...current, video.file_name]))} />
                           <div className="audio-drive-video-copy">
-                            <strong>{video.chapter_number ? `Chương ${video.chapter_number}` : video.name}</strong>
+                            <strong>{videoLabel(video)}</strong>
                             <small>{progress?.status === 'uploading' ? `Đang upload… ${progress.percent}%` : progress?.status === 'done' ? 'Upload thành công' : progress?.status === 'error' ? `Upload lỗi: ${progress.error || 'Không xác định'}` : (video.chapter_title || video.name)}</small>
                             {driveMode === 'upload' && progress && <div className="audio-drive-progress"><div style={{ width: `${progress.percent}%` }} /></div>}
                           </div>

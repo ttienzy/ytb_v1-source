@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  audioSteps,
+  DEFAULT_CTA,
+  DEFAULT_STEPS,
   DEFAULT_STYLE,
   describeStyle,
+  estimateSeconds,
+  formatDuration,
   mergeStyle,
-  styleNeedsOverlay,
+  planQueue,
   backgroundSummary,
   hasBackgroundWork,
   type BgItem,
@@ -106,43 +109,61 @@ test('pruneCompleted giữ lại chương chưa xong (vd chương lỗi); truy�
   assert.deepEqual(pruneCompleted(q, fresh), [{ story_slug: 'a', chapter_numbers: [3] }, { story_slug: 'c', chapter_numbers: [4, 5] }])
 })
 
-test('validateQueue', () => {
-  const stories = [story('a', 'A'), story('b', 'B', 3, 0, null)]
+test('validateQueue: thiếu ảnh không chặn chạy (dùng ảnh bìa nguồn / ảnh thay thế), chỉ liệt kê để cảnh báo', () => {
+  const stories = [story('a', 'A'), story('b', 'B', 3, 0, null), { ...story('c', 'C', 3, 0, null), has_cover: true }]
   assert.deepEqual(validateQueue([], stories, 'v').errors, ['Chọn ít nhất 1 chương ở danh sách bên trái.'])
-  const v = validateQueue([{ story_slug: 'a', chapter_numbers: [1] }, { story_slug: 'b', chapter_numbers: [1] }], stories, '')
-  assert.deepEqual(v.missingThumbnail.map(s => s.story_slug), ['b'])
-  assert.equal(v.errors.length, 2)
-  assert.deepEqual(validateQueue([{ story_slug: 'a', chapter_numbers: [1] }], stories, 'v').errors, [])
+  const v = validateQueue([{ story_slug: 'a', chapter_numbers: [1] }, { story_slug: 'b', chapter_numbers: [1] }, { story_slug: 'c', chapter_numbers: [1] }], stories, '')
+  assert.deepEqual(v.noImage.map(s => s.story_slug), ['b'], 'c có ảnh bìa nguồn')
+  assert.deepEqual(v.errors, ['Chọn giọng đọc.'])
+  assert.deepEqual(validateQueue([{ story_slug: 'b', chapter_numbers: [1] }], stories, 'v').errors, [])
 })
 
-test('buildRunBody: 1 chương -> chạy đơn, nhiều -> batch_items', () => {
-  const opts = { voice: 'v', aspect: '9:16' as const, bgm: true, drive: false, bgFit: 'fill' as const, style: DEFAULT_STYLE }
+test('buildRunBody: luôn batch_items + đơn vị đầu ra', () => {
+  const opts = { unit: 'story' as const, voice: 'v', aspect: '16:9' as const, bgm: true, drive: false, bgFit: 'fill' as const, style: DEFAULT_STYLE }
   const single = buildRunBody([{ story_slug: 'a', chapter_numbers: [4] }], opts)
-  assert.equal(single.chapter_number, 4)
-  assert.equal(single.batch_items, undefined)
-  const batch = buildRunBody([{ story_slug: 'a', chapter_numbers: [1, 2] }, { story_slug: 'b', chapter_numbers: [1] }], { ...opts, drive: true })
+  assert.deepEqual(single.batch_items, [{ story_slug: 'a', chapter_numbers: [4] }])
+  assert.equal(single.unit, 'story')
+  assert.equal(single.chapter_number, undefined)
+  const batch = buildRunBody([{ story_slug: 'a', chapter_numbers: [1, 2] }, { story_slug: 'b', chapter_numbers: [1] }], { ...opts, unit: 'chapter', drive: true })
   assert.deepEqual(batch.batch_items, [{ story_slug: 'a', chapter_numbers: [1, 2] }, { story_slug: 'b', chapter_numbers: [1] }])
+  assert.equal(batch.unit, 'chapter')
   assert.equal(batch.auto_upload_drive, true)
   assert.equal(batch.delete_local_after_upload, true)
   assert.equal(batch.story_slug, 'a')
-  assert.equal(batch.bg_fit, 'fill')
+  assert.equal(batch.aspect, '16:9')
   assert.deepEqual(batch.options, DEFAULT_STYLE)
-  assert.deepEqual(single.options, DEFAULT_STYLE)
   assert.equal(buildRunBody([{ story_slug: 'a', chapter_numbers: [4] }], { ...opts, bgFit: 'blur' }).bg_fit, 'blur')
 })
 
-test('audioSteps + stepState: thứ tự khớp backend, skipped, error, completed', () => {
-  const steps = audioSteps({ bgm: true, drive: false })
-  assert.deepEqual(steps.map(s => s.key), ['image', 'voice', 'duration', 'merge', 'mux', 'bgm', 'done'])
-  assert.deepEqual(audioSteps({ bgm: false, drive: true }).map(s => s.key), ['image', 'voice', 'duration', 'merge', 'mux', 'drive', 'done'])
-  assert.deepEqual(audioSteps({ bgm: true, drive: false, overlay: true }).map(s => s.key), ['image', 'voice', 'duration', 'merge', 'overlay', 'mux', 'bgm', 'done'])
-  const running = { status: 'running', step: 'merge' }
+test('ước lượng thời lượng + số video của hàng đợi', () => {
+  assert.equal(estimateSeconds(undefined, 5, 5), null)
+  assert.equal(Math.round(estimateSeconds(17900, 5, 5) ?? 0), 1000)
+  assert.equal(Math.round(estimateSeconds(17900, 5, 2) ?? 0), 400, 'chia đều theo số chương đã chọn')
+  assert.equal(formatDuration(null), '')
+  assert.equal(formatDuration(20), '< 1 phút')
+  assert.equal(formatDuration(37 * 60), '≈ 37 phút')
+  assert.equal(formatDuration(65 * 60), '≈ 1 giờ 5 phút')
+  assert.equal(formatDuration(120 * 60), '≈ 2 giờ')
+  const stories = [story('a', 'A', 5), story('b', 'B', 40)]
+  const lengths = { a: 17.9 * 60 * 37, b: 17.9 * 60 * 300 }
+  const queue = [{ story_slug: 'a', chapter_numbers: [1, 2, 3, 4, 5] }, { story_slug: 'b', chapter_numbers: Array.from({ length: 40 }, (_, i) => i + 1) }]
+  const plan = planQueue(queue, stories, lengths, 'story')
+  assert.equal(plan.videos, 1 + 3, 'truyện 5 giờ chia 3 tập (≤ 120 phút/tập)')
+  assert.equal(Math.round((plan.seconds ?? 0) / 60), 337)
+  assert.equal(planQueue(queue, stories, lengths, 'chapter').videos, 45)
+  assert.equal(planQueue(queue, stories, {}, 'story').seconds, null, 'chưa có độ dài thì không đoán bừa')
+})
+
+test('stepState theo danh sách bước của backend: skipped, error, completed', () => {
+  const steps = DEFAULT_STEPS
+  assert.deepEqual(steps.map(s => s.key), ['prepare', 'voice', 'render', 'mix', 'package', 'done'])
+  const running = { status: 'running', step: 'render' }
   assert.equal(stepState(running, 'voice', steps), 'done')
-  assert.equal(stepState(running, 'merge', steps), 'running')
-  assert.equal(stepState(running, 'mux', steps), 'pending')
-  assert.equal(stepState({ status: 'running', step: 'voice', skipped_steps: ['image'] }, 'image', steps), 'skipped')
+  assert.equal(stepState(running, 'render', steps), 'running')
+  assert.equal(stepState(running, 'mix', steps), 'pending')
+  assert.equal(stepState({ status: 'running', step: 'voice', skipped_steps: ['prepare'] }, 'prepare', steps), 'skipped')
   assert.equal(stepState({ status: 'error', step: 'voice' }, 'voice', steps), 'error')
-  assert.equal(stepState({ status: 'completed', step: 'done' }, 'bgm', steps), 'done')
+  assert.equal(stepState({ status: 'completed', step: 'done' }, 'mix', steps), 'done')
   assert.equal(stepState(null, 'voice', steps), 'pending')
 })
 
@@ -193,13 +214,22 @@ test('mergeStyle: thiếu trường -> mặc định; sai kiểu/ngoài khoảng
   assert.equal(s.waveform, false)
   assert.equal(s.fade_out_sec, 3)
   assert.equal(mergeStyle({ logo_id: 'abcdef012345' }).logo_id, 'abcdef012345')
+  // Cấu hình lưu từ bản trước (không có bố cục/phụ đề) → mặc định mới; giá trị lạ → mặc định.
+  const old = mergeStyle({ voice_speed: 1.2, bg_mode: 'cover' })
+  assert.equal(old.layout, 'cover_center')
+  assert.equal(old.subtitles, true)
+  assert.equal(mergeStyle({ layout: 'grid', subtitles: 'yes', cta_text: '   ' }).layout, 'cover_center')
+  assert.equal(mergeStyle({ cta_text: '   ' }).cta_text, DEFAULT_CTA)
+  assert.equal(mergeStyle({ cta_text: 'x'.repeat(80) }).cta_text.length, 60)
+  assert.equal(mergeStyle({ layout: 'classic', subtitles: false }).subtitles, false)
 })
 
-test('styleNeedsOverlay + describeStyle', () => {
-  assert.equal(styleNeedsOverlay(DEFAULT_STYLE), false)
+test('describeStyle: chỉ liệt kê khác mặc định; lớp phủ của bố cục "Nền video" chỉ tính khi đang dùng bố cục đó', () => {
   assert.deepEqual(describeStyle(DEFAULT_STYLE), [])
-  const custom = { ...DEFAULT_STYLE, dim: 0.3, waveform: true, voice_speed: 1.1, title_card: 'intro' as const, bg_mode: 'cover' as const, logo_id: 'abcdef012345', bgm_volume: 0.4, loudnorm: false }
-  assert.equal(styleNeedsOverlay(custom), true)
-  assert.deepEqual(describeStyle(custom), ['Đọc ×1.10', 'Nhạc 40%', 'Không chuẩn hóa âm lượng', 'Nền ảnh bìa', 'Tối 30%', 'Tiêu đề đầu video', 'Waveform', 'Logo'])
-  assert.equal(styleNeedsOverlay({ ...DEFAULT_STYLE, bg_mode: 'cover' }), false, 'đổi nền không cần lớp phủ')
+  const overlays = { dim: 0.3, waveform: true, title_card: 'intro' as const, bg_mode: 'cover' as const }
+  const custom = { ...DEFAULT_STYLE, ...overlays, layout: 'classic' as const, voice_speed: 1.1, logo_id: 'abcdef012345', bgm_volume: 0.4, loudnorm: false, subtitles: false }
+  assert.deepEqual(describeStyle(custom), ['Đọc ×1.10', 'Nhạc 40%', 'Không chuẩn hóa âm lượng', 'Không phụ đề', 'Nền ảnh bìa', 'Tối 30%', 'Tiêu đề đầu video', 'Waveform', 'Logo'])
+  assert.deepEqual(describeStyle({ ...DEFAULT_STYLE, ...overlays }), [], 'bố cục ảnh bìa bỏ qua các lớp phủ đó')
+  assert.deepEqual(describeStyle({ ...DEFAULT_STYLE, cta_text: 'Theo dõi kênh' }), ['Lời nhắc riêng'])
+  assert.deepEqual(describeStyle({ ...DEFAULT_STYLE, cta: false, chapter_label: false }), ['Không nhãn chương', 'Không nhắc đăng ký'])
 })

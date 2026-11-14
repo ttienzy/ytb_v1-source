@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Check, FileText, Loader2, Search, X } from 'lucide-react'
-import { ChapterPicker, thumbnailUrl } from './ChapterPicker'
-import { filterStoryViews, type AudioChapter, type QueueItem, type StoryFilter, type StoryView } from './audioModel'
+import { ChapterPicker, storyImageUrl } from './ChapterPicker'
+import { estimateSeconds, filterStoryViews, formatDuration, type AudioChapter, type QueueItem, type StoryFilter, type StoryView } from './audioModel'
 import { VirtualList } from './VirtualList'
 
 const FILTERS: Array<{ key: StoryFilter; label: string }> = [
@@ -23,6 +23,9 @@ function initials(name: string): string {
 
 interface StoryBrowserProps {
   views: StoryView[]
+  /** Ký tự mỗi truyện + tốc độ đọc → thời lượng ước tính. */
+  lengths: Record<string, number>
+  cps: number
   loading: boolean
   loadError: string
   queue: QueueItem[]
@@ -39,7 +42,7 @@ interface StoryBrowserProps {
 }
 
 /** Duyệt truyện (tìm không dấu, lọc, danh sách ảo hóa) + chọn chương — thay cho ô <select> 2.000+ lựa chọn. */
-export function StoryBrowser({ views, loading, loadError, queue, onQueueChange, focusedSlug, onFocus, chaptersBySlug, onRetryChapters, thumbnailBusy, onUploadThumbnail, onNotice, onSummarySaved }: StoryBrowserProps) {
+export function StoryBrowser({ views, lengths, cps, loading, loadError, queue, onQueueChange, focusedSlug, onFocus, chaptersBySlug, onRetryChapters, thumbnailBusy, onUploadThumbnail, onNotice, onSummarySaved }: StoryBrowserProps) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<StoryFilter>('pending')
 
@@ -86,12 +89,15 @@ export function StoryBrowser({ views, loading, loadError, queue, onQueueChange, 
                 return (
                   <button type="button" role="option" aria-selected={story.story_slug === focusedSlug} className={`aw-story ${story.story_slug === focusedSlug ? 'active' : ''}`} onClick={() => onFocus(story.story_slug)}>
                     <span className="aw-story-thumb">
-                      {story.thumbnail_name ? <img src={thumbnailUrl(story.thumbnail_name)} alt="" loading="lazy" /> : initials(story.name)}
+                      {(story.thumbnail_name || story.has_cover)
+                        ? <img src={storyImageUrl(story)} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} />
+                        : null}
+                      <span className="aw-story-initials">{initials(story.name)}</span>
                     </span>
                     <span className="aw-story-info">
                       <strong title={story.name}>{story.name}</strong>
                       <span className="aw-story-meta">
-                        <span>{view.doneCount}/{view.total} chương</span>
+                        <span>{view.doneCount}/{view.total} chương{lengths[story.story_slug] ? ` · ${formatDuration(estimateSeconds(lengths[story.story_slug], view.total, view.total, cps)).replace('≈ ', '')}` : ''}</span>
                         <span className="aw-bar"><i style={{ width: `${percent}%` }} /></span>
                       </span>
                     </span>

@@ -3,7 +3,7 @@ import { BookOpen, Check, ImagePlus, Loader2, Sparkles } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 import { ChapterReader } from './ChapterReader'
 import { StorySummary } from './StorySummary'
-import { chapterRange, doneSet, MAX_QUEUE_STORIES, canAddStory, setStoryChapters, toggleChapter, type AudioChapter, type QueueItem, type StoryView } from './audioModel'
+import { chapterRange, doneSet, MAX_QUEUE_STORIES, canAddStory, setStoryChapters, toggleChapter, type AudioChapter, type AudioStory, type QueueItem, type StoryView } from './audioModel'
 
 interface ChapterPickerProps {
   view: StoryView | null
@@ -23,6 +23,12 @@ export function thumbnailUrl(name: string): string {
   return `${API_URL}/api/audio/thumbnails/${encodeURIComponent(name)}`
 }
 
+/** Ảnh dùng cho video của truyện: ảnh upload tay (nếu có) → ảnh bìa nguồn (backend tải + cache lần đầu). */
+export function storyImageUrl(story: AudioStory): string {
+  const version = story.thumbnail_name ? `?v=${encodeURIComponent(story.thumbnail_name)}` : ''
+  return `${API_URL}/api/audio/stories/${encodeURIComponent(story.story_slug)}/cover${version}`
+}
+
 /** Chọn chương của một truyện: lưới số chương (click để chọn, Shift+click chọn cả dải). */
 export function ChapterPicker({ view, chapters, onRetry, queue, onQueueChange, thumbnailBusy, onUploadThumbnail, onNotice, onSummarySaved }: ChapterPickerProps) {
   // Component được đặt key theo truyện nên các state này tự reset khi đổi truyện.
@@ -37,6 +43,7 @@ export function ChapterPicker({ view, chapters, onRetry, queue, onQueueChange, t
 
   const { story } = view
   const slug = story.story_slug
+  const hasImage = !!(story.thumbnail_name || story.has_cover)
   const selected = new Set(queue.find(item => item.story_slug === slug)?.chapter_numbers ?? [])
   const list = chapters ?? []
   const done = doneSet(chapters)
@@ -73,13 +80,13 @@ export function ChapterPicker({ view, chapters, onRetry, queue, onQueueChange, t
       <div className="aw-chapters-head">
         <button
           type="button"
-          className={`aw-thumb-btn ${story.thumbnail_name ? '' : 'missing'}`}
+          className={`aw-thumb-btn ${hasImage ? '' : 'missing'}`}
           onClick={() => fileInput.current?.click()}
           disabled={thumbnailBusy}
-          title={story.thumbnail_name ? 'Đổi thumbnail' : 'Truyện chưa có thumbnail — bắt buộc phải có trước khi chạy'}
+          title={story.thumbnail_name ? 'Ảnh bạn đã tải lên — bấm để đổi' : story.has_cover ? 'Ảnh bìa nguồn: dùng làm hình video + thumbnail. Bấm để thay bằng ảnh của bạn.' : 'Truyện không có ảnh bìa — video dùng ảnh thay thế. Bấm để thêm ảnh.'}
         >
-          {thumbnailBusy ? <Loader2 size={16} className="spin" /> : story.thumbnail_name ? <img src={thumbnailUrl(story.thumbnail_name)} alt="" /> : <ImagePlus size={18} />}
-          <span>{story.thumbnail_name ? 'Đổi ảnh' : 'Thêm ảnh'}</span>
+          {thumbnailBusy ? <Loader2 size={16} className="spin" /> : hasImage ? <img src={storyImageUrl(story)} alt="" /> : <ImagePlus size={18} />}
+          <span>{hasImage ? 'Đổi ảnh' : 'Thêm ảnh'}</span>
         </button>
         <input
           ref={fileInput}
@@ -95,8 +102,7 @@ export function ChapterPicker({ view, chapters, onRetry, queue, onQueueChange, t
         <div className="aw-chapters-title">
           <strong title={story.name}>{story.name}</strong>
           <small>
-            {view.doneCount}/{view.total} chương đã làm
-            {!story.thumbnail_name && <em className="aw-warn"> · thiếu thumbnail</em>}
+            {view.doneCount}/{view.total} chương đã làm · {story.thumbnail_name ? 'ảnh của bạn' : story.has_cover ? 'ảnh bìa nguồn' : <em className="aw-warn">không có ảnh bìa</em>}
           </small>
         </div>
       </div>

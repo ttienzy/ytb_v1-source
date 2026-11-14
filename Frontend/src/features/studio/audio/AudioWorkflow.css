@@ -59,7 +59,8 @@
 .aw-story:hover { background: #f8fafc; }
 .aw-story.active { background: var(--aw-accent-soft); border-left-color: var(--aw-accent); }
 .aw-story-thumb { width: 36px; height: 36px; border-radius: 8px; overflow: hidden; flex-shrink: 0; display: grid; place-items: center; background: linear-gradient(135deg, #818cf8, #6366f1); color: #fff; font-size: 12px; font-weight: 700; }
-.aw-story-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.aw-story-thumb { position: relative; }
+.aw-story-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; } /* ảnh bìa phủ lên chữ viết tắt; ảnh lỗi thì ẩn để lộ chữ */
 .aw-story-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .aw-story-info strong { font-size: 13px; font-weight: 600; color: var(--aw-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aw-story-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--aw-muted); }
@@ -263,3 +264,14 @@
 .aw-style .aw-segmented { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .aw-style .aw-segmented.corners { grid-auto-flow: row; grid-template-columns: repeat(4, 34px); grid-auto-columns: auto; }
 
+
+/* ── Cảnh báo của job (vd không tải được ảnh bìa) ── */
+.aw-job-warnings { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; font-size: 12px; color: #92400e; }
+.aw-job-warnings li { display: flex; align-items: center; gap: 6px; }
+
+/* ── Kho video: tiêu đề/mô tả gợi ý để đăng ── */
+.audio-story-video-meta { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.audio-story-video-title { margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--aw-text); }
+.audio-story-video-desc { margin: 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font-family: inherit; font-size: 12px; line-height: 1.45; color: var(--aw-muted); background: #f8fafc; border: 1px solid var(--aw-border); border-radius: 6px; padding: 6px 8px; }
+.audio-story-video-item .audio-story-video-actions { display: flex; flex-direction: row; gap: 6px; flex-wrap: wrap; }
+.aw-ghost.small { padding: 3px 8px; font-size: 12px; }

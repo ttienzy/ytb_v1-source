@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AudioLines, ChevronDown, ChevronUp, Eye, ImagePlus, Layers, Loader2, Trash2, Volume2 } from 'lucide-react'
+import { AudioLines, ChevronDown, ChevronUp, Eye, Film, ImagePlus, Loader2, Trash2, Type, Volume2 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
-import { describeStyle, type AudioStyle, type BgFit, type DuckMode, type LogoPosition, type TitleCard } from './audioModel'
+import { DEFAULT_CTA, describeStyle, type AudioStyle, type BgFit, type DuckMode, type LogoPosition, type TitleCard } from './audioModel'
 import { HelpHint } from '../../help/components/HelpHint'
 
-type Tab = 'sound' | 'overlay' | 'background'
+type Tab = 'sound' | 'text' | 'classic'
 
 export interface BgmTrack {
   track_id: string
@@ -117,9 +117,11 @@ export function StyleStudio({ style, onChange, onReset, locked, tracks, bgm, asp
 
   const TABS: Array<{ key: Tab; label: string; icon: ReactNode }> = [
     { key: 'sound', label: 'Âm thanh', icon: <Volume2 size={14} /> },
-    { key: 'overlay', label: 'Lớp phủ', icon: <Layers size={14} /> },
-    { key: 'background', label: 'Nền', icon: <ImagePlus size={14} /> },
+    { key: 'text', label: 'Chữ & logo', icon: <Type size={14} /> },
+    { key: 'classic', label: 'Bố cục Nền video', icon: <Film size={14} /> },
   ]
+  const classic = style.layout === 'classic'
+  const classicLocked = locked || !classic
 
   return (
     <section className="aw-card aw-outputs aw-style">
@@ -164,17 +166,17 @@ export function StyleStudio({ style, onChange, onReset, locked, tracks, bgm, asp
                 </>
               )}
 
-              {tab === 'overlay' && (
+              {tab === 'text' && (
                 <>
-                  <p className="aw-note">Bật bất kỳ lớp phủ nào thì video được mã hóa lại một lượt (chậm hơn đường nối nhanh, nhưng chỉ khoảng một phút cho chương 9 phút).</p>
-                  <Slider label="Làm tối nền" value={style.dim} min={0} max={0.7} step={0.05} format={v => (v === 0 ? 'Tắt' : `${Math.round(v * 100)}%`)} onChange={v => onChange({ dim: v })} disabled={locked} hint="Giúp chữ, waveform và logo dễ đọc trên nền sáng" />
-                  <div className="aw-field">
-                    <span>Thẻ tiêu đề chương</span>
-                    <Segmented<TitleCard> label="Thẻ tiêu đề" value={style.title_card} onChange={v => onChange({ title_card: v })} disabled={locked}
-                      options={[{ value: 'off', label: 'Tắt' }, { value: 'intro', label: 'Đầu video', hint: 'Tên truyện + chương hiện lớn ở giữa rồi mờ dần' }, { value: 'always', label: 'Luôn hiện', hint: 'Dòng nhỏ cố định phía trên' }]} />
-                  </div>
-                  {style.title_card === 'intro' && <Slider label="Hiện trong" value={style.title_seconds} min={2} max={20} step={1} format={v => `${v}s`} onChange={v => onChange({ title_seconds: v })} disabled={locked} />}
-                  <Switch checked={style.waveform} onChange={v => onChange({ waveform: v })} disabled={locked} label="Waveform theo giọng đọc" hint="Sóng âm chạy theo lời đọc ở phần dưới video — kiểu thường thấy ở video sách nói" />
+                  <Switch checked={style.subtitles} onChange={v => onChange({ subtitles: v })} disabled={locked} label="Phụ đề theo lời đọc" hint="Mỗi câu hiện đúng lúc giọng đọc (lấy mốc từ giọng đọc theo từng câu, không cần nhận dạng giọng nói)" />
+                  <Switch checked={style.chapter_label} onChange={v => onChange({ chapter_label: v })} disabled={locked} label='Nhãn "Chương N"' hint="Video cả truyện: nhãn đổi theo chương đang đọc" />
+                  <Switch checked={style.cta} onChange={v => onChange({ cta: v })} disabled={locked} label="Lời nhắc đăng ký" hint="Hiện vài giây mỗi 2,5 phút (không hiện sát cuối video)" />
+                  {style.cta && (
+                    <label className="aw-field">
+                      <span>Nội dung lời nhắc</span>
+                      <input type="text" maxLength={60} value={style.cta_text} onChange={event => onChange({ cta_text: event.target.value })} onBlur={() => !style.cta_text.trim() && onChange({ cta_text: DEFAULT_CTA })} disabled={locked} placeholder={DEFAULT_CTA} />
+                    </label>
+                  )}
                   <div className="aw-field">
                     <span>Logo kênh</span>
                     <div className="aw-logo-row">
@@ -201,18 +203,24 @@ export function StyleStudio({ style, onChange, onReset, locked, tracks, bgm, asp
                 </>
               )}
 
-              {tab === 'background' && (
+              {tab === 'classic' && (
                 <>
+                  <p className="aw-note">{classic
+                    ? 'Các tùy chọn dưới đây áp dụng cho bố cục "Nền video". Bật lớp phủ nào thì video được mã hóa lại một lượt (khoảng một phút cho 9 phút video).'
+                    : 'Đang dùng bố cục "Ảnh bìa + phụ đề" (chọn ở cột Hàng đợi) — các tùy chọn này chỉ có tác dụng khi chuyển sang bố cục "Nền video".'}</p>
                   <div className="aw-field">
                     <span>Nguồn hình nền</span>
-                    <Segmented<AudioStyle['bg_mode']> label="Nguồn hình nền" value={style.bg_mode} onChange={v => onChange({ bg_mode: v })} disabled={locked}
-                      options={[{ value: 'library', label: 'Video trong thư viện' }, { value: 'cover', label: 'Ảnh bìa truyện' }]} />
+                    <Segmented<AudioStyle['bg_mode']> label="Nguồn hình nền" value={style.bg_mode} onChange={v => onChange({ bg_mode: v })} disabled={classicLocked}
+                      options={[{ value: 'library', label: 'Video trong thư viện' }, { value: 'cover', label: 'Ảnh bìa zoom chậm' }]} />
                   </div>
-                  <p className="aw-note">
-                    {style.bg_mode === 'library'
-                      ? 'Ghép ngẫu nhiên các video ở khối "Video nền" (xáo trộn, không lặp liền kề). Cách khớp khung (lấp đầy / nền mờ) chọn ở cột bên phải.'
-                      : 'Dùng chính ảnh bìa (thumbnail) của truyện làm nền, phóng to – thu nhỏ rất chậm theo chu kỳ 40 giây. Không cần video nền; mỗi truyện chỉ tạo một lần rồi dùng lại cho mọi chương.'}
-                  </p>
+                  <Slider label="Làm tối nền" value={style.dim} min={0} max={0.7} step={0.05} format={v => (v === 0 ? 'Tắt' : `${Math.round(v * 100)}%`)} onChange={v => onChange({ dim: v })} disabled={classicLocked} hint="Giúp chữ, waveform và logo dễ đọc trên nền sáng" />
+                  <div className="aw-field">
+                    <span>Thẻ tiêu đề chương</span>
+                    <Segmented<TitleCard> label="Thẻ tiêu đề" value={style.title_card} onChange={v => onChange({ title_card: v })} disabled={classicLocked}
+                      options={[{ value: 'off', label: 'Tắt' }, { value: 'intro', label: 'Đầu video', hint: 'Tên truyện + chương hiện lớn ở giữa rồi mờ dần' }, { value: 'always', label: 'Luôn hiện', hint: 'Dòng nhỏ cố định phía trên' }]} />
+                  </div>
+                  {style.title_card === 'intro' && <Slider label="Hiện trong" value={style.title_seconds} min={2} max={20} step={1} format={v => `${v}s`} onChange={v => onChange({ title_seconds: v })} disabled={classicLocked} />}
+                  <Switch checked={style.waveform} onChange={v => onChange({ waveform: v })} disabled={classicLocked} label="Waveform theo giọng đọc" hint="Sóng âm chạy theo lời đọc ở phần dưới video" />
                 </>
               )}
             </div>

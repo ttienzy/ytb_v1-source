@@ -36,8 +36,9 @@ def _logo_xy(position: str, margin: int) -> tuple[str, str]:
 
 
 def build_filter_graph(options: AudioOptions, aspect: str, duration: float, *, has_title: bool, voice_index: int | None,
-                       logo_index: int | None) -> tuple[str, str]:
+                       logo_index: int | None, ass_name: str | None = None) -> tuple[str, str]:
     """Dựng filter_complex. Đầu vào 0 là video nền; `voice_index`/`logo_index` là chỉ số input của voice/logo (nếu có).
+    `ass_name`: file phụ đề ASS (tên tương đối trong cwd=work, font nằm cùng thư mục) — phủ sau cùng, trên mọi lớp khác.
 
     Trả (filter_complex, nhãn_đầu_ra). Hàm thuần để test chuỗi filter."""
     w, h = ASPECTS[aspect]
@@ -87,13 +88,18 @@ def build_filter_graph(options: AudioOptions, aspect: str, duration: float, *, h
         steps.append(f"[{label}][logo]overlay=x={x}:y={y}:shortest=1[{out}]")
         label = out
 
+    if ass_name:
+        out = nxt()
+        steps.append(f"[{label}]subtitles={ass_name}:fontsdir=.[{out}]")
+        label = out
+
     if not steps:
         raise ValueError("Không có lớp phủ nào được bật.")
     return ";".join(steps), label
 
 
 def render_overlays(video: Path, voice: Path | None, logo: Path | None, work: Path, *, aspect: str, duration: float,
-                    options: AudioOptions, lines: list[str]) -> Path:
+                    options: AudioOptions, lines: list[str], ass_name: str | None = None) -> Path:
     """Phủ lớp phủ lên video nền → file mới (không tiếng, đúng `duration` giây). Chạy trong cwd=work để dùng đường dẫn tương đối."""
     work.mkdir(parents=True, exist_ok=True)
     font_ok = stage_font(work)
@@ -113,7 +119,10 @@ def render_overlays(video: Path, voice: Path | None, logo: Path | None, work: Pa
         inputs += ["-loop", "1", "-i", str(logo)]
 
     effective = options.model_copy(update={"waveform": use_wave, "logo_id": options.logo_id if use_logo else None})
-    graph, label = build_filter_graph(effective, aspect, duration, has_title=has_title, voice_index=voice_index, logo_index=logo_index)
+    if ass_name and not font_ok:
+        ass_name = None  # không có font thì libass phải tự dò font hệ thống (Fontconfig) — bỏ phụ đề còn hơn làm hỏng cả video
+    graph, label = build_filter_graph(effective, aspect, duration, has_title=has_title, voice_index=voice_index, logo_index=logo_index,
+                                      ass_name=ass_name)
     output = work / "overlay.mp4"
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *inputs, "-filter_complex", graph, "-map", f"[{label}]", "-an",
            "-t", f"{duration:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-g", str(FPS * 2), "-pix_fmt", "yuv420p",

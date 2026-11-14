@@ -263,10 +263,11 @@ def test_run_endpoints_reject_empty_library_and_bad_fit(lib):
     app = FastAPI()
     app.include_router(audio_router.router)
     client = TestClient(app)
-    body = {"story_slug": "s", "chapter_number": 1, "voice_id": "v"}
+    classic = {"options": {"layout": "classic"}}  # chỉ bố cục classic (nền video thư viện) mới cần thư viện nền
+    body = {"story_slug": "s", "chapter_number": 1, "voice_id": "v", **classic}
     r = client.post("/api/audio/run", json=body)
     assert r.status_code == 400 and "Thư viện nền đang trống" in r.json()["detail"]
     r = client.post("/api/audio/run", json={**body, "bg_fit": "stretch"})
     assert r.status_code == 400 and "khớp khung" in r.json()["detail"]
-    r = client.post("/api/audio/test-run", json={"text": "xin chào"})
+    r = client.post("/api/audio/test-run", json={"text": "xin chào", **classic})
     assert r.status_code == 400 and "Thư viện nền đang trống" in r.json()["detail"]

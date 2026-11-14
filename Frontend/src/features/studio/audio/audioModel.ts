@@ -16,6 +16,8 @@ export interface AudioStory {
   done_chapters: number
   /** Đã có bản tóm tắt cốt truyện do Gemini viết. */
   has_summary?: boolean
+  /** Có ảnh bìa nguồn (dùng làm hình video + thumbnail khi chưa upload ảnh riêng). */
+  has_cover?: boolean
 }
 
 export interface QueueItem {
@@ -130,23 +132,26 @@ export function pruneCompleted(queue: QueueItem[], chaptersBySlug: Record<string
 
 export interface QueueValidation {
   errors: string[]
-  /** Truyện trong hàng đợi chưa có thumbnail (bắt buộc). */
-  missingThumbnail: AudioStory[]
+  /** Truyện không có ảnh nào (không upload, không có ảnh bìa nguồn): vẫn chạy được, video dùng ảnh thay thế. */
+  noImage: AudioStory[]
 }
 
+/** Ảnh bìa nguồn được dùng tự động nên thiếu ảnh KHÔNG còn chặn chạy — chỉ cảnh báo. */
 export function validateQueue(queue: QueueItem[], stories: AudioStory[], voice: string): QueueValidation {
   const errors: string[] = []
   const bySlug = new Map(stories.map(story => [story.story_slug, story]))
-  const missingThumbnail = queue.map(item => bySlug.get(item.story_slug)).filter((story): story is AudioStory => !!story && !story.thumbnail_name)
+  const noImage = queue.map(item => bySlug.get(item.story_slug)).filter((story): story is AudioStory => !!story && !story.thumbnail_name && !story.has_cover)
   if (!queue.length) errors.push('Chọn ít nhất 1 chương ở danh sách bên trái.')
   if (!voice) errors.push('Chọn giọng đọc.')
-  if (missingThumbnail.length) errors.push(`${missingThumbnail.length === 1 ? `Truyện "${missingThumbnail[0].name}"` : `${missingThumbnail.length} truyện`} chưa có thumbnail.`)
-  return { errors, missingThumbnail }
+  return { errors, noImage }
 }
 
 export type BgFit = 'fill' | 'blur'
+/** story: mỗi truyện một video FULL (truyện dài tự chia tập); chapter: mỗi chương một video. */
+export type VideoUnit = 'story' | 'chapter'
 
 export interface RunOptions {
+  unit: VideoUnit
   /** Âm thanh & hiệu ứng (tốc độ đọc, nhạc nền, lớp phủ, kiểu nền…). */
   style: AudioStyle
   voice: string
@@ -157,45 +162,85 @@ export interface RunOptions {
   bgFit: BgFit
 }
 
-/** Đúng 1 chương -> đường chạy đơn; còn lại -> batch_items (backend không giới hạn số chương mỗi truyện ở đường này). */
+/** Payload /api/audio/run: luôn gửi dạng batch_items (một hay nhiều truyện) + đơn vị đầu ra. */
 export function buildRunBody(queue: QueueItem[], opts: RunOptions): Record<string, unknown> {
-  const common = {
+  return {
+    story_slug: queue[0]?.story_slug,
+    batch_items: queue,
+    unit: opts.unit,
     voice_id: opts.voice,
     aspect: opts.aspect,
     bg_fit: opts.bgFit,
-    options: opts.style,
+    // Ô lời nhắc có thể đang trống khi đang gõ — backend bắt buộc có nội dung.
+    options: { ...opts.style, cta_text: opts.style.cta_text.trim() || DEFAULT_CTA },
     bgm_random: true,
     bgm_enabled: opts.bgm,
     auto_upload_drive: opts.drive,
     delete_local_after_upload: opts.drive,
   }
-  const { chapters } = queueTotals(queue)
-  if (chapters === 1) return { story_slug: queue[0].story_slug, chapter_number: queue[0].chapter_numbers[0], ...common }
-  return { story_slug: queue[0].story_slug, batch_items: queue, ...common }
+}
+
+// ── Ước lượng thời lượng ─────────────────────────────────────────────────────
+
+/** Tốc độ đọc đo được (ký tự/giây) — backend trả kèm /stories/lengths; đây là giá trị dự phòng. */
+export const DEFAULT_CHARS_PER_SECOND = 17.9
+export const PART_MAX_MINUTES = 120
+
+/** Số giây audio ước tính của các chương đã chọn (chia đều theo số chương vì chỉ biết tổng ký tự của truyện). */
+export function estimateSeconds(totalChars: number | undefined, totalChapters: number, selectedChapters: number, cps = DEFAULT_CHARS_PER_SECOND): number | null {
+  if (!totalChars || !totalChapters || cps <= 0) return null
+  return (totalChars * Math.min(selectedChapters, totalChapters)) / totalChapters / cps
+}
+
+/** "≈ 37 phút", "≈ 1 giờ 5 phút", "< 1 phút". */
+export function formatDuration(seconds: number | null): string {
+  if (seconds === null) return ''
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 1) return '< 1 phút'
+  if (minutes < 60) return `≈ ${minutes} phút`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return `≈ ${h} giờ${m ? ` ${m} phút` : ''}`
+}
+
+export interface QueuePlan {
+  videos: number
+  seconds: number | null
+}
+
+/** Bao nhiêu video + tổng thời lượng sẽ ra từ hàng đợi (ước tính; số tập của truyện dài tính theo ngưỡng phút). */
+export function planQueue(queue: QueueItem[], stories: AudioStory[], lengths: Record<string, number>, unit: VideoUnit, cps = DEFAULT_CHARS_PER_SECOND): QueuePlan {
+  const bySlug = new Map(stories.map(story => [story.story_slug, story]))
+  let videos = 0
+  let seconds: number | null = 0
+  for (const item of queue) {
+    const story = bySlug.get(item.story_slug)
+    const estimate = story ? estimateSeconds(lengths[item.story_slug], story.total_chapters, item.chapter_numbers.length, cps) : null
+    if (unit === 'chapter') videos += item.chapter_numbers.length
+    else videos += estimate === null ? 1 : Math.max(1, Math.ceil(estimate / (PART_MAX_MINUTES * 60)))
+    seconds = seconds === null || estimate === null ? null : seconds + estimate
+  }
+  return { videos, seconds }
 }
 
 // ── Các bước tiến trình ──────────────────────────────────────────────────────
 
-export type StepKey = 'image' | 'voice' | 'duration' | 'merge' | 'overlay' | 'mux' | 'bgm' | 'drive' | 'done'
 export type StepState = 'pending' | 'running' | 'done' | 'error' | 'skipped'
 
-const STEP_TITLES: Record<StepKey, string> = {
-  image: 'Thumbnail',
-  voice: 'Giọng đọc',
-  duration: 'Thời lượng',
-  merge: 'Ghép video nền',
-  overlay: 'Lớp phủ',
-  mux: 'Ghép voice',
-  bgm: 'Nhạc nền',
-  drive: 'Upload Drive',
-  done: 'Hoàn tất',
+export interface JobStep {
+  key: string
+  title: string
 }
 
-/** Thứ tự khớp backend (thumbnail trước voice để lỗi rẻ báo sớm). */
-export function audioSteps(opts: { bgm: boolean; drive: boolean; overlay?: boolean }): Array<{ key: StepKey; title: string }> {
-  const keys: StepKey[] = ['image', 'voice', 'duration', 'merge', ...(opts.overlay ? (['overlay'] as StepKey[]) : []), 'mux', ...(opts.bgm ? (['bgm'] as StepKey[]) : []), ...(opts.drive ? (['drive'] as StepKey[]) : []), 'done']
-  return keys.map(key => ({ key, title: STEP_TITLES[key] }))
-}
+/** Bước hiển thị khi backend chưa trả danh sách bước (job vừa tạo). Khớp story_video.STEP_TITLES. */
+export const DEFAULT_STEPS: JobStep[] = [
+  { key: 'prepare', title: 'Chuẩn bị' },
+  { key: 'voice', title: 'Giọng đọc' },
+  { key: 'render', title: 'Dựng hình' },
+  { key: 'mix', title: 'Ghép âm thanh' },
+  { key: 'package', title: 'Thumbnail & mô tả' },
+  { key: 'done', title: 'Hoàn tất' },
+]
 
 export interface JobLike {
   status?: string
@@ -203,11 +248,11 @@ export interface JobLike {
   skipped_steps?: string[]
 }
 
-export function stepState(job: JobLike | null, key: StepKey, steps: Array<{ key: StepKey }>): StepState {
+export function stepState(job: JobLike | null, key: string, steps: Array<{ key: string }>): StepState {
   if (!job) return 'pending'
   if (Array.isArray(job.skipped_steps) && job.skipped_steps.includes(key)) return 'skipped'
   const order = steps.map(step => step.key)
-  const current = order.indexOf(job.step as StepKey)
+  const current = order.indexOf(job.step ?? '')
   const index = order.indexOf(key)
   if (job.status === 'error' && index === current) return 'error'
   if (job.status === 'completed') return 'done'
@@ -296,6 +341,8 @@ export type DuckMode = 'off' | 'normal' | 'strong'
 export type TitleCard = 'off' | 'intro' | 'always'
 export type LogoPosition = 'tl' | 'tr' | 'bl' | 'br'
 export type BgMode = 'library' | 'cover'
+/** cover_center: nền mờ + thẻ ảnh bìa + phụ đề (không cần video nền); classic: nền toàn khung (video thư viện / ảnh bìa zoom) + lớp phủ. */
+export type Layout = 'cover_center' | 'classic'
 
 /** Cùng cấu trúc với AudioOptions ở backend (app/media/audio_options.py). */
 export interface AudioStyle {
@@ -305,6 +352,11 @@ export interface AudioStyle {
   bgm_track_id: string | null
   fade_out_sec: number
   loudnorm: boolean
+  layout: Layout
+  subtitles: boolean
+  chapter_label: boolean
+  cta: boolean
+  cta_text: string
   bg_mode: BgMode
   dim: number
   title_card: TitleCard
@@ -316,8 +368,11 @@ export interface AudioStyle {
   logo_opacity: number
 }
 
+export const DEFAULT_CTA = 'Đăng ký kênh · Bấm thích · Chia sẻ'
+
 export const DEFAULT_STYLE: AudioStyle = {
   voice_speed: 1, bgm_volume: 0.22, bgm_duck: 'normal', bgm_track_id: null, fade_out_sec: 1.5, loudnorm: true,
+  layout: 'cover_center', subtitles: true, chapter_label: true, cta: true, cta_text: DEFAULT_CTA,
   bg_mode: 'library', dim: 0, title_card: 'off', title_seconds: 6, waveform: false,
   logo_id: null, logo_position: 'tr', logo_size: 0.14, logo_opacity: 0.9,
 }
@@ -339,28 +394,30 @@ export function mergeStyle(raw: unknown): AudioStyle {
     return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : (DEFAULT_STYLE[key] as number)
   }
   const logo = saved.logo_id
+  const bool = (key: 'loudnorm' | 'subtitles' | 'chapter_label' | 'cta' | 'waveform'): boolean => (typeof saved[key] === 'boolean' ? (saved[key] as boolean) : DEFAULT_STYLE[key])
+  const cta = typeof saved.cta_text === 'string' ? saved.cta_text.trim().slice(0, 60) : ''
   return {
     voice_speed: num('voice_speed'),
     bgm_volume: num('bgm_volume'),
     bgm_duck: pick(saved.bgm_duck, ['off', 'normal', 'strong'], DEFAULT_STYLE.bgm_duck),
     bgm_track_id: typeof saved.bgm_track_id === 'string' && saved.bgm_track_id ? saved.bgm_track_id : null,
     fade_out_sec: num('fade_out_sec'),
-    loudnorm: typeof saved.loudnorm === 'boolean' ? saved.loudnorm : DEFAULT_STYLE.loudnorm,
+    loudnorm: bool('loudnorm'),
+    layout: pick(saved.layout, ['cover_center', 'classic'], DEFAULT_STYLE.layout),
+    subtitles: bool('subtitles'),
+    chapter_label: bool('chapter_label'),
+    cta: bool('cta'),
+    cta_text: cta || DEFAULT_CTA,
     bg_mode: pick(saved.bg_mode, ['library', 'cover'], DEFAULT_STYLE.bg_mode),
     dim: num('dim'),
     title_card: pick(saved.title_card, ['off', 'intro', 'always'], DEFAULT_STYLE.title_card),
     title_seconds: num('title_seconds'),
-    waveform: typeof saved.waveform === 'boolean' ? saved.waveform : DEFAULT_STYLE.waveform,
+    waveform: bool('waveform'),
     logo_id: typeof logo === 'string' && /^[a-f0-9]{12}$/.test(logo) ? logo : null,
     logo_position: pick(saved.logo_position, ['tl', 'tr', 'bl', 'br'], DEFAULT_STYLE.logo_position),
     logo_size: num('logo_size'),
     logo_opacity: num('logo_opacity'),
   }
-}
-
-/** Có lớp phủ nào bật không (khi đó video phải mã hóa lại một lượt nên chậm hơn đường stream copy). */
-export function styleNeedsOverlay(style: AudioStyle): boolean {
-  return style.dim > 0 || style.title_card !== 'off' || style.waveform || !!style.logo_id
 }
 
 /** Các nhãn ngắn mô tả những gì khác mặc định — hiện trên đầu khối khi đang gập. */
@@ -369,10 +426,17 @@ export function describeStyle(style: AudioStyle): string[] {
   if (Math.abs(style.voice_speed - 1) >= 0.01) tags.push(`Đọc ×${style.voice_speed.toFixed(2)}`)
   if (Math.abs(style.bgm_volume - DEFAULT_STYLE.bgm_volume) >= 0.005) tags.push(`Nhạc ${Math.round(style.bgm_volume * 100)}%`)
   if (!style.loudnorm) tags.push('Không chuẩn hóa âm lượng')
-  if (style.bg_mode === 'cover') tags.push('Nền ảnh bìa')
-  if (style.dim > 0) tags.push(`Tối ${Math.round(style.dim * 100)}%`)
-  if (style.title_card !== 'off') tags.push(style.title_card === 'intro' ? 'Tiêu đề đầu video' : 'Tiêu đề luôn hiện')
-  if (style.waveform) tags.push('Waveform')
+  if (!style.subtitles) tags.push('Không phụ đề')
+  if (!style.chapter_label) tags.push('Không nhãn chương')
+  if (!style.cta) tags.push('Không nhắc đăng ký')
+  else if (style.cta_text !== DEFAULT_CTA) tags.push('Lời nhắc riêng')
+  if (style.layout === 'classic') {
+    // Các lớp phủ dưới đây chỉ có tác dụng với bố cục "Nền video".
+    if (style.bg_mode === 'cover') tags.push('Nền ảnh bìa')
+    if (style.dim > 0) tags.push(`Tối ${Math.round(style.dim * 100)}%`)
+    if (style.title_card !== 'off') tags.push(style.title_card === 'intro' ? 'Tiêu đề đầu video' : 'Tiêu đề luôn hiện')
+    if (style.waveform) tags.push('Waveform')
+  }
   if (style.logo_id) tags.push('Logo')
   return tags
 }
