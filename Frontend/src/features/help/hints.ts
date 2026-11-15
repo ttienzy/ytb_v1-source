@@ -18,6 +18,7 @@ export const HINTS = {
   'campaign.cast': { pageId: 'Chiến dịch AI', anchor: 'khoi-2-nhan-vat-canh', label: 'Cast sheet và các cảnh' },
   'campaign.clip': { pageId: 'Chiến dịch AI', anchor: 'khoi-5-clip', label: 'Tạo clip' },
   'canvas.longMotion': { pageId: 'Canvas AI', anchor: 'motion-video-dai', label: 'Motion video dài' },
+  'canvas.muse': { pageId: 'Canvas AI', anchor: 'muse-canvas', label: 'Muse Canvas' },
   'youtube.schedule': { pageId: 'Lên lịch Youtube', anchor: 'khung-gio-vang', label: 'Khung giờ vàng và hạn mức' },
   'muse.connect': { pageId: 'Muse Studio', anchor: 'trang-thai-ket-noi', label: 'Kết nối Muse' },
 } as const satisfies Record<string, HelpHintTarget>

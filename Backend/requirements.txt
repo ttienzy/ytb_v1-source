@@ -12,6 +12,9 @@ youtube-transcript-api>=1.2.4
 # minimum on the latest stable line so a normal pip install can resolve it.
 yt-dlp>=2026.8.19
 requests>=2.32.0
+# Muse (app/ai/muse/gateway.py) và ChatGPT web: TLS giống Chrome + WebSocket; Noise tự viết trên cryptography
+curl_cffi>=0.17
+cryptography>=42
 google-auth>=2.40.0
 google-auth-oauthlib>=1.2.2
 google-api-python-client>=2.170.0

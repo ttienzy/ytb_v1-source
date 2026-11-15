@@ -7,6 +7,7 @@ import {
   Trash2,
   Video,
   Star,
+  ImageIcon,
 } from 'lucide-react'
 import { WorkflowTabs } from './WorkflowTabs'
 import type { WorkflowTabId } from '../types'
@@ -19,6 +20,8 @@ interface WorkflowToolbarProps {
   onCleanOrphans: () => void
   onOpenLibrary?: () => void
   exportedCount?: number
+  onOpenImageLibrary?: () => void
+  imageCount?: number
   orphanCount: number
   startNodeTitle?: string
   isRunning?: boolean
@@ -32,6 +35,8 @@ export function WorkflowToolbar({
   onCleanOrphans,
   onOpenLibrary,
   exportedCount = 0,
+  onOpenImageLibrary,
+  imageCount = 0,
   orphanCount = 0,
   startNodeTitle = 'Gemini 2.5',
   isRunning = false,
@@ -60,6 +65,20 @@ export function WorkflowToolbar({
             </span>
           )}
         </button>
+
+        {/* Thư viện ảnh: ảnh Muse tạo + ảnh tải lên, dùng lại trong các node */}
+        {onOpenImageLibrary && (
+          <button
+            type="button"
+            className="wf-btn wf-btn-library"
+            onClick={onOpenImageLibrary}
+            title="Mở Thư Viện Ảnh (ảnh Muse tạo, ảnh bạn tải lên)"
+          >
+            <ImageIcon size={14} color="#64748b" />
+            <span>Thư Viện Ảnh</span>
+            {imageCount > 0 && <span className="wf-library-count-pill">{imageCount}</span>}
+          </button>
+        )}
       </div>
 
       {/* Right: Actions specific to active workflow tab */}
@@ -123,6 +142,11 @@ export function WorkflowToolbar({
               )}
             </button>
           </>
+        ) : activeTab === 'muse' ? (
+          <div className="wf-motion-active-indicator">
+            <span className="wf-motion-pulse-dot" />
+            <span>Studio: <strong>Meta Muse Canvas</strong></span>
+          </div>
         ) : (
           <div className="wf-motion-active-indicator">
             <span className="wf-motion-pulse-dot" />

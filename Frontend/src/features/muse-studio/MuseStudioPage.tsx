@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react'
 import type {
+  MuseAccountOption,
   MuseStatus,
   MuseHistoryItem,
   MuseGenerateResult,
@@ -52,6 +53,17 @@ export function MuseStudioPage({ setActivePage }: Props) {
   const [status, setStatus] = useState<MuseStatus | null>(null)
   const [checkingStatus, setCheckingStatus] = useState(false)
   const [launchingBrowser, setLaunchingBrowser] = useState(false)
+
+  // Tài khoản Muse: '' = Tự động (xoay vòng tài khoản sẵn sàng)
+  const [accounts, setAccounts] = useState<MuseAccountOption[]>([])
+  const [selectedAccount, setSelectedAccount] = useState<string>(() => {
+    try {
+      return localStorage.getItem('muse.studio.accountId') || ''
+    } catch {
+      return ''
+    }
+  })
+  const [lastUsedAccount, setLastUsedAccount] = useState('')
 
   // Creation state
   const [prompt, setPrompt] = useState(
@@ -91,14 +103,30 @@ export function MuseStudioPage({ setActivePage }: Props) {
   const checkStatus = useCallback(async () => {
     setCheckingStatus(true)
     try {
-      const res = await api.getMuseStatus()
+      const res = await api.getMuseStatus(selectedAccount || undefined)
       setStatus(res)
     } catch {
       setStatus(null)
     } finally {
       setCheckingStatus(false)
     }
+  }, [selectedAccount])
+
+  const loadAccounts = useCallback(async () => {
+    const list = await api.listMuseAccounts().catch(() => [])
+    setAccounts(list)
+    // tài khoản đã nhớ bị xóa -> quay về Tự động
+    setSelectedAccount(prev => (prev && !list.some(a => a.id === prev) ? '' : prev))
   }, [])
+
+  function handleSelectAccount(id: string) {
+    setSelectedAccount(id)
+    try {
+      localStorage.setItem('muse.studio.accountId', id)
+    } catch {
+      /* bỏ qua: không lưu được lựa chọn */
+    }
+  }
 
   // 2. Tải lịch sử video
   const loadHistory = useCallback(async () => {
@@ -129,15 +157,19 @@ export function MuseStudioPage({ setActivePage }: Props) {
   }, [])
 
   useEffect(() => {
-    checkStatus()
+    loadAccounts()
     loadHistory()
-  }, [checkStatus, loadHistory])
+  }, [loadAccounts, loadHistory])
+
+  useEffect(() => {
+    checkStatus()
+  }, [checkStatus])
 
   // 3. Mở Chrome Muse
   async function handleOpenBrowser() {
     setLaunchingBrowser(true)
     try {
-      await api.openMuseBrowser()
+      await api.openMuseBrowser(selectedAccount || undefined)
       setTimeout(checkStatus, 3000)
     } catch (err: any) {
       alert(err?.message || 'Không thể mở trình duyệt Muse')
@@ -244,7 +276,9 @@ export function MuseStudioPage({ setActivePage }: Props) {
         reference_media: allMedia.length > 0 ? allMedia : undefined,
         use_side_chat: useSideChat,
         continuation: continuation,
+        account_id: selectedAccount || undefined,
       })
+      if (result.account_label) setLastUsedAccount(result.account_label)
 
       if (result.ok && result.local_path) {
         // Cập nhật monitor sang video mới sinh
@@ -260,6 +294,7 @@ export function MuseStudioPage({ setActivePage }: Props) {
         })
         // Tải lại lịch sử
         loadHistory()
+        loadAccounts()
       } else {
         setGenError(result.error || 'Muse không thể tạo video. Vui lòng thử lại.')
       }
@@ -347,7 +382,7 @@ export function MuseStudioPage({ setActivePage }: Props) {
               </span>
             </div>
             <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0' }}>
-              Không gian sáng tạo video điện ảnh — Tự động hóa qua Meta Muse Cloud VM &amp; Chrome CDP
+              Không gian sáng tạo video điện ảnh — kết nối thẳng tới Meta Muse Cloud VM, không cần mở Chrome
               <HelpHint hint="muse.connect" />
             </p>
           </div>
@@ -355,6 +390,35 @@ export function MuseStudioPage({ setActivePage }: Props) {
 
         {/* Toolbar Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* Chọn tài khoản Muse */}
+          {accounts.length > 0 && (
+            <select
+              value={selectedAccount}
+              onChange={e => handleSelectAccount(e.target.value)}
+              disabled={isGenerating}
+              title={lastUsedAccount ? `Video gần nhất tạo bằng: ${lastUsedAccount}` : 'Tài khoản Muse dùng để tạo video'}
+              style={{
+                padding: '5px 8px',
+                borderRadius: 6,
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#334155',
+                fontSize: 12,
+                fontWeight: 600,
+                maxWidth: 220,
+              }}
+            >
+              <option value="">Tự động (xoay vòng {accounts.filter(a => a.status === 'active').length} tài khoản)</option>
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                  {a.status === 'active' ? '' : a.status === 'error' ? ' — hết phiên' : ' — hết hạn mức'}
+                  {a.busy ? ' (đang chạy)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+
           {/* Status Indicator */}
           <div
             onClick={checkStatus}
@@ -371,7 +435,7 @@ export function MuseStudioPage({ setActivePage }: Props) {
               border: isConnected ? '1px solid #bbf7d0' : '1px solid #fde68a',
               cursor: 'pointer',
             }}
-            title="Bấm để kiểm tra lại trạng thái kết nối"
+            title={`${status?.message || 'Bấm để kiểm tra lại trạng thái kết nối'}${status?.account_label ? ` — ${status.account_label}` : ''}`}
           >
             <span
               style={{
@@ -932,7 +996,7 @@ export function MuseStudioPage({ setActivePage }: Props) {
               >
                 <Clock size={14} className="animate-spin" />
                 <span>
-                  Đang kết nối Chrome CDP, gõ prompt và render trên Meta VM ({elapsedSec}s). Vui lòng đợi trong 30-75 giây...
+                  Đã gửi prompt tới Muse, đang chờ Meta VM render ({elapsedSec}s). Video thường mất vài phút...
                 </span>
               </div>
             )}

@@ -5,7 +5,7 @@ export const settingsPageDoc: HelpDoc = {
   title: 'Cài đặt (tài khoản & kết nối)',
   summary:
     'Nơi kết nối mọi dịch vụ ngoài mà các trang khác dựa vào: Gemini, ChatGPT, Google Veo/Flow, Muse, Google Drive, YouTube, Pippit, Mail.tm. Hầu hết lỗi “không chạy được” ở các trang khác đều bắt nguồn từ một kết nối ở đây đã hết hạn.',
-  verifiedAt: '2026-11-12',
+  verifiedAt: '2026-11-15',
   requires: [],
   start: [
     {
@@ -24,7 +24,7 @@ export const settingsPageDoc: HelpDoc = {
     },
     {
       title: 'Các kết nối còn lại khi cần',
-      do: 'Google Drive (upload tự động), YouTube (đăng video), Pippit (đăng Facebook/TikTok), Muse (video Meta Muse).',
+      do: 'Google Drive (upload tự động), YouTube (đăng video), Pippit (đăng Facebook/TikTok), Muse (video Meta Muse: tab “Muse AI (Meta)” → “(+) Thêm tài khoản Muse”).',
     },
   ],
   areas: [
@@ -68,7 +68,8 @@ export const settingsPageDoc: HelpDoc = {
     {
       id: 'muse',
       name: 'Tab Muse AI (Meta)',
-      what: 'Cấu hình Chrome CDP cho Muse Studio: Muse App URL, cổng CDP, thời gian chờ render, thư mục lưu video, hậu tố prompt dùng chung, profile Chrome riêng. Hiển thị “Chrome đang chạy với CDP” / “Chưa phát hiện phiên đăng nhập Muse” và nút “Mở Chrome Muse”.',
+      what: 'Thẻ “Tài khoản Muse”: “(+) Thêm tài khoản Muse” mở Chrome với profile mới, bạn đăng nhập Meta/Muse, app tự nhận khi đăng nhập xong. Trên mỗi dòng có nút mở Chrome (xem chat trên muse.ai), kiểm tra phiên, “Đăng nhập lại”, đổi tên (bút chì) và xóa. Bên dưới là “Cấu hình sinh video”: thư mục lưu video MP4 (có “Mở thư mục”), thời gian chờ video (tối thiểu 600 giây) và tiền tố prompt mặc định.',
+      tip: 'Tạo video kết nối thẳng tới Muse bằng phiên đã lưu, không cần mở Chrome. Muse Studio cần ít nhất một tài khoản “Sẵn sàng”.',
     },
     {
       id: 'lien-he',
@@ -97,6 +98,11 @@ export const settingsPageDoc: HelpDoc = {
       link: 'Chiến dịch AI',
     },
     {
+      symptom: 'Tài khoản Muse báo “Hết phiên — đăng nhập lại”',
+      fix: 'Tab “Muse AI (Meta)”: bấm “Đăng nhập lại” trên dòng tài khoản đó và đăng nhập trong cửa sổ Chrome vừa mở. Nếu báo tài khoản đã có trong danh sách, nghĩa là bạn vừa đăng nhập một tài khoản Meta đã thêm trước đó.',
+      link: 'Muse Studio',
+    },
+    {
       symptom: 'Veo Studio / clip không chạy, Bridge không kết nối',
       fix: 'Kiểm tra extension đã nạp, tab Google Flow đang mở và đã đăng nhập; xem Bridge Server và heartbeat ở tab “Google Veo”.',
       link: 'Veo Studio',
@@ -112,6 +118,8 @@ export const settingsPageDoc: HelpDoc = {
   ],
   related: ['Recap & Audio', 'Chiến dịch AI', 'Veo Studio', 'Muse Studio', 'Lên lịch Youtube', 'Lên lịch Pippit'],
   changes: [
+    { date: '2026-11-15', text: 'Tab Muse AI (Meta) gọn lại: bỏ Muse App URL, cổng CDP, profile Chrome mặc định và công tắc tự tải MP4 (video luôn được tải về).' },
+    { date: '2026-11-15', text: 'Tab Muse AI (Meta) quản lý được nhiều tài khoản Muse như tài khoản ChatGPT: thêm, đăng nhập lại, kiểm tra, đổi tên, xóa.' },
     { date: '2026-11-12', text: 'Viết lại tài liệu cho đủ 9 tab; Chiến dịch AI và viết kịch bản dùng tài khoản ChatGPT web.' },
   ],
 }

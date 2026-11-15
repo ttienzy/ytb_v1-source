@@ -1867,7 +1867,7 @@ def list_exported_videos() -> list[dict]:
             "is_motion_control": False,
             "input_mode": "",
             "prompt": meta.get("prompt"),
-            "model_display_name": "FFmpeg Concat (1080p)",
+            "model_display_name": meta.get("model_display_name") or "FFmpeg Concat (1080p)",
         }
         result.append(item)
 
@@ -1953,6 +1953,14 @@ def list_exported_videos() -> list[dict]:
             }
             result.append(item)
 
+    # 3. Clip Muse (thư mục tải video của Muse) — chỉ file Muse, xem muse_finish.muse_library_clips
+    try:
+        from app.workflow.muse_finish import muse_library_clips
+
+        result.extend(muse_library_clips(seen_filenames))
+    except Exception as e:
+        logger.warning(f"Không liệt kê được clip Muse: {e}")
+
     # Sắp xếp mới nhất lên đầu
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return result
@@ -1991,7 +1999,10 @@ def delete_exported_video(filename: str) -> bool:
                 logger.error(f"Lỗi khi xóa clip Veo {target_veo}: {e}")
                 raise
 
-        return False
+    # 3. Clip Muse
+    from app.workflow.muse_finish import delete_muse_clip
+
+    return delete_muse_clip(base_name)
 
 
 def open_export_folder_in_explorer(filename: str) -> bool:
@@ -2002,6 +2013,10 @@ def open_export_folder_in_explorer(filename: str) -> bool:
         target_veo = (VEO_DATA_DIR / base_name).resolve()
         if target_veo.exists() and target_veo.is_file():
             target = target_veo
+    if not (target.exists() and target.is_file()):
+        from app.workflow.muse_finish import find_muse_clip
+
+        target = find_muse_clip(base_name) or target
 
     import subprocess
     import sys

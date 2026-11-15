@@ -59,7 +59,13 @@ Ví dụ thực tế (một số mục có thể chưa có trên máy bạn):
 |---|---|---|
 | `app.db` (+ `-wal`, `-shm`) | SQLite: veo_projects, veo_images, voices, bgm, stories, campaign (6 bảng)… | A |
 | `config.json` | Cookie Gemini, cấu hình Muse/Pippit/Drive/YouTube/Mail.tm — **nhạy cảm, đã ignore** | A |
-| `ChromeProfile/`, `ChromeProfile_Muse/`, `YtProfile/`, `yt_cookies.txt` | Profile Chrome (Playwright), cookie YouTube dự phòng | A |
+| `ChromeProfile/`, `YtProfile/`, `yt_cookies.txt` | Profile Chrome (Playwright), cookie YouTube dự phòng. `ChromeProfile_Muse/` (nếu còn từ bản cũ) không được dùng nữa, có thể xóa | A |
+| `muse_accounts.json`, `muse-profiles/` | Tài khoản Muse (cookie — nhạy cảm) và profile Chrome riêng của từng tài khoản | A |
+| `muse_canvas.json`, `muse_prompts/` | Đồ thị Muse Canvas (Canvas AI) và prompt node đã “Lưu làm mặc định” | A |
+| `image_library.json`, `media/image_library/`, `media/muse_outputs/` | Thư Viện Ảnh của Canvas AI: chỉ mục, ảnh người dùng tải lên, ảnh Muse tạo (tự ghi vào chỉ mục; file lạ trong muse_outputs được tự thêm khi liệt kê) | A |
+| `media/muse_texts/` | Bài chữ Muse trả (`output_kind=text`, vd. node “Kịch bản video” của Muse Canvas), mỗi lần chạy một file `.md` | A |
+| `<thư mục tải video Muse>/*.muse.json` | Sidecar của mỗi video Muse tải về (prompt, tên chat, tài khoản, thời điểm) — Thư Viện Video đọc để hiện clip Muse | A |
+| `workflow_exports/muse_final_*.mp4` | Video hoàn chỉnh xuất từ node Video kết quả của Muse Canvas (nhạc nền, nhãn kênh, tiếng gốc); metadata trong `workflow_exports/exports_history.json` | A |
 | `chatgpt-profiles/`, `chatgpt_accounts.json` | Tài khoản ChatGPT và profile | A |
 | `campaigns/<id>/`, `exports/` | Artifact và gói xuất của Chiến dịch AI | A |
 | `workflow_assets/`, `workflow_exports/`, `workflow_voiceovers/` | Canvas AI | A |

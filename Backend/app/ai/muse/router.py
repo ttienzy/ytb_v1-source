@@ -12,6 +12,9 @@ from app.ai.muse.schemas import (
     MuseGenerateResponse,
     MuseHistoryResponse,
     MuseUploadResponse,
+    MuseAccountsResponse,
+    MuseLoginRequest,
+    MuseRenameRequest,
 )
 from app.ai.muse.service import muse_service
 
@@ -24,19 +27,7 @@ _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 @router.get("/api/settings/muse", response_model=MuseSettingsResponse)
 def get_muse_settings():
     """Lấy cấu hình hiện tại của Muse AI."""
-    cfg = muse_service.get_config()
-    return MuseSettingsResponse(
-        ok=True,
-        is_connected=cfg.get("is_connected", False),
-        last_checked_at=cfg.get("last_checked_at"),
-        app_url=cfg.get("app_url", "https://muse.ai/"),
-        cdp_port=cfg.get("cdp_port", 9225),
-        auto_download=cfg.get("auto_download", True),
-        download_dir=cfg.get("download_dir", str(muse_service.profile_dir.parent / "Downloads")),
-        timeout_seconds=cfg.get("timeout_seconds", 120),
-        default_prompt_prefix=cfg.get("default_prompt_prefix", ""),
-        profile_dir=str(muse_service.profile_dir),
-    )
+    return muse_service.get_settings()
 
 
 @router.put("/api/settings/muse", response_model=MuseSettingsResponse)
@@ -46,18 +37,78 @@ def update_muse_settings(payload: MuseSettingsPayload):
 
 
 @router.get("/api/settings/muse/status", response_model=MuseStatusResponse)
-def get_muse_status():
-    """Kiểm tra trực tiếp trạng thái kết nối & phiên đăng nhập của Muse qua CDP."""
-    return muse_service.check_status()
+def get_muse_status(account_id: Optional[str] = Query(default=None)):
+    """Phiên đăng nhập Muse của một tài khoản (gọi auth/check bằng cookie đã lưu, không mở Chrome).
+
+    account_id bỏ trống: tài khoản sẵn sàng đầu tiên.
+    """
+    return muse_service.check_status(account_id)
 
 
 @router.post("/api/settings/muse/open-browser")
-def open_muse_browser():
-    """Khởi chạy hoặc mở cửa sổ Chrome Muse để người dùng đăng nhập/thao tác."""
+def open_muse_browser(account_id: Optional[str] = Query(default=None)):
+    """Mở cửa sổ Chrome của một tài khoản Muse để xem chat trên muse.ai."""
     try:
-        return muse_service.open_browser()
+        return muse_service.open_browser(account_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------- tài khoản Muse
+
+
+@router.get("/api/settings/muse/accounts", response_model=MuseAccountsResponse)
+def list_muse_accounts():
+    """Danh sách tài khoản Muse (mỗi tài khoản một profile Chrome riêng)."""
+    return muse_service.list_accounts()
+
+
+@router.post("/api/settings/muse/accounts/login")
+def login_muse_account(body: Optional[MuseLoginRequest] = None):
+    """Mở Chrome để đăng nhập Muse: tạo tài khoản mới, hoặc đăng nhập lại tài khoản `account_id`."""
+    try:
+        acc = muse_service.login_account(account_id=(body.account_id if body else None))
+        return {"ok": True, "account": acc}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/settings/muse/accounts/{account_id}/check")
+def check_muse_account(account_id: str):
+    """Kiểm tra phiên đăng nhập của một tài khoản Muse."""
+    try:
+        return {"ok": True, "account": muse_service.check_account(account_id)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/api/settings/muse/accounts/{account_id}")
+def rename_muse_account(account_id: str, body: MuseRenameRequest):
+    """Đổi tên hiển thị của tài khoản Muse."""
+    try:
+        return {"ok": True, "account": muse_service.rename_account(account_id, body.label)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/api/settings/muse/accounts/{account_id}")
+def delete_muse_account(account_id: str):
+    """Xóa tài khoản Muse (đóng Chrome của nó và xóa profile Chrome do app tạo)."""
+    try:
+        deleted = muse_service.delete_account(account_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản để xóa")
+    return {"ok": True, "deleted": True}
 
 
 @router.post("/api/ai/muse/generate", response_model=MuseGenerateResponse)
@@ -149,6 +200,19 @@ async def upload_muse_media(file: UploadFile = File(...)):
         file_size=file_size,
         preview_url=f"/api/ai/muse/preview?file={dest.name}",
     )
+
+
+@router.get("/api/ai/muse/output")
+def muse_output_file(file: str = Query(...)):
+    """Ảnh Muse đã tạo (Data/media/muse_outputs), vd. kết quả node Tách áo quần."""
+    from app.ai.muse.service import MUSE_OUTPUT_DIR
+
+    target = MUSE_OUTPUT_DIR / Path(file).name
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File không tồn tại.")
+    ext = target.suffix.lower()
+    media_type = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}.get(ext, "image/webp")
+    return FileResponse(path=str(target), media_type=media_type)
 
 
 @router.get("/api/ai/muse/preview")

@@ -1,0 +1,5 @@
+16:9 horizontal character setting display board:
+Gender: Female
+Style:
+Image quality: 8K 3D CG image quality, PBR material
+High-end character asset layout, overall using a four-zone structure. The left side is about 34% width for a large character portrait area, showing a half-body close-up portrait of the same character, with the character's face as the visual center, and a soft, blurred background. The middle is about 44% width for a three-view area, with the front, side, and back views arranged side by side at the top, three columns of equal width, each column with Chinese and English labels "Front FRONT VIEW, Side SIDE VIEW, Back BACK VIEW" at the top. The character's full body is shown, with completely unified hairstyles, clothing, and accessories. The rightmost side is about 15% width for a detail display column, with 4 to 5 small frames of local close-ups arranged vertically, showing, respectively, clothing textures, cuff details, and waist details. The bottom includes a color scheme color palette, showing the main colors with 5 to 6 circular color blocks. The information hierarchy is clear, high-end, simple, and refined.

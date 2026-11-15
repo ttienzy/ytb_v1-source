@@ -4,24 +4,24 @@ export const museStudioDoc: HelpDoc = {
   pageId: 'Muse Studio',
   title: 'Muse Studio (Meta Muse Spark)',
   summary:
-    'Tạo video điện ảnh bằng Meta Muse: bạn viết prompt (kèm ảnh/video tham chiếu nếu muốn), app điều khiển một cửa sổ Chrome đã đăng nhập Muse để sinh video, rồi tự lấy file MP4 về xem ngay và lưu vào thư mục tải về.',
-  verifiedAt: '2026-11-12',
+    'Tạo video điện ảnh bằng Meta Muse: bạn viết prompt (kèm ảnh/video tham chiếu nếu muốn), app gửi thẳng tới máy ảo Muse của tài khoản bằng phiên đăng nhập đã lưu (không cần mở Chrome), chờ Muse render rồi tự tải file MP4 về xem ngay và lưu vào thư mục tải về.',
+  verifiedAt: '2026-11-15',
   requires: [
     {
-      label: 'Chrome Muse đã mở và đăng nhập Muse',
+      label: 'Ít nhất một tài khoản Muse đã đăng nhập',
       fixPage: 'Cài đặt',
-      fixHint: 'Bấm “Mở Muse Chrome” ở đầu trang, đăng nhập Meta Muse một lần. Huy hiệu trạng thái chuyển sang “Sẵn sàng” khi kết nối được.',
+      fixHint: 'Cài đặt → tab “Muse AI (Meta)” → “(+) Thêm tài khoản Muse”, đăng nhập Meta/Muse trong cửa sổ Chrome vừa mở.',
     },
     {
-      label: 'Cấu hình kỹ thuật Muse (URL, cổng CDP, thư mục tải)',
+      label: 'Cấu hình Muse (thư mục tải, thời gian chờ, hậu tố prompt)',
       fixPage: 'Cài đặt',
-      fixHint: 'Tab “Muse AI (Meta)” trong Cài đặt. Mặc định dùng profile Chrome riêng của Muse trong Backend/Data.',
+      fixHint: 'Tab “Muse AI (Meta)” trong Cài đặt. Thời gian chờ video tối thiểu 600 giây.',
     },
   ],
   start: [
     {
-      title: 'Kiểm tra kết nối',
-      do: 'Nhìn huy hiệu trạng thái ở đầu trang. “Chưa kết nối” thì bấm “Mở Muse Chrome” và đăng nhập, rồi bấm huy hiệu để kiểm tra lại.',
+      title: 'Chọn tài khoản và kiểm tra kết nối',
+      do: 'Khi đã thêm tài khoản Muse, chọn tài khoản ở ô đầu trang hoặc để “Tự động” (app luân phiên các tài khoản sẵn sàng). Nhìn huy hiệu trạng thái: “Chưa kết nối” thì bấm “Mở Muse Chrome” và đăng nhập, rồi bấm huy hiệu để kiểm tra lại.',
       result: 'Trạng thái “Sẵn sàng”.',
     },
     {
@@ -34,7 +34,7 @@ export const museStudioDoc: HelpDoc = {
     },
     {
       title: 'Bấm “Khởi tạo video với Muse Spark”',
-      do: 'Chờ render. Video xong sẽ hiện ở màn hình xem trước và được lưu vào thư mục tải về.',
+      do: 'Chờ render (video thường mất vài phút). Video xong sẽ hiện ở màn hình xem trước và được lưu vào thư mục tải về. Đã gửi rồi thì đừng bấm lại khi đang chờ: mỗi lần gửi tốn một lượt của Muse.',
       result: 'Video MP4 xuất hiện trong khung xem và trong danh sách lịch sử.',
     },
   ],
@@ -42,7 +42,8 @@ export const museStudioDoc: HelpDoc = {
     {
       id: 'trang-thai-ket-noi',
       name: 'Đầu trang: trạng thái và lối tắt',
-      what: 'Huy hiệu kết nối (Đang kiểm tra… / Sẵn sàng / Chưa kết nối; bấm để kiểm tra lại), “Mở Muse Chrome”, “Thư mục video” (mở thư mục chứa video đã tải) và “Cài đặt” (nhảy tới cấu hình Muse).',
+      what: 'Ô chọn tài khoản Muse (chỉ hiện khi đã thêm tài khoản): “Tự động (xoay vòng …)” hoặc một tài khoản cụ thể; tài khoản hết phiên ghi “— hết phiên”, đang tạo video ghi “(đang chạy)”. Huy hiệu kết nối (Đang kiểm tra… / Sẵn sàng / Chưa kết nối; bấm để kiểm tra lại) của tài khoản đang chọn, “Mở Muse Chrome” (mở Chrome của tài khoản đó), “Thư mục video” (mở thư mục chứa video đã tải) và “Cài đặt” (nhảy tới cấu hình Muse).',
+      tip: 'Mỗi tài khoản có cửa sổ Chrome riêng nên có thể tạo nhiều video song song trên các tài khoản khác nhau.',
     },
     {
       id: 'prompt',
@@ -52,7 +53,7 @@ export const museStudioDoc: HelpDoc = {
     {
       id: 'tuy-chon-tao-sinh',
       name: 'Tùy chọn tạo sinh',
-      what: 'Hai công tắc: “Phân luồng New Chat riêng biệt” (tự bấm “+ New chat” để video mới không dính vào dự án cũ) và “Tiếp nối video trước (Continuation)” (giữ ngữ cảnh để render phân cảnh kế tiếp trong cùng đoạn phim).',
+      what: 'Hai công tắc: “Phân luồng New Chat riêng biệt” (mỗi lần tạo mở một chat mới trên Muse để video mới không dính vào dự án cũ) và “Tiếp nối video trước (Continuation)” (gửi vào đúng chat của lần tạo trước với tài khoản đó, để Muse giữ ngữ cảnh cho phân cảnh kế tiếp).',
       tip: 'Muốn nối nhiều cảnh liền mạch thì bật “Tiếp nối video trước”. Muốn một video độc lập thì giữ “New Chat riêng biệt”.',
     },
     {
@@ -67,24 +68,36 @@ export const museStudioDoc: HelpDoc = {
     },
   ],
   concepts: [
-    { term: 'Chrome CDP', meaning: 'App điều khiển cửa sổ Chrome Muse qua giao thức gỡ lỗi của Chrome (cổng cấu hình trong Cài đặt), giống như bạn thao tác tay trên trang Muse.' },
+    { term: 'Kết nối trực tiếp', meaning: 'App nói chuyện thẳng với máy ảo Muse của tài khoản (như trang muse.ai làm), dùng phiên đăng nhập đã lưu. Không cần mở Chrome; Chrome chỉ dùng khi thêm hoặc đăng nhập lại tài khoản.' },
     { term: 'Continuation', meaning: 'Chế độ nối tiếp: Muse nhớ video trước để cảnh sau liền mạch với cảnh trước.' },
+    { term: 'Tự động (xoay vòng)', meaning: 'Không chọn tài khoản cụ thể: app dùng tài khoản “Sẵn sàng” đang rảnh và lâu chưa dùng nhất; tài khoản hết phiên bị bỏ qua.' },
   ],
   problems: [
     {
       symptom: 'Huy hiệu báo “Chưa kết nối”',
-      cause: 'Chrome Muse chưa mở, hoặc chưa đăng nhập Muse.',
-      fix: 'Bấm “Mở Muse Chrome”, đăng nhập Meta Muse trong cửa sổ vừa mở, rồi bấm huy hiệu để kiểm tra lại. Trong Cài đặt → Muse AI có phần kiểm tra “Chrome đang chạy với CDP” và “phiên đăng nhập Muse”.',
+      cause: 'Chưa thêm tài khoản Muse, hoặc phiên đăng nhập của tài khoản đang chọn đã hết hạn (Chrome mở hay tắt không ảnh hưởng).',
+      fix: 'Vào Cài đặt → Muse AI (Meta): chưa có tài khoản thì bấm “(+) Thêm tài khoản Muse”; tài khoản báo “Hết phiên” thì bấm “Đăng nhập lại”. Xong bấm huy hiệu để kiểm tra lại.',
+      link: 'Cài đặt',
+    },
+    {
+      symptom: 'Báo “Không có tài khoản Muse nào sẵn sàng”',
+      cause: 'Mọi tài khoản trong danh sách đều hết phiên đăng nhập.',
+      fix: 'Vào Cài đặt → Muse AI (Meta), bấm “Đăng nhập lại” trên một tài khoản.',
       link: 'Cài đặt',
     },
     {
       symptom: 'Báo “Không thể mở trình duyệt Muse”',
-      fix: 'Kiểm tra cổng CDP ở Cài đặt → Muse AI (Meta), đóng cửa sổ Chrome Muse cũ nếu đang treo rồi thử lại.',
+      fix: 'Đóng cửa sổ Chrome của tài khoản đó nếu đang treo rồi thử lại. Nút này chỉ để xem chat trên muse.ai; tạo video không cần Chrome.',
       link: 'Cài đặt',
     },
     {
-      symptom: 'Báo “Muse không thể tạo video. Vui lòng thử lại.”',
-      fix: 'Prompt bị từ chối hoặc Muse đang lỗi/hết hạn mức. Mở cửa sổ Chrome Muse xem thông báo trên trang, chỉnh prompt rồi thử lại.',
+      symptom: 'Báo “Muse trả lời nhưng không có video: …”',
+      cause: 'Muse hỏi lại, từ chối prompt hoặc hết hạn mức; câu trả lời của Muse được hiện nguyên văn.',
+      fix: 'Đọc câu trả lời, chỉnh prompt cho rõ (ví dụ ghi “Create a 5-second video: …”) rồi tạo lại.',
+    },
+    {
+      symptom: 'Báo “Muse chưa trả video sau … giây. Prompt ĐÃ được gửi”',
+      fix: 'Muse vẫn có thể đang render. Bấm “Mở Muse Chrome” để xem chat trên muse.ai; đừng gửi lại để khỏi tốn thêm lượt. Có thể tăng thời gian chờ trong Cài đặt.',
     },
     {
       symptom: 'Báo “Lỗi khi tải file media lên”',
@@ -97,6 +110,8 @@ export const museStudioDoc: HelpDoc = {
   ],
   related: ['Cài đặt', 'Veo Studio', 'Chiến dịch AI'],
   changes: [
+    { date: '2026-11-15', text: 'Tạo video kết nối thẳng tới Muse, không còn điều khiển cửa sổ Chrome; ảnh/video tham chiếu được gửi kèm prompt.' },
+    { date: '2026-11-15', text: 'Chọn được tài khoản Muse để tạo video, hoặc để “Tự động” luân phiên nhiều tài khoản.' },
     { date: '2026-11-12', text: 'Muse Studio có tài liệu hướng dẫn lần đầu.' },
   ],
 }

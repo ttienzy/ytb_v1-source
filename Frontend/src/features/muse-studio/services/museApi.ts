@@ -1,5 +1,6 @@
 import { API_URL } from '../../../shared/constants'
 import type {
+  MuseAccountOption,
   MuseStatus,
   MuseGenerateRequest,
   MuseGenerateResult,
@@ -22,16 +23,35 @@ export async function uploadMuseMedia(file: File): Promise<MuseUploadResponse> {
   return res.json()
 }
 
-export async function getMuseStatus(): Promise<MuseStatus> {
-  const res = await fetch(`${API_URL}/api/settings/muse/status`)
+function accountQuery(accountId?: string): string {
+  return accountId ? `?account_id=${encodeURIComponent(accountId)}` : ''
+}
+
+export async function getMuseStatus(accountId?: string): Promise<MuseStatus> {
+  const res = await fetch(`${API_URL}/api/settings/muse/status${accountQuery(accountId)}`)
   if (!res.ok) throw new Error('Không thể kiểm tra trạng thái Muse')
   return res.json()
 }
 
-export async function openMuseBrowser(): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_URL}/api/settings/muse/open-browser`, { method: 'POST' })
-  if (!res.ok) throw new Error('Không thể mở cửa sổ trình duyệt')
+export async function openMuseBrowser(accountId?: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_URL}/api/settings/muse/open-browser${accountQuery(accountId)}`, { method: 'POST' })
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}))
+    throw new Error(errorData.detail || 'Không thể mở cửa sổ trình duyệt')
+  }
   return res.json()
+}
+
+export async function listMuseAccounts(): Promise<MuseAccountOption[]> {
+  const res = await fetch(`${API_URL}/api/settings/muse/accounts`)
+  if (!res.ok) return []
+  const data = await res.json()
+  return (data.accounts || []).map((a: any) => ({
+    id: String(a.id),
+    label: String(a.label || a.id),
+    status: String(a.status || ''),
+    busy: Boolean(a.busy),
+  }))
 }
 
 export async function openMuseFolder(): Promise<{ ok: boolean; path: string }> {

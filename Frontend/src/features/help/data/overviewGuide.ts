@@ -4,7 +4,7 @@ export const overviewGuide: HelpGuide = {
   title: 'Tổng quan quy trình',
   summary:
     'Các trang trong app nối với nhau thành những quy trình làm video quen thuộc. Chọn quy trình giống việc bạn định làm rồi đi theo từng bước; bấm tên trang để mở hướng dẫn chi tiết của trang đó.',
-  verifiedAt: '2026-11-12',
+  verifiedAt: '2026-11-15',
   journeys: [
     {
       id: 'recap-youtube',
@@ -58,10 +58,10 @@ export const overviewGuide: HelpGuide = {
     {
       id: 'muse',
       name: 'Video điện ảnh bằng Meta Muse',
-      goal: 'Tạo video bằng Meta Muse thông qua Chrome đã đăng nhập.',
+      goal: 'Tạo video bằng Meta Muse bằng tài khoản Muse đã đăng nhập.',
       steps: [
-        { page: 'Cài đặt', note: 'Tab Muse AI (Meta): kiểm tra cấu hình và cổng CDP.' },
-        { page: 'Muse Studio', note: 'Mở Muse Chrome, đăng nhập, viết prompt và tạo video.' },
+        { page: 'Cài đặt', note: 'Tab Muse AI (Meta): thêm tài khoản Muse và đăng nhập một lần.' },
+        { page: 'Muse Studio', note: 'Chọn tài khoản (hoặc Tự động), viết prompt và tạo video.' },
         { page: 'Video', note: 'Đưa clip vào kho để chỉnh hoặc gộp.' },
       ],
     },

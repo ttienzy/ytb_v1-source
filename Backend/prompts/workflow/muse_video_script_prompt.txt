@@ -1,0 +1,34 @@
+You are an expert short-form fashion video director for TikTok/Reels sales and affiliate content. Write a complete, production-ready video script using my "Character Sheet to Reality" held-board reveal format, then output the exact video-generation prompts needed to produce it.
+
+## My inputs
+- Image 1 (IDENTITY ANCHOR): [describe or attach the character photo — face, hairstyle, hair color, skin tone, body]. This exact same person must appear in EVERY segment. Never redesign her.
+- Character design boards: I have one 16:9 character design board per outfit (portrait + front/side/back three-views + fabric detail close-ups + color palette). If I have not made the boards yet, tell me to create them first using the outfit list below.
+- Outfits, in my preferred order: [list each outfit with exact garments, colors, fabric details, and one signature detail to show off, e.g. "1) light blue puff-sleeve lace-trim blouse + pleated light blue mini skirt — signature: lace collar; 2) white LOOK bunny graphic T-shirt + black shorts — signature: bunny print; 3) light blue peplum blouse with pearl buttons + silver circular chain belt + navy pencil skirt — signature: chain belt"]
+- Number of outfits: [N — the format must work for any N from 1 to 8]
+
+## The format (follow exactly — this is a proven structure, do not reinvent it)
+Each outfit is ONE self-contained cycle with the same 4 beats:
+1. BOARD CLOSE-UP: The model physically holds that outfit's large printed character design board with both hands, gripping its side edges, held up close in front of her so the board fills most of the frame and the design is clearly visible. Her face peeks above the board.
+2. REVEAL: She slowly lowers the board and steps back, revealing that she is already wearing exactly the outfit printed on that board. No costume-change effect.
+3. PERFORMANCE: She walks two steps toward the camera, does one signature gesture that shows off the outfit's signature detail, then poses facing the camera and smiles. She may keep holding the board loosely at her side in one hand.
+4. BOARD COVER: She lifts the board back up toward the camera until it fills the frame again. This board-cover is the transition: the next cycle begins with the NEXT outfit's board already raised in the same position, so the outfit change is hidden behind the boards and the cut is invisible.
+
+## Hard rules (these fix known failure modes — never break them)
+- ONE single locked background for every segment, described in one verbatim "background block" repeated word-for-word in every generation prompt: a bright minimal studio, plain warm-white wall, plain light floor, soft window daylight from the left, no furniture, no props.
+- ONE continuous single shot per segment: fixed camera, NO cuts inside a segment, NO zoom, NO morphing, NO pop-out effects, NO fast transitions.
+- Everything physically plausible: the board is a rigid, flat printed board held in her hands at all times; it never floats, bends, or appears from nowhere.
+- Identity lock: every generation prompt opens by anchoring to Image 1 (identical face, identical hairstyle), then references that segment's board for the outfit.
+- NO text overlays, NO captions, NO watermarks. Slow, smooth, realistic pacing. Strongest outfit LAST.
+
+## Timing / scaling rules
+- 1–3 outfits: ~9–10 seconds per cycle.
+- 4–5 outfits: trim each cycle to ~7–8 seconds, keep all 4 beats.
+- 6–8 outfits: ~6–7 seconds per cycle, OR split into Part 1 / Part 2 — recommend which and why.
+- Always state the estimated total runtime.
+
+## What to output
+1. One-paragraph concept summary + estimated total runtime.
+2. The locked background block, verbatim.
+3. A per-outfit segment table: outfit, signature detail, the 4 beats with timings, signature gesture.
+4. For EACH segment, a ready-to-paste video generation prompt using the segment template (identity anchor + background block + board close-up → lower/reveal → performance → board cover → "Slow, smooth, physically realistic movements throughout... No text overlays, no watermark.")
+5. Stitching instructions: generate each segment separately (Image 1 + that outfit's board), join at the board-cover moments with a 0.3–0.4s crossfade, export 9:16.

@@ -345,7 +345,7 @@ export interface ExportTimelineNodeData {
 // -------------------------------------------------------------
 // Multi-Workflow Navigation Tabs
 // -------------------------------------------------------------
-export type WorkflowTabId = 'chaining' | 'motion' | (string & {})
+export type WorkflowTabId = 'chaining' | 'motion' | 'muse' | (string & {})
 
 export interface WorkflowTabItem {
   id: WorkflowTabId
@@ -353,7 +353,7 @@ export interface WorkflowTabItem {
   shortTitle?: string
   badge?: string
   badgeType?: 'new' | 'pro' | 'beta' | 'count'
-  iconName: 'film' | 'crosshair' | 'sparkles' | 'layers'
+  iconName: 'film' | 'crosshair' | 'sparkles' | 'layers' | 'clapperboard'
   description: string
 }
 
@@ -371,6 +371,15 @@ export const DEFAULT_WORKFLOW_TABS: WorkflowTabItem[] = [
     shortTitle: 'Motion',
     iconName: 'crosshair',
     description: 'Video tham chiếu & điều khiển chuyển động: Chuyển giao động tác mẫu từ video sang nhân vật và góc máy mới',
+  },
+  {
+    id: 'muse',
+    title: 'Muse Canvas',
+    shortTitle: 'Muse',
+    iconName: 'clapperboard',
+    badge: 'Mới',
+    badgeType: 'new',
+    description: 'Canvas tạo video/ảnh bằng Meta Muse (kết nối trực tiếp, nhiều tài khoản): cấu hình dùng chung cho các node',
   },
 ]
 

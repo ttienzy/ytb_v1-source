@@ -1,5 +1,5 @@
 import React from 'react'
-import { Film, Crosshair, Sparkles, Layers } from 'lucide-react'
+import { Film, Crosshair, Sparkles, Layers, Clapperboard } from 'lucide-react'
 import type { WorkflowTabId, WorkflowTabItem } from '../types'
 import { DEFAULT_WORKFLOW_TABS } from '../types'
 
@@ -27,6 +27,8 @@ export function WorkflowTabs({
         return <Crosshair size={size} color={color} />
       case 'layers':
         return <Layers size={size} color={color} />
+      case 'clapperboard':
+        return <Clapperboard size={size} color={color} />
       case 'sparkles':
       default:
         return <Sparkles size={size} color={color} />

@@ -11,13 +11,8 @@ def default_config() -> dict:
         "mailtm": {"accounts": []},
         "pippit": {"accounts": []},
         "muse": {
-            "app_url": "https://muse.ai/",
-            "is_connected": False,
-            "last_checked_at": None,
-            "cdp_port": 9225,
-            "auto_download": True,
             "download_dir": str(settings.chrome_profile_dir.parent / "Downloads"),
-            "timeout_seconds": 120,
+            "timeout_seconds": 600,
             "default_prompt_prefix": "",
         },
         "image_gen": {

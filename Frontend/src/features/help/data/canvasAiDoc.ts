@@ -2,10 +2,10 @@ import type { HelpDoc } from '../model.ts'
 
 export const canvasAiDoc: HelpDoc = {
   pageId: 'Canvas AI',
-  title: 'Canvas AI (sơ đồ node & Motion Control)',
+  title: 'Canvas AI (sơ đồ node, Motion Control, Muse Canvas)',
   summary:
-    'Không gian node-graph để tự động hóa video từ ảnh sản phẩm (ảnh → Gemini phân tích → kịch bản → clip Flow → xuất video), và tab Motion Control để chuyển động tác từ một video mẫu sang nhân vật/bối cảnh của bạn. Chỉ dùng Omni 1.2 Flash qua Google Flow; mỗi clip tốn credit thật.',
-  verifiedAt: '2026-11-13',
+    'Không gian node-graph để tự động hóa video từ ảnh sản phẩm (ảnh → Gemini phân tích → kịch bản → clip Flow → xuất video), tab Motion Control để chuyển động tác từ một video mẫu sang nhân vật/bối cảnh của bạn, và tab Muse Canvas (đang xây) để tạo video/ảnh bằng Meta Muse. Hai tab đầu chỉ dùng Omni 1.2 Flash qua Google Flow; mỗi clip tốn credit thật.',
+  verifiedAt: '2026-11-15',
   requires: [
     {
       label: 'Extension Flow đã nạp, tab Google Flow đã đăng nhập',
@@ -21,7 +21,7 @@ export const canvasAiDoc: HelpDoc = {
   start: [
     {
       title: 'Chọn chế độ làm việc',
-      do: 'Hai tab trên cùng: “Kịch Bản Liên Hoàn” (chuỗi node từ ảnh sản phẩm ra video) hoặc “Motion Control” (chuyển động tác từ video mẫu).',
+      do: 'Ba tab trên cùng: “Kịch Bản Liên Hoàn” (chuỗi node từ ảnh sản phẩm ra video), “Motion Control” (chuyển động tác từ video mẫu) hoặc “Muse Canvas” (tạo bằng Meta Muse; hiện mới có phần cấu hình).',
     },
     {
       title: 'Cấu hình Flow',
@@ -47,7 +47,18 @@ export const canvasAiDoc: HelpDoc = {
     {
       id: 'thanh-cong-cu',
       name: 'Thanh công cụ',
-      what: 'Chọn Node chính và Studio, “Mặc định (Sketch)” khôi phục bố cục chuẩn của sơ đồ, “Thư Viện Video” mở kho video đã xuất.',
+      what: 'Chọn Node chính và Studio, “Mặc định (Sketch)” khôi phục bố cục chuẩn của sơ đồ, “Thư Viện Video” mở kho video đã xuất, “Thư Viện Ảnh” mở kho ảnh để dùng lại.',
+    },
+    {
+      id: 'thu-vien-anh',
+      name: 'Thư Viện Ảnh',
+      what: 'Kho ảnh dùng lại được giữa các lần làm: ảnh Muse tạo (vd. ảnh sản phẩm của node “Tách áo quần”) tự lưu vào đây kèm prompt, chat Muse và tài khoản đã dùng; bạn cũng tải ảnh của mình lên được (nút “Tải ảnh lên” hoặc kéo thả vào cửa sổ).',
+      how: [
+        'Lọc “Tất cả / Muse tạo / Tải lên / Yêu thích”, tìm theo tên, prompt hoặc tên chat.',
+        'Bấm một ảnh để xem chi tiết: đổi tên, đánh dấu yêu thích (ngôi sao), xem “Prompt đã dùng”, “Chép đường dẫn”, “Mở” ảnh gốc, xóa (thùng rác).',
+        'Trong Muse Canvas, node “Trang phục” có “Chọn từ Thư Viện Ảnh” (và nút thư viện cạnh “Đổi ảnh”): chọn ảnh rồi bấm “Dùng ảnh này” hoặc nháy đúp.',
+      ],
+      tip: 'Xóa ảnh khỏi thư viện cũng xóa file ảnh do app quản lý (Data/media/muse_outputs, Data/media/image_library); node đang dùng ảnh đó sẽ mất ảnh.',
     },
     {
       id: 'motion-control',
@@ -80,6 +91,29 @@ export const canvasAiDoc: HelpDoc = {
         '“Làm lại từ đầu” xóa kế hoạch hiện tại và chia lại.',
       ],
       tip: 'Video ghép mang watermark của Flow. Nếu bước xóa watermark trên video đã ghép bị từ chối (độ tin cậy thấp), xem trang Xóa Watermark: công cụ chắc chắn nhất trên clip Flow gốc chưa chỉnh sửa.',
+    },
+    {
+      id: 'muse-canvas',
+      name: 'Muse Canvas',
+      what: 'Tab tạo video/ảnh bằng Meta Muse, kết nối thẳng tới Muse bằng tài khoản đã thêm ở Cài đặt → Muse AI (Meta), không dùng Google Flow. Canvas tự lưu node, dây và vị trí khung nhìn; panel “Cấu hình Muse Canvas” áp dụng chung cho mọi node. Có hai họ node: “Trang phục” → “Tách áo quần” (mỗi bộ ra ảnh sản phẩm nền trắng) và “Nhân vật tham chiếu” → “Bảng thiết kế nhân vật” (mỗi nhân vật ra một bảng character setting 16:9). Ảnh đã tạo tách ra node “Ảnh kết quả” riêng được. Node “Kịch bản video” nhận mọi ảnh tham chiếu và nhờ Muse viết một kịch bản (chữ).',
+      how: [
+        'Nút “Thêm node” ở góc trên mở menu ba nhóm: Trang phục (“Trang phục”, “Tách áo quần”, “Mẫu: Trang phục → Tách áo quần”) , Nhân vật (“Nhân vật tham chiếu”, “Bảng thiết kế nhân vật”, “Mẫu: Nhân vật → Bảng thiết kế”) và Video (“Kịch bản video”). Mọi node độc lập, có nút thùng rác để xóa (xóa cả dây nối với nó).',
+        'Node “Trang phục”: đúng 1 ảnh người mặc 1 bộ đồ (PNG, JPG, WebP, tối đa 25 MB) — tải từ máy hoặc “Chọn từ Thư Viện Ảnh”; “Đổi ảnh” hoặc X để bỏ ảnh; ô “Tên bộ đồ” tùy chọn. Kéo dây từ chấm hồng bên phải sang node “Tách áo quần”; một trang phục nối được vào nhiều node tách.',
+        'Node “Tách áo quần”: nhận dây từ nhiều node trang phục; mỗi trang phục là một dòng ảnh vào → ảnh ra. “Tách N trang phục” chạy các dòng chưa tách (hoặc đã đổi ảnh), song song theo “Số job song song”; “Chạy”/“Chạy lại” từng dòng. Bấm ảnh ra để mở ảnh lớn.',
+        'Prompt của node tách sửa được (nhãn “Đã sửa”); “Mặc định” nạp lại prompt mặc định, “Lưu làm mặc định” dùng nội dung đang có cho các node mới. Prompt gửi nguyên văn, không ghép tiền tố prompt chung của Muse Studio.',
+        'Node “Nhân vật tham chiếu” (1 ảnh nhân vật) nối vào node “Bảng thiết kế nhân vật”: cách chạy giống node tách — mỗi nhân vật nối vào là một dòng, “Tạo bảng N nhân vật”, “Chạy”/“Chạy lại” từng dòng. Prompt mặc định là bảng character setting 16:9 bốn vùng (chân dung, ba góc Front/Side/Back, chi tiết, bảng màu); sửa dòng “Gender:” / “Style:” trong prompt cho từng nhân vật.',
+        'Kết hợp trang phục: node bảng có cổng thứ hai “Trang phục” (bên trái, dưới cổng “Nhân vật”); nối vào đó các node “Ảnh kết quả” tách từ “Tách áo quần”. Khi đó mỗi cặp nhân vật × trang phục là một dòng và ra một bảng (nhân vật mặc đúng bộ đồ đó); Muse nhận ảnh nhân vật trước, ảnh trang phục sau. “Prompt kết hợp trang phục” được ghép sau prompt chính cho các dòng có trang phục — sửa được, có “Mặc định” và “Lưu làm mặc định”.',
+        'Tách ra node: dòng đã xong có nút “Ra node” tạo node “Ảnh kết quả” bên phải, nối dây từ chấm tím của node chạy; “Tất cả ra node” làm cho mọi dòng còn lại; dòng đã có node thì nút thành “Xem node”. Node Ảnh kết quả giữ ảnh riêng — nếu dòng nguồn chạy lại ra ảnh mới, node báo và có “Dùng ảnh mới”.',
+        'Dây: ảnh vào chỉ nối vào node chạy cùng họ (trang phục → tách áo quần, nhân vật → bảng nhân vật); node chạy nối ra node Ảnh kết quả (mỗi node kết quả một nguồn); Ảnh kết quả của Tách áo quần nối được vào cổng “Trang phục” của bảng nhân vật; Ảnh kết quả, Nhân vật tham chiếu và Trang phục nối được vào cổng “Tham chiếu” của Kịch bản video; Kịch bản video nối ra node Kịch bản (mỗi node Kịch bản một nguồn kịch bản, cổng “Tham chiếu” của nó nhận nhiều ảnh); node Kịch bản nối ra node Video kết quả (mỗi node video một nguồn); dây trùng hoặc ngược chiều bị chặn. Không cần thả trúng chấm: thả dây lên bất kỳ đâu trên node (hoặc kéo ngược từ cổng vào) thì app tự chọn đúng cổng; không nối được thì hiện lý do ở cuối canvas. Rê chuột vào dây để hiện nút X gỡ dây.',
+        'Node “Kịch bản video”: một cổng “Tham chiếu” nhận nhiều dây từ mọi node có ảnh — “Ảnh kết quả” (bảng thiết kế, ảnh sản phẩm), “Nhân vật tham chiếu”, “Trang phục” (tối đa 16 ảnh). Tất cả ảnh gửi chung một lần Muse, không cần một ảnh là một bộ đồ: Muse tự gom các ảnh cùng bộ và tự đếm số bộ. Danh sách ảnh có nhãn vai trò (Bảng thiết kế / Ảnh sản phẩm / Nhân vật / Ảnh trang phục) và nút ↑ ↓ đổi thứ tự. “Viết kịch bản từ N ảnh” nhận về kịch bản “Character Sheet to Reality” + prompt video từng đoạn. “Đoạn tự gửi kèm sau prompt” là phần app tự thêm (danh sách ảnh kèm vai trò, “Ghi chú thêm” — vd. ảnh nào cùng một bộ). Kết quả có “Chép”, tải “.md”, mở rộng; đổi ảnh hoặc thứ tự thì kịch bản báo là bản cũ, bấm “Viết lại kịch bản” (hỏi trước vì tốn thêm lượt).',
+        'Tách kịch bản ra node: khi đã viết xong, nút “Ra node” tạo node “Kịch bản” bên phải, nối dây từ chấm cam của node Kịch bản video; đã có node cho bản này thì nút thành “Xem node”. Node Kịch bản giữ chữ riêng và sửa trực tiếp được (nhãn “Đã sửa”, “Bản gốc” để quay về bản Muse trả), có “Chép”, tải “.md”, mở rộng, ô tên. Viết lại rồi bấm “Ra node” lần nữa sẽ thêm node mới, giữ bản cũ; node cũ báo có bản mới và có “Dùng bản mới”.',
+        'Tạo video từ node Kịch bản: cổng thứ hai “Tham chiếu” (dưới cổng “Kịch bản”) nhận Ảnh kết quả, Nhân vật tham chiếu, Trang phục; nếu chưa nối gì mà Kịch bản video nguồn có ảnh, nút “Nối N ảnh như Kịch bản video” nối lại giúp. “Tạo video” gửi kịch bản đang có (kể cả phần bạn đã sửa) + mọi ảnh tham chiếu theo thứ tự trong một lần Muse; app chờ Muse làm xong các đoạn rồi tải về mọi clip (clip cuối là “Bản chính”, phát ngay trong node; “Thư mục” mở nơi lưu). Sửa kịch bản hoặc đổi ảnh thì video báo là bản cũ; “Tạo lại video” hỏi trước vì tốn thêm lượt.',
+        'Tách video ra node: video xong có nút “Ra node” tạo node “Video kết quả” bên phải, nối dây từ chấm xanh của node Kịch bản; đã có node cho lần tạo này thì nút thành “Xem node”. Node Video kết quả phát video, chuyển giữa “Bản chính” và các clip (nếu Muse trả nhiều), có ô tên, chép đường dẫn, mở trong tab mới, mở thư mục. Tạo lại video rồi “Ra node” lần nữa sẽ thêm node mới; node cũ báo có video mới và có “Dùng video mới”.',
+        'Hoàn thiện video (trong node Video kết quả): “Tắt tiếng gốc” hoặc kéo “Âm lượng gốc”; “Nhạc nền” mở danh sách Thư viện nhạc — nút ▶ cạnh mỗi bài để nghe thử trước khi chọn (thanh tiến trình hiện bên dưới, chỉ một bài phát một lúc), bấm tên bài để chọn, ô tìm khi có nhiều bài; kéo “Âm lượng nhạc”; “Nhãn kênh” là chữ như @tenkenh (vị trí 6 góc / giữa, cỡ Nhỏ – Vừa – Lớn); “Logo kênh” tải ảnh PNG/JPG/WebP ≤ 5 MB (vị trí, cỡ). Có nhiều clip thì chọn “Ghép cả … clip” hoặc chỉ dùng bản chính. “Xuất video hoàn chỉnh” chạy ffmpeg trên máy (không tốn lượt Muse) và lưu vào Thư Viện Video → “Hoàn chỉnh”; node có thêm nút “Bản hoàn chỉnh” để xem. Đổi cấu hình thì bản xuất báo là cũ. “Lưu làm mặc định” giữ cấu hình (vd. nhãn kênh, nhạc) cho các node Video kết quả mới trên máy này.',
+        'Thu gọn: node Kịch bản video và node Kịch bản có nút thu gọn ở góc trên (cạnh thùng rác) — chỉ còn ảnh tham chiếu nhỏ, trạng thái và nút chạy; bấm lại để mở. Trong node, các phần “Ảnh tham chiếu”, “Kịch bản” và bài kết quả (nút “Ẩn” / “Hiện”) cũng đóng mở riêng được.',
+        'Panel “Cấu hình Muse Canvas” chỉ giữ các mục node dùng thật: Tài khoản Muse (“Tự động” xoay vòng hoặc “Cố định” 1 tài khoản; “Quản lý tài khoản” mở Cài đặt), Hội thoại trên Muse (chọn “Chat mới mỗi lần chạy”, “Nối tiếp chat trước” hoặc “Chat chính”; tiền tố tên chat khi chat mới), Chạy (“Tỉ lệ video” cho nút Tạo video, thời gian chờ mỗi job tối thiểu 600 giây, số job song song 1–4, tiền tố tên file). Nút mũi tên ở góc panel thu nhỏ panel thành một dải hẹp bên phải (có số cảnh báo); bấm dải đó để mở lại.',
+      ],
+      tip: 'Mỗi trang phục tốn một lượt Muse. Đã gửi thì không tự gửi lại: dòng lỗi hoặc “bị gián đoạn” (đóng app khi đang chạy) chỉ chạy lại khi bạn bấm “Chạy lại” — nên xem chat trên Muse trước, vì ảnh có thể đã được tạo. Ảnh ra lưu ở Data/media/muse_outputs và tự có trong Thư Viện Ảnh; kịch bản lưu thành file .md ở Data/media/muse_texts.',
     },
   ],
   concepts: [
@@ -128,6 +162,18 @@ export const canvasAiDoc: HelpDoc = {
   ],
   related: ['Veo Studio', 'Chiến dịch AI', 'Xóa Watermark', 'Voices', 'Thư viện nhạc', 'Cài đặt'],
   changes: [
+    { date: '2026-11-15', text: 'Muse Canvas: panel cấu hình gọn lại (bỏ các mục node không dùng: loại đầu ra, thời lượng, âm thanh, ngôn ngữ, phong cách, phần thêm đầu/cuối cảnh, xem trước chỉ dẫn) và thu nhỏ được; nhạc nền nghe thử từng bài trước khi chọn.' },
+    { date: '2026-11-15', text: 'Node Video kết quả: “Hoàn thiện video” — nhạc nền từ Thư viện nhạc, nhãn kênh (chữ + logo), tắt tiếng gốc; xuất vào Thư Viện Video. Thư Viện Video có thêm mục “Muse” cho clip Meta Muse.' },
+    { date: '2026-11-15', text: 'Node Kịch bản: nút “Ra node” ở phần video tách video đã tạo ra node “Video kết quả” riêng (phát, chọn clip, mở thư mục).' },
+    { date: '2026-11-15', text: 'Node Kịch bản: thêm cổng “Tham chiếu” và nút “Tạo video” (gửi kịch bản + ảnh tham chiếu cho Muse, tải về mọi clip). Kịch bản video và Kịch bản thu gọn được.' },
+    { date: '2026-11-15', text: 'Kịch bản video có nút “Ra node”: tách bản kịch bản Muse viết ra node “Kịch bản” riêng — sửa trực tiếp, chép, tải .md, giữ được nhiều bản.' },
+    { date: '2026-11-15', text: 'Muse Canvas: thêm node “Kịch bản video” — nối mọi ảnh tham chiếu (bảng thiết kế, ảnh sản phẩm, nhân vật, trang phục) vào một cổng, gửi chung một lần Muse để nhận một kịch bản held-board reveal kèm prompt video từng đoạn; xếp thứ tự ảnh, chép / tải .md.' },
+    { date: '2026-11-15', text: 'Nối dây dễ hơn: thả lên bất kỳ đâu trên node là tự chọn đúng cổng; cổng to hơn, đổi màu khi kéo; không nối được thì báo lý do.' },
+    { date: '2026-11-15', text: 'Bảng thiết kế nhân vật nhận thêm trang phục đã tách (cổng “Trang phục”): mỗi cặp nhân vật × trang phục ra một bảng nhân vật mặc đúng bộ đồ.' },
+    { date: '2026-11-15', text: 'Muse Canvas: thêm node “Nhân vật tham chiếu” → “Bảng thiết kế nhân vật” (character setting 16:9) và node “Ảnh kết quả” (nút “Ra node” tách ảnh đã tạo thành node riêng).' },
+    { date: '2026-11-15', text: 'Thêm “Thư Viện Ảnh” cạnh Thư Viện Video: ảnh Muse tạo tự lưu vào, tải ảnh của bạn lên, dùng lại cho node “Trang phục”.' },
+    { date: '2026-11-15', text: 'Muse Canvas: node “Trang phục” (1 bộ đồ/node) nối vào node “Tách áo quần” chạy Muse, mỗi trang phục ra 1 ảnh sản phẩm nền trắng; node và dây đều xóa được.' },
+    { date: '2026-11-15', text: 'Thêm tab “Muse Canvas”: canvas riêng cho Meta Muse cùng panel cấu hình (tài khoản, hội thoại, đầu ra, prompt, chạy); các node sẽ có ở bản sau.' },
     { date: '2026-11-13', text: 'Motion Control có node tùy chọn “Tạo Ảnh Nhân Vật Mới”: ảnh của bạn + trang phục → ảnh nhân vật mới (ChatGPT) cho ô Nhân Vật.' },
     { date: '2026-11-12', text: 'Đổi tên từ “AI Workflow” thành “Canvas AI”; chỉ dùng Omni 1.2 Flash.' },
   ],

@@ -61,7 +61,7 @@ export function VideoLibraryModal({
   const [copied, setCopied] = useState(false)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [filterType, setFilterType] = useState<'all' | 'export' | 'veo_scene' | 'motion_control'>('all')
+  const [filterType, setFilterType] = useState<'all' | 'export' | 'veo_scene' | 'motion_control' | 'muse_clip'>('all')
   const [isExtractingFrame, setIsExtractingFrame] = useState(false)
   const [frameSaved, setFrameSaved] = useState(false)
 
@@ -284,6 +284,7 @@ export function VideoLibraryModal({
   const exportCount = videos.filter((v) => (v.sourceType || 'export') === 'export').length
   const motionCount = videos.filter((v) => v.isMotionControl).length
   const veoPromptCount = videos.filter((v) => v.sourceType === 'veo_scene' && !v.isMotionControl).length
+  const museCount = videos.filter((v) => v.sourceType === 'muse_clip').length
 
   const filtered = videos.filter((v) => {
     if (filterType === 'export') {
@@ -292,6 +293,8 @@ export function VideoLibraryModal({
       if (!v.isMotionControl) return false
     } else if (filterType === 'veo_scene') {
       if (v.sourceType !== 'veo_scene' || v.isMotionControl) return false
+    } else if (filterType === 'muse_clip') {
+      if (v.sourceType !== 'muse_clip') return false
     }
     if (!searchTerm.trim()) return true
     const term = searchTerm.toLowerCase()
@@ -897,6 +900,30 @@ export function VideoLibraryModal({
                 <button
                   type="button"
                   onClick={() => {
+                    setFilterType('muse_clip')
+                    setSelectedIndex(0)
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '4px 3px',
+                    borderRadius: 5,
+                    border: 'none',
+                    background: filterType === 'muse_clip' ? '#ffffff' : 'transparent',
+                    color: filterType === 'muse_clip' ? '#1d4ed8' : '#64748b',
+                    boxShadow: filterType === 'muse_clip' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                    fontSize: 10,
+                    fontWeight: filterType === 'muse_clip' ? 700 : 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="Các clip Meta Muse tải về (Muse Canvas, Muse Studio)"
+                >
+                  Muse ({museCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     setFilterType('export')
                     setSelectedIndex(0)
                   }}
@@ -1060,12 +1087,17 @@ export function VideoLibraryModal({
                                     fontWeight: 600,
                                     padding: '1px 5px',
                                     borderRadius: 3,
-                                    background: item.sourceType === 'veo_scene' ? '#ecfdf5' : '#eef2ff',
-                                    color: item.sourceType === 'veo_scene' ? '#059669' : '#4338ca',
-                                    border: item.sourceType === 'veo_scene' ? '1px solid #a7f3d0' : '1px solid #c7d2fe',
+                                    background: item.sourceType === 'veo_scene' ? '#ecfdf5' : item.sourceType === 'muse_clip' ? '#eff6ff' : '#eef2ff',
+                                    color: item.sourceType === 'veo_scene' ? '#059669' : item.sourceType === 'muse_clip' ? '#1d4ed8' : '#4338ca',
+                                    border:
+                                      item.sourceType === 'veo_scene'
+                                        ? '1px solid #a7f3d0'
+                                        : item.sourceType === 'muse_clip'
+                                          ? '1px solid #bfdbfe'
+                                          : '1px solid #c7d2fe',
                                   }}
                                 >
-                                  {item.sourceType === 'veo_scene' ? 'Clip Veo' : 'Hoàn Chỉnh'}
+                                  {item.sourceType === 'veo_scene' ? 'Clip Veo' : item.sourceType === 'muse_clip' ? 'Clip Muse' : 'Hoàn Chỉnh'}
                                 </span>
                               )}
                               <span style={{ fontSize: 9.5, color: '#94a3b8' }}>
@@ -1759,6 +1791,8 @@ export function VideoLibraryModal({
                             ? '#c026d3'
                             : currentVideo.sourceType === 'veo_scene'
                             ? '#059669'
+                            : currentVideo.sourceType === 'muse_clip'
+                            ? '#1d4ed8'
                             : '#4f46e5',
                         }}
                       >
@@ -1766,6 +1800,8 @@ export function VideoLibraryModal({
                           ? 'Phân cảnh Motion Control (AI Edit)'
                           : currentVideo.sourceType === 'veo_scene'
                           ? 'Phân cảnh Veo AI'
+                          : currentVideo.sourceType === 'muse_clip'
+                          ? 'Clip Meta Muse'
                           : 'Video hoàn chỉnh'}
                       </span>
                       <span style={{ margin: '0 6px' }}>•</span>

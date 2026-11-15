@@ -1,0 +1,4 @@
+OUTFIT: The character must wear exactly the outfit shown in the attached outfit product photo (the second image).
+- Use the first image only for the character's face, hairstyle, skin tone and body proportions.
+- Keep the outfit's exact colors, fabric texture, pattern, cut, length, collar, sleeves, buttons and trims; do not redesign, recolor or add pieces.
+- The same outfit must appear consistently in the portrait, the front / side / back views and the detail close-ups; the color palette must come from this outfit.

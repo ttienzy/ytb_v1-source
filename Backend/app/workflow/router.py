@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from app.workflow.schemas import (
     GeminiAnalysisRequest,
@@ -50,7 +51,7 @@ from app.workflow.schemas import (
     MotionCharacterSheetRequest,
     MotionCharacterSheetResponse,
 )
-from app.workflow import motion_character
+from app.workflow import image_library, motion_character, muse_canvas, muse_finish
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
 from app.workflow.service import (
@@ -297,6 +298,140 @@ def get_motion_config() -> MotionWorkflowConfig:
 def update_motion_config(req: MotionWorkflowConfig) -> MotionWorkflowConfig:
     """Cập nhật và lưu cấu hình bền vững cho Motion Control vào config.json."""
     return save_motion_workflow_config(req)
+
+
+# ---------------------------------------------------------------- Muse Canvas
+
+
+@router.get("/muse/config", response_model=muse_canvas.MuseCanvasConfig)
+def get_muse_canvas_config() -> muse_canvas.MuseCanvasConfig:
+    """Cấu hình Muse Canvas (tài khoản, chat, đầu ra, prompt, chạy)."""
+    return muse_canvas.get_config()
+
+
+@router.put("/muse/config", response_model=muse_canvas.MuseCanvasConfig)
+def update_muse_canvas_config(req: muse_canvas.MuseCanvasConfig) -> muse_canvas.MuseCanvasConfig:
+    """Lưu cấu hình Muse Canvas vào config.json (khóa muse_canvas)."""
+    return muse_canvas.save_config(req)
+
+
+@router.get("/muse/canvas", response_model=muse_canvas.MuseCanvasGraph)
+def get_muse_canvas_graph() -> muse_canvas.MuseCanvasGraph:
+    """Đồ thị Muse Canvas đã lưu (nodes, edges, viewport)."""
+    return muse_canvas.get_graph()
+
+
+@router.put("/muse/canvas", response_model=muse_canvas.MuseCanvasGraph)
+def update_muse_canvas_graph(req: muse_canvas.MuseCanvasGraph) -> muse_canvas.MuseCanvasGraph:
+    """Lưu đồ thị Muse Canvas vào Data/muse_canvas.json."""
+    try:
+        return muse_canvas.save_graph(req)
+    except ValueError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+
+
+# ---------------------------------------------------------------- Thư viện ảnh
+
+
+class ImageLibraryPatch(BaseModel):
+    label: Optional[str] = None
+    favorite: Optional[bool] = None
+    tags: Optional[list[str]] = None
+
+
+@router.get("/images")
+def list_library_images(q: str = "", source: str = "", favorite: bool = False) -> dict:
+    """Ảnh trong thư viện (mới nhất trước). source: muse | upload."""
+    items = image_library.list_images(q=q, source=source, favorite=favorite)
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/images/upload")
+async def upload_library_image(file: UploadFile = File(...), label: str = Form(default="")) -> dict:
+    """Tải ảnh của bạn vào thư viện (DATA_DIR/media/image_library)."""
+    try:
+        return image_library.save_upload(file.filename or "image.png", await file.read(), label)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/images/open-folder")
+def open_library_folder() -> dict:
+    return {"ok": True, "path": image_library.open_folder()}
+
+
+@router.patch("/images/{image_id}")
+def update_library_image(image_id: str, body: ImageLibraryPatch) -> dict:
+    try:
+        return image_library.update_image(image_id, label=body.label, favorite=body.favorite, tags=body.tags)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Không tìm thấy ảnh trong thư viện.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/images/{image_id}")
+def delete_library_image(image_id: str, delete_file: bool = True) -> dict:
+    """Xóa khỏi thư viện; file chỉ bị xóa nếu nằm trong thư mục app quản lý."""
+    if not image_library.delete_image(image_id, delete_file=delete_file):
+        raise HTTPException(status_code=404, detail="Không tìm thấy ảnh trong thư viện.")
+    return {"ok": True}
+
+
+@router.get("/images/{image_id}/file")
+def library_image_file(image_id: str):
+    item = image_library.get_image(image_id)
+    if not item or not Path(item["path"]).exists():
+        raise HTTPException(status_code=404, detail="Ảnh không còn trên máy.")
+    ext = Path(item["path"]).suffix.lower()
+    media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}.get(ext, "image/webp")
+    return FileResponse(item["path"], media_type=media)
+
+
+class MusePromptBody(BaseModel):
+    prompt: str
+
+
+def _muse_prompt_call(fn, *args):
+    try:
+        return fn(*args)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Không có prompt mặc định này.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/muse/prompts/{name}")
+def get_muse_prompt(name: str) -> dict:
+    """Prompt mặc định của một node Muse Canvas (vd. outfit_extract = tách áo quần)."""
+    return _muse_prompt_call(muse_canvas.get_prompt, name)
+
+
+@router.put("/muse/prompts/{name}")
+def save_muse_prompt(name: str, body: MusePromptBody) -> dict:
+    """Lưu prompt làm mặc định cho các node mới (DATA_DIR/muse_prompts/)."""
+    return _muse_prompt_call(muse_canvas.save_prompt, name, body.prompt)
+
+
+@router.delete("/muse/prompts/{name}")
+def reset_muse_prompt(name: str) -> dict:
+    """Bỏ bản đã lưu, quay về prompt gốc đóng kèm app."""
+    return _muse_prompt_call(muse_canvas.reset_prompt, name)
+
+
+@router.post("/muse/finish")
+async def finish_muse_video(req: muse_finish.MuseFinishRequest) -> dict:
+    """Hoàn thiện video Muse (ghép clip, nhãn kênh / logo, tắt tiếng gốc, nhạc nền) → Thư Viện Video."""
+    try:
+        return await run_in_threadpool(muse_finish.finish_video, req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi hoàn thiện video: {e}") from e
 
 
 @router.get("/motion/presets", response_model=MotionPresetListResponse)
@@ -689,6 +824,8 @@ async def get_exported_video(filename: str, mute: bool = False, clean: bool = Fa
     p = WORKFLOW_EXPORTS_DIR / base_name
     if not p.exists() or not p.is_file():
         p = VEO_DATA_DIR / base_name
+    if not p.exists() or not p.is_file():
+        p = muse_finish.find_muse_clip(base_name) or p  # clip Muse trong Thư Viện Video
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="Không tìm thấy file video.")
 

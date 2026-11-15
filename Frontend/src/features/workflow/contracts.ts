@@ -162,7 +162,7 @@ export interface ExportedVideoItem {
   aspectRatio?: string
   resolution?: string
   title?: string
-  sourceType?: 'export' | 'veo_scene'
+  sourceType?: 'export' | 'veo_scene' | 'muse_clip'
   prompt?: string
   modelDisplayName?: string
   isMotionControl?: boolean

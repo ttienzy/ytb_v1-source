@@ -212,7 +212,7 @@ export function App() {
           ) : activePage === 'Muse Studio' ? (
             <MuseStudioPage setActivePage={setActivePage} />
           ) : activePage === 'Canvas AI' ? (
-            <WorkflowPage />
+            <WorkflowPage setActivePage={setActivePage} />
           ) : activePage === 'Chiến dịch AI' ? (
             <CampaignPage />
           ) : activePage === 'Lên lịch Pippit' ? (

@@ -1,0 +1,23 @@
+Extract ONLY the outfit worn by the person in the input image and recreate it as a clean e-commerce product photo.
+
+REMOVE:
+- The person entirely: no face, hair, skin, hands, legs, body shape or mannequin.
+- The whole background and all props: furniture, flowers, vases, mirrors, phones, bags, jewelry, shoes.
+- Any logos, watermarks, text overlays or product codes on the image.
+
+KEEP & PRESERVE EXACTLY:
+- Every garment of the outfit (top, bottom, dress, jacket, etc.) plus details that belong to them (belts, chains, bows, buttons, ties).
+- Exact color, fabric texture, pattern, cut, length, collar shape, sleeve style, buttons, stitching, lace/trim, pleats and pockets.
+- Do NOT redesign, simplify, recolor or add any new details.
+
+RECONSTRUCT:
+- Fill in any parts hidden by the body, arms, hands, hair or objects so every garment looks complete, natural and symmetrical.
+
+LAYOUT:
+- Flat-lay / ghost-mannequin style, front view, garments neatly laid out and smoothed (no pose wrinkles).
+- If there are multiple pieces, place them side by side (top on the left, bottom on the right), not overlapping, with correct relative scale.
+- Centered composition with even margins.
+
+BACKGROUND & QUALITY:
+- Pure white background (#FFFFFF), soft even studio lighting, only a very subtle natural shadow.
+- High resolution, sharp, photorealistic product photography.

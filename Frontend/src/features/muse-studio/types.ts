@@ -1,11 +1,17 @@
 export interface MuseStatus {
   is_connected: boolean
-  is_running: boolean
-  cdp_port: number
-  tab_title?: string | null
-  tab_url?: string | null
   last_checked_at: string
   message: string
+  account_id?: string | null
+  account_label?: string | null
+}
+
+/** Rút gọn từ /api/settings/muse/accounts — đủ để hiện ô chọn tài khoản. */
+export interface MuseAccountOption {
+  id: string
+  label: string
+  status: string
+  busy: boolean
 }
 
 export interface MuseUploadResponse {
@@ -36,11 +42,15 @@ export interface MuseGenerateRequest {
   use_side_chat?: boolean
   continuation?: boolean
   timeout_seconds?: number
+  /** bỏ trống = tự xoay vòng các tài khoản sẵn sàng */
+  account_id?: string
 }
 
 export interface MuseGenerateResult {
   ok: boolean
   prompt: string
+  account_id?: string | null
+  account_label?: string | null
   video_url?: string | null
   local_path?: string | null
   file_size?: number | null

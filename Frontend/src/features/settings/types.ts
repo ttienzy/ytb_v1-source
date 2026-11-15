@@ -98,25 +98,41 @@ export type PippitTask = {
 
 export type MuseSettings = {
   ok: boolean
-  is_connected: boolean
-  last_checked_at?: string | null
-  app_url: string
-  cdp_port: number
-  auto_download: boolean
   download_dir: string
+  /** giây, backend ép tối thiểu 600 */
   timeout_seconds: number
   default_prompt_prefix: string
-  profile_dir: string
 }
 
 export type MuseStatus = {
   is_connected: boolean
-  is_running: boolean
-  cdp_port: number
-  tab_title?: string | null
-  tab_url?: string | null
   last_checked_at: string
   message: string
+  account_id?: string | null
+  account_label?: string | null
+}
+
+export type MuseAccount = {
+  id: string
+  label: string
+  viewerId: string
+  hasSession: boolean
+  partition: string
+  cdpPort: number
+  status: 'active' | 'exhausted' | 'error' | string
+  message: string
+  addedAt: number
+  lastUsed: number
+  lastCheckedAt: number
+  exhaustedAt: number
+  running: boolean
+  busy: boolean
+}
+
+export type MuseAccountsState = {
+  accounts: MuseAccount[]
+  active_accounts_count: number
+  total_accounts_count: number
 }
 
 export type MuseGenerateResult = {

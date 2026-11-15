@@ -35,6 +35,10 @@ import { VideoLibraryModal } from './components/VideoLibraryModal'
 import { VideoPlayerModal } from './components/VideoPlayerModal'
 import { VeoVideoPickerModal } from './components/VeoVideoPickerModal'
 import { MotionControlWorkspace } from './components/MotionControlWorkspace'
+import { VIDEO_LIBRARY_CHANGED } from './services/museCanvasApi.ts'
+import { MuseCanvasWorkspace } from './components/MuseCanvasWorkspace'
+import { ImageLibraryModal } from './components/ImageLibraryModal'
+import { IMAGE_LIBRARY_CHANGED, listLibraryImages } from './services/imageLibraryApi'
 import { StudioErrorBoundary } from '../veo-studio/components/StudioErrorBoundary'
 import * as veoApi from '../veo-studio/services/veoApi'
 import type { VeoCapabilities, VeoProject } from '../veo-studio/types'
@@ -81,7 +85,7 @@ import { useWorkflowState } from './hooks/useWorkflowState.ts'
 import { buildVoiceoverPlan, selectCachedVoiceoverPath } from './services/workflowAudio.ts'
 import { isValidWorkflowConnection } from './services/workflowGraph.ts'
 
-function WorkflowCanvas() {
+function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => void }) {
   const [activeTab, setActiveTab] = useState<WorkflowTabId>('chaining')
   const [edges, setEdges] = useState<Edge[]>(initialEdges)
   const { nodes, setNodes, nodesRef, captureRevision } = useWorkflowState(initialNodes, edges)
@@ -142,6 +146,19 @@ function WorkflowCanvas() {
   // Exported video library and player modal states
   const [isLibraryOpen, setIsLibraryOpen] = useState(false)
   const [exportedCount, setExportedCount] = useState<number>(0)
+  const [isImageLibraryOpen, setIsImageLibraryOpen] = useState(false)
+  const [imageCount, setImageCount] = useState<number>(0)
+
+  // Số ảnh trong Thư Viện Ảnh cho nút trên toolbar (lỗi thì bỏ qua: backend cũ chưa có API)
+  useEffect(() => {
+    const refresh = () =>
+      listLibraryImages()
+        .then((items) => setImageCount(items.length))
+        .catch(() => {})
+    refresh()
+    window.addEventListener(IMAGE_LIBRARY_CHANGED, refresh)
+    return () => window.removeEventListener(IMAGE_LIBRARY_CHANGED, refresh)
+  }, [])
   const [promptPresets, setPromptPresets] = useState<PromptPresetItem[]>([])
   const [previewModalData, setPreviewModalData] = useState<{
     isOpen: boolean
@@ -155,6 +172,15 @@ function WorkflowCanvas() {
     nodeId: string
     sceneIndex: number
   } | null>(null)
+
+  // Muse Canvas xuất video hoàn chỉnh -> cập nhật số đếm Thư Viện Video
+  useEffect(() => {
+    const refresh = () => {
+      fetchExportedVideos().then((items) => setExportedCount(items.length))
+    }
+    window.addEventListener(VIDEO_LIBRARY_CHANGED, refresh)
+    return () => window.removeEventListener(VIDEO_LIBRARY_CHANGED, refresh)
+  }, [])
 
   // Load exported video count, prompt presets & default BGM tracks on mount
   useEffect(() => {
@@ -2014,6 +2040,8 @@ function WorkflowCanvas() {
         isRunning={isRunning}
         onOpenLibrary={() => setIsLibraryOpen(true)}
         exportedCount={exportedCount}
+        onOpenImageLibrary={() => setIsImageLibraryOpen(true)}
+        imageCount={imageCount}
       />
       {configError && (
         <div style={{ position: 'absolute', top: 12, right: 24, zIndex: 20, padding: '6px 10px', borderRadius: 8, background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: 11 }}>
@@ -2090,6 +2118,13 @@ function WorkflowCanvas() {
         </div>
       )}
 
+      {/* TAB 3: Muse Canvas (Meta Muse, kết nối trực tiếp) */}
+      {activeTab === 'muse' && (
+        <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <MuseCanvasWorkspace onOpenSettings={setActivePage ? () => setActivePage('Cài đặt') : undefined} />
+        </div>
+      )}
+
       {/* Modal Cấu Hình Google Veo & Flow Project */}
       {isVeoModalOpen && (
         <VeoSetupModal
@@ -2108,6 +2143,15 @@ function WorkflowCanvas() {
       )}
 
       {/* Modal Thư Viện Video Đã Xuất */}
+      {/* Modal Thư Viện Ảnh */}
+      {isImageLibraryOpen && (
+        <ImageLibraryModal
+          isOpen={isImageLibraryOpen}
+          onClose={() => setIsImageLibraryOpen(false)}
+          onCountChange={setImageCount}
+        />
+      )}
+
       {isLibraryOpen && (
         <VideoLibraryModal
           isOpen={isLibraryOpen}
@@ -2146,11 +2190,11 @@ function WorkflowCanvas() {
   )
 }
 
-export function WorkflowPage() {
+export function WorkflowPage({ setActivePage }: { setActivePage?: (page: string) => void } = {}) {
   return (
     <StudioErrorBoundary fallbackTitle="Lỗi hiển thị Workflow Studio">
       <ReactFlowProvider>
-        <WorkflowCanvas />
+        <WorkflowCanvas setActivePage={setActivePage} />
       </ReactFlowProvider>
     </StudioErrorBoundary>
   )
