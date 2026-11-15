@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
+  AlertTriangle,
   Calendar,
   CalendarClock,
   Check,
@@ -28,21 +29,32 @@ import {
   Send,
   Share2,
   Sparkles,
+  Square,
   Tag,
   ThumbsUp,
-  Trash2,
   UploadCloud,
   X,
   XCircle,
 } from 'lucide-react'
+import { API_URL } from '../../shared/constants'
+import { PippitHistoryTab } from '../history/components/PippitHistoryTab'
 import { fmtBytes } from '../../shared/utils/formatters'
+import './PublisherPage.css'
 import * as api from './services/publisherApi'
+import {
+  channelLabel,
+  countByTarget,
+  ensureFutureTimes,
+  isPostedToTarget,
+  scheduleRange,
+  summarizeRun,
+  targetPlatform,
+  type BulkRunItem,
+} from './scheduleChecks'
 import type {
   ActiveFacebookPage,
   DriveFolder,
   DriveVideo,
-  PippitAccount,
-  PippitScheduleTask,
   ScheduleSlot,
 } from './types'
 
@@ -82,6 +94,10 @@ function resolvePublishedCaption(template: string, filename: string): string {
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
+
+function fmtSlotTime(ms: number): string {
+  return new Date(ms).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
 }
 
 function TikTokIcon({ size = 11 }: { size?: number }) {
@@ -372,11 +388,12 @@ export function PublisherPage() {
     })
   }, [activeWorkflow, captionTemplate, selectedCaptionHashtags])
 
-  // Tasks & Execution state
-  const [tasks, setTasks] = useState<PippitScheduleTask[]>([])
-  const [isLoadingTasks, setIsLoadingTasks] = useState(false)
+  // Execution state
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitProgress, setSubmitProgress] = useState<{ current: number; total: number } | null>(null)
+  const [submitProgress, setSubmitProgress] = useState<{ current: number; total: number; title: string } | null>(null)
+  const [runResults, setRunResults] = useState<BulkRunItem[] | null>(null)
+  const stopRequestedRef = useRef(false)
+  const [stopRequested, setStopRequested] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
@@ -385,142 +402,6 @@ export function PublisherPage() {
     const timer = window.setTimeout(() => setSuccessMessage(''), 4000)
     return () => window.clearTimeout(timer)
   }, [successMessage])
-
-  // History Filter & Pagination state
-  const [historySearch, setHistorySearch] = useState('')
-  const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | 'waiting' | 'published' | 'failed'>('all')
-  const [historyPageFilter, setHistoryPageFilter] = useState<string>('all')
-  const [historyDatePreset, setHistoryDatePreset] = useState<'all' | 'today' | 'tomorrow' | '7days' | 'custom'>('all')
-  const [historyCustomDate, setHistoryCustomDate] = useState<string>('')
-  const [historySortOrder, setHistorySortOrder] = useState<'time_asc' | 'time_desc' | 'created_desc'>('time_asc')
-  const [historyPage, setHistoryPage] = useState<number>(1)
-  const [historyPageSize, setHistoryPageSize] = useState<number>(15)
-
-  // Computed History Stats
-  const historyStats = useMemo(() => {
-    let waiting = 0
-    let published = 0
-    let failed = 0
-    for (const t of tasks) {
-      if (t.published || t.status === 3) published++
-      else if (t.status === 4 || Boolean(t.failed_reason)) failed++
-      else waiting++
-    }
-    return {
-      total: tasks.length,
-      waiting,
-      published,
-      failed,
-    }
-  }, [tasks])
-
-  // Distinct Pages in History
-  const distinctHistoryPages = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const t of tasks) {
-      const pid = String(t.page_id || '').trim()
-      const pname = t.page_name || pid || 'Fanpage'
-      if (pid) {
-        map.set(pid, pname)
-      }
-    }
-    return Array.from(map.entries()).map(([page_id, page_name]) => ({ page_id, page_name }))
-  }, [tasks])
-
-  // Filtered & Sorted Tasks
-  const filteredTasks = useMemo(() => {
-    let list = [...tasks]
-
-    // 1. Search query
-    if (historySearch.trim()) {
-      const s = historySearch.toLowerCase().trim()
-      list = list.filter(
-        t =>
-          (t.title && t.title.toLowerCase().includes(s)) ||
-          (t.description && t.description.toLowerCase().includes(s)) ||
-          (t.page_name && t.page_name.toLowerCase().includes(s)) ||
-          (t.task_id && t.task_id.toLowerCase().includes(s))
-      )
-    }
-
-    // 2. Status filter
-    if (historyStatusFilter === 'waiting') {
-      list = list.filter(t => !t.published && t.status !== 3 && t.status !== 4 && !t.failed_reason)
-    } else if (historyStatusFilter === 'published') {
-      list = list.filter(t => t.published || t.status === 3)
-    } else if (historyStatusFilter === 'failed') {
-      list = list.filter(t => t.status === 4 || Boolean(t.failed_reason))
-    }
-
-    // 3. Page filter
-    if (historyPageFilter !== 'all') {
-      list = list.filter(t => String(t.page_id) === historyPageFilter || t.page_name === historyPageFilter)
-    }
-
-    // 4. Date filter
-    const now = new Date()
-    const pad = (n: number) => String(n).padStart(2, '0')
-    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-
-    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-    const tomorrowStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
-
-    if (historyDatePreset === 'today') {
-      list = list.filter(t => {
-        if (!t.schedule_time_ms) return false
-        const d = new Date(t.schedule_time_ms)
-        const dStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-        return dStr === todayStr
-      })
-    } else if (historyDatePreset === 'tomorrow') {
-      list = list.filter(t => {
-        if (!t.schedule_time_ms) return false
-        const d = new Date(t.schedule_time_ms)
-        const dStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-        return dStr === tomorrowStr
-      })
-    } else if (historyDatePreset === '7days') {
-      const in7Days = now.getTime() + 7 * 24 * 60 * 60 * 1000
-      list = list.filter(t => {
-        if (!t.schedule_time_ms) return false
-        return t.schedule_time_ms >= now.getTime() - 24 * 60 * 60 * 1000 && t.schedule_time_ms <= in7Days
-      })
-    } else if (historyDatePreset === 'custom' && historyCustomDate) {
-      list = list.filter(t => {
-        if (!t.schedule_time_ms) return false
-        const d = new Date(t.schedule_time_ms)
-        const dStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-        return dStr === historyCustomDate
-      })
-    }
-
-    // 5. Sort
-    if (historySortOrder === 'time_asc') {
-      list.sort((a, b) => (a.schedule_time_ms || 0) - (b.schedule_time_ms || 0))
-    } else if (historySortOrder === 'time_desc') {
-      list.sort((a, b) => (b.schedule_time_ms || 0) - (a.schedule_time_ms || 0))
-    } else if (historySortOrder === 'created_desc') {
-      list.sort((a, b) => {
-        const da = a.created_at ? new Date(a.created_at).getTime() : 0
-        const db = b.created_at ? new Date(b.created_at).getTime() : 0
-        return db - da
-      })
-    }
-
-    return list
-  }, [tasks, historySearch, historyStatusFilter, historyPageFilter, historyDatePreset, historyCustomDate, historySortOrder])
-
-  // Pagination calculation
-  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / historyPageSize))
-  const paginatedTasks = useMemo(() => {
-    const start = (historyPage - 1) * historyPageSize
-    return filteredTasks.slice(start, start + historyPageSize)
-  }, [filteredTasks, historyPage, historyPageSize])
-
-  // Reset page to 1 when filters change
-  useEffect(() => {
-    setHistoryPage(1)
-  }, [historySearch, historyStatusFilter, historyPageFilter, historyDatePreset, historyCustomDate, historySortOrder, historyPageSize])
 
   // Preview modal state
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
@@ -582,23 +463,9 @@ export function PublisherPage() {
     }
   }, [])
 
-  // 3. Load Pippit Tasks History
-  const loadTasks = useCallback(async () => {
-    setIsLoadingTasks(true)
-    try {
-      const res = await api.fetchPippitAllTasks()
-      setTasks(res || [])
-    } catch (err: any) {
-      console.warn('Load tasks error:', err)
-    } finally {
-      setIsLoadingTasks(false)
-    }
-  }, [])
-
   useEffect(() => {
     loadInitialData()
-    loadTasks()
-  }, [loadInitialData, loadTasks])
+  }, [loadInitialData])
 
   useEffect(() => {
     if (selectedFolderId) {
@@ -1134,47 +1001,99 @@ export function PublisherPage() {
     setCustomSlotPages({})
   }
 
-  // Submit bulk schedule
+  // Video nào đã đăng / lên lịch lên đúng kênh đích (tránh đăng trùng)
+  const duplicateFileIds = useMemo(() => {
+    const byId = new Map<string, DriveVideo>()
+    for (const v of [...videos, ...Object.values(expandedFolderVideos).flat()]) byId.set(v.id, v)
+    const out = new Set<string>()
+    for (const slot of scheduledSlots) {
+      const page = activePages.find(p => p.page_id === slot.page_id)
+      const video = byId.get(slot.file_id)
+      if (page && video && isPostedToTarget(video.published_channels, page)) out.add(slot.file_id)
+    }
+    return out
+  }, [scheduledSlots, videos, expandedFolderVideos, activePages])
+
+  const slotRange = useMemo(() => scheduleRange(scheduledSlots), [scheduledSlots])
+
+  const handleDeselectDuplicates = () => {
+    setSelectedVideoIds(prev => {
+      const next = new Set(prev)
+      duplicateFileIds.forEach(id => next.delete(id))
+      return next
+    })
+  }
+
+  // Đặt lịch: gửi từng video một (mỗi video = 1 request bulk 1 mục) để có tiến trình thật,
+  // dừng được giữa chừng và biết chính xác video nào lỗi. Không tự gửi lại mục lỗi.
   const handleStartBulkSchedule = async () => {
-    if (scheduledSlots.length === 0 || activePages.length === 0) return
+    if (scheduledSlots.length === 0 || activePages.length === 0 || isSubmitting) return
     setErrorMessage('')
     setSuccessMessage('')
+    setRunResults([])
     setIsSubmitting(true)
-    setSubmitProgress({ current: 0, total: scheduledSlots.length })
+    stopRequestedRef.current = false
+    setStopRequested(false)
 
-    try {
-      const firstPage = activePages.find(p => p.page_id === scheduledSlots[0].page_id)
-      const accountId = firstPage?.account_id || ''
-
-      // Safeguard: Đảm bảo thời gian lên lịch không bị trôi về quá khứ nếu người dùng ngâm trang lâu
-      const minAllowedMs = Date.now() + 3 * 60 * 1000
-      const safeSlots = scheduledSlots.map((slot, sIdx) => {
-        if (slot.schedule_time_ms < minAllowedMs) {
-          return {
-            ...slot,
-            schedule_time_ms: minAllowedMs + sIdx * 5 * 60 * 1000,
-          }
-        }
-        return slot
-      })
-
-      const res = await api.submitBulkSchedule(accountId, safeSlots)
-
-      if (res.ok || res.success_count > 0) {
-        setSuccessMessage(
-          `🎉 Thành công! Đã lên lịch ${res.success_count}/${res.total} video lên Fanpage qua Pippit!`
-        )
-        // Refresh tasks
-        loadTasks()
-      } else {
-        setErrorMessage(res.message || 'Lên lịch thất bại.')
+    const slots = ensureFutureTimes(scheduledSlots, Date.now())
+    const results: BulkRunItem[] = []
+    for (let i = 0; i < slots.length; i++) {
+      if (stopRequestedRef.current) break
+      const slot = slots[i]
+      setSubmitProgress({ current: i, total: slots.length, title: slot.title })
+      const page = activePages.find(p => p.page_id === slot.page_id)
+      const base = {
+        file_id: slot.file_id,
+        file_name: slot.file_name,
+        title: slot.title,
+        page_name: page ? channelLabel(page) : slot.page_name,
+        schedule_time_ms: slot.schedule_time_ms,
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Đã xảy ra lỗi khi gửi yêu cầu lên lịch')
-    } finally {
-      setIsSubmitting(false)
-      setSubmitProgress(null)
+      try {
+        // Giờ hẹn có thể đã trôi trong lúc upload các video trước.
+        const [fresh] = ensureFutureTimes([slot], Date.now())
+        const res = await api.submitBulkSchedule(page?.account_id || '', [
+          { ...fresh, platform: page ? targetPlatform(page) : undefined },
+        ])
+        const r = res.results?.[0]
+        results.push({
+          ...base,
+          schedule_time_ms: fresh.schedule_time_ms,
+          ok: Boolean(r?.ok),
+          error: r?.ok ? undefined : r?.error || res.message || 'Pippit không trả kết quả',
+          task_id: r?.task_id,
+        })
+      } catch (err: any) {
+        results.push({
+          ...base,
+          ok: false,
+          error: `${err?.message || err}. Kiểm tra tab “Lịch đã đặt” trước khi đặt lại (Pippit có thể đã nhận bài).`,
+        })
+      }
+      setRunResults([...results])
     }
+
+    const okIds = new Set(results.filter(r => r.ok).map(r => r.file_id))
+    if (okIds.size > 0) {
+      // Bỏ chọn video đã lên lịch xong để không bấm gửi lại lần nữa.
+      setSelectedVideoIds(prev => new Set([...prev].filter(id => !okIds.has(id))))
+      setCustomSlotTimes(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => !okIds.has(id))))
+      setCustomSlotPages(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => !okIds.has(id))))
+      if (selectedFolderId) loadVideos(selectedFolderId, videoSearch)
+    }
+    const summary = summarizeRun(results)
+    const stoppedNote = stopRequestedRef.current && results.length < slots.length
+      ? ` Đã dừng, ${slots.length - results.length} video chưa gửi.`
+      : ''
+    if (summary.failed > 0) setErrorMessage(summary.text + stoppedNote)
+    else if (results.length > 0) setSuccessMessage(summary.text + stoppedNote)
+    setIsSubmitting(false)
+    setSubmitProgress(null)
+  }
+
+  const handleStopBulkSchedule = () => {
+    stopRequestedRef.current = true
+    setStopRequested(true)
   }
 
   const handleAddHashtag = (tag: string) => {
@@ -1268,7 +1187,7 @@ export function PublisherPage() {
             </span>
           </div>
           <p className="page-subtitle">
-            Tự động đồng bộ video ngắn 10s từ Google Drive, thiết lập khoảng cách phát thông minh và lên lịch đăng hàng loạt lên Facebook Fanpage qua Pippit Cloud.
+            Chọn video ngắn trong Google Drive, đặt khung giờ và lên lịch đăng hàng loạt lên Facebook Fanpage / TikTok qua Pippit.
           </p>
 
           <div className="pub-status-tags">
@@ -1287,7 +1206,12 @@ export function PublisherPage() {
             <div className={`pub-tag ${activePages.length > 0 ? 'pub-tag-ok' : 'pub-tag-err'}`}>
               <Share2 size={13} />
               <span>
-                Fanpage Facebook: <strong>{activePages.length} Fanpage đang kết nối</strong>
+                Kênh đăng:{' '}
+                <strong>
+                  {activePages.length === 0
+                    ? 'chưa có kênh nào'
+                    : `${activePages.filter(p => targetPlatform(p) === 'facebook').length} Facebook · ${activePages.filter(p => targetPlatform(p) === 'tiktok').length} TikTok`}
+                </strong>
               </span>
             </div>
           </div>
@@ -1304,12 +1228,9 @@ export function PublisherPage() {
           <button
             type="button"
             className={`pub-tab-btn ${activeTab === 'history' ? 'pub-tab-active' : ''}`}
-            onClick={() => {
-              setActiveTab('history')
-              loadTasks()
-            }}
+            onClick={() => setActiveTab('history')}
           >
-            <CalendarClock size={15} /> Lịch đã đặt ({tasks.length})
+            <CalendarClock size={15} /> Lịch đã đặt
           </button>
         </div>
       </div>
@@ -1380,7 +1301,7 @@ export function PublisherPage() {
               <button
                 type="button"
                 className="chrome-button pub-btn-change-folder"
-                onClick={openFolderPickerModal}
+                onClick={() => openFolderPickerModal()}
               >
                 <Folder size={13} /> Đổi thư mục
               </button>
@@ -1829,8 +1750,8 @@ export function PublisherPage() {
                 <div className="pub-card-title">
                   <Share2 size={17} className="pub-icon-fb" />
                   <div>
-                    <h3>2. Cấu hình Kênh & Lịch phát tự động</h3>
-                    <span>Chọn Fanpage đích và thiết lập giãn cách thời gian</span>
+                    <h3>2. Kênh đăng & lịch phát</h3>
+                    <span>Chọn kênh Facebook / TikTok và khung giờ đăng</span>
                   </div>
                 </div>
               </div>
@@ -1839,41 +1760,65 @@ export function PublisherPage() {
                 {/* Left side: Active Fanpage Selector */}
                 <div className="pub-config-side-pages">
                   <label className="pub-label">
-                    Fanpage Facebook Active ({selectedPageIds.size}/{activePages.length}):
+                    Kênh đăng (đã chọn {selectedPageIds.size}/{activePages.length}):
                   </label>
                   <div className="pub-active-pages-list">
                     {activePages.map(page => {
                       const isSelected = selectedPageIds.has(page.page_id)
+                      const plat = targetPlatform(page)
+                      const expired = page.un_expired === false
                       return (
                         <div
                           key={page.page_id}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={isSelected}
                           className={`pub-active-page-card ${
                             isSelected ? 'pub-active-page-card-selected' : ''
                           }`}
                           onClick={() => handleTogglePage(page.page_id)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              handleTogglePage(page.page_id)
+                            }
+                          }}
+                          title={selectedPageIds.size === 1 && isSelected ? 'Cần chọn ít nhất 1 kênh' : undefined}
                         >
                           <div className="pub-page-card-left">
-                            {page.avatar_url ? (
-                              <img
-                                src={page.avatar_url}
-                                alt=""
-                                className="pub-active-page-avatar"
-                              />
-                            ) : (
-                              <div className="pub-active-page-fb-icon">
-                                <Share2 size={16} />
-                              </div>
-                            )}
+                            <span className="pub-page-avatar-wrap">
+                              <span className={`pub-page-avatar-fallback pub-plat-${plat}`}>
+                                {(page.page_name || '?').charAt(0).toUpperCase()}
+                              </span>
+                              {page.avatar_url && (
+                                <img
+                                  src={page.avatar_url}
+                                  alt=""
+                                  className="pub-active-page-avatar"
+                                  onError={e => {
+                                    e.currentTarget.style.display = 'none'
+                                  }}
+                                />
+                              )}
+                              <span className={`pub-page-plat-badge pub-plat-${plat}`} title={plat === 'tiktok' ? 'TikTok' : 'Facebook'}>
+                                {plat === 'tiktok' ? <TikTokIcon size={9} /> : <FacebookIcon size={9} />}
+                              </span>
+                            </span>
                             <div className="pub-page-card-text">
                               <strong className="pub-page-card-name">{page.page_name}</strong>
                               <span className="pub-page-card-meta">
-                                ID: {page.page_id} • {page.account_email}
+                                {plat === 'tiktok' ? 'TikTok' : 'Facebook Page'}
+                                {page.handle ? ` · @${page.handle}` : ''} · {page.account_email}
                               </span>
                             </div>
                           </div>
 
                           <div className="pub-page-card-right">
-                            <span className="pub-page-status-pill">🟢 Đang kết nối</span>
+                            {expired ? (
+                              <span className="pub-page-status-pill pub-page-status-expired">Hết hạn ủy quyền</span>
+                            ) : (
+                              <span className="pub-page-status-pill">Đang kết nối</span>
+                            )}
                             <div
                               className={`pub-page-radio ${
                                 isSelected ? 'pub-page-radio-checked' : ''
@@ -1890,8 +1835,8 @@ export function PublisherPage() {
                       <div className="pub-no-pages-alert">
                         <AlertCircle size={18} />
                         <div>
-                          <strong>Chưa có Fanpage Facebook nào được liên kết</strong>
-                          <p>Vui lòng liên kết Fanpage trên Pippit để bắt đầu đăng bài.</p>
+                          <strong>Chưa có kênh Facebook / TikTok nào</strong>
+                          <p>Liên kết kênh trên Pippit rồi bấm quét lại tài khoản trong Cài đặt.</p>
                         </div>
                       </div>
                     )}
@@ -2154,7 +2099,7 @@ export function PublisherPage() {
                   <CalendarClock size={17} className="pub-icon-time" />
                   <div>
                     <h3>3. Dòng thời gian chi tiết</h3>
-                    <span>Tùy chỉnh lịch phát & Fanpage riêng cho từng video</span>
+                    <span>Chỉnh giờ và kênh riêng cho từng video</span>
                   </div>
                 </div>
 
@@ -2234,13 +2179,14 @@ export function PublisherPage() {
                       slotDate.getMinutes()
                     ).padStart(2, '0')}`
                     const periodInfo = getSlotPeriodName(timeStr)
+                    const isDuplicate = duplicateFileIds.has(slot.file_id)
 
                     return (
                       <div
                         key={slot.file_id || idx}
                         className={`pub-slot-card-detailed ${
                           isCustom ? 'pub-slot-card-customized' : ''
-                        }`}
+                        }${isDuplicate ? ' pub-slot-card-duplicate' : ''}`}
                       >
                         <div className="pub-slot-card-top-row">
                           <div className="pub-slot-title-left">
@@ -2259,6 +2205,14 @@ export function PublisherPage() {
                               <Clock size={11} /> {formatDuration(slot.duration_seconds)}
                             </span>
                             <span className="pub-slot-size-txt">{fmtBytes(slot.size_bytes)}</span>
+                            {isDuplicate && (
+                              <span
+                                className="pub-slot-dup-tag"
+                                title="Video này đã được đăng hoặc lên lịch lên đúng kênh đích"
+                              >
+                                <AlertTriangle size={11} /> Đã đăng lên kênh này
+                              </span>
+                            )}
                             {isCustom && (
                               <span className="pub-slot-custom-tag">Đã chỉnh giờ</span>
                             )}
@@ -2284,11 +2238,13 @@ export function PublisherPage() {
                               onChange={e => handleUpdateSlotPage(slot.file_id, e.target.value)}
                               className="pub-slot-page-select"
                             >
-                              {activePages.map(p => (
-                                <option key={p.page_id} value={p.page_id}>
-                                  {p.page_name}
-                                </option>
-                              ))}
+                              {activePages
+                                .filter(p => selectedPageIds.has(p.page_id) || p.page_id === slot.page_id)
+                                .map(p => (
+                                  <option key={p.page_id} value={p.page_id}>
+                                    {channelLabel(p)}
+                                  </option>
+                                ))}
                             </select>
                           </div>
 
@@ -2339,492 +2295,117 @@ export function PublisherPage() {
                 )}
               </div>
 
-              {/* Submit Action Block */}
-              <div className="pub-action-block" style={{ marginTop: 16 }}>
-                {isSubmitting && submitProgress && (
-                  <div className="pub-progress-wrap">
+              {/* Thanh hành động dính đáy: tóm tắt + đặt lịch + tiến trình */}
+              <div className="pub-action-bar">
+                {isSubmitting && submitProgress ? (
+                  <div className="pub-action-progress">
                     <div className="pub-progress-text">
                       <Loader2 size={14} className="spin" />
                       <span>
-                        Đang xử lý & lên lịch Pippit ({submitProgress.current}/{submitProgress.total})...
+                        {stopRequested ? 'Đang dừng sau video hiện tại… ' : 'Đang upload & lên lịch '}
+                        <strong>
+                          {submitProgress.current + 1}/{submitProgress.total}
+                        </strong>
+                        : {submitProgress.title}
                       </span>
                     </div>
                     <div className="wm-prog-bar-wrap">
                       <div
                         className="wm-prog-bar"
-                        style={{
-                          width: `${(submitProgress.current / submitProgress.total) * 100}%`,
-                        }}
+                        style={{ width: `${(submitProgress.current / submitProgress.total) * 100}%` }}
                       />
                     </div>
                   </div>
-                )}
-
-                <button
-                  type="button"
-                  className="pub-submit-btn"
-                  disabled={
-                    scheduledSlots.length === 0 ||
-                    isSubmitting ||
-                    activePages.length === 0 ||
-                    selectedPageIds.size === 0
-                  }
-                  onClick={handleStartBulkSchedule}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 size={18} className="spin" /> Đang kích hoạt Pippit...
-                    </>
-                  ) : (
-                    <>
-                      <UploadCloud size={18} /> BẮT ĐẦU ĐẶT LỊCH HÀNG LOẠT ({scheduledSlots.length} VIDEO)
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 2: SCHEDULED TASKS HISTORY & LIVE TRACKING */}
-      {activeTab === 'history' && (
-        <div className="settings-card pub-history-card">
-          {/* Header */}
-          <div className="pub-history-header">
-            <div>
-              <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CalendarClock size={20} color="#4f46e5" />
-                Lịch sử & Quản lý bài đăng Pippit ({tasks.length})
-              </h2>
-              <p>Theo dõi tiến độ phát sóng, lọc theo ngày và xem liên kết bài viết Facebook theo thời gian thực.</p>
-            </div>
-            <button
-              type="button"
-              className="chrome-button"
-              onClick={loadTasks}
-              disabled={isLoadingTasks}
-              style={{ gap: 6 }}
-            >
-              <RefreshCw size={13} className={isLoadingTasks ? 'spin' : ''} /> Làm mới trạng thái
-            </button>
-          </div>
-
-          {/* 1. Overview Stats Grid */}
-          <div className="pub-stat-grid">
-            <div className="pub-stat-card">
-              <div className="pub-stat-icon" style={{ background: '#e0e7ff', color: '#4f46e5' }}>
-                <CalendarClock size={20} />
-              </div>
-              <div>
-                <div className="pub-stat-val">{historyStats.total}</div>
-                <div className="pub-stat-lbl">Tổng bài đã lên lịch</div>
-              </div>
-            </div>
-
-            <div className="pub-stat-card">
-              <div className="pub-stat-icon" style={{ background: '#eff6ff', color: '#2563eb' }}>
-                <Clock size={20} />
-              </div>
-              <div>
-                <div className="pub-stat-val" style={{ color: '#2563eb' }}>{historyStats.waiting}</div>
-                <div className="pub-stat-lbl">Đang chờ phát</div>
-              </div>
-            </div>
-
-            <div className="pub-stat-card">
-              <div className="pub-stat-icon" style={{ background: '#f0fdf4', color: '#16a34a' }}>
-                <CheckCircle2 size={20} />
-              </div>
-              <div>
-                <div className="pub-stat-val" style={{ color: '#16a34a' }}>{historyStats.published}</div>
-                <div className="pub-stat-lbl">Đã phát thành công</div>
-              </div>
-            </div>
-
-            <div className="pub-stat-card">
-              <div className="pub-stat-icon" style={{ background: '#fef2f2', color: '#dc2626' }}>
-                <XCircle size={20} />
-              </div>
-              <div>
-                <div className="pub-stat-val" style={{ color: '#dc2626' }}>{historyStats.failed}</div>
-                <div className="pub-stat-lbl">Lỗi / Thất bại</div>
-              </div>
-            </div>
-          </div>
-
-          {/* 2. Interactive Filter Toolbar */}
-          <div className="pub-filter-toolbar">
-            {/* Top row: Status Tabs & Quick Date presets */}
-            <div className="pub-filter-top-row">
-              <div className="pub-filter-status-pills">
-                <button
-                  type="button"
-                  className={`pub-filter-pill-btn ${historyStatusFilter === 'all' ? 'pub-filter-pill-active' : ''}`}
-                  onClick={() => setHistoryStatusFilter('all')}
-                >
-                  Tất cả ({historyStats.total})
-                </button>
-                <button
-                  type="button"
-                  className={`pub-filter-pill-btn ${historyStatusFilter === 'waiting' ? 'pub-filter-pill-active' : ''}`}
-                  onClick={() => setHistoryStatusFilter('waiting')}
-                >
-                  <Clock size={12} /> Đang chờ ({historyStats.waiting})
-                </button>
-                <button
-                  type="button"
-                  className={`pub-filter-pill-btn ${historyStatusFilter === 'published' ? 'pub-filter-pill-active' : ''}`}
-                  onClick={() => setHistoryStatusFilter('published')}
-                >
-                  <CheckCircle2 size={12} /> Đã đăng ({historyStats.published})
-                </button>
-                {historyStats.failed > 0 && (
-                  <button
-                    type="button"
-                    className={`pub-filter-pill-btn ${historyStatusFilter === 'failed' ? 'pub-filter-pill-active' : ''}`}
-                    onClick={() => setHistoryStatusFilter('failed')}
-                  >
-                    <XCircle size={12} /> Thất bại ({historyStats.failed})
-                  </button>
-                )}
-              </div>
-
-              {/* Quick Date Presets */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>Lọc ngày:</span>
-                <select
-                  value={historyDatePreset}
-                  onChange={e => setHistoryDatePreset(e.target.value as any)}
-                  className="pub-filter-select"
-                  style={{ minWidth: 120 }}
-                >
-                  <option value="all">Tất cả ngày</option>
-                  <option value="today">Hôm nay</option>
-                  <option value="tomorrow">Ngày mai</option>
-                  <option value="7days">7 ngày tới</option>
-                  <option value="custom">Chọn ngày cụ thể...</option>
-                </select>
-
-                {historyDatePreset === 'custom' && (
-                  <input
-                    type="date"
-                    value={historyCustomDate}
-                    onChange={e => setHistoryCustomDate(e.target.value)}
-                    className="pub-filter-select"
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Bottom row: Search query, Fanpage filter, Sort & Page size */}
-            <div className="pub-filter-bottom-row">
-              <div className="pub-filter-search-wrap">
-                <Search size={14} className="pub-filter-search-icon" />
-                <input
-                  type="text"
-                  placeholder="Tìm theo tên video, hashtag, ID bài đăng..."
-                  value={historySearch}
-                  onChange={e => setHistorySearch(e.target.value)}
-                  className="pub-filter-search-input"
-                />
-                {historySearch && (
-                  <button
-                    type="button"
-                    onClick={() => setHistorySearch('')}
-                    style={{
-                      position: 'absolute',
-                      right: 8,
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      color: '#94a3b8',
-                    }}
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-
-              <div className="pub-filter-controls-group">
-                {/* Fanpage filter */}
-                {distinctHistoryPages.length > 1 && (
-                  <select
-                    value={historyPageFilter}
-                    onChange={e => setHistoryPageFilter(e.target.value)}
-                    className="pub-filter-select"
-                  >
-                    <option value="all">Tất cả Fanpage ({distinctHistoryPages.length})</option>
-                    {distinctHistoryPages.map(p => (
-                      <option key={p.page_id} value={p.page_id}>
-                        {p.page_name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {/* Sort Order */}
-                <select
-                  value={historySortOrder}
-                  onChange={e => setHistorySortOrder(e.target.value as any)}
-                  className="pub-filter-select"
-                >
-                  <option value="time_asc">Giờ phát: Sớm nhất trước ↗</option>
-                  <option value="time_desc">Giờ phát: Muộn nhất trước ↘</option>
-                  <option value="created_desc">Mới tạo gần đây nhất</option>
-                </select>
-
-                {/* Page Size */}
-                <select
-                  value={historyPageSize}
-                  onChange={e => setHistoryPageSize(Number(e.target.value))}
-                  className="pub-filter-select"
-                  style={{ minWidth: 90 }}
-                >
-                  <option value={10}>10 / trang</option>
-                  <option value={15}>15 / trang</option>
-                  <option value={30}>30 / trang</option>
-                  <option value={50}>50 / trang</option>
-                  <option value={100}>100 / trang</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Task List Table */}
-          <div className="pub-tasks-table-wrap">
-            {filteredTasks.length === 0 ? (
-              <div className="pub-empty-box" style={{ padding: '50px 0' }}>
-                <CalendarClock size={36} color="#94a3b8" />
-                <p style={{ marginTop: 10, fontSize: 13.5, color: '#64748b' }}>
-                  {tasks.length === 0
-                    ? 'Chưa có bài đăng nào được lên lịch.'
-                    : 'Không tìm thấy bài đăng nào phù hợp với bộ lọc hiện tại.'}
-                </p>
-                {tasks.length > 0 && (
-                  <button
-                    type="button"
-                    className="chrome-button"
-                    onClick={() => {
-                      setHistorySearch('')
-                      setHistoryStatusFilter('all')
-                      setHistoryPageFilter('all')
-                      setHistoryDatePreset('all')
-                      setHistoryCustomDate('')
-                    }}
-                    style={{ marginTop: 8 }}
-                  >
-                    Xóa tất cả bộ lọc
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="pub-tasks-list">
-                {paginatedTasks.map((task, idx) => {
-                  const globalIdx = (historyPage - 1) * historyPageSize + idx + 1
-                  const schedDate = task.schedule_time_ms
-                    ? new Date(task.schedule_time_ms)
-                    : null
-                  const schedDateStr = schedDate
-                    ? schedDate.toLocaleString('vi-VN', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    : '—'
-                  const isPublished = task.published || task.status === 3
-                  const isFailed = task.status === 4 || Boolean(task.failed_reason)
-
-                  // Period name (Sáng/Trưa/Chiều/Tối)
-                  let periodBadge = ''
-                  if (schedDate) {
-                    const hh = schedDate.getHours()
-                    if (hh >= 5 && hh < 11) periodBadge = 'Sáng'
-                    else if (hh >= 11 && hh < 15) periodBadge = 'Trưa'
-                    else if (hh >= 15 && hh < 18) periodBadge = 'Chiều'
-                    else periodBadge = 'Tối'
-                  }
-
-                  return (
-                    <div key={task.task_id || `${task.schedule_time_ms}_${idx}`} className="pub-task-row">
-                      <div className="pub-task-info">
-                        <div className="pub-task-title-line">
-                          <span
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              background: '#f1f5f9',
-                              color: '#475569',
-                              padding: '2px 7px',
-                              borderRadius: 6,
-                            }}
-                          >
-                            #{globalIdx}
-                          </span>
-                          <strong>{task.title || 'Video ngắn'}</strong>
-
-                          <span
-                            className={`pub-task-status ${
-                              isPublished
-                                ? 'pub-status-done'
-                                : isFailed
-                                ? 'pub-status-err'
-                                : 'pub-status-wait'
-                            }`}
-                          >
-                            {isPublished ? (
-                              <>
-                                <CheckCircle2 size={12} /> Đã đăng
-                              </>
-                            ) : isFailed ? (
-                              <>
-                                <XCircle size={12} /> Thất bại
-                              </>
-                            ) : (
-                              <>
-                                <Clock size={12} /> Đang chờ phát
-                              </>
-                            )}
-                          </span>
-
-                          {periodBadge && !isPublished && (
-                            <span
-                              style={{
-                                fontSize: 10.5,
-                                fontWeight: 700,
-                                padding: '1px 6px',
-                                borderRadius: 4,
-                                background: '#f8fafc',
-                                border: '1px solid #e2e8f0',
-                                color: '#64748b',
-                              }}
-                            >
-                              {periodBadge}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="pub-task-desc">{task.description}</div>
-
-                        <div className="pub-task-meta">
-                          <span>
-                            <Share2 size={12} /> <strong>{task.page_name || task.page_id || 'Fanpage'}</strong>
-                          </span>
-                          <span>
-                            <Calendar size={12} /> Hẹn lúc: <strong>{schedDateStr}</strong>
-                          </span>
-                          {task.task_id && (
-                            <span style={{ color: '#94a3b8' }}>
-                              ID: <code>{task.task_id}</code>
-                            </span>
-                          )}
-                          {task.failed_reason && (
-                            <span style={{ color: '#ef4444', fontWeight: 600 }}>Lỗi: {task.failed_reason}</span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="pub-task-actions">
-                        {task.post_url ? (
-                          <a
-                            href={task.post_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="primary-button pub-btn-link"
-                            style={{ textDecoration: 'none' }}
-                          >
-                            <ExternalLink size={13} /> Xem bài viết ↗
-                          </a>
-                        ) : isPublished ? (
-                          <span className="pub-published-text" style={{ color: '#16a34a', fontWeight: 600, fontSize: 12 }}>
-                            ✅ Đã đăng Facebook
-                          </span>
-                        ) : (
-                          <span className="pub-waiting-text" style={{ color: '#64748b', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            <Clock size={12} /> Đang xếp hàng...
+                ) : (
+                  <div className="pub-action-summary">
+                    {scheduledSlots.length === 0 ? (
+                      <span>Chưa chọn video nào.</span>
+                    ) : (
+                      <>
+                        <span>
+                          <strong>{scheduledSlots.length} video</strong> →{' '}
+                          {[...countByTarget(scheduledSlots)]
+                            .map(([pid, n]) => {
+                              const pg = activePages.find(p => p.page_id === pid)
+                              return `${pg ? channelLabel(pg) : pid} (${n})`
+                            })
+                            .join(', ')}
+                        </span>
+                        {slotRange && (
+                          <span className="pub-action-range">
+                            <Clock size={12} /> {fmtSlotTime(slotRange.first)}
+                            {slotRange.last !== slotRange.first ? ` → ${fmtSlotTime(slotRange.last)}` : ''}
                           </span>
                         )}
-                      </div>
-                    </div>
-                  )
-                })}
+                        {duplicateFileIds.size > 0 && (
+                          <span className="pub-action-dup">
+                            <AlertTriangle size={12} /> {duplicateFileIds.size} video đã đăng lên kênh đích
+                            <button type="button" onClick={handleDeselectDuplicates}>
+                              Bỏ chọn
+                            </button>
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {isSubmitting ? (
+                  <button
+                    type="button"
+                    className="pub-stop-btn"
+                    onClick={handleStopBulkSchedule}
+                    disabled={stopRequested}
+                  >
+                    <Square size={14} /> {stopRequested ? 'Đang dừng…' : 'Dừng'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="pub-submit-btn"
+                    disabled={
+                      scheduledSlots.length === 0 ||
+                      activePages.length === 0 ||
+                      selectedPageIds.size === 0
+                    }
+                    onClick={handleStartBulkSchedule}
+                  >
+                    <UploadCloud size={17} /> Đặt lịch {scheduledSlots.length} video
+                  </button>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* 4. Pagination Navigation Bar */}
-          {filteredTasks.length > 0 && (
-            <div className="pub-pagination-bar">
-              <div style={{ fontSize: 12, color: '#64748b' }}>
-                Hiển thị <strong>{(historyPage - 1) * historyPageSize + 1}</strong> –{' '}
-                <strong>{Math.min(historyPage * historyPageSize, filteredTasks.length)}</strong> trên tổng số{' '}
-                <strong>{filteredTasks.length}</strong> bài đăng (Trang {historyPage}/{totalPages})
-              </div>
-
-              <div className="pub-page-nav-btns">
-                <button
-                  type="button"
-                  className="pub-page-num-btn"
-                  onClick={() => setHistoryPage(1)}
-                  disabled={historyPage === 1}
-                  title="Về trang đầu"
-                >
-                  ««
-                </button>
-                <button
-                  type="button"
-                  className="pub-page-num-btn"
-                  onClick={() => setHistoryPage(prev => Math.max(1, prev - 1))}
-                  disabled={historyPage === 1}
-                  title="Trang trước"
-                >
-                  <ChevronLeft size={14} />
-                </button>
-
-                {/* Numeric page pills */}
-                {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter(p => p === 1 || p === totalPages || Math.abs(p - historyPage) <= 2)
-                  .map((pageNum, i, arr) => {
-                    const showEllipsis = i > 0 && pageNum - arr[i - 1] > 1
-                    return (
-                      <span key={pageNum} style={{ display: 'inline-flex', alignItems: 'center' }}>
-                        {showEllipsis && <span style={{ padding: '0 4px', color: '#94a3b8' }}>...</span>}
-                        <button
-                          type="button"
-                          className={`pub-page-num-btn ${historyPage === pageNum ? 'pub-page-num-active' : ''}`}
-                          onClick={() => setHistoryPage(pageNum)}
-                        >
-                          {pageNum}
-                        </button>
-                      </span>
-                    )
-                  })}
-
-                <button
-                  type="button"
-                  className="pub-page-num-btn"
-                  onClick={() => setHistoryPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={historyPage >= totalPages}
-                  title="Trang sau"
-                >
-                  <ChevronRight size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="pub-page-num-btn"
-                  onClick={() => setHistoryPage(totalPages)}
-                  disabled={historyPage >= totalPages}
-                  title="Đến trang cuối"
-                >
-                  »»
-                </button>
-              </div>
+              {runResults && runResults.length > 0 && (
+                <div className="pub-run-results">
+                  <div className="pub-run-results-head">
+                    <strong>Kết quả lượt đặt lịch: {summarizeRun(runResults).text}</strong>
+                    {!isSubmitting && (
+                      <button type="button" className="pub-icon-close" onClick={() => setRunResults(null)} title="Đóng">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                  <ul>
+                    {runResults.map((r, i) => (
+                      <li key={`${r.file_id}-${i}`} className={r.ok ? 'is-ok' : 'is-err'}>
+                        {r.ok ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                        <span className="pub-run-title">{r.title}</span>
+                        <span className="pub-run-meta">
+                          {r.page_name} · {fmtSlotTime(r.schedule_time_ms)}
+                        </span>
+                        {!r.ok && r.error && <span className="pub-run-err">{r.error}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
+
+      {/* TAB 2: LỊCH ĐÃ ĐẶT — dùng chung component với Lịch sử > Đăng FB & TikTok */}
+      {activeTab === 'history' && <PippitHistoryTab />}
 
       {/* FOLDER PICKER MODAL */}
       {isFolderModalOpen && (
@@ -3109,8 +2690,8 @@ export function PublisherPage() {
                     {/* Facebook Post Header */}
                     <div className="fb-mock-header">
                       <div className="fb-mock-author">
-                        {targetPage?.picture_url ? (
-                          <img src={targetPage.picture_url} alt="" className="fb-mock-avatar" />
+                        {targetPage?.avatar_url ? (
+                          <img src={targetPage.avatar_url} alt="" className="fb-mock-avatar" />
                         ) : (
                           <div className="fb-mock-avatar-placeholder">
                             {targetPage?.page_name?.charAt(0) || 'F'}

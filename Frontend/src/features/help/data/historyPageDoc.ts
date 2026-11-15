@@ -5,7 +5,7 @@ export const historyPageDoc: HelpDoc = {
   title: 'Lịch sử',
   summary:
     'Nơi tra cứu mọi thứ đã làm và đã đăng: lịch phát sóng theo tháng, các video Studio đã tạo (kèm kịch bản lồng tiếng), bài đã đăng qua Pippit (Facebook/TikTok) và các video đã đăng lên YouTube.',
-  verifiedAt: '2026-11-12',
+  verifiedAt: '2026-11-15',
   requires: [],
   start: [
     {
@@ -36,7 +36,14 @@ export const historyPageDoc: HelpDoc = {
     {
       id: 'pippit',
       name: 'Đăng FB & TikTok (Pippit)',
-      what: 'Lịch sử bài đăng qua Pippit: tìm theo tiêu đề hoặc Page, làm mới danh sách, xem trạng thái và lỗi của từng bài.',
+      what: 'Lịch sử bài đăng qua Pippit, nhóm theo ngày đăng. Mở tab là hiện ngay dữ liệu đã lưu rồi tự đồng bộ với Pippit; nút “Đồng bộ” lấy lại trạng thái mới nhất.',
+      how: [
+        'Lọc theo trạng thái: Đang hẹn giờ, Quá giờ, chưa xác nhận, Đã đăng, Lỗi, Không thấy trên Pippit.',
+        'Lọc theo nền tảng (Facebook / TikTok) và theo Page / kênh; ô tìm kiếm không phân biệt dấu (tiêu đề, caption, kênh, Task ID).',
+        'Bấm một bài để xem caption, hashtag, lý do lỗi, Task ID, tài khoản; mở bài trên Facebook/TikTok, “Copy caption”, hoặc “Mở video gốc” (bài đăng từ Video Studio).',
+        '“Tải thêm” để xem tiếp khi danh sách dài.',
+      ],
+      tip: 'Nếu tài khoản Pippit hết phiên, app tự đăng nhập lại bằng mật khẩu đã lưu. Không được thì hiện cảnh báo vàng kèm nút “Mở Cài đặt”.',
     },
     {
       id: 'youtube',
@@ -62,10 +69,21 @@ export const historyPageDoc: HelpDoc = {
       fix: 'Bấm nút đồng bộ để lấy dữ liệu mới từ Pippit và YouTube.',
     },
     {
+      symptom: 'Bài Pippit hiện “Quá giờ, chưa xác nhận”',
+      fix: 'Đã qua giờ hẹn hơn 30 phút mà chưa có kết quả từ Pippit. Bấm “Đồng bộ”; nếu có cảnh báo tài khoản chưa đồng bộ được, đăng nhập lại tài khoản Pippit trong Cài đặt.',
+      link: 'Cài đặt',
+    },
+    {
+      symptom: 'Bài Pippit hiện “Không thấy trên Pippit”',
+      fix: 'Tài khoản đồng bộ được nhưng Pippit không có bài này: bài đã bị xóa trên Pippit hoặc lúc lên lịch Pippit không tạo được task (không có Task ID). Kiểm tra trên trang Pippit, lên lịch lại nếu cần.',
+    },
+    {
       symptom: 'Xóa video báo “Xóa video thất bại”',
       fix: 'File có thể đang được dùng bởi tiến trình khác. Đóng trình phát/job đang chạy rồi thử lại.',
     },
   ],
   related: ['Recap & Audio', 'Lên lịch Youtube', 'Lên lịch Pippit', 'Dashboard', 'Cài đặt'],
-  changes: [],
+  changes: [
+    { date: '2026-11-15', text: 'Tab “Đăng FB & TikTok (Pippit)” làm lại: danh sách gọn nhóm theo ngày, lọc theo nền tảng/kênh, trạng thái mới “Quá giờ, chưa xác nhận” và “Không thấy trên Pippit”, cảnh báo tài khoản không đồng bộ được. Sửa: bài TikTok trước đây kẹt ở “Đang lên lịch” vì không bao giờ được đồng bộ; bài TikTok hiện đúng biểu tượng và link.' },
+  ],
 }

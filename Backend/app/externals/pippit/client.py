@@ -35,7 +35,12 @@ PROFILES = {
 }
 
 SOON_OFFSET_MS = 60 * 1000  # Hẹn giờ tối thiểu +1 phút
-PIPPIT_STATUS_PUBLISHED = 3  # status task đã đăng thành công lên Facebook
+PIPPIT_STATUS_PUBLISHED = 3  # status task đã đăng thành công (Facebook lẫn TikTok)
+PIPPIT_STATUS_FAILED = 4  # status task đăng lỗi (đi kèm failed_reason)
+
+PLATFORM_FACEBOOK = 301
+PLATFORM_TIKTOK = 1
+TIKTOK_PLATFORM_TYPES = {1, 101, 1001}
 
 GUEST_COOKIES = {
     "x-web-secsdk-uid": "754e5488-b206-4fb1-904e-1cd05ea701ee",
@@ -343,6 +348,47 @@ def post_id_from_link(link: str) -> str:
     return tail if tail.isdigit() else ""
 
 
+def parse_schedule_task(t: dict) -> dict:
+    """Chuẩn hoá một phần tử `data` của list_schedule_task (Facebook hoặc TikTok)."""
+    try:
+        ptype = int(t.get("platform_type") or 0)
+    except (TypeError, ValueError):
+        ptype = 0
+    is_tiktok = ptype in TIKTOK_PLATFORM_TYPES
+    user = t.get("platform_user") or {}
+    handle = t.get("platform_unique_name") or user.get("unique_name") or ""
+    link = t.get("platform_item_link") or ""
+    if is_tiktok:
+        param = t.get("tiktok_publish_param") or {}
+        # Pippit trả link TikTok thiếu handle: https://www.tiktok.com/@/video/<id>
+        if handle and "/@/video/" in link:
+            link = link.replace("/@/video/", f"/@{handle}/video/")
+        text = param.get("title") or param.get("description") or ""
+        title = text.split("\n", 1)[0].strip()
+        description = param.get("description") or text
+    else:
+        param = t.get("facebook_page_publish_param") or {}
+        title = param.get("title") or ""
+        description = param.get("description") or ""
+    status = t.get("status")
+    return {
+        "task_id": str(t.get("id") or ""),
+        "status": status,
+        "published": status == PIPPIT_STATUS_PUBLISHED,
+        "platform": "tiktok" if is_tiktok else "facebook",
+        "post_id": post_id_from_link(link),
+        "post_url": link,
+        "page_id": str(t.get("platform_user_id") or ""),
+        "page_name": user.get("nick_name") or handle or "",
+        "handle": handle,
+        "cover_url": t.get("cover_url") or "",
+        "schedule_time_ms": t.get("schedule_time") or 0,
+        "title": title,
+        "description": description,
+        "failed_reason": t.get("failed_reason") or "",
+    }
+
+
 # ===========================================================================
 # PippitClient Class
 # ===========================================================================
@@ -630,15 +676,37 @@ class PippitClient:
         return ""
 
     # -- Tra cứu lịch bài đăng --------------------------------------------
-    def list_schedule_tasks(self, page_ids: list[str] | None = None, limit: int = 100) -> list[dict]:
+    def list_schedule_tasks(
+        self,
+        page_ids: list[str] | None = None,
+        limit: int = 500,
+        tiktok_ids: list[str] | None = None,
+    ) -> list[dict]:
+        """Lấy các task lịch đăng của Facebook Page (key "301") và TikTok (key "1").
+
+        Đã thử thật (11/2026): một request nhận cả hai key; Pippit bỏ qua `count`
+        và không trả cursor tiếp theo, nên không có phân trang.
+        """
         now_ms = int(time.time() * 1000)
-        p_ids = page_ids or []
-        if not p_ids:
+        fb_ids = [str(i) for i in (page_ids or []) if i]
+        tt_ids = [str(i) for i in (tiktok_ids or []) if i]
+        if not fb_ids and not tt_ids:
             try:
-                accs = self.facebook_accounts()
-                p_ids = [str(a.get("platform_user_id")) for a in accs if a.get("platform_user_id")]
+                bound = self.bound_accounts()
+                fb_ids = [str(a.get("platform_user_id")) for a in bound.get("facebook", []) if a.get("platform_user_id")]
+                tt_ids = [str(a.get("platform_user_id")) for a in bound.get("tiktok", []) if a.get("platform_user_id")]
+            except PippitAuthError:
+                raise
             except Exception:
-                p_ids = []
+                pass
+        if not fb_ids and not tt_ids:
+            return []
+
+        user_ids: dict[str, list[str]] = {}
+        if fb_ids:
+            user_ids[str(PLATFORM_FACEBOOK)] = fb_ids
+        if tt_ids:
+            user_ids[str(PLATFORM_TIKTOK)] = tt_ids
 
         # Quét lịch trong khoảng 180 ngày trước và 180 ngày tới
         body = {
@@ -647,29 +715,12 @@ class PippitClient:
             "start_time": now_ms - (180 * 86400 * 1000),
             "end_time": now_ms + (180 * 86400 * 1000),
             "status_list": [1, 2, 3, 4, 6],
-            "platform_user_ids": {"301": p_ids},
+            "platform_user_ids": user_ids,
         }
         j = self.post("/api/biz/v1/publish/list_schedule_task", body, "publish")
         if j.get("ret") != "0":
+            if str(j.get("ret")) == "1017":
+                raise PippitAuthError("Cookie Pippit đã hết hạn - Cần đăng nhập lại.")
             raise PippitError(f"list_schedule_task thất bại: {j}")
 
-        out = []
-        for t in j.get("data") or []:
-            param = t.get("facebook_page_publish_param") or {}
-            link = t.get("platform_item_link") or ""
-            out.append(
-                {
-                    "task_id": str(t.get("id") or ""),
-                    "status": t.get("status"),
-                    "published": t.get("status") == PIPPIT_STATUS_PUBLISHED,
-                    "post_id": post_id_from_link(link),
-                    "post_url": link,
-                    "page_id": str(t.get("platform_user_id") or ""),
-                    "page_name": ((t.get("platform_user") or {}).get("nick_name") or ""),
-                    "schedule_time_ms": t.get("schedule_time") or 0,
-                    "title": param.get("title") or "",
-                    "description": param.get("description") or "",
-                    "failed_reason": t.get("failed_reason") or "",
-                }
-            )
-        return out
+        return [parse_schedule_task(t) for t in (j.get("data") or [])]

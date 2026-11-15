@@ -9,6 +9,7 @@ from app.externals.pippit.schemas import (
     PippitPublishRequest,
     PippitPublishResponse,
     PippitScheduleTaskOut,
+    PippitTasksOverview,
 )
 
 router = APIRouter(prefix="/api/pippit", tags=["Pippit AI"])
@@ -58,8 +59,14 @@ def get_tasks(account_id: str):
 
 @router.get("/all-tasks")
 def get_all_tasks():
-    """Lấy danh sách tất cả các bài đăng đã lên lịch trên toàn bộ tài khoản Pippit."""
+    """Lấy danh sách tất cả các bài đăng đã lên lịch trên toàn bộ tài khoản Pippit (luôn đồng bộ live)."""
     return service.list_all_saved_accounts_tasks()
+
+
+@router.get("/tasks", response_model=PippitTasksOverview)
+def get_tasks_overview(sync: bool = False):
+    """Lịch sử bài đăng: sync=false đọc cache; sync=true đồng bộ live và báo trạng thái từng tài khoản."""
+    return service.get_tasks_overview(sync=sync)
 
 
 @router.post("/publish", response_model=PippitPublishResponse)

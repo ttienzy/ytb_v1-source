@@ -142,10 +142,8 @@ def get_daily_publishing_summary(force_sync: bool = False) -> PublisherDailySumm
     if force_sync:
         try:
             # Đồng bộ trực tiếp với Pippit API từ máy chủ
+            # Đồng bộ trực tiếp + tự ghi lại cache pippit_tasks.json
             pippit_tasks = list_all_saved_accounts_tasks()
-            # Lưu lại vào cache
-            PIPPIT_TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            PIPPIT_TASKS_FILE.write_text(json.dumps(pippit_tasks, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
             logger.warning("[PublisherMonitor] Không thể live sync tasks từ Pippit API: %s", exc)
             pippit_tasks = get_pippit_saved_tasks()
@@ -155,7 +153,6 @@ def get_daily_publishing_summary(force_sync: bool = False) -> PublisherDailySumm
         if not pippit_tasks:
             try:
                 pippit_tasks = list_all_saved_accounts_tasks()
-                PIPPIT_TASKS_FILE.write_text(json.dumps(pippit_tasks, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
 
@@ -324,7 +321,6 @@ def get_calendar_events(month: str | None = None, force_sync: bool = False) -> C
     if force_sync:
         try:
             pippit_tasks = list_all_saved_accounts_tasks()
-            PIPPIT_TASKS_FILE.write_text(json.dumps(pippit_tasks, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pippit_tasks = get_pippit_saved_tasks()
     else:
@@ -332,7 +328,6 @@ def get_calendar_events(month: str | None = None, force_sync: bool = False) -> C
         if not pippit_tasks:
             try:
                 pippit_tasks = list_all_saved_accounts_tasks()
-                PIPPIT_TASKS_FILE.write_text(json.dumps(pippit_tasks, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
 

@@ -225,7 +225,7 @@ export function App() {
               initialUrls={studioBatchUrls}
             />
           ) : activePage === 'Lịch sử' ? (
-            <HistoryPage />
+            <HistoryPage setActivePage={setActivePage} />
           ) : activePage === 'Crawl truyện' ? (
             <StoriesPage />
           ) : activePage === 'Dashboard' ? (

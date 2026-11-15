@@ -1,6 +1,8 @@
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,31 +28,50 @@ from app.externals.pippit.schemas import (
 
 PIPPIT_TASKS_FILE = TOOLS_DIR / "Backend" / "Data" / "pippit_tasks.json"
 
+# Mọi thao tác đọc-sửa-ghi pippit_tasks.json đi qua lock này (FastAPI chạy các
+# endpoint sync trong threadpool, đăng bài và đồng bộ có thể chạy cùng lúc).
+_TASKS_LOCK = threading.RLock()
+_SYNC_WORKERS = 4
+
+# Trường lấy từ Pippit (nguồn sự thật về trạng thái) khi task có trong kết quả live.
+_LIVE_STATUS_FIELDS = ("status", "published", "failed_reason")
+# Trường live chỉ dùng để lấp chỗ trống, không ghi đè dữ liệu local (tiêu đề gốc...).
+_LIVE_FILL_FIELDS = ("post_url", "post_id", "page_name", "handle", "cover_url", "platform", "page_id", "schedule_time_ms")
+
 
 def _get_saved_tasks() -> list[dict]:
     """Đọc lịch sử các task đã đăng/lên lịch từ pippit_tasks.json."""
     if not PIPPIT_TASKS_FILE.exists():
         return []
     try:
-        return json.loads(PIPPIT_TASKS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(PIPPIT_TASKS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
     except Exception:
         return []
 
 
+def _write_tasks(tasks: list[dict]) -> None:
+    """Ghi nguyên tử (file tạm + replace) để không để lại JSON hỏng khi bị ngắt giữa chừng."""
+    PIPPIT_TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PIPPIT_TASKS_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, PIPPIT_TASKS_FILE)
+
+
 def _save_task_record(task_data: dict) -> None:
     """Lưu 1 task bài đăng vào pippit_tasks.json."""
-    tasks = _get_saved_tasks()
-    tid = task_data.get("task_id")
-    idx = next((i for i, t in enumerate(tasks) if t.get("task_id") == tid), -1) if tid else -1
-    if idx >= 0:
-        tasks[idx].update(task_data)
-    else:
-        tasks.insert(0, task_data)
-    try:
-        PIPPIT_TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        PIPPIT_TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as exc:
-        print(f"[Pippit] Không thể lưu task record: {exc}")
+    with _TASKS_LOCK:
+        tasks = _get_saved_tasks()
+        tid = task_data.get("task_id")
+        idx = next((i for i, t in enumerate(tasks) if t.get("task_id") == tid), -1) if tid else -1
+        if idx >= 0:
+            tasks[idx].update(task_data)
+        else:
+            tasks.insert(0, task_data)
+        try:
+            _write_tasks(tasks)
+        except Exception as exc:
+            print(f"[Pippit] Không thể lưu task record: {exc}")
 
 
 def get_saved_pippit_accounts() -> list[dict]:
@@ -407,76 +428,291 @@ def list_account_tasks(account_id: str) -> list[PippitScheduleTaskOut]:
     if not acc:
         raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Pippit.")
 
+    fb_ids, tt_ids = _account_target_ids(acc)
+    try:
+        tasks = _account_client(acc).list_schedule_tasks(page_ids=fb_ids, tiktok_ids=tt_ids)
+        return [PippitScheduleTaskOut(**t) for t in tasks]
+    except PippitAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lấy danh sách tasks thất bại: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Đồng bộ lịch sử bài đăng (local cache pippit_tasks.json ⇄ Pippit live)
+# ---------------------------------------------------------------------------
+def _account_target_ids(acc: dict) -> tuple[list[str], list[str]]:
     fb_ids = [str(p.get("page_id")) for p in acc.get("facebook_pages", []) if p.get("page_id")]
     tt_ids = [str(t.get("channel_id")) for t in acc.get("tiktok_channels", []) if t.get("channel_id")]
-    all_target_ids = fb_ids + tt_ids
+    return fb_ids, tt_ids
 
-    c = PippitClient(
+
+def _account_client(acc: dict) -> PippitClient:
+    return PippitClient(
         cookies=acc.get("cookies", ""),
         workspace_id=acc.get("workspace_id", ""),
         proxy=acc.get("proxy", ""),
         user_id=acc.get("user_id", ""),
     )
-    try:
-        tasks = c.list_schedule_tasks(page_ids=all_target_ids)
-        return [PippitScheduleTaskOut(**t) for t in tasks]
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Lấy danh sách tasks thất bại: {exc}") from exc
 
 
-def list_all_saved_accounts_tasks() -> list[dict]:
-    """Lấy toàn bộ tasks đã lên lịch từ local cache + live sync từ Pippit."""
-    local_tasks = _get_saved_tasks()
-    accounts = get_saved_pippit_accounts()
+def _platform_index(accounts: list[dict]) -> dict[str, dict]:
+    """page_id/channel_id -> {platform, name, handle, account_id, account_email} từ config."""
+    idx: dict[str, dict] = {}
+    for a in accounts:
+        for p in a.get("facebook_pages", []):
+            pid = str(p.get("page_id") or "").strip()
+            if pid:
+                idx[pid] = {
+                    "platform": "facebook",
+                    "name": p.get("page_name", ""),
+                    "handle": "",
+                    "account_id": a.get("id"),
+                    "account_email": a.get("email"),
+                }
+        for t in a.get("tiktok_channels", []):
+            cid = str(t.get("channel_id") or "").strip()
+            if cid:
+                idx[cid] = {
+                    "platform": "tiktok",
+                    "name": t.get("nickname", ""),
+                    "handle": t.get("handle", ""),
+                    "account_id": a.get("id"),
+                    "account_email": a.get("email"),
+                }
+    return idx
 
-    live_tasks_map = {}
-    for acc in accounts:
-        cookies = acc.get("cookies", "")
-        if not cookies:
-            continue
-        fb_ids = [str(p.get("page_id")) for p in acc.get("facebook_pages", []) if p.get("page_id")]
-        tt_ids = [str(t.get("channel_id")) for t in acc.get("tiktok_channels", []) if t.get("channel_id")]
-        all_ids = fb_ids + tt_ids
-        try:
-            c = PippitClient(
-                cookies=cookies,
-                workspace_id=acc.get("workspace_id", ""),
-                proxy=acc.get("proxy", ""),
-                user_id=acc.get("user_id", ""),
-            )
-            fetched = c.list_schedule_tasks(page_ids=all_ids)
-            for t in fetched:
-                tid = t.get("task_id")
-                if tid:
-                    t["account_id"] = acc.get("id")
-                    t["account_email"] = acc.get("email")
-                    live_tasks_map[tid] = t
-        except Exception:
-            pass
 
-    merged = []
-    seen_ids = set()
+def merge_task_lists(
+    local_tasks: list[dict],
+    live_tasks: dict[str, dict],
+    accounts: list[dict],
+    synced_at: str | None = None,
+    synced_account_ids: set[str] | None = None,
+    now_ms: int | None = None,
+) -> list[dict]:
+    """Gộp cache local với kết quả live (hàm thuần, không I/O).
+
+    - Task có trong live: trạng thái lấy theo Pippit; các trường hiển thị chỉ lấp chỗ trống.
+    - Task chỉ có live (đăng từ web Pippit): thêm mới.
+    - Task cũ thiếu `platform`: suy ra từ page_id trong config tài khoản hoặc từ task khác cùng page.
+    - Tài khoản trong `synced_account_ids` đồng bộ thành công mà Pippit không trả task (trong
+      cửa sổ ±180 ngày Pippit quét) → `missing_on_pippit = True`.
+    """
+    pindex = _platform_index(accounts)
+    synced_ids = synced_account_ids or set()
+    now = now_ms if now_ms is not None else int(time.time() * 1000)
+    window_ms = 180 * 86400 * 1000
+    merged: list[dict] = []
+    seen: set[str] = set()
 
     for lt in local_tasks:
-        tid = lt.get("task_id")
+        t = dict(lt)
+        tid = str(t.get("task_id") or "")
         if tid:
-            seen_ids.add(tid)
-        if tid and tid in live_tasks_map:
-            live = live_tasks_map[tid]
-            lt["status"] = live.get("status", lt.get("status"))
-            lt["published"] = live.get("published", lt.get("published"))
+            if tid in seen:
+                continue
+            seen.add(tid)
+        live = live_tasks.get(tid) if tid else None
+        if not live and t.get("account_id") in synced_ids:
+            sched = t.get("schedule_time_ms") or 0
+            if not sched or abs(sched - now) < window_ms:
+                t["missing_on_pippit"] = True
+        if live:
+            t.pop("missing_on_pippit", None)
+            for f in _LIVE_STATUS_FIELDS:
+                if f in live:
+                    t[f] = live[f]
+            for f in _LIVE_FILL_FIELDS:
+                if live.get(f) and not t.get(f):
+                    t[f] = live[f]
+            # Link live luôn mới hơn (vd. link TikTok đã được sửa handle).
             if live.get("post_url"):
-                lt["post_url"] = live.get("post_url")
-            if live.get("failed_reason"):
-                lt["failed_reason"] = live.get("failed_reason")
-        merged.append(lt)
+                t["post_url"] = live["post_url"]
+            for f in ("account_id", "account_email"):
+                if live.get(f) and not t.get(f):
+                    t[f] = live[f]
+            if synced_at:
+                t["synced_at"] = synced_at
+        merged.append(t)
 
-    for tid, live in live_tasks_map.items():
-        if tid not in seen_ids:
-            merged.append(live)
+    for tid, live in live_tasks.items():
+        if tid and tid not in seen:
+            t = dict(live)
+            if synced_at:
+                t["synced_at"] = synced_at
+            merged.append(t)
+
+    page_platform = {
+        str(t.get("page_id")): t["platform"] for t in merged if t.get("page_id") and t.get("platform")
+    }
+    for t in merged:
+        pid = str(t.get("page_id") or "")
+        if not t.get("platform") and pid in page_platform:
+            t["platform"] = page_platform[pid]
+        info = pindex.get(pid)
+        if info:
+            if not t.get("platform"):
+                t["platform"] = info["platform"]
+            if not t.get("handle") and info["handle"]:
+                t["handle"] = info["handle"]
+            if not t.get("page_name") and info["name"]:
+                t["page_name"] = info["name"]
+            for f in ("account_id", "account_email"):
+                if not t.get(f) and info.get(f):
+                    t[f] = info[f]
 
     merged.sort(key=lambda x: x.get("schedule_time_ms") or 0, reverse=True)
     return merged
+
+
+def _relogin_account(acc: dict) -> None:
+    """Đăng nhập lại bằng mật khẩu đã lưu; cập nhật cookies/workspace_id trong `acc` (chưa ghi config)."""
+    auth = client.login(acc.get("email", ""), acc.get("password", ""), proxy=acc.get("proxy", ""))
+    acc["cookies"] = auth["cookies"]
+    acc["workspace_id"] = auth["workspace_id"]
+    if auth.get("user_id"):
+        acc["user_id"] = auth["user_id"]
+
+
+def _historic_target_ids(acc: dict, local_tasks: list[dict]) -> tuple[list[str], list[str]]:
+    """Page/kênh từng đăng bằng tài khoản này theo cache local.
+
+    Pippit vẫn trả task của page đã gỡ liên kết nếu hỏi đúng page_id (đã thử thật 11/2026),
+    nên không chỉ hỏi các page đang gán trong config.
+    """
+    fb: list[str] = []
+    tt: list[str] = []
+    for t in local_tasks:
+        if t.get("account_id") != acc.get("id"):
+            continue
+        pid = str(t.get("page_id") or "").strip()
+        if not pid:
+            continue
+        target = tt if t.get("platform") == "tiktok" else fb
+        if pid not in target:
+            target.append(pid)
+    return fb, tt
+
+
+def _fetch_account_live_tasks(acc: dict, local_tasks: list[dict] | None = None) -> dict:
+    """Lấy task live của một tài khoản. Không ném lỗi: trả về {tasks, ok, error, relogged}."""
+    result = {
+        "account_id": acc.get("id", ""),
+        "account_email": acc.get("email", ""),
+        "ok": False,
+        "error": "",
+        "relogged": False,
+        "task_count": 0,
+        "tasks": [],
+    }
+    fb_ids, tt_ids = _account_target_ids(acc)
+    hist_fb, hist_tt = _historic_target_ids(acc, local_tasks or [])
+    tt_ids += [i for i in hist_tt if i not in tt_ids]
+    fb_ids += [i for i in hist_fb if i not in fb_ids and i not in tt_ids]
+    if not fb_ids and not tt_ids:
+        result["ok"] = True
+        return result
+
+    def _fetch() -> list[dict]:
+        if not acc.get("cookies"):
+            raise PippitAuthError("Tài khoản chưa có cookie đăng nhập.")
+        return _account_client(acc).list_schedule_tasks(page_ids=fb_ids, tiktok_ids=tt_ids)
+
+    try:
+        try:
+            tasks = _fetch()
+        except PippitAuthError:
+            if not (acc.get("email") and acc.get("password")):
+                raise PippitAuthError("Cookie hết hạn và không có mật khẩu để tự đăng nhập lại.")
+            _relogin_account(acc)
+            result["relogged"] = True
+            tasks = _fetch()
+    except PippitAuthError as exc:
+        result["error"] = f"Phiên đăng nhập Pippit hết hạn: {exc}"
+        return result
+    except Exception as exc:
+        result["error"] = f"Không đồng bộ được: {exc}"
+        return result
+
+    for t in tasks:
+        t["account_id"] = acc.get("id")
+        t["account_email"] = acc.get("email")
+    result.update(ok=True, tasks=tasks, task_count=len(tasks))
+    return result
+
+
+def _persist_relogged_cookies(relogged: list[dict]) -> None:
+    """Ghi cookie mới cho các tài khoản vừa đăng nhập lại (đọc config mới nhất, chỉ vá đúng tài khoản)."""
+    if not relogged:
+        return
+    fresh = get_saved_pippit_accounts()
+    by_id = {a.get("id"): a for a in relogged}
+    for a in fresh:
+        src = by_id.get(a.get("id"))
+        if src:
+            for f in ("cookies", "workspace_id", "user_id"):
+                if src.get(f):
+                    a[f] = src[f]
+    _save_pippit_accounts(fresh)
+
+
+def sync_all_tasks() -> dict:
+    """Đồng bộ live mọi tài khoản (song song), gộp với cache rồi ghi lại pippit_tasks.json."""
+    accounts = get_saved_pippit_accounts()
+    synced_at = datetime.now(timezone.utc).isoformat()
+
+    local_snapshot = _get_saved_tasks()
+    results: list[dict] = []
+    if accounts:
+        with ThreadPoolExecutor(max_workers=min(_SYNC_WORKERS, len(accounts))) as pool:
+            results = list(pool.map(lambda a: _fetch_account_live_tasks(a, local_snapshot), accounts))
+
+    try:
+        _persist_relogged_cookies([a for a, r in zip(accounts, results) if r["relogged"] and r["ok"]])
+    except Exception as exc:
+        print(f"[Pippit] Không lưu được cookie mới sau khi đăng nhập lại: {exc}")
+
+    live_map: dict[str, dict] = {}
+    for r in results:
+        for t in r["tasks"]:
+            tid = str(t.get("task_id") or "")
+            if tid:
+                live_map[tid] = t
+
+    with _TASKS_LOCK:
+        merged = merge_task_lists(
+            _get_saved_tasks(),
+            live_map,
+            accounts,
+            synced_at=synced_at,
+            synced_account_ids={r["account_id"] for r in results if r["ok"]},
+        )
+        try:
+            _write_tasks(merged)
+        except Exception as exc:
+            print(f"[Pippit] Không thể ghi pippit_tasks.json sau đồng bộ: {exc}")
+
+    return {
+        "tasks": merged,
+        "accounts": [{k: v for k, v in r.items() if k != "tasks"} for r in results],
+        "synced_at": synced_at,
+    }
+
+
+def get_tasks_overview(sync: bool = False) -> dict:
+    """Dữ liệu cho tab Lịch sử: `sync=False` đọc cache (nhanh), `sync=True` đồng bộ live."""
+    if sync:
+        return sync_all_tasks()
+    accounts = get_saved_pippit_accounts()
+    tasks = merge_task_lists(_get_saved_tasks(), {}, accounts)
+    last = max((t.get("synced_at") or "" for t in tasks), default="") or None
+    return {"tasks": tasks, "accounts": [], "synced_at": last}
+
+
+def list_all_saved_accounts_tasks() -> list[dict]:
+    """Lấy toàn bộ tasks (local cache + live sync từ Pippit); kết quả được ghi lại vào cache."""
+    return sync_all_tasks()["tasks"]
 
 
 def delete_pippit_account(account_id: str) -> dict:
@@ -579,10 +815,10 @@ def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkSchedu
         target_acc = target_to_account.get(str(target_id)) or default_acc
         acc_id = target_acc.get("id", "default")
         if acc_id not in clients_by_account:
-            cookies = target_acc.get("cookies", "")
-            if not cookies:
+            if not target_acc.get("cookies", ""):
                 raise ValueError(f"Tài khoản {target_acc.get('email')} thiếu cookie đăng nhập.")
-            clients_by_account[acc_id] = PippitClient(cookies=cookies)
+            # Cần workspace_id + user_id (consumer_uid) giống luồng đăng lẻ.
+            clients_by_account[acc_id] = _account_client(target_acc)
         return clients_by_account[acc_id], target_acc
 
     results: list[PippitBulkScheduleResultItem] = []
@@ -649,6 +885,13 @@ def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkSchedu
                     title=title_clean,
                 )
 
+            if not task_id:
+                # Không lưu bản ghi "mồ côi"; nếu Pippit thật ra đã tạo task, lần đồng bộ sau sẽ kéo về.
+                raise ValueError(
+                    "Pippit không trả task id nên chưa xác nhận được lịch. "
+                    "Bấm Đồng bộ ở tab Lịch đã đặt để kiểm tra trước khi đặt lại."
+                )
+
             res_item.task_id = task_id
             res_item.ok = True
             success_count += 1
@@ -657,7 +900,7 @@ def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkSchedu
                 "task_id": task_id,
                 "asset_id": asset_id,
                 "job_id": None,
-                "account_id": payload.account_id,
+                "account_id": acc.get("id") or payload.account_id,
                 "account_email": acc.get("email", ""),
                 "page_id": str(item.page_id),
                 "page_name": res_item.page_name,
@@ -669,6 +912,9 @@ def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkSchedu
                 "status": 1,
                 "published": False,
                 "source": "bulk",
+                # Để Drive nhận diện chính xác video đã đăng (thay vì đoán theo tiêu đề).
+                "drive_file_id": item.file_id or "",
+                "file_name": item.file_name,
             })
 
         except Exception as exc:

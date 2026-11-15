@@ -77,10 +77,28 @@ class PippitScheduleTaskOut(BaseModel):
     post_url: str = ""
     page_id: str = ""
     page_name: str = ""
+    handle: str = ""
+    cover_url: str = ""
     schedule_time_ms: int = 0
     title: str = ""
     description: str = ""
     failed_reason: str = ""
+
+
+class PippitSyncAccountStatus(BaseModel):
+    account_id: str = ""
+    account_email: str = ""
+    ok: bool = False
+    error: str = ""
+    relogged: bool = False
+    task_count: int = 0
+
+
+class PippitTasksOverview(BaseModel):
+    # Task là bản ghi tự do trong pippit_tasks.json (job_id, source, file_name…), giữ nguyên dạng dict.
+    tasks: list[dict] = Field(default_factory=list)
+    accounts: list[PippitSyncAccountStatus] = Field(default_factory=list)
+    synced_at: str | None = None
 
 
 class PippitBulkScheduleItem(BaseModel):

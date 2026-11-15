@@ -59,6 +59,7 @@ export type ActiveFacebookPage = {
   account_email: string
   un_expired: boolean
   platform?: 'facebook' | 'tiktok'
+  handle?: string
 }
 
 export type PippitAccount = {

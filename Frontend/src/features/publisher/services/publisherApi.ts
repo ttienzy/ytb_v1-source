@@ -1,5 +1,6 @@
 import { API_URL } from '../../../shared/constants'
 import type {
+  ActiveFacebookPage,
   BulkScheduleResponse,
   DriveFolder,
   DriveVideoList,
@@ -56,7 +57,8 @@ export async function fetchActiveFacebookPages(): Promise<ActiveFacebookPage[]> 
 
     const mappedTT: ActiveFacebookPage[] = (ttChannels || []).map((t: any) => ({
       page_id: t.channel_id,
-      page_name: `[TikTok] ${t.nickname}${t.handle ? ` (@${t.handle})` : ''}`,
+      page_name: t.nickname || (t.handle ? `@${t.handle}` : `TikTok ${t.channel_id}`),
+      handle: t.handle || '',
       avatar_url: t.avatar_url,
       status: t.status,
       account_id: t.account_id,
@@ -80,18 +82,19 @@ export async function fetchPippitAllTasks(): Promise<PippitScheduleTask[]> {
 
 export async function submitBulkSchedule(
   accountId: string,
-  slots: ScheduleSlot[]
+  slots: (ScheduleSlot & { platform?: 'facebook' | 'tiktok'; file_path?: string })[]
 ): Promise<BulkScheduleResponse> {
   const payload = {
     account_id: accountId,
     items: slots.map(s => ({
       file_id: s.file_id,
-      file_path: (s as any).file_path || null,
+      file_path: s.file_path || null,
       file_name: s.file_name,
       title: s.title,
       caption: s.caption,
       schedule_time_ms: s.schedule_time_ms,
       page_id: s.page_id,
+      ...(s.platform ? { platform: s.platform } : {}),
     })),
   }
 
