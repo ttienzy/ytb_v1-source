@@ -28,12 +28,15 @@ GRAPH_FILE = DATA_DIR / "muse_canvas.json"
 PROMPT_FILES = {
     "outfit_extract": "muse_outfit_extract_prompt.txt",  # node "Tách áo quần"
     "character_sheet": "muse_character_sheet_prompt.txt",  # node "Bảng thiết kế nhân vật"
+    # node "Bảng thiết kế nhân vật" khi gạt sang GPT: tự gọi tên ảnh 1 (nhân vật) / ảnh 2 (trang phục), không ghép prompt kết hợp
+    "character_sheet_gpt": "muse_character_sheet_gpt_prompt.txt",
     # ghép thêm khi dòng của bảng nhân vật có ảnh trang phục nối vào (cổng "Trang phục")
     "character_outfit": "muse_character_outfit_prompt.txt",
     "video_script": "muse_video_script_prompt.txt",  # node "Kịch bản video" (Muse trả lời chữ)
+    "clip_script": "gpt_clip_script_prompt.txt",  # node "Kịch bản tạo video" (ChatGPT: mỗi tham chiếu 1 clip, có mối nối)
 }
 PROMPT_OVERRIDE_DIR = DATA_DIR / "muse_prompts"
-MAX_PROMPT_CHARS = 8000
+MAX_PROMPT_CHARS = 20000
 
 # Thời lượng Muse đã kiểm chứng ra video đúng (5 s và 10 s, 2026-11-15).
 DURATIONS = (5, 10)
@@ -74,6 +77,12 @@ class MuseCanvasConfig(BaseModel):
     max_parallel: int = Field(default=1, description="Số job Muse chạy song song (giới hạn bởi số tài khoản)")
     file_prefix: str = Field(default="muse_canvas", max_length=40)
 
+    # Google Flow (Omni 1.2) cho nút "Tạo video" của node Clip. Project gắn với 1 tài khoản Google: đổi tài khoản Flow
+    # (hết credit) thì project cũ không mở được -> chọn / tạo project của tài khoản đang dùng.
+    flow_project_id: str = Field(default="", max_length=64, description="VeoProject.id dùng cho node Clip")
+    flow_aspect: Literal["9:16", "16:9"] = "9:16"
+    flow_resolution: Literal["720p", "360p"] = "720p"
+
     @field_validator("duration_seconds")
     @classmethod
     def _duration(cls, v: int) -> int:
@@ -95,7 +104,7 @@ class MuseCanvasConfig(BaseModel):
         safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (v or "").strip())
         return safe or "muse_canvas"
 
-    @field_validator("chat_title_prefix", "style_preset", "prompt_prefix", "prompt_suffix", "avoid", "account_id")
+    @field_validator("chat_title_prefix", "style_preset", "prompt_prefix", "prompt_suffix", "avoid", "account_id", "flow_project_id")
     @classmethod
     def _strip(cls, v: str) -> str:
         return (v or "").strip()

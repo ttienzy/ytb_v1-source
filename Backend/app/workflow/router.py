@@ -51,7 +51,7 @@ from app.workflow.schemas import (
     MotionCharacterSheetRequest,
     MotionCharacterSheetResponse,
 )
-from app.workflow import image_library, motion_character, muse_canvas, muse_finish
+from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_gpt_image, muse_merge
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
 from app.workflow.service import (
@@ -341,7 +341,7 @@ class ImageLibraryPatch(BaseModel):
 
 @router.get("/images")
 def list_library_images(q: str = "", source: str = "", favorite: bool = False) -> dict:
-    """Ảnh trong thư viện (mới nhất trước). source: muse | upload."""
+    """Ảnh trong thư viện (mới nhất trước). source: muse | upload | chatgpt."""
     items = image_library.list_images(q=q, source=source, favorite=favorite)
     return {"items": items, "total": len(items)}
 
@@ -419,6 +419,85 @@ def save_muse_prompt(name: str, body: MusePromptBody) -> dict:
 def reset_muse_prompt(name: str) -> dict:
     """Bỏ bản đã lưu, quay về prompt gốc đóng kèm app."""
     return _muse_prompt_call(muse_canvas.reset_prompt, name)
+
+
+@router.post("/muse/gpt-image")
+async def create_muse_gpt_image(req: muse_gpt_image.GptImageRequest) -> dict:
+    """Node Muse Canvas gạt sang GPT: tạo 1 ảnh bằng tài khoản ChatGPT (cùng prompt + ảnh tham chiếu)."""
+    from app.ai.image_gen.gptimage.adapter import GptImageError
+
+    try:
+        return await run_in_threadpool(muse_gpt_image.generate, req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except GptImageError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi tạo ảnh bằng ChatGPT: {e}") from e
+
+
+@router.post("/muse/gpt-script")
+async def create_muse_gpt_script(req: muse_gpt_image.GptScriptRequest) -> dict:
+    """Node "Kịch bản tạo video": ChatGPT viết kịch bản từng clip (mỗi ảnh tham chiếu 1 clip) — 1 lượt, không tự gửi lại."""
+    from app.ai.image_gen.gptimage.adapter import GptImageError
+
+    try:
+        return await run_in_threadpool(muse_gpt_image.write_script, req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except GptImageError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi nhờ ChatGPT viết kịch bản: {e}") from e
+
+
+@router.get("/muse/flow/accounts")
+def muse_flow_accounts() -> dict:
+    """Tài khoản Google Labs extension đã thấy (mới nhất trước), kèm credit nếu biết."""
+    return {"accounts": muse_flow.flow_accounts()}
+
+
+@router.post("/muse/flow/check")
+async def muse_flow_check(req: muse_flow.FlowProjectCheckRequest) -> dict:
+    """Mở project trên tab Flow và xác nhận tab thật sự ở trang project (không tạo video, không tốn credit)."""
+    return await run_in_threadpool(muse_flow.check_project, req.project_id)
+
+
+@router.get("/muse/merge/frame")
+async def muse_merge_frame(path: str = Query(..., min_length=1), at: str = Query("first", pattern="^(first|last)$"), w: int = Query(360, ge=80, le=1080)):
+    """Khung hình đầu / cuối của 1 clip (xem trước điểm nối giữa hai clip)."""
+    from fastapi.responses import Response
+
+    try:
+        video = muse_merge.resolve_video(path)
+        data = await run_in_threadpool(muse_merge.extract_frame, video, at, w)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, PermissionError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.post("/muse/merge")
+async def muse_merge_start(req: muse_merge.MuseMergeRequest) -> dict:
+    """Node "Ghép video": xóa watermark từng clip → chuẩn hóa / cắt → ghép + nhạc + nhãn. Chạy nền, hỏi tiến độ ở GET /muse/merge/{job_id}."""
+    try:
+        job_id = await run_in_threadpool(muse_merge.start_merge, req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, PermissionError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"job_id": job_id}
+
+
+@router.get("/muse/merge/{job_id}")
+def muse_merge_job(job_id: str) -> dict:
+    job = muse_merge.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Không còn job ghép này (backend đã khởi động lại?). Bấm ghép lại.")
+    return job
 
 
 @router.post("/muse/finish")

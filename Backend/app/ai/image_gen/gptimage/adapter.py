@@ -148,12 +148,13 @@ class GptImageClient:
                 self._pool_cv.wait(timeout=10)
 
     def chat_text(self, prompt: str, system: str = "", ref_paths: list[str] | None = None,
-                  model: str = "auto", timeout: float = 300.0) -> tuple[str, str]:
+                  model: str = "auto", timeout: float = 300.0, failover: bool = True) -> tuple[str, str]:
         """Gửi một tin nhắn chữ (kèm ảnh nếu có) qua tài khoản ChatGPT web, trả (văn bản đã làm sạch, nhãn tài khoản).
 
         ChatGPT web không có vai trò system: hướng dẫn hệ thống được gộp lên đầu tin nhắn, kèm yêu cầu trả văn bản thuần
         và không tìm web (tìm web làm câu trả lời chèn trích dẫn/thẻ giao diện). Lỗi cookie -> tự làm mới rồi thử lại;
-        lỗi khác -> chuyển tài khoản. KHÔNG đổi trạng thái "hết lượt ảnh" của tài khoản khi viết chữ lỗi."""
+        lỗi khác -> chuyển tài khoản (failover=False: báo lỗi luôn, không gửi lại cùng tin ở tài khoản khác — dùng khi tin
+        dài/tốn hạn mức và người dùng muốn tự quyết định chạy lại). KHÔNG đổi trạng thái "hết lượt ảnh" khi viết chữ lỗi."""
         from .pkg.gpt_plus import check_limit_refusal, clean_web_text
 
         if not any(a.get("cookies") and a.get("ua") for a in self._store.list_raw()):
@@ -173,8 +174,10 @@ class GptImageClient:
                 for attempt in (1, 2):
                     try:
                         self._notify(f"ChatGPT đang viết… [{label}]")
+                        # curl chờ đủ `timeout` (trước đây cứng 180 s nên bài dài bị cắt giữa chừng dù ChatGPT vẫn đang viết)
                         res = self._run(self._gpt_for(acc).chat(message, image=False, model=model, ref_paths=refs or None,
-                                                                check_refusal=False), timeout=timeout)
+                                                                check_refusal=False, http_timeout=timeout),
+                                        timeout=timeout + 60)
                         text = clean_web_text(res.get("message", ""))
                         if not text:
                             raise GptImageError("ChatGPT trả lời rỗng.")
@@ -192,6 +195,8 @@ class GptImageClient:
                         errors.append(f"{label}: {str(exc)[:160]}")
                         break
                 tried.add(acc["id"])
+                if not failover:
+                    raise GptImageError(f"ChatGPT lỗi ({errors[-1] if errors else label}). Không tự gửi lại sang tài khoản khác.")
             finally:
                 self._release_account(acc["id"])
 

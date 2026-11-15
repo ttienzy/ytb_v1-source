@@ -64,6 +64,8 @@ Với nhánh HTTP, `flow_request.http_no_captcha = true` nên backend **không c
 
 Extension chỉ điều khiển được **một tab Flow, một việc UI mỗi lúc**, và sẽ từ chối việc đến sau nếu bận. `_FifoGate` ở `service.py` xếp hàng ngay ở backend (FIFO, nghỉ tối thiểu 3 s giữa hai việc) và chỉ đẩy việc vào bridge khi tới lượt. Cả tạo video lẫn tạo ảnh đều đi qua `flow_ui_slot(owner)`. `FlowBusyError` nghĩa là *chưa gửi gì lên Flow*, an toàn để thử lại.
 
+**Khởi động lại backend giữa chừng.** Mỗi job chạy trong một thread `veo-job-<id>` nên thread mất theo backend. `_load_jobs` (lúc `startup`) đánh lỗi mọi job còn dở: job đã qua bước gửi (`captcha`/`submitting`/`generating`/`downloading`) → `JOB_INTERRUPTED` (Flow có thể đã nhận lệnh: tìm lại bằng `recover-current` trước khi tạo lại); job còn `pending` (đang xếp hàng) → `NOT_SUBMITTED` (chưa lên Flow, chưa mất credit). Trước đây job `pending` bị bỏ nguyên trạng thái nên kẹt vô hạn. `dev.js` tự khởi động lại backend khi sửa file `.py` — đừng sửa khi đang có job chạy (`npm run start:stable --prefix Desktop`).
+
 `GET /api/veo/status` cho thấy trạng thái bridge, extension (tab, heartbeat), credits từng tài khoản, hàng đợi captcha.
 
 ## 5. HTTP hay UI? Và khi mọi thứ lỗi

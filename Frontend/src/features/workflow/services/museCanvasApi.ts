@@ -4,6 +4,7 @@
  *   GET/PUT /api/workflow/muse/canvas   (Data/muse_canvas.json)
  */
 import { API_URL } from '../../../shared/constants'
+import { fileStem } from './museCanvasNodes.ts'
 import {
   DEFAULT_MUSE_CANVAS_CONFIG,
   museCanvasConfigToApi,
@@ -175,6 +176,27 @@ export async function generateMuseText(body: Record<string, unknown>): Promise<M
   return { text: d.reply_text, path: d.local_path || '', warning: d.error || null, sessionId: d.session_id ?? null }
 }
 
+export interface GptScriptResult {
+  text: string
+  /** File .md backend đã lưu (Data/media/muse_texts) */
+  path: string
+  accountLabel: string | null
+}
+
+/** Node "Kịch bản tạo video": 1 lượt ChatGPT viết kịch bản từng clip (POST /api/workflow/muse/gpt-script). Lỗi -> throw. */
+export async function generateGptClipScript(body: Record<string, unknown>): Promise<GptScriptResult> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/gpt-script`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (res.status === 404 || res.status === 405) throw new Error('Backend chưa có node Kịch bản tạo video — hãy khởi động lại backend.')
+  if (!res.ok || !d.ok) throw new Error(typeof d.detail === 'string' ? d.detail : `ChatGPT lỗi (HTTP ${res.status})`)
+  if (!d.text) throw new Error('ChatGPT không trả chữ.')
+  return { text: d.text, path: d.local_path || '', accountLabel: d.account_label ?? null }
+}
+
 export interface MuseVideoResult {
   /** Mọi video đã tải (cuối = bản chính) */
   paths: string[]
@@ -273,6 +295,22 @@ export async function openMuseVideoFolder(): Promise<void> {
   await fetch(`${API_URL}/api/ai/muse/open-folder`, { method: 'POST' })
 }
 
+/** Node gạt sang GPT: tạo 1 ảnh bằng tài khoản ChatGPT (POST /api/workflow/muse/gpt-image). Lỗi -> throw kèm câu của backend. */
+export async function generateGptImage(body: Record<string, unknown>): Promise<MuseImageResult> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/gpt-image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (res.status === 404 || res.status === 405) throw new Error('Backend chưa có chế độ GPT — hãy khởi động lại backend.')
+  if (!res.ok || !d.ok) {
+    throw new Error(typeof d.detail === 'string' ? d.detail : `ChatGPT lỗi (HTTP ${res.status})`)
+  }
+  if (!d.preview_url || !d.local_path) throw new Error('ChatGPT không trả ảnh.')
+  return { path: d.local_path, previewUrl: d.preview_url, size: d.file_size || 0, sessionId: null, accountLabel: null }
+}
+
 /** Chạy 1 lần Muse ra ẢNH (POST /api/ai/muse/generate, output_kind=image). Lỗi -> throw kèm câu của backend. */
 export async function generateMuseImage(body: Record<string, unknown>): Promise<MuseImageResult> {
   const res = await fetch(`${API_URL}/api/ai/muse/generate`, {
@@ -293,3 +331,144 @@ export async function generateMuseImage(body: Record<string, unknown>): Promise<
     accountLabel: d.account_label ?? null,
   }
 }
+
+// ---------------------------------------------------------------- Google Flow (Omni 1.2) cho node Clip
+
+export interface FlowProject {
+  id: string
+  name: string
+  flow_project_id: string
+  account_email: string
+  is_active: boolean
+  video_count: number
+  created_at: string
+}
+
+export interface FlowAccount {
+  email: string
+  credits: number | null
+  seen_at: string
+}
+
+export interface FlowProjectCheck {
+  ok: boolean
+  state: 'open' | 'redirected' | 'missing' | 'no_extension' | 'unknown'
+  message: string
+  account_email?: string
+  accounts: FlowAccount[]
+}
+
+async function jsonOrThrow<T>(res: Response, fallback: string): Promise<T> {
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(typeof d.detail === 'string' ? d.detail : `${fallback} (HTTP ${res.status})`)
+  return d as T
+}
+
+export async function listFlowProjects(): Promise<FlowProject[]> {
+  return jsonOrThrow<FlowProject[]>(await fetch(`${API_URL}/api/veo/projects`), 'Không tải được danh sách project Flow')
+}
+
+/** Tạo project trên tab Flow (tài khoản đang đăng nhập) — extension tạo và trả mã project. */
+export async function createFlowProject(name: string): Promise<FlowProject> {
+  const res = await fetch(`${API_URL}/api/veo/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  return jsonOrThrow<FlowProject>(res, 'Không tạo được project Flow')
+}
+
+export async function fetchFlowAccounts(): Promise<FlowAccount[]> {
+  const d = await jsonOrThrow<{ accounts: FlowAccount[] }>(await fetch(`${API_URL}/api/workflow/muse/flow/accounts`), 'Không tải được tài khoản Flow')
+  return d.accounts || []
+}
+
+/** Mở project trên tab Flow và xác nhận (không tạo video). Có thể mất tới ~45 s (chờ heartbeat của extension). */
+export async function checkFlowProject(projectId: string): Promise<FlowProjectCheck> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/flow/check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId }),
+  })
+  return jsonOrThrow<FlowProjectCheck>(res, 'Không kiểm tra được project')
+}
+
+export interface VeoJobLite {
+  job_id: string
+  status: string
+  current_step?: string
+  error_code?: string | null
+  error_message?: string | null
+  output_files?: string[]
+  deduplicated?: boolean
+  updated_at?: string
+}
+
+export async function submitVeoJob(body: Record<string, unknown>): Promise<VeoJobLite> {
+  const res = await fetch(`${API_URL}/api/veo/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail = Array.isArray(d.detail) ? d.detail.map((x: any) => x?.msg).filter(Boolean).join('; ') : d.detail
+    throw new Error(typeof detail === 'string' && detail ? detail : `Không gửi được job Flow (HTTP ${res.status})`)
+  }
+  return d as VeoJobLite
+}
+
+export async function getVeoJob(jobId: string): Promise<VeoJobLite | null> {
+  const res = await fetch(`${API_URL}/api/veo/jobs/${encodeURIComponent(jobId)}`)
+  if (res.status === 404) return null
+  return jsonOrThrow<VeoJobLite>(res, 'Không đọc được trạng thái job')
+}
+
+/** Tìm lại video đã tạo trong project (khớp mediaId) thay vì gửi lại — dùng khi job báo lỗi / hết giờ. */
+export async function recoverVeoJob(jobId: string): Promise<VeoJobLite> {
+  const res = await fetch(`${API_URL}/api/veo/jobs/${encodeURIComponent(jobId)}/recover-current`, { method: 'POST' })
+  return jsonOrThrow<VeoJobLite>(res, 'Không tìm lại được video')
+}
+
+export const veoVideoUrl = (path: string) => `${API_URL}/api/veo/history/${encodeURIComponent(fileStem(path))}/file`
+
+// ---------------------------------------------------------------- Ghép video (các clip Flow đã tạo)
+
+export interface MergeJob {
+  job_id: string
+  status: 'running' | 'done' | 'error'
+  step: string
+  clip: number
+  total: number
+  result?: { filename?: string; file_path?: string; video_url?: string; duration_sec?: number; title?: string } | null
+  error?: string | null
+}
+
+/** Bắt đầu ghép (chạy nền ở backend); trả job_id. Lỗi kiểm tra đầu vào (clip thiếu, cắt quá tay) -> throw kèm "Clip N: …". */
+export async function startMerge(body: Record<string, unknown>): Promise<string> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (res.status === 404 && d.detail === 'Not Found') throw new Error('Backend chưa có chức năng ghép video — hãy khởi động lại backend.')
+  if (!res.ok) {
+    const detail = Array.isArray(d.detail) ? d.detail.map((x: any) => x?.msg).filter(Boolean).join('; ') : d.detail
+    throw new Error(typeof detail === 'string' && detail ? detail : `Không bắt đầu ghép được (HTTP ${res.status})`)
+  }
+  return d.job_id as string
+}
+
+/** null = backend không còn job này (đã khởi động lại). */
+export async function getMergeJob(jobId: string): Promise<MergeJob | null> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/merge/${encodeURIComponent(jobId)}`)
+  if (res.status === 404) return null
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(typeof d.detail === 'string' ? d.detail : `Không đọc được job ghép (HTTP ${res.status})`)
+  return d as MergeJob
+}
+
+/** Khung hình đầu / cuối của 1 clip (JPEG) — xem trước điểm nối. */
+export const mergeFrameUrl = (path: string, at: 'first' | 'last', width = 200) =>
+  `${API_URL}/api/workflow/muse/merge/frame?path=${encodeURIComponent(path)}&at=${at}&w=${width}`

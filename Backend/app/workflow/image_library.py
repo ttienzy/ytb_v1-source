@@ -25,7 +25,7 @@ UPLOAD_DIR = DATA_DIR / "media" / "image_library"
 MUSE_OUTPUT_DIR = DATA_DIR / "media" / "muse_outputs"
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-SOURCES = ("muse", "upload")
+SOURCES = ("muse", "upload", "chatgpt")  # chatgpt: node Muse Canvas gạt sang GPT (ảnh cũng nằm ở muse_outputs)
 
 _lock = threading.RLock()
 

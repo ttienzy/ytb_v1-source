@@ -330,3 +330,58 @@ test('muse nodes: giải thích vì sao không nối được', () => {
   assert.match(explainMuseConnection('x', 'source', 'sheet', nodes, []), /Ra node/)
   assert.match(explainMuseConnection('a', 'source', 'x', nodes, [{ source: 'a', target: 'x' }]), /đã được nối/)
 })
+
+// ---------------------------------------------------------------- công tắc tạo ảnh Muse | GPT
+
+import { buildGptJobRequest, normalizeJobData, providerOf } from '../services/museCanvasNodes.ts'
+
+test('muse nodes: công tắc tạo ảnh mặc định Muse; node cũ không có trường provider vẫn là Muse', () => {
+  assert.equal(createJobNode(MUSE_NODE.characterSheet, { x: 0, y: 0 }, 'p').data.provider, 'muse')
+  assert.equal(normalizeJobData({ prompt: 'p' }, MUSE_NODE.characterSheet).provider, 'muse')
+  assert.equal(normalizeJobData({ prompt: 'p', provider: 'gpt' }, MUSE_NODE.characterSheet).provider, 'gpt')
+  assert.equal(providerOf('lạ'), 'muse')
+})
+
+test('muse nodes: request GPT gửi cùng prompt + ảnh như Muse, không mang tham số tài khoản Muse', () => {
+  const spec = JOB_SPECS[MUSE_NODE.characterSheet]
+  const row = buildJobRows(
+    [{ sourceNodeId: 'c1', label: 'Linh', image: ref('D:/linh.png') }],
+    [{ sourceNodeId: 'o1', label: 'Áo dài', image: ref('D:/ao.webp') }],
+  )[0]
+  const cfg = { ...DEFAULT_MUSE_CANVAS_CONFIG, accountMode: 'fixed' as const, accountId: 'acc1' }
+  assert.deepEqual(buildGptJobRequest(spec, cfg, 'BOARD', row, 'OUTFIT'), {
+    prompt: 'BOARD\n\nOUTFIT',
+    reference_images: ['D:/linh.png', 'D:/ao.webp'],
+    chat_title: 'Muse Canvas · Bảng nhân vật · Linh × Áo dài',
+    file_prefix: 'muse_canvas_character',
+    aspect: '16:9',
+  })
+  assert.equal(buildGptJobRequest(JOB_SPECS[MUSE_NODE.extract], cfg, 'X', { sourceNodeId: 'a', label: 'Áo', image: ref('a.png') }).aspect, '1:1')
+  assert.throws(() => buildGptJobRequest(spec, cfg, 'p', { sourceNodeId: 'b', label: 'Nhân vật 2', image: null }), /chưa có ảnh/)
+})
+
+test('muse nodes: dòng GPT bị gián đoạn chỉ chỗ xem lại là ChatGPT', () => {
+  const fixed = markInterrupted({
+    a: { sourceNodeId: 'a', inputPath: 'x', status: 'running', provider: 'gpt', updatedAt: 1 },
+    b: { sourceNodeId: 'b', inputPath: 'y', status: 'running', updatedAt: 1 },
+  }, 5)!
+  assert.match(fixed.a.error || '', /ChatGPT/)
+  assert.match(fixed.b.error || '', /Muse/)
+  assert.equal(fixed.a.provider, 'gpt')
+})
+
+import { activePrompt } from '../services/museCanvasNodes.ts'
+
+test('muse nodes: prompt mặc định theo công tắc — bảng nhân vật có prompt GPT riêng, không ghép prompt kết hợp', () => {
+  const sheet = JOB_SPECS[MUSE_NODE.characterSheet]
+  const base = normalizeJobData({ prompt: 'MUSE', secondaryPrompt: 'OUTFIT', gptPrompt: 'GPT', gptPromptSource: 'custom' }, MUSE_NODE.characterSheet)
+  const muse = activePrompt(sheet, base)
+  assert.deepEqual([muse.text, muse.promptName, muse.field, muse.useSecondary], ['MUSE', 'character_sheet', 'prompt', true])
+  const gpt = activePrompt(sheet, { ...base, provider: 'gpt' })
+  assert.deepEqual([gpt.text, gpt.source, gpt.promptName, gpt.field, gpt.useSecondary], ['GPT', 'custom', 'character_sheet_gpt', 'gptPrompt', false])
+  // node tách không có prompt GPT riêng: GPT dùng chung prompt Muse
+  const extract = activePrompt(JOB_SPECS[MUSE_NODE.extract], { ...normalizeJobData({ prompt: 'X' }), provider: 'gpt' })
+  assert.deepEqual([extract.text, extract.field, extract.gptOwn], ['X', 'prompt', false])
+  // node cũ chưa có trường gptPrompt
+  assert.equal(normalizeJobData({ prompt: 'p' }, MUSE_NODE.characterSheet).gptPrompt, '')
+})

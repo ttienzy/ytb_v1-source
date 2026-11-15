@@ -648,6 +648,29 @@ a.mc-mini-btn { text-decoration: none; }
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
 }
 .mc-xtoggle-hint { font-size: 10.5px; font-weight: 500; color: #94a3b8; }
+
+/* Công tắc tạo ảnh Muse | GPT trên node chạy */
+.mc-provider { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mc-provider-label { font-size: 11.5px; font-weight: 600; color: #475569; }
+.mc-provider-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: #f1f5f9; border: 1px solid #e2e8f0; }
+.mc-provider-opt {
+  min-width: 64px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mc-provider-opt:hover:not(.active) { color: #0f172a; }
+.mc-provider-opt.active { background: #ffffff; color: #0f172a; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12); }
+.mc-provider-opt.mc-provider-muse.active { color: #4338ca; }
+.mc-provider-opt.mc-provider-gpt.active { color: #047857; }
+.mc-provider-opt:focus-visible { outline: 2px solid #6366f1; outline-offset: 1px; }
+.mc-node-badge.mc-badge-muse { background: #eef2ff; color: #4338ca; }
+.mc-node-badge.mc-badge-gpt { background: #ecfdf5; color: #047857; }
 .mc-prompt-sm { min-height: 90px; }
 
 /* ---- nối dây: cổng to hơn, đổi màu khi đang kéo, báo lý do khi không nối được ---- */
@@ -974,3 +997,95 @@ a.mc-mini-btn { text-decoration: none; }
 .mc-panel-compact .mc-field > span { font-size: 11px; }
 .mc-loading { background: #f8fafc !important; color: #475569 !important; border-color: #e2e8f0 !important; }
 .mc-bgm-search input { height: 22px !important; min-height: 0 !important; padding: 0 !important; box-shadow: none !important; }
+
+/* Node "Kịch bản tạo video" (ChatGPT): mỗi tham chiếu 1 clip */
+.mc-node-clipscript { width: 520px; }
+.mc-icon-clipscript { background: #ecfdf5; color: #047857; }
+.mc-run-btn.mc-run-clipscript { background: #047857; }
+.mc-run-btn.mc-run-clipscript:disabled { background: #a7f3d0; }
+.mc-clip-summary { font-size: 12px; color: #334155; padding: 6px 2px; }
+.mc-clip-summary strong { color: #047857; }
+.mc-clip-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #d1fae5;
+  border-radius: 10px;
+  background: #fbfefc;
+}
+.mc-clip-card.warn { border-color: #fcd34d; background: #fffdf5; }
+.mc-clip-card.dim { opacity: 0.6; }
+.mc-clip-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mc-clip-no { font-size: 11px; font-weight: 800; color: #047857; background: #d1fae5; padding: 2px 7px; border-radius: 6px; flex-shrink: 0; }
+.mc-clip-name { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-clip-sec { font-size: 11.5px; font-weight: 700; color: #334155; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.mc-clip-timeline { display: flex; gap: 2px; height: 20px; border-radius: 6px; overflow: hidden; }
+.mc-clip-seg {
+  flex-basis: 0;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #10b981;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.mc-clip-seg.in, .mc-clip-seg.out { background: #f59e0b; }
+.mc-clip-warn { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #92400e; }
+.mc-clip-prompt {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Node "Clip" (1 clip tách từ Kịch bản tạo video) */
+.mc-node-clipprompt { width: 440px; }
+.mc-handle-clip { background: #047857 !important; }
+.mc-clipnode-top { display: flex; align-items: center; gap: 12px; }
+.mc-clipnode-top img { width: 132px; height: 74px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; display: block; }
+.mc-clipnode-top .mc-xph { width: 132px; height: 74px; }
+.mc-clipnode-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mc-clipnode-sec { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #334155; }
+.mc-clipnode-sec input { width: 58px; height: 28px; box-sizing: border-box; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12.5px; font-weight: 700; text-align: center; }
+.mc-text-danger { color: #b91c1c !important; font-weight: 700; }
+.mc-flow-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Node Clip: phần Video Flow */
+.mc-clipvideo { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid #d1fae5; border-radius: 10px; background: #f7fdfa; }
+.mc-clipvideo.mc-cv-error { border-color: #fecaca; background: #fffafa; }
+.mc-clipvideo-head { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; font-weight: 700; color: #065f46; flex-wrap: wrap; }
+.mc-clipvideo-head small { font-weight: 500; color: #64748b; font-size: 11px; }
+.mc-clipvideo-player { width: 100%; max-height: 360px; border-radius: 8px; background: #0f172a; }
+.mc-clipvideo-player.dim { opacity: 0.55; }
+.mc-clipvideo-hint { margin-top: 4px; font-weight: 500; color: #7f1d1d; }
+.mc-run-btn.mc-clipvideo-run { width: auto; flex: 1; min-height: 32px; font-size: 12.5px; }
+
+/* Node "Ghép video" */
+.mc-node-clipmerge { width: 560px; }
+.mc-merge-list { display: flex; flex-direction: column; gap: 6px; }
+.mc-merge-row { display: grid; grid-template-columns: 24px 40px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff; }
+.mc-merge-row.mc-merge-ready { border-color: #bbf7d0; }
+.mc-merge-row.mc-merge-error { border-color: #fecaca; }
+.mc-merge-thumb { width: 40px; height: 56px; object-fit: cover; border-radius: 6px; background: #0f172a; display: block; }
+.mc-merge-info { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
+.mc-merge-info b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #0f172a; }
+.mc-merge-info small { color: #64748b; }
+.mc-merge-chip { font-weight: 700; }
+.mc-merge-chip-ready { color: #15803d; }
+.mc-merge-chip-no_video, .mc-merge-chip-error { color: #b91c1c; }
+.mc-merge-chip-running { color: #4338ca; }
+.mc-merge-trims { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #64748b; }
+.mc-merge-trims input { width: 46px; height: 24px; box-sizing: border-box; padding: 0 4px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11.5px; text-align: center; }
+.mc-splice-list { display: flex; flex-direction: column; gap: 8px; }
+.mc-splice-frames { display: flex; align-items: center; gap: 8px; }
+.mc-splice-frames img { width: 96px; height: 170px; object-fit: cover; border-radius: 8px; background: #0f172a; }

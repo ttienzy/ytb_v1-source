@@ -99,7 +99,10 @@ class GPTPlus:
         return self._bootstrap_cache
 
     async def chat(self, message: str, image: bool = False, model: str | None = None,
-                   ref_paths: list | None = None, check_refusal: bool = True) -> dict:
+                   ref_paths: list | None = None, check_refusal: bool = True,
+                   http_timeout: float = 180) -> dict:
+        """`http_timeout`: giây tối đa cho MỖI request curl, kể cả /f/conversation (đọc hết câu trả lời SSE).
+        Bài dài (vd. kịch bản nhiều clip, model thinking) cần hơn 180 s mặc định."""
         cookies = self._env("GPT_COOKIES")
         ua = self._env("GPT_USER_AGENT")
         device_id = self._env("GPT_DEVICE_ID") or str(uuid4())
@@ -110,7 +113,7 @@ class GPTPlus:
         if not cookies or not ua:
             raise PlusError("Chưa có session ChatGPT (cookies/User-Agent) — Đăng nhập ChatGPT trong Settings.")
 
-        async with cffi.AsyncSession(impersonate=IMPERSONATE, timeout=180) as client:
+        async with cffi.AsyncSession(impersonate=IMPERSONATE, timeout=http_timeout) as client:
             # 1. accessToken
             r = await client.get(self.SESSION,
                                  headers={"Cookie": cookies, "User-Agent": ua, "Accept": "application/json"})

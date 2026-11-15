@@ -102,7 +102,8 @@ class VeoCapabilityProfile(BaseModel):
 
 class VeoJobRequest(BaseModel):
     """Request tạo video mới."""
-    prompt: str = Field(..., min_length=1, max_length=2000, description="Mô tả cảnh video")
+    # Trần rộng chỉ để chặn dữ liệu bất thường; Chiến dịch AI vẫn tự giới hạn 2000 (campaign/executors/clip.py PROMPT_MAX).
+    prompt: str = Field(..., min_length=1, max_length=8000, description="Mô tả cảnh video")
     model_display_name: str = Field(
         default="Omni 1.1 Flash",
         description="Tên model hiển thị (sẽ map sang ID khi đã xác minh)",

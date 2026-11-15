@@ -1,7 +1,7 @@
 /** Thư Viện Ảnh của Canvas AI — /api/workflow/images (app/workflow/image_library.py). */
 import { API_URL } from '../../../shared/constants'
 
-export type LibraryImageSource = 'muse' | 'upload'
+export type LibraryImageSource = 'muse' | 'upload' | 'chatgpt'
 
 export interface LibraryImage {
   id: string

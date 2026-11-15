@@ -202,6 +202,15 @@ def _load_jobs() -> None:
                     job["error_message"] = "Job interrupted by server restart"
                     job.update(_classify_job_error(job["error_message"], job.get("status")))
                     job["updated_at"] = datetime.now(timezone.utc).isoformat()
+                elif job.get("status") == "pending":
+                    # Job còn xếp hàng chờ lượt Flow: luồng xử lý (veo-job-<id>) mất theo backend nên sẽ KHÔNG BAO GIỜ chạy tiếp.
+                    # Chưa tới bước gửi (captcha / submitting) nên chưa lên Flow, chưa mất credit -> báo lỗi "chưa gửi" để
+                    # giao diện cho tạo lại thay vì quay vô hạn.
+                    job["status"] = "error"
+                    job["error_message"] = "Job chưa gửi lên Flow: backend khởi động lại khi job đang xếp hàng."
+                    job.update(_classify_job_error(job["error_message"], "pending"))
+                    job["error_hint"] = "Backend đã khởi động lại khi job còn xếp hàng nên job chưa được gửi lên Flow — chưa mất credit, bấm tạo lại."
+                    job["updated_at"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
             logger.warning("Failed to load jobs: %s", e)
 

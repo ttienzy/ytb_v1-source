@@ -110,6 +110,7 @@
 .il-src { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; flex-shrink: 0; }
 .il-src-muse { background: #eef2ff; color: #4338ca; }
 .il-src-upload { background: #f1f5f9; color: #475569; }
+.il-src-chatgpt { background: #ecfdf5; color: #047857; }
 .il-star { position: absolute; top: 6px; right: 6px; color: #f59e0b; fill: #f59e0b; }
 
 .il-detail {

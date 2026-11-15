@@ -29,7 +29,14 @@ export interface MuseCanvasConfig {
   timeoutSeconds: number
   maxParallel: number
   filePrefix: string
+  /** Google Flow (Omni 1.2) cho nút "Tạo video" của node Clip: project (VeoProject.id), khung hình, chất lượng */
+  flowProjectId: string
+  flowAspect: FlowAspect
+  flowResolution: FlowResolution
 }
+
+export type FlowAspect = '9:16' | '16:9'
+export type FlowResolution = '720p' | '360p'
 
 /** Thời lượng Muse đã kiểm chứng ra video đúng (khớp DURATIONS ở backend). */
 export const MUSE_DURATIONS = [5, 10] as const
@@ -53,6 +60,9 @@ export const DEFAULT_MUSE_CANVAS_CONFIG: MuseCanvasConfig = {
   timeoutSeconds: MUSE_MIN_TIMEOUT,
   maxParallel: 1,
   filePrefix: 'muse_canvas',
+  flowProjectId: '',
+  flowAspect: '9:16',
+  flowResolution: '720p',
 }
 
 export interface MuseStylePreset {
@@ -110,6 +120,9 @@ export function normalizeMuseCanvasConfig(raw: unknown): MuseCanvasConfig {
     timeoutSeconds: Number.isFinite(timeout) ? Math.max(MUSE_MIN_TIMEOUT, Math.round(timeout)) : d.timeoutSeconds,
     maxParallel: Number.isFinite(parallel) ? Math.min(MUSE_MAX_PARALLEL, Math.max(1, Math.round(parallel))) : d.maxParallel,
     filePrefix: filePrefix || d.filePrefix,
+    flowProjectId: text(get('flowProjectId', 'flow_project_id'), 64),
+    flowAspect: pick(get('flowAspect', 'flow_aspect'), ['9:16', '16:9'] as const, d.flowAspect),
+    flowResolution: pick(get('flowResolution', 'flow_resolution'), ['720p', '360p'] as const, d.flowResolution),
   }
 }
 
@@ -132,6 +145,9 @@ export function museCanvasConfigToApi(c: MuseCanvasConfig): Record<string, unkno
     timeout_seconds: c.timeoutSeconds,
     max_parallel: c.maxParallel,
     file_prefix: c.filePrefix,
+    flow_project_id: c.flowProjectId,
+    flow_aspect: c.flowAspect,
+    flow_resolution: c.flowResolution,
   }
 }
 

@@ -32,7 +32,7 @@ import {
 } from '../services/imageLibraryApi'
 import './imageLibrary.css'
 
-type Filter = 'all' | 'muse' | 'upload' | 'favorite'
+type Filter = 'all' | 'muse' | 'chatgpt' | 'upload' | 'favorite'
 
 interface ImageLibraryModalProps {
   isOpen: boolean
@@ -47,11 +47,12 @@ interface ImageLibraryModalProps {
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'Tất cả' },
   { id: 'muse', label: 'Muse tạo' },
+  { id: 'chatgpt', label: 'GPT tạo' },
   { id: 'upload', label: 'Tải lên' },
   { id: 'favorite', label: 'Yêu thích' },
 ]
 
-const SOURCE_LABEL: Record<string, string> = { muse: 'Muse', upload: 'Tải lên' }
+const SOURCE_LABEL: Record<string, string> = { muse: 'Muse', chatgpt: 'GPT', upload: 'Tải lên' }
 
 function formatTime(sec: number): string {
   if (!sec) return '—'
@@ -101,7 +102,7 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
     const q = query.trim().toLowerCase()
     return items.filter((i) => {
       if (filter === 'favorite' && !i.favorite) return false
-      if ((filter === 'muse' || filter === 'upload') && i.source !== filter) return false
+      if ((filter === 'muse' || filter === 'chatgpt' || filter === 'upload') && i.source !== filter) return false
       if (!q) return true
       return [i.label, i.file_name, i.meta?.chat_title, i.meta?.prompt?.slice(0, 400), ...(i.tags || [])]
         .filter(Boolean)
@@ -157,7 +158,7 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
   }
 
   async function remove(it: LibraryImage) {
-    const where = it.source === 'muse' ? 'File ảnh trong Data/media/muse_outputs cũng bị xóa.' : 'File ảnh tải lên cũng bị xóa.'
+    const where = it.source === 'muse' || it.source === 'chatgpt' ? 'File ảnh trong Data/media/muse_outputs cũng bị xóa.' : 'File ảnh tải lên cũng bị xóa.'
     if (!window.confirm(`Xóa “${it.label}” khỏi Thư Viện Ảnh? ${where} Node đang dùng ảnh này sẽ mất ảnh.`)) return
     try {
       await deleteLibraryImage(it.id)
@@ -290,7 +291,7 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
                 </div>
                 <dl className="il-info">
                   <dt>Nguồn</dt>
-                  <dd>{selected.source === 'muse' ? 'Muse tạo' : 'Bạn tải lên'}</dd>
+                  <dd>{selected.source === 'muse' ? 'Muse tạo' : selected.source === 'chatgpt' ? 'ChatGPT tạo' : 'Bạn tải lên'}</dd>
                   <dt>Tạo lúc</dt>
                   <dd>{formatTime(selected.created_at)}</dd>
                   <dt>Kích thước</dt>

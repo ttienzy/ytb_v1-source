@@ -83,7 +83,7 @@ class FakeGPT:
         self.behaviour = behaviour
         self.calls = []
 
-    async def chat(self, message, image=False, model=None, ref_paths=None, check_refusal=True):
+    async def chat(self, message, image=False, model=None, ref_paths=None, check_refusal=True, http_timeout=180):
         self.calls.append({"message": message, "image": image, "model": model, "refs": ref_paths, "check_refusal": check_refusal})
         b = self.behaviour.pop(0) if isinstance(self.behaviour, list) else self.behaviour
         if isinstance(b, Exception):

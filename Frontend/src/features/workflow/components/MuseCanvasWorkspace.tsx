@@ -32,6 +32,8 @@ import {
   Clapperboard,
   Cloud,
   FileText,
+  Film,
+  Search,
   CloudOff,
   Loader2,
   MessagesSquare,
@@ -75,6 +77,9 @@ import {
   createInputNode,
   createJobNode,
   createScriptNode,
+  createClipScriptNode,
+  createClipMergeNode,
+  CLIP_SCRIPT_SPEC,
   createStarter,
   isValidMuseConnection,
   SCRIPT_SPEC,
@@ -86,12 +91,24 @@ import {
 } from '../services/museCanvasNodes.ts'
 import { MuseLinkEdge } from '../edges/MuseLinkEdge'
 import { fetchMusePrompt } from '../services/museCanvasApi.ts'
+import {
+  checkFlowProject,
+  createFlowProject,
+  fetchFlowAccounts,
+  listFlowProjects,
+  type FlowAccount,
+  type FlowProject,
+  type FlowProjectCheck,
+} from '../services/museCanvasApi.ts'
 import { MuseInputNode } from '../nodes/muse/MuseInputNode'
 import { MuseJobNode } from '../nodes/muse/MuseJobNode'
 import { MuseOutputNode } from '../nodes/muse/MuseOutputNode'
 import { MuseScriptNode } from '../nodes/muse/MuseScriptNode'
 import { MuseScriptTextNode } from '../nodes/muse/MuseScriptTextNode'
 import { MuseVideoOutputNode } from '../nodes/muse/MuseVideoOutputNode'
+import { GptClipScriptNode } from '../nodes/muse/GptClipScriptNode'
+import { GptClipPromptNode } from '../nodes/muse/GptClipPromptNode'
+import { GptClipMergeNode } from '../nodes/muse/GptClipMergeNode'
 import { MuseCanvasContext, type MuseCanvasContextValue } from './museCanvasContext'
 import { ImageLibraryModal } from './ImageLibraryModal'
 import type { LibraryImage } from '../services/imageLibraryApi'
@@ -108,6 +125,9 @@ const MUSE_NODE_TYPES: NodeTypes = {
   [MUSE_NODE.script]: MuseScriptNode,
   [MUSE_NODE.scriptText]: MuseScriptTextNode,
   [MUSE_NODE.videoOutput]: MuseVideoOutputNode,
+  [MUSE_NODE.clipScript]: GptClipScriptNode,
+  [MUSE_NODE.clipPrompt]: GptClipPromptNode,
+  [MUSE_NODE.clipMerge]: GptClipMergeNode,
 }
 const MUSE_EDGE_TYPES: EdgeTypes = { [MUSE_EDGE_TYPE]: MuseLinkEdge }
 
@@ -167,6 +187,27 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
     }
   }, [])
 
+  // Google Flow (Omni 1.2) cho node Clip: project gắn với 1 tài khoản Google
+  const [flowProjects, setFlowProjects] = useState<FlowProject[]>([])
+  const [flowAccounts, setFlowAccounts] = useState<FlowAccount[]>([])
+  const [flowLoading, setFlowLoading] = useState(false)
+  const [flowBusy, setFlowBusy] = useState<'' | 'create' | 'check'>('')
+  const [flowCheck, setFlowCheck] = useState<FlowProjectCheck | null>(null)
+  const [flowError, setFlowError] = useState('')
+  const loadFlow = useCallback(async () => {
+    setFlowLoading(true)
+    setFlowError('')
+    try {
+      const [projects, accs] = await Promise.all([listFlowProjects(), fetchFlowAccounts().catch(() => [])])
+      setFlowProjects(projects)
+      setFlowAccounts(accs)
+    } catch (e: any) {
+      setFlowError(e?.message || 'Không tải được project Flow')
+    } finally {
+      setFlowLoading(false)
+    }
+  }, [])
+
   const loadAccounts = useCallback(async () => {
     setAccountsLoading(true)
     try {
@@ -197,10 +238,11 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
       }
     })()
     loadAccounts()
+    loadFlow()
     return () => {
       alive = false
     }
-  }, [loadAccounts, setEdges, setNodes])
+  }, [loadAccounts, loadFlow, setEdges, setNodes])
 
   useDebounced(
     () => {
@@ -297,7 +339,7 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
    * 'starter' (ảnh vào nối sẵn vào node chạy cùng họ). `type` là id type node (MUSE_NODE).
    */
   const addNode = useCallback(
-    async (kind: 'input' | 'job' | 'starter' | 'script', type: string) => {
+    async (kind: 'input' | 'job' | 'starter' | 'script' | 'clipScript' | 'clipMerge', type: string) => {
       setAddError('')
       setMenuOpen(false)
       const pos = centerPosition()
@@ -310,6 +352,15 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
         if (kind === 'script') {
           const { prompt } = await fetchMusePrompt(SCRIPT_SPEC.promptName)
           setNodes((ns) => [...ns, createScriptNode(pos, prompt) as Node])
+          return
+        }
+        if (kind === 'clipMerge') {
+          setNodes((ns) => [...ns, createClipMergeNode(pos) as Node])
+          return
+        }
+        if (kind === 'clipScript') {
+          const { prompt } = await fetchMusePrompt(CLIP_SCRIPT_SPEC.promptName)
+          setNodes((ns) => [...ns, createClipScriptNode(pos, prompt) as Node])
           return
         }
         const spec = JOB_SPECS[type]
@@ -362,6 +413,7 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
     picker?.resolve(it)
     setPicker(null)
   }
+  const flowProject = useMemo(() => flowProjects.find((p) => p.id === config.flowProjectId) ?? null, [flowProjects, config.flowProjectId])
   const ctx: MuseCanvasContextValue = useMemo(
     () => ({
       config,
@@ -369,9 +421,45 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
       // chưa tải xong danh sách tài khoản thì đừng báo "Chưa có tài khoản" (chỉ chặn chạy tạm)
       blockers: accountsLoaded ? museRunBlockers(config, accounts) : ['Đang tải tài khoản Muse…'],
       pickLibraryImage,
+      flowProject,
     }),
-    [config, accounts, accountsLoaded, pickLibraryImage],
+    [config, accounts, accountsLoaded, pickLibraryImage, flowProject],
   )
+
+  async function createProject() {
+    const stamp = new Date().toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    const name = window.prompt('Tên project Flow mới (tạo trên tài khoản Google đang đăng nhập ở tab Flow):', `Muse Canvas ${stamp}`)
+    if (name == null || !name.trim()) return
+    setFlowBusy('create')
+    setFlowError('')
+    setFlowCheck(null)
+    try {
+      const p = await createFlowProject(name.trim())
+      await loadFlow()
+      update('flowProjectId', p.id)
+      setFlowCheck({ ok: true, state: 'open', message: `Đã tạo “${p.name}”${p.account_email ? ` trên ${p.account_email}` : ''} và chọn cho node Clip.`, accounts: flowAccounts })
+    } catch (e: any) {
+      setFlowError(e?.message || 'Không tạo được project Flow')
+    } finally {
+      setFlowBusy('')
+    }
+  }
+
+  async function checkProject() {
+    if (!config.flowProjectId) return
+    setFlowBusy('check')
+    setFlowError('')
+    setFlowCheck(null)
+    try {
+      const r = await checkFlowProject(config.flowProjectId)
+      setFlowCheck(r)
+      if (r.accounts?.length) setFlowAccounts(r.accounts)
+    } catch (e: any) {
+      setFlowError(e?.message || 'Không kiểm tra được project')
+    } finally {
+      setFlowBusy('')
+    }
+  }
   const readyCount = accounts.filter((a) => a.status === 'active').length
   const saveState: SaveState =
     configSave === 'error' || graphSave === 'error'
@@ -428,6 +516,12 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
               <div className="mc-addmenu-group">Video</div>
               <button type="button" role="menuitem" onClick={() => addNode('script', MUSE_NODE.script)}>
                 <FileText size={13} /> Kịch bản video <small>bảng thiết kế → kịch bản + prompt</small>
+              </button>
+              <button type="button" role="menuitem" onClick={() => addNode('clipScript', MUSE_NODE.clipScript)}>
+                <Clapperboard size={13} /> Kịch bản tạo video <small>ChatGPT · mỗi ảnh 1 clip ≤ 15 s, có mối nối</small>
+              </button>
+              <button type="button" role="menuitem" onClick={() => addNode('clipMerge', MUSE_NODE.clipMerge)}>
+                <Film size={13} /> Ghép video <small>các clip Flow đã tạo → 1 video + nhạc</small>
               </button>
             </div>
           )}
@@ -577,6 +671,98 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
                 Quản lý tài khoản
               </button>
             )}
+          </p>
+        </section>
+
+        {/* Google Flow (Omni 1.2) — nút "Tạo video" của node Clip */}
+        <section className="mc-section">
+          <div className="mc-section-title">
+            <Film size={13} /> Google Flow (Omni 1.2)
+            <button type="button" className="mc-icon-btn" onClick={loadFlow} title="Tải lại project / tài khoản Flow">
+              <RefreshCw size={12} className={flowLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          {flowAccounts[0] && (
+            <p className="mc-hint">
+              Tài khoản Flow vừa thấy: <b>{flowAccounts[0].email}</b>
+              {flowAccounts[0].credits != null ? ` · ${flowAccounts[0].credits} credit` : ''}
+            </p>
+          )}
+          <select
+            className="mc-input"
+            value={config.flowProjectId}
+            onChange={(e) => {
+              update('flowProjectId', e.target.value)
+              setFlowCheck(null)
+            }}
+          >
+            <option value="">— Chọn project Flow cho node Clip —</option>
+            {flowProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.account_email ? ` · ${p.account_email}` : ''}
+              </option>
+            ))}
+          </select>
+          {config.flowProjectId && !flowProject && !flowLoading && (
+            <p className="mc-hint mc-text-danger">Project đã chọn không còn trong app — chọn hoặc tạo project khác.</p>
+          )}
+          {flowProject?.account_email && flowAccounts[0]?.email && flowProject.account_email !== flowAccounts[0].email && (
+            <div className="mc-warn">
+              <div>
+                <AlertTriangle size={13} />{' '}
+                <span>
+                  Project này thuộc {flowProject.account_email}, còn tài khoản Flow vừa thấy là {flowAccounts[0].email}. Nếu tab Flow đang ở tài
+                  khoản mới, bấm “Tạo project mới” (hoặc “Kiểm tra” để chắc chắn).
+                </span>
+              </div>
+            </div>
+          )}
+          <div className="mc-flow-actions">
+            <button type="button" className="mc-mini-btn" onClick={createProject} disabled={!!flowBusy} title="Tạo project trên tài khoản Google đang đăng nhập ở tab Flow">
+              {flowBusy === 'create' ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Tạo project mới
+            </button>
+            <button
+              type="button"
+              className="mc-mini-btn"
+              onClick={checkProject}
+              disabled={!!flowBusy || !flowProject}
+              title="Mở project trên tab Flow và xác nhận mở được (không tạo video, không tốn credit)"
+            >
+              {flowBusy === 'check' ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} Kiểm tra
+            </button>
+          </div>
+          {flowBusy === 'check' && <p className="mc-hint">Đang mở project trên tab Flow… có thể mất tới ~45 giây.</p>}
+          {flowCheck &&
+            (flowCheck.ok ? (
+              <div className="mc-ok"><CheckCircle2 size={13} /> {flowCheck.message}</div>
+            ) : (
+              <div className="mc-warn"><div><AlertTriangle size={13} /> <span>{flowCheck.message}</span></div></div>
+            ))}
+          {flowError && <div className="mc-error">{flowError}</div>}
+          <div className="mc-row">
+            <span className="mc-label">Khung hình</span>
+            <div className="mc-seg">
+              {(['9:16', '16:9'] as const).map((r) => (
+                <button key={r} type="button" className={config.flowAspect === r ? 'on' : ''} onClick={() => update('flowAspect', r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mc-row">
+            <span className="mc-label" title="360p ≈ 1/3 credit, để thử nháp">Chất lượng</span>
+            <div className="mc-seg">
+              {(['720p', '360p'] as const).map((r) => (
+                <button key={r} type="button" className={config.flowResolution === r ? 'on' : ''} onClick={() => update('flowResolution', r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="mc-hint">
+            Project gắn với 1 tài khoản Google: đổi tài khoản trên Flow (vd. hết credit) thì bấm “Tạo project mới” — project cũ không mở được
+            nữa. 360p ≈ 1/3 credit, để thử nháp.
           </p>
         </section>
 

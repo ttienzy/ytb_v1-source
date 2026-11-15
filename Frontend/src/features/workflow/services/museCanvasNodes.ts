@@ -31,6 +31,12 @@ export const MUSE_NODE = {
   script: 'museVideoScript',
   scriptText: 'museScriptText',
   videoOutput: 'museVideoOutput',
+  /** "Kịch bản tạo video" (ChatGPT): mỗi ảnh tham chiếu → 1 kịch bản clip ≤ 15 s, có mối nối giữa các clip */
+  clipScript: 'gptClipScript',
+  /** "Clip": 1 kịch bản clip tách từ Kịch bản tạo video (prompt video sửa được) */
+  clipPrompt: 'gptClipPrompt',
+  /** "Ghép video": ghép các clip Flow đã tạo (xóa watermark, nhạc, nhãn kênh) */
+  clipMerge: 'gptClipMerge',
 } as const
 
 /** Loại dây (có nút X để gỡ) — đăng ký ở MUSE_EDGE_TYPES của workspace. */
@@ -59,6 +65,12 @@ export const MUSE_HANDLE = {
   /** node Kịch bản → node "Video kết quả" (mỗi node video 1 nguồn) */
   videoOut: 'video',
   videoIn: 'video',
+  /** Kịch bản tạo video → node Clip */
+  clipOut: 'clips',
+  clipIn: 'clip',
+  /** node Clip (video đã tạo) → node Ghép video */
+  clipVideoOut: 'clipvideo',
+  clipVideoIn: 'clipvideos',
   // tên cũ (giữ cho code / test trước)
   outfitOut: 'images',
   extractIn: 'images',
@@ -94,6 +106,13 @@ export interface JobNodeSpec {
   /** Danh từ đếm trên nút chạy: "Tách 3 trang phục", "Tạo 2 bảng" */
   unitNoun: string
   doneText: string
+  /** Tỉ lệ ảnh khi gạt sang GPT (ghi kèm request; ChatGPT lấy tỉ lệ chủ yếu từ prompt) */
+  gptAspect: '16:9' | '9:16' | '1:1'
+  /**
+   * Prompt mặc định riêng khi gạt sang GPT (tùy chọn). Có thì node giữ prompt GPT riêng (gptPrompt) và KHÔNG ghép
+   * prompt kết hợp vì prompt GPT tự gọi tên ảnh 1 / ảnh 2; không có thì GPT dùng chung prompt với Muse.
+   */
+  gptPromptName?: string
   /** Cổng vào phụ (tùy chọn): nhận ảnh từ node Ảnh kết quả; mỗi cặp ảnh chính × ảnh phụ = 1 dòng. */
   secondary?: {
     handle: string
@@ -138,6 +157,7 @@ export const JOB_SPECS: Record<string, JobNodeSpec> = {
     runVerb: 'Tách',
     unitNoun: 'trang phục',
     doneText: 'Đã tách',
+    gptAspect: '1:1',
   },
   [MUSE_NODE.characterSheet]: {
     type: MUSE_NODE.characterSheet,
@@ -151,6 +171,8 @@ export const JOB_SPECS: Record<string, JobNodeSpec> = {
     runVerb: 'Tạo',
     unitNoun: 'bảng',
     doneText: 'Đã tạo',
+    gptAspect: '16:9',
+    gptPromptName: 'character_sheet_gpt',
     secondary: {
       handle: 'outfits',
       title: 'Trang phục (tùy chọn)',
@@ -195,6 +217,15 @@ export type MuseOutfitData = MuseInputData
 
 export type ExtractStatus = 'running' | 'done' | 'error' | 'interrupted'
 
+/** Ai tạo ảnh cho node chạy: Muse (mặc định) hoặc tài khoản ChatGPT (Cài đặt → Tài khoản ChatGPT). */
+export type MuseImageProvider = 'muse' | 'gpt'
+export const IMAGE_PROVIDERS: { id: MuseImageProvider; label: string; title: string }[] = [
+  { id: 'muse', label: 'Muse', title: 'Tạo ảnh bằng tài khoản Muse (Cài đặt → Muse AI)' },
+  { id: 'gpt', label: 'GPT', title: 'Tạo ảnh bằng tài khoản ChatGPT (Cài đặt → Tài khoản ChatGPT)' },
+]
+export const PROVIDER_LABEL: Record<MuseImageProvider, string> = { muse: 'Muse', gpt: 'GPT' }
+export const providerOf = (v: unknown): MuseImageProvider => (v === 'gpt' ? 'gpt' : 'muse')
+
 export interface MuseExtractResult {
   sourceNodeId: string
   /** Ảnh đầu vào lúc chạy — khác ảnh hiện tại của node nguồn thì kết quả là "cũ". */
@@ -203,6 +234,8 @@ export interface MuseExtractResult {
   output?: MuseImageRef
   error?: string
   sessionId?: string | null
+  /** Ai đã tạo ảnh của dòng này (thiếu = Muse, kết quả lưu trước khi có công tắc). */
+  provider?: MuseImageProvider
   updatedAt: number
 }
 
@@ -214,6 +247,11 @@ export interface MuseJobData {
   /** Prompt ghép thêm khi dòng có ảnh phụ (vd. trang phục) — chỉ node có `secondary` */
   secondaryPrompt: string
   secondaryPromptSource: 'default' | 'custom'
+  /** Prompt riêng của chế độ GPT (chỉ node có JobNodeSpec.gptPromptName); rỗng khi chưa nạp mặc định. */
+  gptPrompt: string
+  gptPromptSource: 'default' | 'custom'
+  /** Công tắc tạo ảnh của node. Đổi công tắc không làm kết quả cũ thành "cũ"; chỉ áp cho lần chạy sau. */
+  provider: MuseImageProvider
   results: Record<string, MuseExtractResult>
   [key: string]: unknown
 }
@@ -287,6 +325,10 @@ export function createJobNode(
     promptSource: 'default',
     secondaryPrompt,
     secondaryPromptSource: 'default',
+    provider: 'muse',
+    // gptPrompt để trống: node tự nạp prompt GPT mặc định khi gắn lên canvas (xem MuseJobNode)
+    gptPrompt: '',
+    gptPromptSource: 'default',
     results: {},
   }
   return { id, type, position, data }
@@ -387,9 +429,24 @@ export function isValidMuseConnection(
       !edges.some((e) => e.target === c.target)
     )
   }
-  if (src.type === MUSE_NODE.script || src.type === MUSE_NODE.scriptText || src.type === MUSE_NODE.videoOutput) return false
-  // Ảnh tham chiếu → cổng boards của Kịch bản video hoặc của node Kịch bản (Tạo video)
-  if (dst.type === MUSE_NODE.script || dst.type === MUSE_NODE.scriptText) {
+  if (dst.type === MUSE_NODE.clipPrompt) {
+    return (
+      src.type === MUSE_NODE.clipScript &&
+      (sh ?? MUSE_HANDLE.clipOut) === MUSE_HANDLE.clipOut &&
+      (th ?? MUSE_HANDLE.clipIn) === MUSE_HANDLE.clipIn &&
+      !edges.some((e) => e.target === c.target)
+    )
+  }
+  if (dst.type === MUSE_NODE.clipMerge) {
+    return (
+      src.type === MUSE_NODE.clipPrompt &&
+      (sh ?? MUSE_HANDLE.clipVideoOut) === MUSE_HANDLE.clipVideoOut &&
+      (th ?? MUSE_HANDLE.clipVideoIn) === MUSE_HANDLE.clipVideoIn
+    )
+  }
+  if (src.type === MUSE_NODE.script || src.type === MUSE_NODE.scriptText || src.type === MUSE_NODE.videoOutput || src.type === MUSE_NODE.clipScript || src.type === MUSE_NODE.clipPrompt || src.type === MUSE_NODE.clipMerge) return false
+  // Ảnh tham chiếu → cổng boards của Kịch bản video / Kịch bản tạo video hoặc của node Kịch bản (Tạo video)
+  if (dst.type === MUSE_NODE.script || dst.type === MUSE_NODE.scriptText || dst.type === MUSE_NODE.clipScript) {
     if ((th ?? MUSE_HANDLE.refsIn) !== MUSE_HANDLE.refsIn) return false
     if (src.type === MUSE_NODE.output) return (sh ?? MUSE_HANDLE.imageOut) === MUSE_HANDLE.imageOut
     if (src.type === MUSE_NODE.character || src.type === MUSE_NODE.outfit) return (sh ?? MUSE_HANDLE.imagesOut) === MUSE_HANDLE.imagesOut
@@ -446,6 +503,9 @@ export function normalizeJobData(raw: Record<string, unknown> | undefined, type:
     promptSource: d.promptSource === 'custom' ? 'custom' : 'default',
     secondaryPrompt: typeof d.secondaryPrompt === 'string' ? d.secondaryPrompt : '',
     secondaryPromptSource: d.secondaryPromptSource === 'custom' ? 'custom' : 'default',
+    provider: providerOf(d.provider),
+    gptPrompt: typeof d.gptPrompt === 'string' ? d.gptPrompt : '',
+    gptPromptSource: d.gptPromptSource === 'custom' ? 'custom' : 'default',
     results: d.results && typeof d.results === 'object' ? (d.results as Record<string, MuseExtractResult>) : {},
   }
 }
@@ -579,10 +639,11 @@ export function markInterrupted(results: Record<string, MuseExtractResult>, now 
   for (const [k, r] of Object.entries(results)) {
     if (r.status === 'running') {
       changed = true
+      const where = r.provider === 'gpt' ? 'xem lịch sử chat trên ChatGPT' : 'xem chat trên Muse'
       next[k] = {
         ...r,
         status: 'interrupted',
-        error: 'Lần chạy bị gián đoạn (đóng app / tải lại trang). Prompt có thể ĐÃ gửi — xem chat trên Muse trước khi chạy lại.',
+        error: `Lần chạy bị gián đoạn (đóng app / tải lại trang). Prompt có thể ĐÃ gửi — ${where} trước khi chạy lại.`,
         updatedAt: now,
       }
     } else next[k] = r
@@ -606,6 +667,17 @@ export function extractOutputs(inputs: ExtractInput[], results: Record<string, M
 }
 
 /** Body gọi POST /api/ai/muse/generate cho 1 đầu vào. Prompt gửi nguyên văn (không ghép tiền tố chung). */
+/** Prompt đầy đủ + ảnh tham chiếu theo thứ tự (ảnh chính trước, ảnh phụ sau) của 1 dòng. Thiếu ảnh -> throw. */
+function rowPromptAndRefs(input: ExtractInput, prompt: string, secondaryPrompt: string): { prompt: string; refs: string[] } {
+  if (!input.image) throw new Error(`${input.label}: chưa có ảnh.`)
+  const extra = (input.extra ?? []).map((x) => {
+    if (!x.image) throw new Error(`${input.label}: ${x.label} chưa có ảnh.`)
+    return x.image.path
+  })
+  const full = extra.length && secondaryPrompt.trim() ? `${prompt.trim()}\n\n${secondaryPrompt.trim()}` : prompt.trim()
+  return { prompt: full, refs: [input.image.path, ...extra] }
+}
+
 export function buildJobRequest(
   spec: JobNodeSpec,
   config: MuseCanvasConfig,
@@ -613,20 +685,59 @@ export function buildJobRequest(
   input: ExtractInput,
   secondaryPrompt = '',
 ): Record<string, unknown> {
-  if (!input.image) throw new Error(`${input.label}: chưa có ảnh.`)
-  const extra = (input.extra ?? []).map((x) => {
-    if (!x.image) throw new Error(`${input.label}: ${x.label} chưa có ảnh.`)
-    return x.image.path
-  })
-  const fullPrompt = extra.length && secondaryPrompt.trim() ? `${prompt.trim()}\n\n${secondaryPrompt.trim()}` : prompt.trim()
+  const row = rowPromptAndRefs(input, prompt, secondaryPrompt)
   return {
-    prompt: fullPrompt,
-    reference_images: [input.image.path, ...extra],
+    prompt: row.prompt,
+    reference_images: row.refs,
     output_kind: 'image',
     apply_prefix: false,
     chat_title: `${config.chatTitlePrefix} · ${spec.chatLabel} · ${input.label}`.slice(0, 80),
     file_prefix: `${config.filePrefix}_${spec.fileSuffix}`.slice(0, 40),
     ...museGenerateOptions(config),
+  }
+}
+
+/** Prompt node đang dùng theo công tắc: trường nào hiển thị/sửa, tên prompt mặc định, có ghép prompt kết hợp không. */
+export interface ActivePrompt {
+  text: string
+  source: 'default' | 'custom'
+  promptName: string
+  field: 'prompt' | 'gptPrompt'
+  sourceField: 'promptSource' | 'gptPromptSource'
+  /** Ghép prompt kết hợp (ảnh phụ) sau prompt chính? GPT có prompt riêng thì không. */
+  useSecondary: boolean
+  /** Prompt riêng của GPT (true) hay prompt chung Muse/GPT (false) */
+  gptOwn: boolean
+}
+
+export function activePrompt(spec: JobNodeSpec, data: MuseJobData): ActivePrompt {
+  if (data.provider === 'gpt' && spec.gptPromptName) {
+    return {
+      text: data.gptPrompt, source: data.gptPromptSource, promptName: spec.gptPromptName,
+      field: 'gptPrompt', sourceField: 'gptPromptSource', useSecondary: false, gptOwn: true,
+    }
+  }
+  return {
+    text: data.prompt, source: data.promptSource, promptName: spec.promptName,
+    field: 'prompt', sourceField: 'promptSource', useSecondary: true, gptOwn: false,
+  }
+}
+
+/** Body POST /api/workflow/muse/gpt-image: cùng prompt + ảnh tham chiếu như Muse, tạo bằng tài khoản ChatGPT. */
+export function buildGptJobRequest(
+  spec: JobNodeSpec,
+  config: MuseCanvasConfig,
+  prompt: string,
+  input: ExtractInput,
+  secondaryPrompt = '',
+): Record<string, unknown> {
+  const row = rowPromptAndRefs(input, prompt, secondaryPrompt)
+  return {
+    prompt: row.prompt,
+    reference_images: row.refs,
+    chat_title: `${config.chatTitlePrefix} · ${spec.chatLabel} · ${input.label}`.slice(0, 80),
+    file_prefix: `${config.filePrefix}_${spec.fileSuffix}`.slice(0, 40),
+    aspect: spec.gptAspect,
   }
 }
 export const buildExtractRequest = (config: MuseCanvasConfig, prompt: string, input: ExtractInput) =>
@@ -679,7 +790,7 @@ export function planOutputNodes(
 }
 
 /** Node Ảnh kết quả có ảnh mới hơn ở node chạy nguồn (dòng đó vừa chạy lại)? Trả ảnh mới hoặc null. */
-export function newerOutputFor(output: MuseOutputData, jobData: MuseJobData | null | undefined): MuseImageRef | null {
+export function newerOutputFor(output: MuseOutputData, jobData: (Partial<MuseJobData> & Pick<MuseJobData, 'results'>) | null | undefined): MuseImageRef | null {
   if (!output.origin || !jobData) return null
   const r = jobData.results[output.origin.sourceNodeId]
   if (!r || r.status !== 'done' || !r.output) return null
@@ -689,7 +800,7 @@ export function newerOutputFor(output: MuseOutputData, jobData: MuseJobData | nu
 // ---------------------------------------------------------------- nối dây "thông minh"
 
 /** Cổng có thể có của mỗi loại node (để tự chọn cổng khi thả dây vào thân node). */
-const SOURCE_HANDLES = [MUSE_HANDLE.imagesOut, MUSE_HANDLE.jobOut, MUSE_HANDLE.imageOut, MUSE_HANDLE.scriptOut, MUSE_HANDLE.videoOut]
+const SOURCE_HANDLES = [MUSE_HANDLE.imagesOut, MUSE_HANDLE.jobOut, MUSE_HANDLE.imageOut, MUSE_HANDLE.scriptOut, MUSE_HANDLE.videoOut, MUSE_HANDLE.clipOut, MUSE_HANDLE.clipVideoOut]
 const TARGET_HANDLES = [
   MUSE_HANDLE.imagesIn,
   MUSE_HANDLE.outfitsIn,
@@ -697,6 +808,8 @@ const TARGET_HANDLES = [
   MUSE_HANDLE.refsIn,
   MUSE_HANDLE.scriptIn,
   MUSE_HANDLE.videoIn,
+  MUSE_HANDLE.clipIn,
+  MUSE_HANDLE.clipVideoIn,
 ]
 
 /**
@@ -734,6 +847,9 @@ const NODE_NAME: Record<string, string> = {
   [MUSE_NODE.script]: 'Kịch bản video',
   [MUSE_NODE.scriptText]: 'Kịch bản',
   [MUSE_NODE.videoOutput]: 'Video kết quả',
+  [MUSE_NODE.clipScript]: 'Kịch bản tạo video',
+  [MUSE_NODE.clipPrompt]: 'Clip',
+  [MUSE_NODE.clipMerge]: 'Ghép video',
 }
 
 /** Câu giải thích vì sao 2 node không nối được (hiện cho người dùng thay vì dây biến mất). */
@@ -763,6 +879,16 @@ export function explainMuseConnection(
       : 'Node Kịch bản nhận kịch bản từ Kịch bản video và ảnh tham chiếu (Ảnh kết quả, Nhân vật, Trang phục) ở cổng “Tham chiếu”.'
   if (dst.type === MUSE_NODE.script)
     return 'Kịch bản video nhận node có ảnh: Ảnh kết quả, Nhân vật tham chiếu, Trang phục (nối vào cổng “Tham chiếu”).'
+  if (dst.type === MUSE_NODE.clipScript)
+    return 'Kịch bản tạo video nhận node có ảnh: Ảnh kết quả (bảng thiết kế), Nhân vật tham chiếu, Trang phục (nối vào cổng “Tham chiếu”).'
+  if (dst.type === MUSE_NODE.clipPrompt)
+    return src.type === MUSE_NODE.clipScript
+      ? 'Node Clip chỉ có 1 nguồn — gỡ dây cũ trước.'
+      : 'Node Clip chỉ nhận dây từ Kịch bản tạo video (dùng nút “Ra node” ở từng clip).'
+  if (dst.type === MUSE_NODE.clipMerge) return 'Ghép video chỉ nhận dây từ node Clip (chấm xanh bên phải node Clip).'
+  if (src.type === MUSE_NODE.clipScript) return 'Kịch bản tạo video chỉ nối ra node Clip — dùng nút “Ra node” ở từng clip.'
+  if (src.type === MUSE_NODE.clipPrompt) return 'Node Clip chỉ nối ra node Ghép video (hoặc để trống).'
+  if (src.type === MUSE_NODE.clipMerge) return 'Node Ghép video là node cuối — chưa nối ra node nào.'
 
   if (src.type === MUSE_NODE.script) return 'Kịch bản video chỉ nối ra node Kịch bản — dùng nút “Ra node”.'
   if (src.type === MUSE_NODE.scriptText) return 'Node Kịch bản chỉ nối ra node Video kết quả — dùng nút “Ra node” ở phần video.'
@@ -812,6 +938,8 @@ export interface MuseScriptResult {
   warning?: string
   error?: string
   sessionId?: string | null
+  /** Tài khoản ChatGPT đã viết (node Kịch bản tạo video) */
+  accountLabel?: string | null
   updatedAt: number
 }
 
@@ -936,10 +1064,10 @@ export function scriptFingerprint(refs: ScriptRef[]): string {
 
 export type ScriptState = 'no_refs' | 'too_many' | 'no_image' | 'pending' | 'running' | 'done' | 'error' | 'interrupted' | 'stale'
 
-export function scriptState(refs: ScriptRef[], result: MuseScriptResult | null): ScriptState {
+export function scriptState(refs: ScriptRef[], result: MuseScriptResult | null, maxRefs: number = SCRIPT_MAX_REFS): ScriptState {
   if (result?.status === 'running') return 'running'
   if (!refs.length) return 'no_refs'
-  if (refs.length > SCRIPT_MAX_REFS) return 'too_many'
+  if (refs.length > maxRefs) return 'too_many'
   if (refs.some((r) => !r.image)) return 'no_image'
   if (!result) return 'pending'
   if (result.status === 'done' && result.inputPath !== scriptFingerprint(refs)) return 'stale'
@@ -1002,6 +1130,775 @@ export function interruptScript(result: MuseScriptResult | null, now = Date.now(
     ...result,
     status: 'interrupted',
     error: 'Lần chạy bị gián đoạn (đóng app / tải lại trang). Prompt có thể ĐÃ gửi — xem chat trên Muse trước khi chạy lại.',
+    updatedAt: now,
+  }
+}
+
+// ---------------------------------------------------------------- node "Kịch bản tạo video" (ChatGPT)
+
+/**
+ * 1 node = 1 lượt ChatGPT: gửi prompt + mọi ảnh tham chiếu theo thứ tự (#1..#N). ChatGPT viết N kịch bản clip
+ * (mỗi tham chiếu 1 clip, tự chọn độ dài ≤ 15 s, thiết kế mối nối "hinge" giữa clip k và k+1), tách bằng dòng
+ * "=== SCRIPT k/N — REF #k — <tên> — <D>s ===" … "=== END SCRIPT k ===". App tách và kiểm tra (không nhờ GPT đếm).
+ */
+export const CLIP_SCRIPT_SPEC = {
+  type: MUSE_NODE.clipScript,
+  title: 'Kịch bản tạo video',
+  subtitle: 'ChatGPT · mỗi tham chiếu → 1 clip ≤ 15 s, có mối nối giữa các clip',
+  promptName: 'clip_script',
+  chatLabel: 'Kịch bản clip',
+  fileSuffix: 'clipscript',
+} as const
+
+/** Ảnh tối đa mỗi lượt ChatGPT (giới hạn thật của ChatGPT web chưa kiểm chứng). */
+export const CLIP_SCRIPT_MAX_REFS = 10
+/** Omni 1.2 (Flow Ingredients): clip 3–15 s; giá đo được ở 720p ≈ 3 credit/giây (6 s = 18, 8 s = 24, 10 s = 30). */
+export const CLIP_MIN_SECONDS = 3
+export const CLIP_MAX_SECONDS = 15
+export const CLIP_CREDIT_PER_SECOND_720P = 3
+
+export function createClipScriptNode(position: XYPosition, prompt: string, id = museNodeId('clipscript')): MuseNodeLike {
+  const data: MuseScriptData = {
+    title: CLIP_SCRIPT_SPEC.title,
+    prompt,
+    promptSource: 'default',
+    notes: '',
+    order: [],
+    result: null,
+    collapsed: false,
+  }
+  return { id, type: MUSE_NODE.clipScript, position, data }
+}
+
+export function normalizeClipScriptData(raw: Record<string, unknown> | undefined): MuseScriptData {
+  const d = normalizeScriptData(raw)
+  return { ...d, title: titleOr((raw ?? {}).title, CLIP_SCRIPT_SPEC.title) }
+}
+
+/** Đoạn app tự gửi sau prompt: danh sách ảnh #k (vai trò + tên), số kịch bản bắt buộc, ghi chú của người dùng. */
+export function buildClipScriptContext(refs: ScriptRef[], notes = ''): string {
+  const n = refs.length
+  const lines = ['## Reference images attached to this message (in this exact order)']
+  refs.forEach((r, i) => lines.push(`- #${i + 1}: ${SCRIPT_REF_KINDS[r.kind].en} — "${r.label}".`))
+  lines.push(
+    '',
+    `N = ${n}. Write exactly ${n} script${n === 1 ? '' : 's'} (=== SCRIPT 1/${n} … === SCRIPT ${n}/${n}), one per reference image, in this order.`,
+  )
+  const extra = notes.trim()
+  lines.push('', '## User note', extra || '(none)')
+  lines.push('', 'Do not ask me questions — write the complete output now.')
+  return lines.join('\n')
+}
+
+/** Body POST /api/workflow/muse/gpt-script. */
+export function buildClipScriptRequest(
+  config: MuseCanvasConfig,
+  prompt: string,
+  refs: ScriptRef[],
+  notes = '',
+): Record<string, unknown> {
+  if (!prompt.trim()) throw new Error('Prompt kịch bản đang trống.')
+  if (!refs.length) throw new Error('Chưa nối ảnh tham chiếu nào.')
+  if (refs.length > CLIP_SCRIPT_MAX_REFS) throw new Error(`Tối đa ${CLIP_SCRIPT_MAX_REFS} ảnh tham chiếu mỗi lượt ChatGPT.`)
+  const images = refs.map((r) => {
+    if (!r.image) throw new Error(`${r.label}: chưa có ảnh.`)
+    return r.image.path
+  })
+  return {
+    prompt: `${prompt.trim()}\n\n${buildClipScriptContext(refs, notes)}`,
+    reference_images: images,
+    chat_title: `${config.chatTitlePrefix} · ${CLIP_SCRIPT_SPEC.chatLabel} · ${refs.length} ảnh`.slice(0, 80),
+    file_prefix: `${config.filePrefix}_${CLIP_SCRIPT_SPEC.fileSuffix}`.slice(0, 40),
+  }
+}
+
+/** Mở lại canvas: còn 'running' mà không còn request chờ -> gián đoạn (chỗ xem lại là ChatGPT). */
+export function interruptClipScript(result: MuseScriptResult | null, now = Date.now()): MuseScriptResult | null {
+  if (!result || result.status !== 'running') return null
+  return {
+    ...result,
+    status: 'interrupted',
+    error: 'Lần chạy bị gián đoạn (đóng app / tải lại trang). Prompt có thể ĐÃ gửi — xem lịch sử chat trên ChatGPT trước khi chạy lại.',
+    updatedAt: now,
+  }
+}
+
+export interface ClipBeat {
+  from: number
+  to: number
+}
+
+export interface ParsedClip {
+  /** Số thứ tự clip (k) và tổng (N) ghi ở dòng tiêu đề */
+  k: number
+  n: number
+  /** REF #… ghi ở tiêu đề (null nếu không ghi) */
+  ref: number | null
+  name: string
+  /** Độ dài ghi ở tiêu đề (giây) */
+  seconds: number | null
+  /** Toàn bộ phần của clip (bảng timeline, lý do…) — Markdown */
+  body: string
+  /** Prompt video tiếng Anh để dán vào Flow */
+  videoPrompt: string
+  /** Các mốc [a–bs] trong prompt video */
+  beats: ClipBeat[]
+  warnings: string[]
+}
+
+export interface ParsedClipScript {
+  /** Phần trước clip đầu: tổng quan, IDENTITY LOCK, bảng chuyển cảnh */
+  intro: string
+  clips: ParsedClip[]
+  /** Phần sau clip cuối: hướng dẫn ghép */
+  outro: string
+  totalSeconds: number
+  warnings: string[]
+}
+
+const CLIP_HEAD = /^\s*(?:#+\s*)?\**\s*={3}\s*SCRIPT\s+(\d+)\s*\/\s*(\d+)\s*(.*?)\s*={3}\s*\**\s*$/i
+const CLIP_END = /^\s*(?:#+\s*)?\**\s*={3}\s*END\s+SCRIPT\b.*={3}\s*\**\s*$/i
+const BEAT = /\[\s*(\d+(?:[.,]\d+)?)\s*s?\s*[–—-]\s*(\d+(?:[.,]\d+)?)\s*s?\s*\]/g
+const num = (x: string) => Number(x.replace(',', '.'))
+
+function parseHeadRest(rest: string): { ref: number | null; name: string; seconds: number | null } {
+  const refM = rest.match(/REF\s*#?\s*(\d+)/i)
+  const secAll = [...rest.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:s|giây)\b/gi)]
+  const secM = secAll.length ? secAll[secAll.length - 1] : null
+  let name = rest
+  if (secM && secM.index != null) name = name.slice(0, secM.index) + name.slice(secM.index + secM[0].length)
+  if (refM) name = name.replace(refM[0], ' ')
+  name = name
+    .split(/\s*[—–|]\s*|\s+-\s+/) // " - " là dấu tách; "T-shirt" (không có khoảng trắng) giữ nguyên
+    .map((x) => x.replace(/^[\s\-:·]+|[\s\-:·]+$/g, '').trim())
+    .filter(Boolean)
+    .join(' — ')
+  return { ref: refM ? Number(refM[1]) : null, name, seconds: secM ? num(secM[1]) : null }
+}
+
+function extractVideoPrompt(body: string): string {
+  const lines = body.split('\n')
+  const at = lines.findIndex((l) => /VIDEO\s*PROMPT/i.test(l))
+  if (at < 0) return ''
+  const after = lines.slice(at + 1)
+  const open = after.findIndex((l) => l.trim().startsWith('```'))
+  if (open >= 0) {
+    const close = after.findIndex((l, i) => i > open && l.trim().startsWith('```'))
+    return after.slice(open + 1, close > open ? close : undefined).join('\n').trim()
+  }
+  // không có khối ``` : lấy phần chữ ngay sau dòng VIDEO PROMPT
+  const inline = lines[at].replace(/^.*VIDEO\s*PROMPT\s*:?\**\s*/i, '').trim()
+  return [inline, ...after].join('\n').trim()
+}
+
+/** Kiểm tra mốc [a–bs] của 1 clip: bắt đầu từ 0, liền nhau, kết thúc đúng độ dài. */
+export function checkClipBeats(beats: ClipBeat[], seconds: number | null): string[] {
+  const w: string[] = []
+  if (!beats.length) return ['Prompt video không có mốc thời gian [a–bs].']
+  if (Math.abs(beats[0].from) > 0.05) w.push(`Mốc đầu bắt đầu ở ${beats[0].from}s, không phải 0s.`)
+  for (let i = 1; i < beats.length; i++) {
+    const gap = beats[i].from - beats[i - 1].to
+    if (Math.abs(gap) > 0.05) w.push(`Mốc ${beats[i - 1].to}s → ${beats[i].from}s ${gap > 0 ? 'bị hở' : 'bị chồng'}.`)
+  }
+  if (beats.some((b) => b.to <= b.from)) w.push('Có mốc kết thúc sớm hơn lúc bắt đầu.')
+  const last = beats[beats.length - 1].to
+  if (seconds != null && Math.abs(last - seconds) > 0.25) w.push(`Mốc cuối ${last}s khác độ dài clip ${seconds}s.`)
+  return w
+}
+
+/** Tách bài ChatGPT theo dòng "=== SCRIPT k/N … ===" và kiểm tra từng clip. `expected` = số ảnh tham chiếu. */
+export function parseClipScript(text: string, expected: number): ParsedClipScript {
+  const intro: string[] = []
+  const outro: string[] = []
+  const clips: ParsedClip[] = []
+  let head: RegExpMatchArray | null = null
+  let lines: string[] = []
+  const flush = () => {
+    if (!head) return
+    const [, k, n, rest] = head
+    const h = parseHeadRest(rest)
+    const body = lines.join('\n').trim()
+    const videoPrompt = extractVideoPrompt(body)
+    const beats = [...videoPrompt.matchAll(BEAT)].map((m) => ({ from: num(m[1]), to: num(m[2]) }))
+    const warnings: string[] = []
+    const kk = Number(k)
+    if (h.seconds == null) warnings.push('Tiêu đề không ghi số giây.')
+    else if (h.seconds > CLIP_MAX_SECONDS) warnings.push(`Dài ${h.seconds}s — Omni 1.2 tối đa ${CLIP_MAX_SECONDS}s.`)
+    else if (h.seconds < CLIP_MIN_SECONDS) warnings.push(`Ngắn ${h.seconds}s — Omni 1.2 tối thiểu ${CLIP_MIN_SECONDS}s.`)
+    else if (!Number.isInteger(h.seconds)) warnings.push(`${h.seconds}s không phải số giây nguyên (Flow chỉ có mốc nguyên).`)
+    if (h.ref != null && h.ref !== kk) warnings.push(`Tiêu đề ghi REF #${h.ref} nhưng là clip ${kk}.`)
+    if (!videoPrompt) warnings.push('Không tìm thấy VIDEO PROMPT.')
+    else warnings.push(...checkClipBeats(beats, h.seconds))
+    clips.push({ k: kk, n: Number(n), ref: h.ref, name: h.name, seconds: h.seconds, body, videoPrompt, beats, warnings })
+    head = null
+    lines = []
+  }
+  for (const line of text.split('\n')) {
+    const m = line.match(CLIP_HEAD)
+    if (m) {
+      flush()
+      outro.length = 0
+      head = m
+      continue
+    }
+    if (CLIP_END.test(line)) {
+      flush()
+      continue
+    }
+    if (head) lines.push(line)
+    else if (clips.length) outro.push(line)
+    else intro.push(line)
+  }
+  flush()
+  const warnings: string[] = []
+  if (!clips.length) warnings.push('Không tách được kịch bản nào theo dòng “=== SCRIPT k/N … ===” — xem bài đầy đủ.')
+  else if (clips.length !== expected) warnings.push(`ChatGPT viết ${clips.length} kịch bản, cần ${expected} (1 kịch bản / ảnh tham chiếu).`)
+  clips.forEach((c, i) => {
+    if (c.k !== i + 1) warnings.push(`Kịch bản thứ ${i + 1} ghi số ${c.k}.`)
+  })
+  const totalSeconds = clips.reduce((a, c) => a + (c.seconds ?? 0), 0)
+  return { intro: intro.join('\n').trim(), clips, outro: outro.join('\n').trim(), totalSeconds, warnings }
+}
+
+/** Ước tính credit Flow ở 720p (theo số giây ghi ở tiêu đề). */
+export const clipCredits720p = (seconds: number) => Math.round(seconds * CLIP_CREDIT_PER_SECOND_720P)
+
+// ---------------------------------------------------------------- node "Clip" (1 clip tách từ Kịch bản tạo video)
+
+/**
+ * Node "Clip": 1 kịch bản clip tách từ node Kịch bản tạo video (nút "Ra node"). Giữ ảnh tham chiếu #k, số giây,
+ * prompt video (sửa được) và phần chi tiết; nguồn viết lại thì báo + "Dùng bản mới".
+ */
+export interface MuseClipPromptData {
+  title: string
+  name: string
+  k: number
+  n: number
+  /** Độ dài clip (giây) — sửa được */
+  seconds: number | null
+  originalSeconds: number | null
+  /** Prompt video đang dùng — sửa được */
+  prompt: string
+  /** Bản ChatGPT viết, để "Bản gốc" */
+  originalPrompt: string
+  /** Phần chi tiết của clip (style, timeline) — Markdown */
+  body: string
+  /** Ảnh tham chiếu #k lúc tách */
+  image: MuseImageRef | null
+  origin: { clipScriptNodeId: string; updatedAt: number; k: number } | null
+  /** Lần "Tạo video" gần nhất (Omni 1.2 trên Flow) */
+  video: MuseClipVideo | null
+  collapsed: boolean
+  [key: string]: unknown
+}
+
+export function createClipPromptNode(
+  position: XYPosition,
+  clip: Pick<ParsedClip, 'k' | 'n' | 'name' | 'seconds' | 'videoPrompt' | 'body'>,
+  image: MuseImageRef | null,
+  origin: MuseClipPromptData['origin'],
+  id = museNodeId('clip'),
+): MuseNodeLike {
+  const data: MuseClipPromptData = {
+    title: `Clip ${clip.k}/${clip.n}`,
+    name: clip.name,
+    k: clip.k,
+    n: clip.n,
+    seconds: clip.seconds,
+    originalSeconds: clip.seconds,
+    prompt: clip.videoPrompt,
+    originalPrompt: clip.videoPrompt,
+    body: clip.body,
+    image,
+    origin,
+    video: null,
+    collapsed: false,
+  }
+  return { id, type: MUSE_NODE.clipPrompt, position, data }
+}
+
+export function normalizeClipPromptData(raw: Record<string, unknown> | undefined): MuseClipPromptData {
+  const d = raw ?? {}
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const k = n(d.k) ?? 1
+  const total = n(d.n) ?? k
+  const o = d.origin as MuseClipPromptData['origin'] | undefined
+  return {
+    title: titleOr(d.title, `Clip ${k}/${total}`),
+    name: typeof d.name === 'string' ? d.name : '',
+    k,
+    n: total,
+    seconds: n(d.seconds),
+    originalSeconds: n(d.originalSeconds),
+    prompt: typeof d.prompt === 'string' ? d.prompt : '',
+    originalPrompt: typeof d.originalPrompt === 'string' ? d.originalPrompt : '',
+    body: typeof d.body === 'string' ? d.body : '',
+    image: (d.image as MuseImageRef | null | undefined) ?? null,
+    origin: o && typeof o === 'object' && typeof o.clipScriptNodeId === 'string' ? o : null,
+    video: d.video && typeof d.video === 'object' && typeof (d.video as MuseClipVideo).status === 'string' ? (d.video as MuseClipVideo) : null,
+    collapsed: d.collapsed === true,
+  }
+}
+
+/** Mốc [a–bs] trong 1 prompt video. */
+export function promptBeats(prompt: string): ClipBeat[] {
+  return [...prompt.matchAll(BEAT)].map((m) => ({ from: num(m[1]), to: num(m[2]) }))
+}
+
+/** Kiểm tra 1 clip (dùng cả khi người dùng đã sửa số giây / prompt). */
+export function checkClipPrompt(prompt: string, seconds: number | null): string[] {
+  const w: string[] = []
+  if (seconds == null) w.push('Chưa có số giây.')
+  else if (seconds > CLIP_MAX_SECONDS) w.push(`Dài ${seconds}s — Omni 1.2 tối đa ${CLIP_MAX_SECONDS}s.`)
+  else if (seconds < CLIP_MIN_SECONDS) w.push(`Ngắn ${seconds}s — Omni 1.2 tối thiểu ${CLIP_MIN_SECONDS}s.`)
+  else if (!Number.isInteger(seconds)) w.push(`${seconds}s không phải số giây nguyên (Flow chỉ có mốc nguyên).`)
+  if (!prompt.trim()) return [...w, 'Prompt video đang trống.']
+  return [...w, ...checkClipBeats(promptBeats(prompt), seconds)] // độ dài prompt chỉ hiển thị, không cảnh báo / không chặn
+}
+
+export function findClipPromptNodeFor(nodes: MuseNodeLike[], clipScriptNodeId: string, updatedAt: number, k: number): MuseNodeLike | undefined {
+  return nodes.find((n) => {
+    if (n.type !== MUSE_NODE.clipPrompt) return false
+    const o = normalizeClipPromptData(n.data).origin
+    return o?.clipScriptNodeId === clipScriptNodeId && o.updatedAt === updatedAt && o.k === k
+  })
+}
+
+export const museClipEdge = (clipScriptId: string, clipNodeId: string) =>
+  museEdge(clipScriptId, clipNodeId, MUSE_HANDLE.clipOut, MUSE_HANDLE.clipIn)
+
+/**
+ * Tạo node Clip + dây cho các clip của lần viết hiện tại chưa có node (only = 1 clip). Ảnh tham chiếu #k chỉ gắn khi
+ * vẫn đúng ảnh lúc viết (so đường dẫn). Không tạo gì nếu chưa có bài.
+ */
+export function planClipPromptNodes(
+  script: MuseNodeLike & { width?: number },
+  refs: ScriptRef[],
+  nodes: MuseNodeLike[],
+  only?: number,
+): { nodes: MuseNodeLike[]; edges: MuseEdgeLike[] } {
+  const out = { nodes: [] as MuseNodeLike[], edges: [] as MuseEdgeLike[] }
+  const r = normalizeClipScriptData(script.data).result
+  if (!r || r.status !== 'done' || !r.text) return out
+  const sentPaths = r.inputPath ? r.inputPath.split('|') : []
+  const parsed = parseClipScript(r.text, sentPaths.length || refs.length)
+  for (const c of parsed.clips) {
+    if (only != null && c.k !== only) continue
+    if (findClipPromptNodeFor(nodes, script.id, r.updatedAt, c.k)) continue
+    const ref = refs[c.k - 1]
+    const image = ref?.image && ref.image.path === sentPaths[c.k - 1] ? ref.image : null
+    // node của cùng clip ở lần viết trước (nếu còn) -> đặt lệch một chút để không chồng lên
+    const older = nodes.filter((n) => n.type === MUSE_NODE.clipPrompt && normalizeClipPromptData(n.data).origin?.clipScriptNodeId === script.id && normalizeClipPromptData(n.data).k === c.k).length
+    const position = { x: script.position.x + (script.width || 520) + 90 + older * 40, y: script.position.y + (c.k - 1) * 1080 + older * 40 }
+    const node = createClipPromptNode(position, c, image, { clipScriptNodeId: script.id, updatedAt: r.updatedAt, k: c.k })
+    out.nodes.push(node)
+    out.edges.push(museClipEdge(script.id, node.id))
+  }
+  return out
+}
+
+/** Nguồn đã viết lại và bài mới có clip cùng số k? Trả clip mới + lần viết, hoặc null. */
+export function newerClipFor(
+  clip: MuseClipPromptData,
+  scriptData: MuseScriptData | null | undefined,
+): { clip: ParsedClip; updatedAt: number; imagePath: string | null } | null {
+  const r = scriptData?.result
+  if (!clip.origin || !r || r.status !== 'done' || !r.text || r.updatedAt === clip.origin.updatedAt) return null
+  const sent = r.inputPath ? r.inputPath.split('|') : []
+  const c = parseClipScript(r.text, sent.length).clips.find((x) => x.k === clip.k)
+  return c ? { clip: c, updatedAt: r.updatedAt, imagePath: sent[clip.k - 1] ?? null } : null
+}
+
+// ---------------------------------------------------------------- "Tạo video" của node Clip (Omni 1.2 trên Flow)
+
+/** Model Omni 1.2 (tên hiển thị backend map sang macaron_cookie_r2v_<D>s[_360p]). */
+export const CLIP_FLOW_MODEL = 'Omni 1.2 Flash'
+/** Lỗi chắc chắn xảy ra TRƯỚC khi Flow nhận lệnh (không mất credit) — khớp SAFE_ERROR_CODES của Chiến dịch AI. */
+export const FLOW_SAFE_ERROR_CODES = ['BRIDGE_OFFLINE', 'EXTENSION_DISCONNECTED', 'FLOW_AUTH_REQUIRED', 'CAPTCHA_QUEUE_BUSY', 'CAPTCHA_FAILED', 'REFERENCE_INVALID', 'NOT_SUBMITTED']
+
+export interface ClipFlowSettings {
+  projectId: string
+  aspect: '9:16' | '16:9'
+  resolution: '720p' | '360p'
+}
+
+export interface MuseClipVideo {
+  status: 'running' | 'done' | 'error'
+  jobId?: string
+  /** Prompt / số giây / ảnh / khung hình / chất lượng / project lúc gửi — khác hiện tại thì video là "cũ" */
+  fingerprint: string
+  /** Lần gửi thứ mấy (vào khóa chống trùng; "Tạo lại" tăng lên) */
+  attempt: number
+  files?: string[]
+  step?: string
+  /** Câu mô tả bước hiện tại do backend ghi (vd. "Đang xếp hàng chờ Flow (1 việc phía trước)...") */
+  detail?: string
+  /** Lần cập nhật cuối của job TRONG BACKEND (ms) — job im lặng quá lâu thì có thể đã chết */
+  backendUpdatedAt?: number
+  error?: string
+  errorCode?: string
+  startedAt: number
+  updatedAt: number
+}
+
+/**
+ * Job đang chạy mà backend không cập nhật gì quá lâu = nghi đã chết (vd. backend khởi động lại làm mất luồng xử lý).
+ * Một job Flow tối đa chờ ~18 phút (1080 s) và hàng đợi tự cập nhật khi vị trí đổi, nên 25 phút là ngưỡng an toàn.
+ */
+export const CLIP_VIDEO_STALL_MS = 25 * 60 * 1000
+
+export function clipVideoStalled(v: MuseClipVideo | null | undefined, now: number): boolean {
+  if (!v || v.status !== 'running' || !v.jobId) return false
+  return now - (v.backendUpdatedAt ?? v.startedAt) > CLIP_VIDEO_STALL_MS
+}
+
+/** Người dùng bấm "Dừng chờ": thôi theo dõi, mở lại nút Tạo lại. Job vẫn có thể chạy ở backend nên KHÔNG coi là "chưa gửi". */
+export function stopWaitingVideo(v: MuseClipVideo, now = Date.now()): MuseClipVideo {
+  return {
+    ...v,
+    status: 'error',
+    errorCode: 'STOPPED_WAITING',
+    error: 'Đã dừng chờ. Job vẫn có thể đang chạy ở backend — xem Thư Viện Video / Veo Studio trước khi tạo lại.',
+    updatedAt: now,
+  }
+}
+
+export const clipFlowSettings = (c: { flowProjectId: string; flowAspect: '9:16' | '16:9'; flowResolution: '720p' | '360p' }): ClipFlowSettings => ({
+  projectId: c.flowProjectId,
+  aspect: c.flowAspect,
+  resolution: c.flowResolution,
+})
+
+/** Tên file không đuôi từ đường dẫn Windows (\) hoặc POSIX (/) — id video của /api/veo/history/{id}/file. */
+export const fileStem = (path: string) => (path.split(/[\\/]/).pop() || path).replace(/\.[^.]+$/, '')
+
+/** Credit Flow ước tính: ~3/giây ở 720p (đo được), 360p ≈ 1/3. */
+export const clipFlowCredits = (seconds: number, resolution: '720p' | '360p') =>
+  Math.round(seconds * (resolution === '360p' ? CLIP_CREDIT_PER_SECOND_720P / 3 : CLIP_CREDIT_PER_SECOND_720P))
+
+function hashText(text: string): string {
+  let h = 5381
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
+export function clipVideoFingerprint(d: Pick<MuseClipPromptData, 'prompt' | 'seconds' | 'image'>, flow: ClipFlowSettings): string {
+  return [hashText(d.prompt.trim()), d.seconds ?? '', d.image?.path ?? '', flow.aspect, flow.resolution, flow.projectId].join('|')
+}
+
+/** Lỗi chặn "Tạo video" (kiểm tra TRƯỚC khi gửi — không tốn credit). Rỗng = gửi được. */
+export function clipVideoBlockers(d: Pick<MuseClipPromptData, 'prompt' | 'seconds' | 'image'>, flow: ClipFlowSettings): string[] {
+  const b: string[] = []
+  if (!flow.projectId) b.push('Chưa chọn project Flow — mở Cấu hình → Google Flow để chọn hoặc tạo project.')
+  if (!d.image) b.push('Chưa có ảnh tham chiếu cho clip này.')
+  const s = d.seconds
+  if (s == null || !Number.isInteger(s) || s < CLIP_MIN_SECONDS || s > CLIP_MAX_SECONDS)
+    b.push(`Độ dài phải là số giây nguyên ${CLIP_MIN_SECONDS}–${CLIP_MAX_SECONDS}.`)
+  if (!d.prompt.trim()) b.push('Prompt video đang trống.')
+  return b
+}
+
+/** Body POST /api/veo/jobs: Omni 1.2 Ingredients, 1 ảnh tham chiếu (#k), khóa chống trùng theo node + nội dung + lần gửi. */
+export function buildClipVideoRequest(
+  nodeId: string,
+  d: Pick<MuseClipPromptData, 'prompt' | 'seconds' | 'image'>,
+  flow: ClipFlowSettings,
+  attempt: number,
+): Record<string, unknown> {
+  const blockers = clipVideoBlockers(d, flow)
+  if (blockers.length) throw new Error(blockers[0])
+  return {
+    prompt: d.prompt.trim(),
+    model_display_name: CLIP_FLOW_MODEL,
+    input_mode: 'ingredients',
+    aspect_ratio: flow.aspect,
+    duration_seconds: d.seconds,
+    resolution: flow.resolution,
+    num_outputs: 1,
+    project_id: flow.projectId,
+    ingredient_image_paths: [d.image!.path],
+    idempotency_key: `musecanvas-${nodeId}-${hashText(clipVideoFingerprint(d, flow))}-a${attempt}`.slice(0, 128),
+  }
+}
+
+export type ClipVideoState = 'none' | 'running' | 'done' | 'stale' | 'error'
+
+export function clipVideoState(d: MuseClipPromptData, flow: ClipFlowSettings): ClipVideoState {
+  const v = d.video
+  if (!v) return 'none'
+  if (v.status === 'running') return 'running'
+  if (v.status === 'error') return 'error'
+  return v.fingerprint === clipVideoFingerprint(d, flow) ? 'done' : 'stale'
+}
+
+/** Lỗi xảy ra trước khi Flow nhận lệnh (chưa mất credit, gửi lại an toàn)? */
+export const isSafeFlowError = (code?: string | null) => !!code && FLOW_SAFE_ERROR_CODES.includes(code)
+
+/** Tab Flow bị đẩy về trang chủ — thường do project thuộc tài khoản Google khác (đã đổi tài khoản). */
+export const isProjectHomeError = (message?: string | null) => !!message && /home page|reCAPTCHA is not loaded|Open a Flow project/i.test(message)
+
+// ---------------------------------------------------------------- node "Ghép video" (các clip Flow đã tạo → 1 video)
+
+/**
+ * Node độc lập: nhận các node Clip đã có video (cổng "clips"), xếp thứ tự, cắt đầu / cuối từng clip (mặc định 0), rồi
+ * POST /api/workflow/muse/merge (chạy nền): xóa watermark Flow TỪNG clip (trước khi ghép — gwr chỉ làm đúng trên clip
+ * gốc; có cache) → chuẩn hóa / cắt → ghép CẮT CỨNG (điểm nối nằm ở khung không thấy trang phục) → tiếng gốc / nhạc nền /
+ * nhãn / logo như node "Video kết quả" → Thư Viện Video, mục "Hoàn chỉnh". Không tốn credit Flow / Muse.
+ */
+export const CLIP_MERGE_SPEC = {
+  type: MUSE_NODE.clipMerge,
+  title: 'Ghép video',
+  subtitle: 'Các clip Flow đã tạo → 1 video: xóa watermark, nhạc, nhãn kênh',
+} as const
+
+export const MERGE_MAX_CLIPS = 20
+export const MERGE_MIN_SECONDS = 0.5
+export const MERGE_MAX_TRIM = 60
+
+export interface MergeTrim {
+  /** giây cắt bỏ ở đầu clip */
+  start: number
+  /** giây cắt bỏ ở cuối clip */
+  end: number
+}
+
+export interface MuseMergeResult {
+  status: 'running' | 'done' | 'error' | 'interrupted'
+  /** Job ở backend (chạy nền; đóng / mở lại canvas vẫn theo dõi tiếp) */
+  jobId?: string
+  /** Dấu vân tay clip + cắt + cấu hình lúc ghép — khác hiện tại thì bản ghép là "cũ" */
+  inputPath: string
+  step?: string
+  clip?: number
+  total?: number
+  filename?: string
+  path?: string
+  title?: string
+  durationSec?: number
+  error?: string
+  startedAt: number
+  updatedAt: number
+}
+
+export interface MuseClipMergeData {
+  title: string
+  /** Tên video (tùy chọn) — dùng làm tên trong Thư Viện Video */
+  label: string
+  /** Thứ tự clip do người dùng xếp (id node Clip); clip mới nối chưa có ở đây thì xếp theo số k */
+  order: string[]
+  trims: Record<string, MergeTrim>
+  removeWatermark: boolean
+  finish: MuseFinishSettings
+  merge: MuseMergeResult | null
+  /** Tạo từ nút "Ghép video" của node Kịch bản tạo video nào (chống tạo trùng) */
+  origin: { clipScriptNodeId: string } | null
+  collapsed: boolean
+  [key: string]: unknown
+}
+
+export function createClipMergeNode(position: XYPosition, origin: MuseClipMergeData['origin'] = null, id = museNodeId('merge')): MuseNodeLike {
+  const data: MuseClipMergeData = {
+    title: CLIP_MERGE_SPEC.title,
+    label: '',
+    order: [],
+    trims: {},
+    removeWatermark: true,
+    finish: { ...DEFAULT_MERGE_FINISH },
+    merge: null,
+    origin,
+    collapsed: false,
+  }
+  return { id, type: MUSE_NODE.clipMerge, position, data }
+}
+
+const trimNum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(MERGE_MAX_TRIM, Math.max(0, Math.round(v * 100) / 100)) : 0)
+
+export function normalizeClipMergeData(raw: Record<string, unknown> | undefined): MuseClipMergeData {
+  const d = raw ?? {}
+  const trims: Record<string, MergeTrim> = {}
+  if (d.trims && typeof d.trims === 'object') {
+    for (const [k, v] of Object.entries(d.trims as Record<string, unknown>)) {
+      const t = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+      trims[k] = { start: trimNum(t.start), end: trimNum(t.end) }
+    }
+  }
+  const m = d.merge as MuseMergeResult | null | undefined
+  const o = d.origin as MuseClipMergeData['origin'] | undefined
+  return {
+    title: titleOr(d.title, CLIP_MERGE_SPEC.title),
+    label: typeof d.label === 'string' ? d.label.slice(0, 120) : '',
+    order: Array.isArray(d.order) ? (d.order as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+    trims,
+    removeWatermark: d.removeWatermark !== false,
+    finish: d.finish ? normalizeFinishSettings(d.finish) : { ...DEFAULT_MERGE_FINISH },
+    merge: m && typeof m === 'object' && typeof m.status === 'string' && typeof m.inputPath === 'string' ? m : null,
+    origin: o && typeof o === 'object' && typeof o.clipScriptNodeId === 'string' ? o : null,
+    collapsed: d.collapsed === true,
+  }
+}
+
+export type MergeClipStatus = 'ready' | 'no_video' | 'running' | 'error'
+
+export interface MergeClipRow {
+  nodeId: string
+  k: number
+  name: string
+  seconds: number | null
+  /** File video của lần tạo gần nhất đã xong (tên file Veo hoặc đường dẫn); null = chưa có */
+  file: string | null
+  status: MergeClipStatus
+}
+
+/** Các node Clip đang nối vào, xếp theo `order` rồi số k. */
+export function mergeRowsFromSources(
+  sources: { id: string; type?: string; data?: Record<string, unknown> }[],
+  order: string[] = [],
+): MergeClipRow[] {
+  const seen = new Set<string>()
+  const rows: MergeClipRow[] = []
+  for (const s of sources) {
+    if (!s || s.type !== MUSE_NODE.clipPrompt || seen.has(s.id)) continue
+    seen.add(s.id)
+    const d = normalizeClipPromptData(s.data)
+    const v = d.video
+    const done = v?.status === 'done' && v.files?.length ? v.files[v.files.length - 1] : null
+    rows.push({
+      nodeId: s.id,
+      k: d.k,
+      name: d.name,
+      seconds: d.seconds,
+      file: done,
+      status: done ? 'ready' : v?.status === 'running' ? 'running' : v?.status === 'error' ? 'error' : 'no_video',
+    })
+  }
+  const rank = (id: string) => {
+    const i = order.indexOf(id)
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i
+  }
+  return rows.sort((a, b) => rank(a.nodeId) - rank(b.nodeId) || a.k - b.k || a.nodeId.localeCompare(b.nodeId))
+}
+
+/** Đổi chỗ clip lên (-1) / xuống (+1); trả thứ tự mới (đủ mọi clip đang nối). */
+export function moveMergeRow(rows: MergeClipRow[], nodeId: string, dir: -1 | 1): string[] {
+  const ids = rows.map((r) => r.nodeId)
+  const i = ids.indexOf(nodeId)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= ids.length) return ids
+  ;[ids[i], ids[j]] = [ids[j], ids[i]]
+  return ids
+}
+
+const trimOf = (trims: Record<string, MergeTrim>, id: string): MergeTrim => trims[id] ?? { start: 0, end: 0 }
+
+/** Lỗi chặn "Ghép" (kiểm tra TRƯỚC khi chạy). Rỗng = ghép được. Backend vẫn kiểm tra lại theo độ dài thật của file. */
+export function mergeBlockers(rows: MergeClipRow[], trims: Record<string, MergeTrim>): string[] {
+  if (!rows.length) return ['Chưa nối clip nào — nối các node Clip vào chấm “Clip” bên trái.']
+  const b: string[] = []
+  if (rows.length > MERGE_MAX_CLIPS) b.push(`Tối đa ${MERGE_MAX_CLIPS} clip mỗi bản ghép.`)
+  for (const r of rows) {
+    if (!r.file) {
+      b.push(r.status === 'running' ? `Clip ${r.k}: video đang tạo — chờ xong rồi ghép.` : `Clip ${r.k}: chưa có video — tạo video ở node Clip trước.`)
+      continue
+    }
+    const t = trimOf(trims, r.nodeId)
+    if (r.seconds != null && r.seconds - t.start - t.end < MERGE_MIN_SECONDS)
+      b.push(`Clip ${r.k}: cắt đầu ${t.start}s + cuối ${t.end}s làm clip ${r.seconds}s chỉ còn dưới ${MERGE_MIN_SECONDS}s.`)
+  }
+  return b
+}
+
+export function mergeFingerprint(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings): string {
+  return JSON.stringify([
+    rows.map((r) => [r.file, trimOf(trims, r.nodeId).start, trimOf(trims, r.nodeId).end]),
+    removeWatermark,
+    s.muteOriginal, s.muteOriginal ? 0 : s.originalVolume,
+    s.bgmTrackIds, s.bgmTrackIds.length ? s.bgmVolume : 0,
+    s.labelText.trim(), s.labelText.trim() ? [s.labelPosition, s.labelSize] : 0,
+    s.logoId, s.logoId ? [s.logoPosition, s.logoSize] : 0,
+  ])
+}
+
+export type MergeState = 'no_clips' | 'missing' | 'pending' | 'running' | 'done' | 'stale' | 'error' | 'interrupted'
+
+export function mergeState(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings, merge: MuseMergeResult | null): MergeState {
+  if (merge?.status === 'running') return 'running'
+  if (!rows.length) return 'no_clips'
+  if (rows.some((r) => !r.file)) return 'missing'
+  if (!merge) return 'pending'
+  if (merge.status === 'done' && merge.inputPath !== mergeFingerprint(rows, trims, removeWatermark, s)) return 'stale'
+  return merge.status
+}
+
+/** Body POST /api/workflow/muse/merge. */
+export function buildMergeRequest(
+  rows: MergeClipRow[],
+  trims: Record<string, MergeTrim>,
+  removeWatermark: boolean,
+  s: MuseFinishSettings,
+  title = '',
+): Record<string, unknown> {
+  const blockers = mergeBlockers(rows, trims)
+  if (blockers.length) throw new Error(blockers[0])
+  return {
+    clips: rows.map((r) => ({ path: r.file, trim_start: trimOf(trims, r.nodeId).start, trim_end: trimOf(trims, r.nodeId).end })),
+    remove_watermark: removeWatermark,
+    title: title.trim().slice(0, 120),
+    mute_original: s.muteOriginal,
+    original_volume: s.originalVolume,
+    bgm_track_ids: s.bgmTrackIds,
+    bgm_volume: s.bgmVolume,
+    label_text: s.labelText.trim(),
+    label_position: s.labelPosition,
+    label_size: s.labelSize,
+    logo_id: s.logoId || null,
+    logo_position: s.logoPosition,
+    logo_size: s.logoSize,
+  }
+}
+
+/** Tóm tắt 1 dòng các bước sẽ chạy. */
+export function mergeSummary(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings, trackName: (id: string) => string = (id) => id): string {
+  const cut = rows.filter((r) => trimOf(trims, r.nodeId).start || trimOf(trims, r.nodeId).end).length
+  const parts = [`${rows.length} clip`]
+  if (removeWatermark) parts.push('xóa watermark Flow')
+  if (cut) parts.push(`cắt ${cut} clip`)
+  parts.push(finishSummary(s, trackName))
+  return parts.join(' · ')
+}
+
+/** Tạo node Ghép video + dây từ mọi node Clip của 1 node Kịch bản tạo video (chưa có thì mới tạo). */
+export function planMergeNode(
+  script: MuseNodeLike & { width?: number },
+  nodes: MuseNodeLike[],
+): { node: MuseNodeLike; edges: MuseEdgeLike[] } | null {
+  const clips = nodes
+    .filter((n) => n.type === MUSE_NODE.clipPrompt && normalizeClipPromptData(n.data).origin?.clipScriptNodeId === script.id)
+    .sort((a, b) => normalizeClipPromptData(a.data).k - normalizeClipPromptData(b.data).k)
+  if (!clips.length) return null
+  if (nodes.some((n) => n.type === MUSE_NODE.clipMerge && normalizeClipMergeData(n.data).origin?.clipScriptNodeId === script.id)) return null
+  const position = { x: script.position.x + (script.width || 520) + 90 + 520 + 90, y: script.position.y }
+  const node = createClipMergeNode(position, { clipScriptNodeId: script.id })
+  return { node, edges: clips.map((c) => museEdge(c.id, node.id, MUSE_HANDLE.clipVideoOut, MUSE_HANDLE.clipVideoIn)) }
+}
+
+/** Trạng thái job ở backend → kết quả lưu trên node. */
+export function mergeFromJob(
+  prev: MuseMergeResult,
+  job: { status: string; step?: string; clip?: number; total?: number; error?: string | null; result?: { filename?: string; file_path?: string; title?: string; duration_sec?: number } | null },
+  now = Date.now(),
+): MuseMergeResult {
+  const status = job.status === 'done' ? 'done' : job.status === 'error' ? 'error' : 'running'
+  return {
+    ...prev,
+    status,
+    step: job.step || prev.step,
+    clip: job.clip ?? prev.clip,
+    total: job.total ?? prev.total,
+    filename: status === 'done' ? job.result?.filename : prev.filename,
+    path: status === 'done' ? job.result?.file_path : prev.path,
+    title: status === 'done' ? job.result?.title : prev.title,
+    durationSec: status === 'done' ? job.result?.duration_sec : prev.durationSec,
+    error: status === 'error' ? job.error || 'Lỗi ghép video' : undefined,
     updatedAt: now,
   }
 }
@@ -1352,7 +2249,10 @@ export const DEFAULT_FINISH_SETTINGS: MuseFinishSettings = {
   joinClips: false,
 }
 
-const clampNum = (v: unknown, lo: number, hi: number, dflt: number) => {
+/** Ghép clip Omni: mặc định tắt tiếng gốc (Omni chỉ sinh tiếng nền phòng thu) và để nhạc nền lo phần âm thanh. */
+export const DEFAULT_MERGE_FINISH: MuseFinishSettings = { ...DEFAULT_FINISH_SETTINGS, muteOriginal: true, originalVolume: 0.2 }
+
+const clampNum =(v: unknown, lo: number, hi: number, dflt: number) => {
   const n = typeof v === 'number' && Number.isFinite(v) ? v : dflt
   return Math.min(hi, Math.max(lo, n))
 }

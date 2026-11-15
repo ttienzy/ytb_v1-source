@@ -31,10 +31,14 @@ import {
   Scissors,
 } from 'lucide-react'
 import {
+  IMAGE_PROVIDERS,
   INPUT_SPECS,
   JOB_SPECS,
   MUSE_HANDLE,
   MUSE_NODE,
+  PROVIDER_LABEL,
+  activePrompt,
+  buildGptJobRequest,
   buildJobRequest,
   buildJobRows,
   extractInputsFromSources,
@@ -49,9 +53,10 @@ import {
   secondaryInputsFromSources,
   type ExtractInput,
   type MuseExtractResult,
+  type MuseImageProvider,
   type MuseNodeLike,
 } from '../../services/museCanvasNodes.ts'
-import { fetchMusePrompt, generateMuseImage, museMediaUrl, saveMusePromptDefault } from '../../services/museCanvasApi.ts'
+import { fetchMusePrompt, generateGptImage, generateMuseImage, museMediaUrl, saveMusePromptDefault } from '../../services/museCanvasApi.ts'
 import { notifyImageLibraryChanged } from '../../services/imageLibraryApi'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
@@ -151,6 +156,13 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         .then((p) => updateNodeData(id, { secondaryPrompt: p.prompt, secondaryPromptSource: 'default' }))
         .catch(() => {})
     }
+    // Node chưa có prompt GPT riêng (node mới, hoặc tạo trước khi có công tắc): nạp prompt GPT mặc định
+    const rawGpt = (raw as Record<string, unknown>).gptPrompt
+    if (spec.gptPromptName && (typeof rawGpt !== 'string' || !rawGpt.trim()) && (raw as Record<string, unknown>).gptPromptSource !== 'custom') {
+      fetchMusePrompt(spec.gptPromptName)
+        .then((p) => updateNodeData(id, { gptPrompt: p.prompt, gptPromptSource: 'default' }))
+        .catch(() => {})
+    }
     // chỉ chạy khi node gắn lên màn hình
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -166,29 +178,36 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
     async (input: ExtractInput) => {
       const key = flightKey(id, input.sourceNodeId)
       if (inflight.has(key) || !input.image) return
+      const provider: MuseImageProvider = data.provider
+      const ap = activePrompt(spec, data)
+      const extraPrompt = ap.useSecondary ? data.secondaryPrompt : ''
       let body: Record<string, unknown>
       try {
-        body = buildJobRequest(spec, config, data.prompt, input, data.secondaryPrompt)
+        body = provider === 'gpt'
+          ? buildGptJobRequest(spec, config, ap.text, input, extraPrompt)
+          : buildJobRequest(spec, config, ap.text, input, extraPrompt)
       } catch (e: any) {
-        setResult({ sourceNodeId: input.sourceNodeId, inputPath: rowFingerprint(input), status: 'error', error: e?.message, updatedAt: Date.now() })
+        setResult({ sourceNodeId: input.sourceNodeId, inputPath: rowFingerprint(input), status: 'error', error: e?.message, provider, updatedAt: Date.now() })
         return
       }
       const inputPath = rowFingerprint(input)
-      setResult({ sourceNodeId: input.sourceNodeId, inputPath, status: 'running', updatedAt: Date.now() })
-      const job: Promise<MuseExtractResult> = generateMuseImage(body)
+      setResult({ sourceNodeId: input.sourceNodeId, inputPath, status: 'running', provider, updatedAt: Date.now() })
+      const job: Promise<MuseExtractResult> = (provider === 'gpt' ? generateGptImage(body) : generateMuseImage(body))
         .then((r) => ({
           sourceNodeId: input.sourceNodeId,
           inputPath,
           status: 'done' as const,
           output: { id: `${Date.now().toString(36)}`, name: basename(r.path), path: r.path, previewUrl: r.previewUrl, size: r.size },
           sessionId: r.sessionId,
+          provider,
           updatedAt: Date.now(),
         }))
         .catch((e: any) => ({
           sourceNodeId: input.sourceNodeId,
           inputPath,
           status: 'error' as const,
-          error: e?.message || 'Muse lỗi',
+          error: e?.message || `${PROVIDER_LABEL[provider]} lỗi`,
+          provider,
           updatedAt: Date.now(),
         }))
         .finally(() => inflight.delete(key))
@@ -197,10 +216,10 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
       setResult(done)
       if (done.status === 'done') notifyImageLibraryChanged()
     },
-    [config, data.prompt, data.secondaryPrompt, id, setResult, spec],
+    [config, data.prompt, data.gptPrompt, data.provider, data.secondaryPrompt, id, setResult, spec],
   )
 
-  /** Chạy nhiều ảnh vào, tối đa `maxParallel` lượt cùng lúc (mỗi tài khoản Muse chạy 1 lượt một lúc). */
+  /** Chạy nhiều ảnh vào, tối đa `maxParallel` lượt cùng lúc (mỗi tài khoản Muse/ChatGPT chạy 1 lượt một lúc). */
   const runMany = useCallback(
     async (list: ExtractInput[]) => {
       const queue = [...list]
@@ -253,9 +272,11 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         setNote({ kind: 'ok', text: 'Đã nạp prompt kết hợp mặc định.' })
         return
       }
-      const p = await fetchMusePrompt(spec.promptName)
-      updateNodeData(id, { prompt: p.prompt, promptSource: 'default' })
-      setNote({ kind: 'ok', text: p.is_custom ? 'Đã nạp prompt mặc định bạn đã lưu.' : 'Đã nạp prompt mặc định gốc.' })
+      const ap = activePrompt(spec, data)
+      const p = await fetchMusePrompt(ap.promptName)
+      updateNodeData(id, { [ap.field]: p.prompt, [ap.sourceField]: 'default' })
+      const gptTag = ap.gptOwn ? ' GPT' : ''
+      setNote({ kind: 'ok', text: p.is_custom ? `Đã nạp prompt${gptTag} mặc định bạn đã lưu.` : `Đã nạp prompt${gptTag} mặc định gốc.` })
     } catch (e: any) {
       setNote({ kind: 'err', text: e?.message || 'Không tải được prompt mặc định' })
     } finally {
@@ -273,9 +294,10 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         setNote({ kind: 'ok', text: 'Đã lưu prompt kết hợp làm mặc định.' })
         return
       }
-      await saveMusePromptDefault(spec.promptName, data.prompt)
-      updateNodeData(id, { promptSource: 'default' })
-      setNote({ kind: 'ok', text: 'Đã lưu làm prompt mặc định cho các node mới.' })
+      const ap = activePrompt(spec, data)
+      await saveMusePromptDefault(ap.promptName, ap.text)
+      updateNodeData(id, { [ap.sourceField]: 'default' })
+      setNote({ kind: 'ok', text: `Đã lưu làm prompt${ap.gptOwn ? ' GPT' : ''} mặc định cho các node mới.` })
     } catch (e: any) {
       setNote({ kind: 'err', text: e?.message || 'Không lưu được' })
     } finally {
@@ -286,8 +308,15 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const toRun = inputsToRun(inputs, data.results)
   const outputs = extractOutputs(inputs, data.results)
   const notSpawned = inputs.filter((i) => extractRowState(i, data.results) === 'done' && !outputNodeOf(i.sourceNodeId))
-  const promptEmpty = !data.prompt.trim()
-  const blocked = blockers.length > 0 || promptEmpty
+  const ap = activePrompt(spec, data)
+  const promptEmpty = !ap.text.trim()
+  const isGpt = data.provider === 'gpt'
+  // Prompt GPT riêng gọi tên "Image 2" = trang phục: dòng không có trang phục thì thiếu ảnh 2
+  const gptNeedsOutfit = ap.gptOwn && !!sec && inputs.length > 0 && secondary.length === 0
+  // Chặn do tài khoản Muse chỉ áp cho chế độ Muse; chế độ GPT báo lỗi tài khoản ChatGPT ngay ở dòng chạy.
+  const runBlockers = isGpt ? [] : blockers
+  const blocked = runBlockers.length > 0 || promptEmpty
+  const unitCost = isGpt ? 'lượt tạo ảnh ChatGPT' : 'lượt Muse'
   const hasResults = Object.keys(data.results).length > 0
   const Icon = isCharacter ? LayoutPanelLeft : Scissors
 
@@ -340,6 +369,26 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
       </div>
 
       <div className="mc-node-body">
+        {/* Công tắc tạo ảnh: Muse | GPT (áp cho lần chạy sau; kết quả cũ giữ nguyên) */}
+        <div className="mc-provider nodrag" role="radiogroup" aria-label="Tạo ảnh bằng">
+          <span className="mc-provider-label">Tạo ảnh bằng</span>
+          <div className="mc-provider-seg">
+            {IMAGE_PROVIDERS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={data.provider === p.id}
+                className={`mc-provider-opt ${data.provider === p.id ? 'active' : ''} mc-provider-${p.id}`}
+                onClick={() => data.provider !== p.id && updateNodeData(id, { provider: p.id })}
+                title={p.title}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Đầu vào → đầu ra */}
         {inputs.length === 0 ? (
           <div className="mc-inputs-empty">
@@ -388,7 +437,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
                       {state === 'running'
                         ? `Đang chạy… ${Math.max(0, Math.round((now - (r?.updatedAt || now)) / 1000))}s`
                         : state === 'done'
-                          ? spec.doneText
+                          ? `${spec.doneText} · ${PROVIDER_LABEL[r?.provider ?? 'muse']}`
                           : state === 'error' || state === 'interrupted'
                             ? r?.error || 'Lỗi'
                             : state === 'no_image'
@@ -414,7 +463,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
                       className="mc-mini-btn nodrag"
                       disabled={!canRun}
                       onClick={() => runOne(input)}
-                      title={state === 'pending' ? 'Chạy dòng này (tốn 1 lượt Muse)' : 'Chạy lại (tốn thêm 1 lượt Muse)'}
+                      title={state === 'pending' ? `Chạy dòng này (tốn 1 ${unitCost})` : `Chạy lại (tốn thêm 1 ${unitCost})`}
                     >
                       {state === 'pending' ? <Play size={11} /> : <RotateCcw size={11} />}
                       {state === 'pending' ? 'Chạy' : 'Chạy lại'}
@@ -429,22 +478,34 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         {/* Prompt */}
         <button type="button" className="mc-xtoggle nodrag" onClick={() => setShowPrompt((v) => !v)}>
           {showPrompt ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Prompt
-          <span className={`mc-node-badge ${data.promptSource === 'custom' ? 'custom' : ''}`}>
-            {data.promptSource === 'custom' ? 'Đã sửa' : 'Mặc định'}
+          {spec.gptPromptName && (
+            <span className={`mc-node-badge mc-badge-${data.provider}`} title={ap.gptOwn ? 'Prompt riêng của chế độ GPT' : 'Prompt của chế độ Muse'}>
+              {PROVIDER_LABEL[data.provider]}
+            </span>
+          )}
+          <span className={`mc-node-badge ${ap.source === 'custom' ? 'custom' : ''}`}>
+            {ap.source === 'custom' ? 'Đã sửa' : 'Mặc định'}
           </span>
         </button>
         {showPrompt && (
           <>
             <textarea
               className="mc-prompt nodrag nowheel"
-              value={data.prompt}
+              value={ap.text}
               rows={10}
               spellCheck={false}
-              onChange={(e) => updateNodeData(id, { prompt: e.target.value, promptSource: 'custom' })}
-              placeholder="Prompt gửi kèm từng ảnh cho Muse…"
+              onChange={(e) => updateNodeData(id, { [ap.field]: e.target.value, [ap.sourceField]: 'custom' })}
+              placeholder={ap.gptOwn ? 'Đang nạp prompt GPT mặc định… (hoặc gõ prompt cho ChatGPT)' : `Prompt gửi kèm từng ảnh cho ${PROVIDER_LABEL[data.provider]}…`}
             />
+            {ap.gptOwn && (
+              <div className={gptNeedsOutfit ? 'mc-node-error' : 'mc-node-meta'}>
+                {gptNeedsOutfit
+                  ? 'Prompt GPT dùng ảnh 1 = nhân vật, ảnh 2 = trang phục — hãy nối trang phục vào cổng “Trang phục”.'
+                  : 'Chế độ GPT dùng prompt riêng (ảnh 1 = nhân vật, ảnh 2 = trang phục), không ghép prompt kết hợp.'}
+              </div>
+            )}
             <div className="mc-node-actions">
-              <span className="mc-node-meta">{data.prompt.length.toLocaleString('vi-VN')} ký tự</span>
+              <span className="mc-node-meta">{ap.text.length.toLocaleString('vi-VN')} ký tự</span>
               <button type="button" className="mc-mini-btn nodrag" onClick={() => resetToDefault()} disabled={!!busy} title="Thay nội dung bằng prompt mặc định">
                 {busy === 'reset' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Mặc định
               </button>
@@ -455,8 +516,8 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
           </>
         )}
 
-        {/* Prompt ghép thêm khi dòng có ảnh phụ (trang phục) */}
-        {sec && (
+        {/* Prompt ghép thêm khi dòng có ảnh phụ (trang phục) — chế độ GPT có prompt riêng thì không dùng */}
+        {sec && ap.useSecondary && (
           <>
             <button type="button" className="mc-xtoggle nodrag" onClick={() => setShowSecondary((v) => !v)}>
               {showSecondary ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Prompt kết hợp {sec.rowLabel.toLowerCase()}
@@ -491,7 +552,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         {note && <div className={note.kind === 'ok' ? 'mc-node-ok' : 'mc-node-error'}>{note.text}</div>}
 
         {/* Chạy */}
-        {blockers.length > 0 && <div className="mc-node-error">{blockers[0]}</div>}
+        {runBlockers.length > 0 && <div className="mc-node-error">{runBlockers[0]}</div>}
         <button
           type="button"
           className={`mc-run-btn nodrag ${isCharacter ? 'mc-run-character' : ''}`}
@@ -507,7 +568,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
               : `Không còn ${spec.unitNoun} cần chạy`}
         </button>
         <p className="mc-hint">
-          Mỗi {spec.unitNoun} tốn 1 lượt Muse.{sec ? ` Nối ${sec.rowLabel.toLowerCase()} vào cổng phụ: mỗi cặp ${rowLabel.toLowerCase()} × ${sec.rowLabel.toLowerCase()} ra 1 ${spec.unitNoun}.` : ''} Đã gửi thì không tự gửi lại; song song tối đa {config.maxParallel} (panel cấu hình). Ảnh
+          Mỗi {spec.unitNoun} tốn 1 {unitCost}{isGpt ? ' (tài khoản ở Cài đặt → Tài khoản ChatGPT)' : ''}.{sec ? ` Nối ${sec.rowLabel.toLowerCase()} vào cổng phụ: mỗi cặp ${rowLabel.toLowerCase()} × ${sec.rowLabel.toLowerCase()} ra 1 ${spec.unitNoun}.` : ''} Đã gửi thì không tự gửi lại; song song tối đa {config.maxParallel} (panel cấu hình). Ảnh
           ra tự lưu vào Thư Viện Ảnh; “Ra node” tách ảnh thành node riêng.
         </p>
       </div>
