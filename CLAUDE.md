@@ -31,7 +31,7 @@ npm run start:stable --prefix Desktop   # no backend auto-restart on .py edits (
 npm run stop --prefix Desktop           # clean up leftover dev processes
 npm test --prefix Desktop               # tests for dev.js process-kill logic
 ```
-`dev.js` flags: `--reuse`, `--keep-services`, `--no-reload`, `--force`, `--only=backend,voice,frontend`. Every `npm start` boots a *fresh* backend (orphaned uvicorn `--reload` workers on Windows otherwise keep serving old code).
+`dev.js` flags: `--reuse`, `--keep-services`, `--no-reload`, `--force`, `--only=backend,voice,frontend`, `--restart-during-jobs` (by default a `.py` edit does NOT restart the backend while Flow jobs are running — it waits, because a restart interrupts jobs Flow may already have charged for). Every `npm start` boots a *fresh* backend (orphaned uvicorn `--reload` workers on Windows otherwise keep serving old code).
 
 **Backend** (`Backend/`, venv at `Backend/.venv`):
 ```powershell
@@ -47,9 +47,10 @@ Files named `manual_test_*.py` are NOT automated tests (they hit real services).
 **Frontend** (`Frontend/`):
 ```powershell
 npm run dev            # electron-vite dev (spawns/reuses backend itself too)
-npm run typecheck      # tsc --noEmit  — the only "lint"; there is no eslint
+npm run typecheck      # scripts/typecheck.mjs: tsc on tsconfig.web + tsconfig.node, fails only on errors NOT in typecheck-baseline.json (no eslint); after fixing old errors: npm run typecheck -- --update
 npm run build          # electron-vite build → out/
-npm run test:all       # all frontend node:test files in one command (this is what CI runs)
+npm run test:all       # all frontend node:test files in one command (this is what CI runs); src/shared/__tests__/guardrails.test.ts holds the project's mechanical rules
+npm run e2e:up         # isolated real-Electron test env (backend :8010, Vite :5199, data in %TEMP%\creatorflow-e2e); then node scripts/e2e/<name>.e2e.mjs (helpers: scripts/e2e/harness.mjs, example: npm run e2e:muse-cut); always npm run e2e:down
 npm test               # node --experimental-strip-types --test src/features/workflow/__tests__/*.test.{ts,mjs}
 npm run test:campaign | test:voices | test:veo | test:help | test:studio | test:audio | test:video | test:discover   # other feature test sets (same node:test runner); test:help guards the in-app help docs
 node --experimental-strip-types --test path/to/file.test.ts   # single test file
@@ -102,6 +103,7 @@ npm run verify                         # full: build, tests normal+minified, rel
 Standalone process so the heavy model isn't loaded in Backend; Backend reaches it through `app/voices/voice_client.py` (`voice_service_url` setting) and the browser only ever calls Backend's `/api/voices`. One inference session at a time.
 
 ## Conventions & gotchas
+- Project skills: `.claude/skills/verify-change` (which checks to run, isolated e2e, report format) and `.claude/skills/fix-root-cause` (turn a fixed bug into a test/typecheck/CI guardrail instead of a new note here). A workflow repeated twice becomes a script or harness helper, not more prose.
 - Windows paths and PowerShell are the norm. ffmpeg `drawtext` with `fontfile=`/`textfile=` breaks on drive-letter colons/spaces: use relative paths with `cwd` set to the temp dir. `drawtext` WITHOUT `fontfile=` crashes the Windows ffmpeg build (0xC0000005, Fontconfig) — always pass one (`app/media/fonts.py`: `find_font` / `stage_font`).
 - yt-dlp must be kept current (YouTube blocks); working flags use nightly + node + `ejs:github`, not cookies.
 - Recap video encoding: R2 cuts with `libx264 -preset veryfast` (frame-accurate; `-c copy` caused fast-forward/cut-off artefacts); the merge muxes with `-c:v copy` and concatenates with the concat demuxer (stream copy). There is no `_pick_video_encoder` any more. See `docs/recap.md`.

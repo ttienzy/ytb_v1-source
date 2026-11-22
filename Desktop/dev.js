@@ -39,6 +39,8 @@ const flag = name => argv.includes(`--${name}`) || process.env[`DEV_${name.toUpp
 const OPT = {
   reuse: flag('reuse'), keepServices: flag('keep-services'), noReload: flag('no-reload'),
   force: flag('force'), stop: flag('stop'),
+  // restart backend ngay cả khi còn job Flow đang chạy (mặc định: hoãn tới khi không còn job)
+  restartDuringJobs: flag('restart-during-jobs'),
 }
 const onlyArg = argv.find(a => a.startsWith('--only='))
 const ONLY = onlyArg ? new Set(onlyArg.slice(7).toLowerCase().split(',').map(s => s.trim()).filter(Boolean)) : null
@@ -345,6 +347,53 @@ async function restartService(target, why) {
   say(target.name, target.color, ok ? `đã chạy lại (pid ${child.pid}) và sẵn sàng.` : 'đã chạy lại nhưng chưa phản hồi sau 60 giây — kiểm tra log phía trên (có thể lỗi cú pháp).')
 }
 
+// ── hoãn restart khi còn job Flow ────────────────────────────────────────────
+// Restart backend giữa lúc job Flow đang chạy sẽ ngắt job (JOB_INTERRUPTED / NOT_SUBMITTED) mà Flow có thể ĐÃ trừ credit
+// (2026-11-23: mất 30 credit vì sửa một file .py giữa lúc tạo video). Phải khớp backend veo/service._ACTIVE_JOB_STATUSES.
+const ACTIVE_FLOW_STATUSES = new Set(['pending', 'captcha', 'submitting', 'generating', 'downloading'])
+/** Job quá lâu không cập nhật coi như đã chết (job Flow chờ tối đa 18 phút) -> không chặn restart mãi. */
+const FLOW_JOB_STALE_MS = 25 * 60 * 1000
+
+/** Các job Flow còn sống trong danh sách /api/veo/jobs (thuần, có test). */
+function activeFlowJobs(jobs, now = Date.now()) {
+  if (!Array.isArray(jobs)) return []
+  return jobs.filter(j => {
+    if (!j || !ACTIVE_FLOW_STATUSES.has(String(j.status))) return false
+    const updated = Date.parse(j.updated_at || j.created_at || '')
+    return !Number.isFinite(updated) || now - updated < FLOW_JOB_STALE_MS
+  })
+}
+
+/** Hỏi backend đang chạy; không hỏi được (backend chết / chưa lên) = không có gì để bảo vệ. */
+async function fetchActiveFlowJobs(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/veo/jobs`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return []
+    return activeFlowJobs(await res.json())
+  } catch { return [] }
+}
+
+/** Chờ tới khi không còn job Flow nào đang chạy (báo một lần, báo lại khi số job đổi). */
+async function waitFlowIdle(target) {
+  if (OPT.restartDuringJobs || !target.port) return
+  let lastCount = 0
+  for (;;) {
+    if (shuttingDown) return
+    const active = await fetchActiveFlowJobs(target.port)
+    if (!active.length) {
+      if (lastCount) dev('hết job Flow đang chạy → restart backend.')
+      return
+    }
+    if (active.length !== lastCount) {
+      warn(`HOÃN restart backend: còn ${active.length} job Flow đang chạy (${active.map(j => j.job_id).join(', ')}). `
+        + 'Restart bây giờ sẽ ngắt job mà Flow có thể đã trừ credit. Sẽ tự restart khi job xong '
+        + '(bỏ qua: chạy lại với --restart-during-jobs).')
+      lastCount = active.length
+    }
+    await new Promise(r => setTimeout(r, 10000))
+  }
+}
+
 /** Theo dõi Backend/**.py; gom các lần lưu liên tiếp (debounce) rồi restart đúng một lần. */
 function watchBackend(target) {
   const dir = path.join(ROOT, 'Backend')
@@ -356,6 +405,7 @@ function watchBackend(target) {
     busy = true
     try {
       while (changed.size && !shuttingDown) {
+        await waitFlowIdle(target)   // file sửa trong lúc chờ vẫn được gom vào lần restart này
         const files = [...changed].slice(0, 3).join(', ') + (changed.size > 3 ? `… (+${changed.size - 3})` : '')
         changed.clear()
         await restartService(target, `phát hiện sửa ${files}`)
@@ -382,7 +432,7 @@ function watchBackend(target) {
 }
 
 if (require.main !== module) {
-  module.exports = { collectVictims, isManagedChild, looksOurs, isBackendSource, createChangeFilter, listBackendSources, PROTECTED, SPAWNED }
+  module.exports = { collectVictims, isManagedChild, looksOurs, isBackendSource, createChangeFilter, listBackendSources, activeFlowJobs, fetchActiveFlowJobs, ACTIVE_FLOW_STATUSES, PROTECTED, SPAWNED }
 } else {
 process.on('SIGINT', () => shutdown('Ctrl+C'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))

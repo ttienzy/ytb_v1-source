@@ -86,3 +86,5 @@ samples/
 /Backend/uploads/
 /Backend/job_result.txt
 /Backend/test_render_clip.py
+# cấu hình Vite tạm do Frontend/scripts/e2e/isolated.mjs tạo
+Frontend/vite.e2e.tmp.config.mjs

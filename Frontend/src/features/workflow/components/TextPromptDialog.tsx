@@ -7,6 +7,8 @@
  *   return <>{promptDialog} …</>
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+// Kiểu .mc-dialog / .mc-input nằm ở đây; trang dùng hộp này có thể được tải mà chưa mở Canvas AI (các trang là lazy).
+import './museCanvas.css'
 
 export interface TextPromptOptions {
   title: string

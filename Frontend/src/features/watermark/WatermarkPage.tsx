@@ -26,6 +26,7 @@ import type { QueuedFile, WatermarkBatchJob, WatermarkVideoItem } from './types'
 import { VeoVideoPickerModal } from '../workflow/components/VeoVideoPickerModal'
 import { ImageLibraryModal } from '../workflow/components/ImageLibraryModal'
 import { VideoPlayerModal } from '../workflow/components/VideoPlayerModal'
+import { useTextPrompt } from '../workflow/components/TextPromptDialog'
 import type { ExportedVideoItem } from '../workflow/contracts'
 import type { LibraryImage } from '../workflow/services/imageLibraryApi'
 
@@ -33,6 +34,8 @@ const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp']
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm']
 
 export function WatermarkPage() {
+  // Electron không hỗ trợ window.prompt() -> hộp nhập trong app
+  const [askText, promptDialog] = useTextPrompt()
   const [activeTab, setActiveTab] = useState<'image' | 'video'>('image')
   const [cliOk, setCliOk] = useState<boolean | null>(null)
   const [videoCliOk, setVideoCliOk] = useState<boolean | null>(null)
@@ -251,11 +254,14 @@ export function WatermarkPage() {
     }
   }
 
-  function handleImportImagePath() {
-    const entered = window.prompt(
-      'Nhập đường dẫn file ảnh hoặc thư mục chứa ảnh:',
-      'C:\\Users\\nguye\\OneDrive\\Pictures\\ai_profile'
-    )
+  async function handleImportImagePath() {
+    const entered = await askText({
+      title: 'Thêm ảnh theo đường dẫn',
+      label: 'Đường dẫn file ảnh hoặc thư mục chứa ảnh',
+      defaultValue: 'C:\\Users\\nguye\\OneDrive\\Pictures\\ai_profile',
+      confirmLabel: 'Thêm',
+      maxLength: 500,
+    })
     if (!entered) return
     setErrorMsg('')
     const trimmed = entered.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
@@ -270,11 +276,14 @@ export function WatermarkPage() {
     }
   }
 
-  function handleImportVideoPath() {
-    const entered = window.prompt(
-      'Nhập đường dẫn file video hoặc thư mục chứa video:',
-      'C:\\Users\\nguye\\Videos\\fl1'
-    )
+  async function handleImportVideoPath() {
+    const entered = await askText({
+      title: 'Thêm video theo đường dẫn',
+      label: 'Đường dẫn file video hoặc thư mục chứa video',
+      defaultValue: 'C:\\Users\\nguye\\Videos\\fl1',
+      confirmLabel: 'Thêm',
+      maxLength: 500,
+    })
     if (!entered) return
     setErrorMsg('')
     const trimmed = entered.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
@@ -466,6 +475,7 @@ export function WatermarkPage() {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', paddingBottom: 40 }}>
+      {promptDialog}
       {/* ── Top Header ── */}
       <div
         style={{
@@ -1225,7 +1235,7 @@ export function WatermarkPage() {
 
             <button
               type="button"
-              onClick={loadHistory}
+              onClick={() => loadHistory()}
               style={{
                 height: 28,
                 padding: '0 10px',

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { collectVictims, isManagedChild, isBackendSource, createChangeFilter, listBackendSources } = require('./dev.js')
+const { collectVictims, isManagedChild, isBackendSource, createChangeFilter, listBackendSources, activeFlowJobs, ACTIVE_FLOW_STATUSES } = require('./dev.js')
 
 const T0 = Date.parse('2026-11-09T14:00:00Z')
 const p = (pid, ppid, name, cmd = '', createdOffsetMs = 0) => ({ pid, ppid, name, cmd, created: T0 + createdOffsetMs })
@@ -107,4 +107,28 @@ test('createChangeFilter: chỉ ĐỌC file .py (đổi last-access) KHÔNG rest
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('hoãn restart backend khi còn job Flow đang chạy; job chết / đã xong không chặn', () => {
+  const now = Date.parse('2026-11-23T10:00:00Z')
+  const at = (minAgo) => new Date(now - minAgo * 60_000).toISOString()
+  const jobs = [
+    { job_id: 'gen', status: 'generating', updated_at: at(2) },
+    { job_id: 'queued', status: 'pending', updated_at: at(0) },
+    { job_id: 'done', status: 'done', updated_at: at(1) },
+    { job_id: 'err', status: 'error', updated_at: at(1) },
+    { job_id: 'stuck', status: 'generating', updated_at: at(40) },   // im lặng 40 phút = đã chết
+    { job_id: 'nodate', status: 'captcha' },                          // không có giờ: coi là còn sống
+  ]
+  assert.deepEqual(activeFlowJobs(jobs, now).map(j => j.job_id), ['gen', 'queued', 'nodate'])
+  assert.deepEqual(activeFlowJobs(null, now), [])
+  assert.deepEqual(activeFlowJobs([], now), [])
+})
+
+test('trạng thái "đang chạy" khớp backend veo/service._ACTIVE_JOB_STATUSES', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'Backend', 'app', 'veo', 'service.py'), 'utf8')
+  const block = src.slice(src.indexOf('_ACTIVE_JOB_STATUSES = {'), src.indexOf('}', src.indexOf('_ACTIVE_JOB_STATUSES = {')))
+  const names = [...block.matchAll(/JobStatus\.([A-Z_]+)\.value/g)].map(m => m[1].toLowerCase()).sort()
+  assert.ok(names.length > 0, 'không đọc được _ACTIVE_JOB_STATUSES')
+  assert.deepEqual([...ACTIVE_FLOW_STATUSES].sort(), names, 'đổi trạng thái job ở backend thì sửa ACTIVE_FLOW_STATUSES trong dev.js')
 })

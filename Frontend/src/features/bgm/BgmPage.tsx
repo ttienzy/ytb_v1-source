@@ -22,8 +22,11 @@ import {
 import { API_URL } from '../../shared/constants'
 import type { BgmOut } from './types'
 import './BgmPage.css'
+import { useTextPrompt } from '../workflow/components/TextPromptDialog'
 
 export function BgmPage() {
+  // Electron không hỗ trợ window.prompt() -> hộp nhập trong app
+  const [askText, promptDialog] = useTextPrompt()
   const [tracks, setTracks] = useState<BgmOut[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -194,10 +197,13 @@ export function BgmPage() {
 
   // 6. Import Folder
   async function importFolder() {
-    const folder = window.prompt(
-      'Nhập đường dẫn thư mục nhạc trên máy tính:',
-      'C:\\Users\\nguye\\Music\\music_no_copyright'
-    )
+    const folder = await askText({
+      title: 'Nhập nhạc từ thư mục',
+      label: 'Đường dẫn thư mục nhạc trên máy tính',
+      defaultValue: 'C:\\Users\\nguye\\Music\\music_no_copyright',
+      confirmLabel: 'Nhập',
+      maxLength: 500,
+    })
     if (!folder) return
     setImporting(true)
     setMessage('')
@@ -302,6 +308,7 @@ export function BgmPage() {
 
   return (
     <div className="bgm-studio-page">
+      {promptDialog}
       {/* --------------------------------------------------------------------
           1. Hero Studio Banner (Harmonized Light Mode)
           -------------------------------------------------------------------- */}
