@@ -100,6 +100,8 @@ _RESULT_STORES_NAMES = (
 _extension_info: dict[str, Any] = {
     "ext_fp": "",
     "version": "",
+    # Năng lực của bản extension ĐANG CHẠY (heartbeat): vd. {"motion_ref_max_seconds": 15}. Bản cũ không báo -> {}.
+    "capabilities": {},
     "tab_count": 0,
     "last_heartbeat": None,
     "connected": False,
@@ -241,6 +243,20 @@ def get_bridge_port() -> int:
 def get_credentials_pool() -> dict[str, dict[str, Any]]:
     with _bridge_lock:
         return dict(_credentials_pool)
+
+
+def apply_heartbeat(data: dict[str, Any]) -> None:
+    """Ghi nhận heartbeat của extension. `capabilities` được GHI ĐÈ mỗi lần: bản extension cũ không báo trường này nên
+    năng lực của bản mới từng báo trước đó không được giữ lại (backend không được tin số liệu thừa)."""
+    caps = data.get("capabilities")
+    with _bridge_lock:
+        _extension_info["ext_fp"] = data.get("ext_fp", "")
+        _extension_info["version"] = data.get("version", "")
+        _extension_info["capabilities"] = dict(caps) if isinstance(caps, dict) else {}
+        _extension_info["tab_count"] = data.get("tab_count", 0)
+        _extension_info["tabs"] = data.get("tabs", [])
+        _extension_info["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+        _extension_info["connected"] = True
 
 
 def get_extension_info() -> dict[str, Any]:
@@ -829,14 +845,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             if not self._check_secret():
                 self._send_json({"error": "forbidden"}, 403)
                 return
-            data = self._read_json()
-            with _bridge_lock:
-                _extension_info["ext_fp"] = data.get("ext_fp", "")
-                _extension_info["version"] = data.get("version", "")
-                _extension_info["tab_count"] = data.get("tab_count", 0)
-                _extension_info["tabs"] = data.get("tabs", [])
-                _extension_info["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
-                _extension_info["connected"] = True
+            apply_heartbeat(self._read_json())
             self._send_json({"ok": True})
             return
 

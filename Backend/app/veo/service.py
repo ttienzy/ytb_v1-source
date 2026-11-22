@@ -145,6 +145,24 @@ def get_flow_ui_state() -> dict[str, Any]:
     return _flow_ui_gate.state()
 
 
+def _describe_flow_holder(holder: str | None) -> str:
+    """Việc đang giữ lượt Flow, dạng người đọc được: "Motion Control (video_edit) job d0afb250-a4c, đã chạy 9 phút"."""
+    if not holder:
+        return ""
+    kind, _, ident = holder.partition(":")
+    job = _jobs.get(ident) if kind == "video" else None
+    if not job:
+        return holder
+    mode = {"video_edit": "chỉnh video / Motion Control", "ingredients": "Ingredients", "frames": "Frames"}.get(job.get("input_mode"), job.get("input_mode") or "video")
+    age = ""
+    try:
+        started = datetime.fromisoformat(job.get("created_at") or "")
+        age = f", đã {max(0, int((datetime.now(timezone.utc) - started).total_seconds() // 60))} phút"
+    except ValueError:
+        pass
+    return f"{mode} · job {ident}{age}"
+
+
 def _ensure_flow_project_tab(flow_project_id: str | None, timeout: float = 15.0) -> None:
     """Bảo đảm Chrome đang mở đúng project Flow trước khi giao việc (tránh lỗi reCAPTCHA ở trang chủ).
 
@@ -224,6 +242,43 @@ OMNI_12_NAME = "Omni 1.2 Flash"
 # Chỉnh video theo video mẫu (Motion Control): cùng RPC jIps6 như Omni 1.1, chỉ đổi model id. HAR flow.google_video_motion.com
 # (2026-11-11): đoạn 0–240 khung, 1 ảnh tham chiếu, 720p, trừ 30 credit, xong sau ~75 giây. 360p chưa có HAR -> chưa mở.
 OMNI_12_EDIT = "macaron_cookie_edit"
+# Đoạn video mẫu dài nhất Flow nhận cho chỉnh video (Omni 1.2). Trước là 10 giây; người dùng xác nhận Flow hiện nhận 15 giây
+# (2026-11-22). Extension kiểm cùng giới hạn trong page/video-http.js — đổi thì đổi cả hai.
+MOTION_REF_MAX_SECONDS = 15.0
+# Giới hạn của extension FlowsVeo bản CŨ (trước khi nâng lên 15 s). Bản mới báo giới hạn thật trong heartbeat
+# (`capabilities.motion_ref_max_seconds`); bản cũ không báo gì.
+LEGACY_EXTENSION_MOTION_REF_SECONDS = 10.0
+
+
+def _extension_motion_ref_limit() -> float | None:
+    """Đoạn video mẫu dài nhất (giây) extension ĐANG KẾT NỐI nhận qua HTTP; None = chưa kết nối (không kiểm được)."""
+    info = bridge.get_extension_info() or {}
+    if not info.get("connected"):
+        return None
+    try:
+        reported = float((info.get("capabilities") or {}).get("motion_ref_max_seconds"))
+    except (TypeError, ValueError):
+        return LEGACY_EXTENSION_MOTION_REF_SECONDS
+    return reported if reported > 0 else LEGACY_EXTENSION_MOTION_REF_SECONDS
+
+
+def _require_extension_motion_limit(length_seconds: float) -> None:
+    """Chặn TRƯỚC khi tạo job nếu extension trong Chrome chưa được tải lại sau khi nâng giới hạn.
+
+    Extension cũ (số phiên bản vẫn 2.2.0 nên không phân biệt được bằng version) thấy đoạn dài hơn giới hạn của nó thì
+    canUseHttpVideo() = false và LẶNG LẼ chuyển sang điều khiển giao diện Flow (hay lỗi "Flow control not found"). Lỗi
+    này xảy ra khi tạo job, trước mọi lệnh gửi lên Flow nên chắc chắn không mất credit.
+    """
+    limit = _extension_motion_ref_limit()
+    if limit is None or length_seconds <= limit + 1e-6:
+        return
+    raise ValueError(
+        f"Extension FlowsVeo trong Chrome đang chạy bản cũ: chỉ nhận đoạn video mẫu tối đa {limit:g} giây "
+        f"(bản mới nhận {MOTION_REF_MAX_SECONDS:g} giây), còn đoạn này dài {length_seconds:g} giây. Nếu cứ gửi, extension sẽ "
+        "lặng lẽ chuyển sang điều khiển giao diện Flow và hay lỗi. Mở chrome://extensions, bấm tải lại (Reload) FlowsVeo "
+        f"lúc không có job nào đang chạy, chờ khoảng 30 giây cho extension kết nối lại rồi thử lại; hoặc cắt đoạn ≤ {limit:g} giây. "
+        "Chưa gửi gì lên Flow nên chưa mất credit."
+    )
 OMNI_12_T2V_10S = "macaron_cookie_t2v_10s"
 OMNI_12_T2V_10S_360P = "macaron_cookie_t2v_10s_360p"  # độ phân giải nằm trong model id (HAR + PoC live 2026-11-09)
 # Frames đầu–cuối (i2v_fl): HAR flow.google_2_test_gd_7.com (6s, 720p = 18 credit) và flow.google_2_new_credit_check_11_09_v2.com
@@ -504,7 +559,7 @@ def _build_profiles() -> list[dict[str, Any]]:  # noqa: C901
                         "note": f"I2V {mode.value} — Theo Google Flow Help",
                     })
 
-    # Omni 1.2 Flash — Motion Control: chỉnh video theo video mẫu (cắt tối đa 10 giây) + ảnh tham chiếu.
+    # Omni 1.2 Flash — Motion Control: chỉnh video theo video mẫu (cắt tối đa MOTION_REF_MAX_SECONDS) + ảnh tham chiếu.
     # Giá đã đo MỘT lần (HAR 2026-11-11): đoạn 8 giây, 720p = 30 credit. Google: chỉnh video tính theo giây như tạo thường.
     for aspect in ("16:9", "9:16"):
         aspect_slug = "landscape" if aspect == "16:9" else "portrait"
@@ -520,7 +575,7 @@ def _build_profiles() -> list[dict[str, Any]]:  # noqa: C901
             "credit_cost": 30,
             "documented": True,
             "runtime_verified": True,
-            "note": "Giá đã đo 1 lần (đoạn 8 giây, 720p = 30 credit) · cắt 3–10 giây · 360p chưa xác minh",
+            "note": f"Giá đã đo 1 lần (đoạn 8 giây, 720p = 30 credit) · cắt 3–{MOTION_REF_MAX_SECONDS:g} giây · 360p chưa xác minh",
         })
 
     # Veo 3.1 Lite — frames (10 credits) + ingredients (10 credits)
@@ -938,8 +993,9 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         end_seconds = request.reference_video_end_seconds or request.reference_video_start_seconds + 10
         if end_seconds <= request.reference_video_start_seconds:
             raise ValueError("Reference video end time must be after its start time")
-        if end_seconds - request.reference_video_start_seconds > 10:
-            raise ValueError("Flow video references support clips up to 10 seconds")
+        if end_seconds - request.reference_video_start_seconds > MOTION_REF_MAX_SECONDS:
+            raise ValueError(f"Flow video references support clips up to {MOTION_REF_MAX_SECONDS:g} seconds")
+        _require_extension_motion_limit(end_seconds - request.reference_video_start_seconds)
 
     job_id = str(uuid.uuid4())[:12]
     now = datetime.now(timezone.utc).isoformat()
@@ -959,6 +1015,7 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         "resolution": request.resolution,
         "num_outputs": request.num_outputs,
         "seed": request.seed,
+        "variant": request.variant,
         "image_path": request.image_path,
         "end_image_path": request.end_image_path,
         "ingredient_image_paths": request.ingredient_image_paths or [],
@@ -1021,7 +1078,11 @@ def _process_job(job_id: str) -> None:
             return
         state = get_flow_ui_state()
         if state["holder"] or state["waiting"]:
-            _update_job(job, JobStatus.PENDING, f"Đang xếp hàng chờ Flow ({state['waiting'] + 1} việc phía trước)...")
+            ahead = _describe_flow_holder(state["holder"])
+            _update_job(
+                job, JobStatus.PENDING,
+                f"Đang xếp hàng chờ Flow ({state['waiting'] + 1} việc phía trước" + (f" — đang chạy: {ahead}" if ahead else "") + ")...",
+            )
         with flow_ui_slot(f"video:{job_id}"):
             _process_job_in_slot(job_id, job)
     except FlowBusyError as e:
@@ -1306,7 +1367,7 @@ def _http_video_eligible(req: dict[str, Any]) -> bool:
         if not all(isinstance(x, str) and _MEDIA_ID_RE.match(x) for x in ids):
             return False
     elif mode == "video_edit":
-        # Motion Control Omni 1.2 (HAR jIps6): 720p, video mẫu đã có media id, cắt tối đa 10 giây, 1–3 ảnh tham chiếu.
+        # Motion Control Omni 1.2 (HAR jIps6): 720p, video mẫu đã có media id, cắt tối đa MOTION_REF_MAX_SECONDS, 1–3 ảnh tham chiếu.
         if model != OMNI_12_EDIT or (req.get("resolution") or "720p") != "720p":
             return False
         if not _MEDIA_ID_RE.match(str(req.get("reference_video_id") or "")):
@@ -1316,7 +1377,7 @@ def _http_video_eligible(req: dict[str, Any]) -> bool:
             end = float(req.get("reference_video_end_seconds"))
         except (TypeError, ValueError):
             return False
-        if start < 0 or end <= start or end - start > 10:
+        if start < 0 or end <= start or end - start > MOTION_REF_MAX_SECONDS:
             return False
         if _motion_image_order(req) is None:
             return False
@@ -1475,8 +1536,8 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Video edit adapter currently supports exactly one output")
         if reference_video_start_seconds < 0 or reference_video_end_seconds <= reference_video_start_seconds:
             raise ValueError("Reference video trim range is invalid")
-        if reference_video_end_seconds - reference_video_start_seconds > 10:
-            raise ValueError("Flow video references support clips up to 10 seconds")
+        if reference_video_end_seconds - reference_video_start_seconds > MOTION_REF_MAX_SECONDS:
+            raise ValueError(f"Flow video references support clips up to {MOTION_REF_MAX_SECONDS:g} seconds")
         media_info = media_registry.get_media_info_by_id(reference_video_id)
         if media_info and media_info.get("duration", 0) > 0:
             actual_dur = float(media_info["duration"])

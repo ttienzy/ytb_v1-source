@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -292,3 +294,164 @@ def test_omni_12_video_edit_uses_macaron_edit_and_rejects_unverified_360p_and_om
         service._build_verified_flow_request({**base, "resolution": "360p"})
     with pytest.raises(ValueError, match="Omni 1.1"):
         service._build_verified_flow_request({**base, "model_display_name": "Omni 1.1 Flash"})
+
+
+def _motion_request(end_seconds):
+    return VeoJobRequest(
+        prompt="motion", input_mode="video_edit", resolution="720p", reference_video_id="uploaded-video-media-id",
+        reference_video_start_seconds=0, reference_video_end_seconds=end_seconds,
+    )
+
+
+def _isolated_submit(monkeypatch):
+    monkeypatch.setattr(service, "get_active_project", lambda: SimpleNamespace(id="test", flow_project_id="flow"))
+    monkeypatch.setattr(service, "_jobs", {})
+    save = Mock()
+    worker = Mock()
+    monkeypatch.setattr(service, "_save_jobs", save)
+    monkeypatch.setattr(service, "Thread", worker)
+    return save, worker
+
+
+@pytest.mark.parametrize("ext_info,end,allowed", [
+    ({"connected": True}, 13, False),                                                      # extension cũ (không báo gì) -> 10 s
+    ({"connected": True, "capabilities": {}}, 13, False),
+    ({"connected": True}, 10, True),                                                       # đúng giới hạn cũ vẫn chạy
+    ({"connected": True, "capabilities": {"motion_ref_max_seconds": 15}}, 13, True),       # extension mới
+    ({"connected": True, "capabilities": {"motion_ref_max_seconds": 15}}, 15, True),
+    ({"connected": True, "capabilities": {"motion_ref_max_seconds": "x"}}, 13, False),     # báo hỏng -> coi như cũ
+    ({"connected": False}, 13, True),                                                      # chưa kết nối: để các kiểm tra khác lo
+])
+def test_extension_motion_limit_guard(monkeypatch, ext_info, end, allowed):
+    save, worker = _isolated_submit(monkeypatch)
+    monkeypatch.setattr(service.bridge, "get_extension_info", lambda: ext_info)
+    if allowed:
+        service.submit_job(_motion_request(end))
+        worker.assert_called_once()
+    else:
+        with pytest.raises(ValueError) as e:
+            service.submit_job(_motion_request(end))
+        msg = str(e.value)
+        assert "bản cũ" in msg and "Reload" in msg and "chưa mất credit" in msg and "10 giây" in msg
+        # chặn trước khi tạo job: không lưu, không chạy worker => không thể tốn credit
+        assert service._jobs == {}
+        save.assert_not_called()
+        worker.assert_not_called()
+
+
+def test_heartbeat_capabilities_are_stored_and_reset(monkeypatch):
+    """Heartbeat bản mới báo năng lực; bản cũ (không có trường) xóa năng lực cũ để backend không tin số liệu thừa."""
+    from app.veo import bridge as br
+
+    monkeypatch.setattr(br, "_extension_info", dict(br._extension_info))
+    br.apply_heartbeat({"version": "2.2.0", "capabilities": {"motion_ref_max_seconds": 15}, "tab_count": 1})
+    info = br.get_extension_info()
+    assert info["connected"] is True and info["capabilities"] == {"motion_ref_max_seconds": 15}
+    br.apply_heartbeat({"version": "2.2.0"})                       # extension bản cũ
+    assert br.get_extension_info()["capabilities"] == {}
+    br.apply_heartbeat({"capabilities": "hỏng"})
+    assert br.get_extension_info()["capabilities"] == {}
+    # và guard của service đọc đúng số đã lưu
+    br.apply_heartbeat({"capabilities": {"motion_ref_max_seconds": 12}})
+    monkeypatch.setattr(service.bridge, "get_extension_info", br.get_extension_info)
+    assert service._extension_motion_ref_limit() == 12
+
+
+def _variant_request(variant, key):
+    return VeoJobRequest(
+        prompt="same ingredients request", input_mode="video_edit", resolution="720p",
+        reference_video_id="uploaded-video-media-id", reference_video_start_seconds=0, reference_video_end_seconds=8,
+        idempotency_key=key, variant=variant,
+    )
+
+
+def test_variants_with_identical_content_become_separate_jobs(monkeypatch):
+    """Lỗi thật (2026-11-23): biến thể 2 giống hệt biến thể 1 về nội dung chỉ khác idempotency_key nên bị fingerprint coi là
+    bản trùng của job đang chạy -> trả lại job của biến thể 1 (2 ô theo dõi cùng 1 job, chỉ có 1 video)."""
+    _isolated_submit(monkeypatch)
+    worker = Mock()
+    monkeypatch.setattr(service, "Thread", worker)
+    monkeypatch.setattr(service.bridge, "get_extension_info", lambda: {"connected": False})
+    v1 = service.submit_job(_variant_request(1, "k-a1-v1"))
+    v2 = service.submit_job(_variant_request(2, "k-a1-v2"))
+    v3 = service.submit_job(_variant_request(3, "k-a1-v3"))
+    assert len({v1.job_id, v2.job_id, v3.job_id}) == 3
+    assert not (v1.deduplicated or v2.deduplicated or v3.deduplicated)
+    assert worker.call_count == 3
+    assert [service._jobs[j.job_id]["variant"] for j in (v1, v2, v3)] == [1, 2, 3]
+
+
+def test_same_variant_is_still_deduplicated(monkeypatch):
+    """Bấm đúp / gửi lại CÙNG biến thể thì vẫn không tạo thêm job (chống tốn credit)."""
+    _isolated_submit(monkeypatch)
+    worker = Mock()
+    monkeypatch.setattr(service, "Thread", worker)
+    monkeypatch.setattr(service.bridge, "get_extension_info", lambda: {"connected": False})
+    first = service.submit_job(_variant_request(2, "k-a1-v2"))
+    again_same_key = service.submit_job(_variant_request(2, "k-a1-v2"))
+    again_new_key = service.submit_job(_variant_request(2, "k-a2-v2"))   # khác khóa nhưng cùng nội dung + cùng biến thể + job còn chạy
+    assert again_same_key.job_id == first.job_id and again_same_key.deduplicated
+    assert again_new_key.job_id == first.job_id and again_new_key.deduplicated
+    assert worker.call_count == 1
+
+
+def test_variant_is_not_sent_to_flow(monkeypatch):
+    """`variant` chỉ để chống trùng: không được lọt vào request gửi Flow."""
+    job = {"input_mode": "video_edit", "prompt": "p", "model_display_name": "Omni 1.2 Flash", "duration_seconds": 8, "resolution": "720p",
+           "aspect_ratio": "9:16", "num_outputs": 1, "reference_video_id": "50cd26f1-45d8-44eb-95a6-030f6a90293a",
+           "reference_video_start_seconds": 0, "reference_video_end_seconds": 8, "variant": 3, "flow_project_id": "flow"}
+    req = service._build_verified_flow_request(job)
+    assert "variant" not in req and "variant" not in json.dumps(req)
+
+
+def test_queue_message_names_the_job_in_front(monkeypatch):
+    monkeypatch.setattr(service, "_jobs", {"d0afb250-a4c": {
+        "job_id": "d0afb250-a4c", "input_mode": "video_edit",
+        "created_at": (datetime.now(timezone.utc) - timedelta(minutes=9, seconds=20)).isoformat(),
+    }})
+    text = service._describe_flow_holder("video:d0afb250-a4c")
+    assert "Motion Control" in text and "d0afb250-a4c" in text and "đã 9 phút" in text
+    assert service._describe_flow_holder("") == ""
+    assert service._describe_flow_holder("video:khong-co") == "video:khong-co"   # không tra được thì giữ nguyên chữ gốc
+
+
+def test_http_three_variants_as_sent_by_the_muse_canvas_node(monkeypatch, tmp_path):
+    """Hợp đồng frontend ↔ backend: đúng bộ trường node Ingredients gửi (museCanvasNodes.buildVideoIngrRequest) -> 3 POST
+    /api/veo/jobs khác nhau chỉ ở `variant` + khóa chống trùng phải ra 3 job riêng, mỗi job num_outputs = 1."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    images = []
+    for i in range(3):
+        p = tmp_path / f"ref{i}.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
+        images.append(str(p))
+    _isolated_submit(monkeypatch)
+    worker = Mock()
+    monkeypatch.setattr(service, "Thread", worker)
+    monkeypatch.setattr(service, "get_project", lambda pid: SimpleNamespace(id=pid, flow_project_id="flow-abc"))
+    monkeypatch.setattr(service.bridge, "get_extension_info", lambda: {"connected": True, "capabilities": {"motion_ref_max_seconds": 15}})
+
+    def body(variant):
+        return {
+            "prompt": "Recreate the exact pacing…", "model_display_name": "Omni 1.2 Flash", "input_mode": "video_edit",
+            "aspect_ratio": "9:16", "duration_seconds": 13, "resolution": "720p", "num_outputs": 1, "variant": variant,
+            "project_id": "vp-1", "ingredient_image_paths": images, "reference_video_id": "50cd26f1-45d8-44eb-95a6-030f6a90293a",
+            "reference_video_start_seconds": 0, "reference_video_end_seconds": 13.0,
+            "idempotency_key": f"musevingr-vingr-x-abc-a1-v{variant}",
+        }
+
+    client = TestClient(app)
+    got = [client.post("/api/veo/jobs", json=body(v)) for v in (1, 2, 3)]
+    assert [r.status_code for r in got] == [200, 200, 200], [r.text[:200] for r in got]
+    ids = [r.json()["job_id"] for r in got]
+    assert len(set(ids)) == 3 and not any(r.json()["deduplicated"] for r in got)
+    assert worker.call_count == 3
+    # bấm đúp biến thể 2 -> vẫn là job cũ của biến thể 2, không tạo thêm
+    again = client.post("/api/veo/jobs", json=body(2))
+    assert again.json()["job_id"] == ids[1] and again.json()["deduplicated"] is True and worker.call_count == 3
+    # extension bản cũ + đoạn 13 s -> bị chặn trước khi tạo job (400, câu hướng dẫn Reload)
+    monkeypatch.setattr(service.bridge, "get_extension_info", lambda: {"connected": True})
+    blocked = client.post("/api/veo/jobs", json={**body(4), "idempotency_key": "other"})
+    assert blocked.status_code == 400 and "Reload" in blocked.json()["detail"] and "chưa mất credit" in blocked.json()["detail"]
+    assert worker.call_count == 3

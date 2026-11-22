@@ -1,17 +1,14 @@
-"""Muse Canvas (Canvas AI → tab "Muse Canvas"): cấu hình + đồ thị canvas.
+"""Muse Canvas (Canvas AI → tab "Muse Canvas"): cấu hình dùng chung + prompt mặc định của node.
 
-Giai đoạn này mới có cấu hình và nơi lưu canvas; các node sẽ thêm sau. Khi chạy, node sẽ
-gọi Muse qua `app/ai/muse` (HTTP/Noise, nhiều tài khoản) — không dùng trình duyệt.
-
-- Cấu hình: config.json, khóa `muse_canvas` (nhỏ, sửa thường xuyên).
-- Đồ thị:   DATA_DIR/muse_canvas.json  {nodes, edges, viewport, updated_at} (có thể lớn).
+- Cấu hình: config.json, khóa `muse_canvas` (nhỏ, sửa thường xuyên). Các trường Flow / tiền tố file ở đây chỉ là
+  giá trị gốc cho project mới — project nào cũng có cài đặt riêng (`muse_projects.MuseProjectSettings`).
+- Đồ thị:   mỗi project 1 file, xem `app/workflow/muse_projects.py`. `get_graph` / `save_graph` ở đây làm việc với
+  project đang mở (giữ cho bản frontend cũ). GRAPH_FILE (DATA_DIR/muse_canvas.json) là bản trước khi có project,
+  chỉ còn được đọc 1 lần để chuyển thành project "Canvas mặc định".
 """
 from __future__ import annotations
 
-import json
-import os
 import sys
-import time
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -21,7 +18,7 @@ from app.core.config import DATA_DIR
 from app.core.storage import read_config, write_config
 
 CONFIG_KEY = "muse_canvas"
-GRAPH_FILE = DATA_DIR / "muse_canvas.json"
+GRAPH_FILE = DATA_DIR / "muse_canvas.json"  # chỉ còn là nguồn chuyển dữ liệu cũ (xem muse_projects.ensure_store)
 
 # Prompt mặc định của các node: bản gốc đóng kèm app (Backend/prompts/workflow/…),
 # bản người dùng "Lưu làm mặc định" nằm ở DATA_DIR/muse_prompts/ (ghi được cả khi app đã đóng gói).
@@ -34,6 +31,10 @@ PROMPT_FILES = {
     "character_outfit": "muse_character_outfit_prompt.txt",
     "video_script": "muse_video_script_prompt.txt",  # node "Kịch bản video" (Muse trả lời chữ)
     "clip_script": "gpt_clip_script_prompt.txt",  # node "Kịch bản tạo video" (ChatGPT: mỗi tham chiếu 1 clip, có mối nối)
+    # node "Nhân vật trong bối cảnh": ảnh 1 = nhân vật (bảng thiết kế / ảnh nhân vật), ảnh 2 = Tham chiếu bối cảnh
+    "scene_place": "muse_scene_place_prompt.txt",
+    # node "Ingredients (video + ảnh)": Omni 1.2 video_edit — video tham chiếu + 1–3 ảnh tham chiếu theo thứ tự
+    "video_ingredients": "muse_video_ingredients_prompt.txt",
 }
 PROMPT_OVERRIDE_DIR = DATA_DIR / "muse_prompts"
 MAX_PROMPT_CHARS = 20000
@@ -43,6 +44,10 @@ DURATIONS = (5, 10)
 MIN_TIMEOUT = 600
 MAX_PARALLEL = 4
 MAX_GRAPH_BYTES = 5 * 1024 * 1024
+# Omni 1.2 trên Flow: Ingredients 3–15 giây, chỉnh video cắt 3–15 giây (Frames chỉ 6/10, text→video chỉ 10)
+FLOW_MIN_SECONDS = 3
+FLOW_MAX_SECONDS = 15
+FLOW_MAX_VARIANTS = 4
 
 
 class MuseCanvasConfig(BaseModel):
@@ -82,11 +87,35 @@ class MuseCanvasConfig(BaseModel):
     flow_project_id: str = Field(default="", max_length=64, description="VeoProject.id dùng cho node Clip")
     flow_aspect: Literal["9:16", "16:9"] = "9:16"
     flow_resolution: Literal["720p", "360p"] = "720p"
+    # Thời lượng (giây) cho video Flow: 0 = Tự động (theo kịch bản / video tham chiếu), 3–15 = cố định
+    flow_seconds: int = Field(default=0, description="0 = Tự động; 3–15 giây")
+    # Số biến thể mỗi lần bấm Tạo video (node Ingredients): 1–4, mỗi biến thể 1 job Flow riêng
+    flow_variants: int = Field(default=1, description="1–4 biến thể")
 
     @field_validator("duration_seconds")
     @classmethod
     def _duration(cls, v: int) -> int:
         return v if v in DURATIONS else DURATIONS[0]
+
+    @field_validator("flow_seconds", mode="before")
+    @classmethod
+    def _flow_seconds(cls, v) -> int:
+        """0 = Tự động; còn lại 3–15 giây (Omni 1.2 Ingredients / chỉnh video). Giá trị lạ -> Tự động."""
+        try:
+            n = int(round(float(v or 0)))
+        except (TypeError, ValueError):
+            return 0
+        return n if FLOW_MIN_SECONDS <= n <= FLOW_MAX_SECONDS else 0
+
+    @field_validator("flow_variants", mode="before")
+    @classmethod
+    def _flow_variants(cls, v) -> int:
+        """Số biến thể mỗi lần bấm Tạo video: 1–4 (mỗi biến thể là một job Flow riêng, tốn credit riêng). Lạ -> 1."""
+        try:
+            n = int(round(float(v or 1)))
+        except (TypeError, ValueError):
+            return 1
+        return n if 1 <= n <= FLOW_MAX_VARIANTS else 1
 
     @field_validator("timeout_seconds")
     @classmethod
@@ -141,27 +170,17 @@ def save_config(cfg: MuseCanvasConfig) -> MuseCanvasConfig:
 
 
 def get_graph() -> MuseCanvasGraph:
-    if not GRAPH_FILE.exists():
-        return MuseCanvasGraph()
-    try:
-        return MuseCanvasGraph(**json.loads(GRAPH_FILE.read_text(encoding="utf-8")))
-    except Exception:
-        return MuseCanvasGraph()
+    """Đồ thị của project đang mở."""
+    from app.workflow import muse_projects
+
+    return muse_projects.get_graph(muse_projects.active_id())
 
 
 def save_graph(graph: MuseCanvasGraph) -> MuseCanvasGraph:
-    graph.updated_at = time.time()
-    blob = json.dumps(graph.model_dump(mode="json"), ensure_ascii=False)
-    if len(blob.encode("utf-8")) > MAX_GRAPH_BYTES:
-        raise ValueError("Canvas quá lớn (> 5 MB). Đừng nhúng ảnh/video base64 vào node — lưu đường dẫn file.")
-    GRAPH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = GRAPH_FILE.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(blob)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, GRAPH_FILE)
-    return graph
+    """Lưu đồ thị vào project đang mở."""
+    from app.workflow import muse_projects
+
+    return muse_projects.save_graph(muse_projects.active_id(), graph)
 
 
 # ---------------------------------------------------------------- prompt mặc định của node

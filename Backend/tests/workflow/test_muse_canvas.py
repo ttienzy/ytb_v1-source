@@ -6,6 +6,7 @@ import json
 import pytest
 
 from app.workflow import muse_canvas as mc
+from app.workflow import muse_projects as mp
 
 
 @pytest.fixture
@@ -14,6 +15,7 @@ def cfg_store(monkeypatch, tmp_path):
     monkeypatch.setattr(mc, "read_config", lambda: data)
     monkeypatch.setattr(mc, "write_config", lambda d: data.update(d))
     monkeypatch.setattr(mc, "GRAPH_FILE", tmp_path / "muse_canvas.json")
+    monkeypatch.setattr(mp, "PROJECTS_DIR", tmp_path / "muse_canvas_projects")
     return data
 
 
@@ -50,7 +52,8 @@ def test_graph_roundtrip_and_size_limit(cfg_store, monkeypatch):
     g = mc.save_graph(mc.MuseCanvasGraph(nodes=[{"id": "n1", "type": "musePrompt", "position": {"x": 1, "y": 2}, "data": {}}],
                                          edges=[], viewport={"x": 0, "y": 0, "zoom": 1}))
     assert g.updated_at > 0
-    saved = json.loads(mc.GRAPH_FILE.read_text(encoding="utf-8"))
+    # lưu vào file của project đang mở
+    saved = json.loads((mp.PROJECTS_DIR / f"{mp.active_id()}.json").read_text(encoding="utf-8"))
     assert saved["nodes"][0]["id"] == "n1" and mc.get_graph().viewport == {"x": 0, "y": 0, "zoom": 1}
     monkeypatch.setattr(mc, "MAX_GRAPH_BYTES", 10)
     with pytest.raises(ValueError):
@@ -128,3 +131,23 @@ def test_video_script_prompt_file(cfg_store, monkeypatch, tmp_path):
     assert "Character Sheet to Reality" in p["prompt"] and "BOARD COVER" in p["prompt"]
     assert p["prompt"].endswith("export 9:16.")
     assert len(p["prompt"]) <= mc.MAX_PROMPT_CHARS
+
+
+def test_scene_place_prompt_file(cfg_store, monkeypatch, tmp_path):
+    """Node "Nhân vật trong bối cảnh": ảnh 1 = nhân vật, ảnh 2 = bối cảnh; prompt mặc định do người dùng soạn."""
+    monkeypatch.setattr(mc, "PROMPT_OVERRIDE_DIR", tmp_path / "muse_prompts")
+    p = mc.get_prompt("scene_place")
+    assert p["is_custom"] is False
+    assert p["prompt"].startswith("A realistic full-body candid photograph placing the character from Image 1")
+    assert "Keep the background, camera angle, framing, perspective, and color tone of Image 2 100% identical." in p["prompt"]
+    assert p["prompt"].endswith("9:16 vertical aspect ratio.")
+
+
+def test_video_ingredients_prompt_file(cfg_store, monkeypatch, tmp_path):
+    """Node "Ingredients (video + ảnh)": prompt mặc định do người dùng soạn (video tham chiếu + ảnh theo thứ tự)."""
+    monkeypatch.setattr(mc, "PROMPT_OVERRIDE_DIR", tmp_path / "muse_prompts")
+    p = mc.get_prompt("video_ingredients")
+    assert p["is_custom"] is False
+    assert p["prompt"].startswith("Recreate the exact pacing, locked static tripod camera")
+    assert "- Opening Look (First reference image):" in p["prompt"]
+    assert p["prompt"].endswith("photorealistic, 9:16 vertical video.")

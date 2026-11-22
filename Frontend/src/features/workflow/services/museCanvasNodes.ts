@@ -6,14 +6,21 @@
  *   [Trang phục] ──┘                                   └─> …
  *   [Nhân vật tham chiếu] ──images──> [Bảng thiết kế nhân vật] ──extracted──> [Ảnh kết quả]
  *   [Ảnh kết quả (từ Tách áo quần)] ──outfits──┘   (tùy chọn: mỗi cặp nhân vật × trang phục = 1 bảng)
- *   [Ảnh kết quả | Nhân vật tham chiếu | Trang phục] × N ──boards──> [Kịch bản video]
+ *   [Ảnh kết quả (bảng nhân vật) | Nhân vật tham chiếu] ──images──> [Nhân vật trong bối cảnh] ──extracted──> [Ảnh kết quả]
+ *   [Tham chiếu bối cảnh] ──scenes──┘   (bắt buộc: mỗi cặp nhân vật × bối cảnh = 1 ảnh, ảnh 1 = nhân vật, ảnh 2 = bối cảnh)
+ *   [Video tham chiếu] ──refvideo──> [Ingredients (video + ảnh)] <──boards── [Ảnh kết quả | Nhân vật | Trang phục | Bối cảnh] × 1–3
+ *       (Omni 1.2 video_edit trên Flow: video mẫu cắt ≤ 10 s + ảnh tham chiếu theo thứ tự → 1 video)
+ *   [Ô prompt] × N       (độc lập: nhập / giữ prompt; cổng ra "prompt" chưa nối vào node nào)
+ *   [Ảnh kết quả | Nhân vật tham chiếu | Trang phục | Tham chiếu bối cảnh] × N ──boards──> [Kịch bản video]
  *       (mọi ảnh tham chiếu gửi chung 1 lần Muse → 1 kịch bản chữ; Muse tự gom ảnh cùng bộ)
  *   [Kịch bản video] ──script──> [Kịch bản]   (nút "Ra node": tách bản kịch bản ra node riêng, sửa được)
  *   [Ảnh kết quả | Nhân vật | Trang phục] ──boards──┘   (tham chiếu cho nút "Tạo video" của node Kịch bản)
  *   [Kịch bản] ──video──> [Video kết quả]   (nút "Ra node": tách video đã tạo ra node riêng)
  *
  * Hai họ node:
- * - Node ẢNH VÀO (INPUT_SPECS): đúng 1 ảnh/node (Trang phục, Nhân vật tham chiếu).
+ * - Node ẢNH VÀO (INPUT_SPECS): đúng 1 ảnh/node (Trang phục, Nhân vật tham chiếu, Tham chiếu bối cảnh).
+ *   "Tham chiếu bối cảnh" độc lập: không có node chạy riêng, chỉ đưa ảnh địa điểm vào cổng Tham chiếu của các node
+ *   kịch bản (vai trò "Bối cảnh"; ở Kịch bản tạo video nó dùng chung cho mọi clip, KHÔNG thành clip).
  * - Node CHẠY MUSE (JOB_SPECS): nhận dây từ nhiều node ảnh vào cùng loại; mỗi node nối vào chạy 1 lần Muse
  *   (prompt của node + ảnh đó) và cho 1 ảnh. Kết quả lưu theo id node nguồn.
  * - Node "Ảnh kết quả": tách 1 ảnh đã tạo ra node riêng (giữ ảnh, nhớ nguồn) để dùng / nối tiếp.
@@ -27,6 +34,16 @@ export const MUSE_NODE = {
   extract: 'museOutfitPrompt',
   character: 'museCharacterImage',
   characterSheet: 'museCharacterSheet',
+  /** "Tham chiếu bối cảnh": 1 ảnh địa điểm / phông nền, đưa bối cảnh vào các node kịch bản */
+  scene: 'museSceneImage',
+  /** "Nhân vật trong bối cảnh": nhân vật (ảnh 1) đặt vào bối cảnh (ảnh 2) -> 1 ảnh chân thực, giữ đúng nhân vật */
+  scenePlace: 'museScenePlace',
+  /** "Video tham chiếu": độc lập, giữ 1 video mẫu (tải lên / Thư Viện Video) */
+  videoRef: 'museVideoRef',
+  /** "Ô prompt": độc lập, nhập / giữ 1 prompt chữ (thêm bao nhiêu ô cũng được) */
+  promptBox: 'musePromptBox',
+  /** "Ingredients (video + ảnh)": video tham chiếu + 1–3 ảnh → 1 video Omni 1.2 (video_edit) trên Flow */
+  videoIngredients: 'museVideoIngredients',
   output: 'museOutputImage',
   script: 'museVideoScript',
   scriptText: 'museScriptText',
@@ -54,6 +71,13 @@ export const MUSE_HANDLE = {
   imageOut: 'image',
   /** Ảnh kết quả (trang phục đã tách) → cổng phụ của Bảng thiết kế nhân vật */
   outfitsIn: 'outfits',
+  /** Tham chiếu bối cảnh → cổng phụ của Nhân vật trong bối cảnh */
+  scenesIn: 'scenes',
+  /** Video tham chiếu → cổng "Video" của node Ingredients (video + ảnh) */
+  refVideoOut: 'refvideo',
+  refVideoIn: 'refvideo',
+  /** Cổng ra của Ô prompt (chưa node nào nhận) */
+  promptOut: 'prompt',
   /** Mọi ảnh tham chiếu → cổng "Tham chiếu" của node Kịch bản video (nhiều dây, theo thứ tự). Id giữ 'boards'. */
   refsIn: 'boards',
   boardsIn: 'boards',
@@ -86,8 +110,10 @@ export interface InputNodeSpec {
   labelPlaceholder: string
   /** Tên dòng mặc định trong node chạy: "<rowLabel> N" */
   rowLabel: string
-  /** Node chạy Muse nhận loại ảnh này */
+  /** Node chạy Muse nhận loại ảnh này ('' = không có node chạy riêng, vd. Tham chiếu bối cảnh) */
   jobType: string
+  /** Tiền tố id node */
+  idPrefix: string
 }
 
 export interface JobNodeSpec {
@@ -113,15 +139,26 @@ export interface JobNodeSpec {
    * prompt kết hợp vì prompt GPT tự gọi tên ảnh 1 / ảnh 2; không có thì GPT dùng chung prompt với Muse.
    */
   gptPromptName?: string
-  /** Cổng vào phụ (tùy chọn): nhận ảnh từ node Ảnh kết quả; mỗi cặp ảnh chính × ảnh phụ = 1 dòng. */
+  /**
+   * Cổng chính nhận thêm node "Ảnh kết quả" có nguồn là các loại node chạy này (ngoài node ảnh vào `inputType`),
+   * vd. Nhân vật trong bối cảnh nhận bảng thiết kế nhân vật đã tạo.
+   */
+  primaryFromJobTypes?: string[]
+  /** Cổng vào phụ (tùy chọn): mỗi cặp ảnh chính × ảnh phụ = 1 dòng; ảnh phụ gửi SAU ảnh chính. */
   secondary?: {
     handle: string
     title: string
     rowLabel: string
-    /** Chỉ nhận node Ảnh kết quả có nguồn là loại node chạy này */
-    fromJobType: string
-    /** Prompt ghép thêm khi dòng có ảnh phụ (file trong Backend/prompts/workflow) */
-    promptName: string
+    /** Nhận node Ảnh kết quả có nguồn là loại node chạy này */
+    fromJobType?: string
+    /** Hoặc nhận node ảnh vào loại này (vd. Tham chiếu bối cảnh) */
+    fromNodeType?: string
+    /** Prompt ghép thêm khi dòng có ảnh phụ (file trong Backend/prompts/workflow); không có = prompt chính đã gọi tên ảnh 2 */
+    promptName?: string
+    /** Bắt buộc có ảnh phụ: chưa nối thì dòng không chạy được */
+    required?: boolean
+    /** Chữ khi rê chuột vào cổng phụ */
+    handleTitle: string
   }
 }
 
@@ -133,6 +170,7 @@ export const INPUT_SPECS: Record<string, InputNodeSpec> = {
     labelPlaceholder: 'Tên bộ đồ (tùy chọn), vd. Áo dài đỏ',
     rowLabel: 'Trang phục',
     jobType: MUSE_NODE.extract,
+    idPrefix: 'outfit',
   },
   [MUSE_NODE.character]: {
     type: MUSE_NODE.character,
@@ -141,6 +179,16 @@ export const INPUT_SPECS: Record<string, InputNodeSpec> = {
     labelPlaceholder: 'Tên nhân vật (tùy chọn), vd. Linh',
     rowLabel: 'Nhân vật',
     jobType: MUSE_NODE.characterSheet,
+    idPrefix: 'character',
+  },
+  [MUSE_NODE.scene]: {
+    type: MUSE_NODE.scene,
+    title: 'Tham chiếu bối cảnh',
+    subtitle: '1 ảnh địa điểm / phông nền cho video',
+    labelPlaceholder: 'Tên bối cảnh (tùy chọn), vd. Quán cà phê gỗ',
+    rowLabel: 'Bối cảnh',
+    jobType: '',
+    idPrefix: 'scene',
   },
 }
 
@@ -179,12 +227,58 @@ export const JOB_SPECS: Record<string, JobNodeSpec> = {
       rowLabel: 'Trang phục',
       fromJobType: 'museOutfitPrompt',
       promptName: 'character_outfit',
+      handleTitle: 'Trang phục (tùy chọn): nối từ node “Ảnh kết quả” của Tách áo quần — mỗi cặp nhân vật × trang phục ra 1 bảng',
+    },
+  },
+  [MUSE_NODE.scenePlace]: {
+    type: MUSE_NODE.scenePlace,
+    title: 'Nhân vật trong bối cảnh',
+    subtitle: 'Mỗi nhân vật × bối cảnh → 1 ảnh chân thực 9:16, giữ đúng mặt + trang phục',
+    promptName: 'scene_place',
+    inputType: MUSE_NODE.character,
+    primaryFromJobTypes: [MUSE_NODE.characterSheet],
+    chatLabel: 'Nhân vật + bối cảnh',
+    fileSuffix: 'sceneplace',
+    emptyText:
+      'Chưa có nhân vật — nối “Ảnh kết quả” của Bảng thiết kế nhân vật (hoặc node “Nhân vật tham chiếu”) vào cổng “Nhân vật”, và node “Tham chiếu bối cảnh” vào cổng “Bối cảnh”.',
+    runVerb: 'Tạo',
+    unitNoun: 'ảnh',
+    doneText: 'Đã tạo',
+    gptAspect: '9:16',
+    secondary: {
+      handle: MUSE_HANDLE.scenesIn,
+      title: 'Bối cảnh',
+      rowLabel: 'Bối cảnh',
+      fromNodeType: MUSE_NODE.scene,
+      required: true,
+      handleTitle: 'Bối cảnh (bắt buộc): nối từ node “Tham chiếu bối cảnh” — mỗi cặp nhân vật × bối cảnh ra 1 ảnh',
     },
   },
 }
 
 export const isInputType = (t?: string) => !!t && t in INPUT_SPECS
 export const isJobType = (t?: string) => !!t && t in JOB_SPECS
+
+/**
+ * Node nguồn `src` vào cổng nào của node chạy `spec`: 'primary' (cổng images), 'secondary' (cổng phụ) hoặc null.
+ * Chính: node ảnh vào `inputType`, hoặc Ảnh kết quả có nguồn trong `primaryFromJobTypes`.
+ * Phụ: Ảnh kết quả có nguồn `secondary.fromJobType`, hoặc node ảnh vào loại `secondary.fromNodeType`.
+ */
+export function jobPortFor(
+  spec: JobNodeSpec,
+  src: { type?: string; data?: Record<string, unknown> },
+): 'primary' | 'secondary' | null {
+  const jobOfOutput = src.type === MUSE_NODE.output ? normalizeOutputData(src.data).origin?.jobType : undefined
+  if (src.type === spec.inputType) return 'primary'
+  if (jobOfOutput && spec.primaryFromJobTypes?.includes(jobOfOutput)) return 'primary'
+  const sec = spec.secondary
+  if (sec?.fromNodeType && src.type === sec.fromNodeType) return 'secondary'
+  if (sec?.fromJobType && jobOfOutput === sec.fromJobType) return 'secondary'
+  return null
+}
+
+/** Cổng ra mặc định của node nguồn ảnh: node ảnh vào = 'images', Ảnh kết quả = 'image'. */
+const imageOutHandle = (srcType?: string) => (srcType === MUSE_NODE.output ? MUSE_HANDLE.imageOut : MUSE_HANDLE.imagesOut)
 
 /** Tên prompt mặc định của node Tách áo quần (giữ cho code cũ). */
 export const OUTFIT_PROMPT_NAME = JOB_SPECS[MUSE_NODE.extract].promptName
@@ -303,7 +397,7 @@ export function museNodeId(prefix: string): string {
 
 // ---------------------------------------------------------------- tạo node / dây
 
-export function createInputNode(type: string, position: XYPosition, id = museNodeId(type === MUSE_NODE.character ? 'character' : 'outfit')): MuseNodeLike {
+export function createInputNode(type: string, position: XYPosition, id = museNodeId(INPUT_SPECS[type]?.idPrefix ?? 'input')): MuseNodeLike {
   const spec = INPUT_SPECS[type]
   if (!spec) throw new Error(`Không có loại node ảnh vào ${type}`)
   const data: MuseInputData = { title: spec.title, label: '', image: null }
@@ -314,7 +408,7 @@ export function createJobNode(
   type: string,
   position: XYPosition,
   prompt: string,
-  id = museNodeId(type === MUSE_NODE.characterSheet ? 'charsheet' : 'extract'),
+  id = museNodeId(type === MUSE_NODE.characterSheet ? 'charsheet' : type === MUSE_NODE.scenePlace ? 'sceneplace' : 'extract'),
   secondaryPrompt = '',
 ): MuseNodeLike {
   const spec = JOB_SPECS[type]
@@ -429,6 +523,20 @@ export function isValidMuseConnection(
       !edges.some((e) => e.target === c.target)
     )
   }
+  // node Ingredients (video + ảnh): cổng "Video" nhận đúng 1 Video tham chiếu; cổng "Ảnh" nhận tối đa 3 node có ảnh
+  if (dst.type === MUSE_NODE.videoIngredients) {
+    if (src.type === MUSE_NODE.videoRef) {
+      return (
+        (sh ?? MUSE_HANDLE.refVideoOut) === MUSE_HANDLE.refVideoOut &&
+        (th ?? MUSE_HANDLE.refVideoIn) === MUSE_HANDLE.refVideoIn &&
+        !edges.some((e) => e.target === c.target && e.targetHandle === MUSE_HANDLE.refVideoIn)
+      )
+    }
+    if ((th ?? MUSE_HANDLE.refsIn) !== MUSE_HANDLE.refsIn) return false
+    if (!SCRIPT_REF_SOURCE_TYPES.includes(src.type)) return false
+    if ((sh ?? imageOutHandle(src.type)) !== imageOutHandle(src.type)) return false
+    return edges.filter((e) => e.target === c.target && e.targetHandle === MUSE_HANDLE.refsIn).length < VIDEO_INGR_MAX_REFS
+  }
   if (dst.type === MUSE_NODE.clipPrompt) {
     return (
       src.type === MUSE_NODE.clipScript &&
@@ -449,23 +557,22 @@ export function isValidMuseConnection(
   if (dst.type === MUSE_NODE.script || dst.type === MUSE_NODE.scriptText || dst.type === MUSE_NODE.clipScript) {
     if ((th ?? MUSE_HANDLE.refsIn) !== MUSE_HANDLE.refsIn) return false
     if (src.type === MUSE_NODE.output) return (sh ?? MUSE_HANDLE.imageOut) === MUSE_HANDLE.imageOut
-    if (src.type === MUSE_NODE.character || src.type === MUSE_NODE.outfit) return (sh ?? MUSE_HANDLE.imagesOut) === MUSE_HANDLE.imagesOut
+    if (src.type === MUSE_NODE.character || src.type === MUSE_NODE.outfit || src.type === MUSE_NODE.scene)
+      return (sh ?? MUSE_HANDLE.imagesOut) === MUSE_HANDLE.imagesOut
     return false
   }
-  if (isInputType(src.type)) {
-    return (
-      INPUT_SPECS[src.type].jobType === dst.type &&
-      (sh ?? MUSE_HANDLE.imagesOut) === MUSE_HANDLE.imagesOut &&
-      (th ?? MUSE_HANDLE.imagesIn) === MUSE_HANDLE.imagesIn
-    )
+  // Ảnh vào → node chạy: cổng chính (images) hoặc cổng phụ (vd. trang phục đã tách → Bảng thiết kế nhân vật,
+  // Tham chiếu bối cảnh → Nhân vật trong bối cảnh), theo JobNodeSpec
+  if (isJobType(dst.type) && (isInputType(src.type) || src.type === MUSE_NODE.output)) {
+    const spec = JOB_SPECS[dst.type]
+    const port = jobPortFor(spec, src)
+    const out = imageOutHandle(src.type)
+    if ((sh ?? out) !== out) return false
+    if (port === 'primary') return (th ?? MUSE_HANDLE.imagesIn) === MUSE_HANDLE.imagesIn
+    if (port === 'secondary') return (th ?? '') === spec.secondary!.handle
+    return false
   }
-  // Ảnh kết quả → cổng phụ của node chạy (vd. trang phục đã tách → Bảng thiết kế nhân vật)
-  if (src.type === MUSE_NODE.output && isJobType(dst.type)) {
-    const sec = JOB_SPECS[dst.type].secondary
-    if (!sec || (th ?? '') !== sec.handle || (sh ?? MUSE_HANDLE.imageOut) !== MUSE_HANDLE.imageOut) return false
-    const origin = normalizeOutputData(src.data).origin
-    return origin?.jobType === sec.fromJobType
-  }
+  if (isInputType(src.type)) return false
   if (isJobType(src.type) && dst.type === MUSE_NODE.output) {
     return (
       (sh ?? MUSE_HANDLE.jobOut) === MUSE_HANDLE.jobOut &&
@@ -474,6 +581,124 @@ export function isValidMuseConnection(
     )
   }
   return false
+}
+
+// ---------------------------------------------------------------- node "Video tham chiếu" (độc lập)
+
+/** 1 video trên máy: node chỉ giữ đường dẫn (không nhúng file). */
+export interface MuseVideoRef {
+  id: string
+  name: string
+  /** Đường dẫn file trên máy */
+  path: string
+  /** URL backend để phát: /api/ai/muse/preview?file=… (tải lên) hoặc URL của Thư Viện Video */
+  previewUrl: string
+  size: number
+  /** Thời lượng (giây) đọc từ video khi phát được; 0 = chưa biết */
+  durationSec: number
+  /** Nguồn: tải từ máy hay chọn trong Thư Viện Video */
+  source: 'upload' | 'library'
+}
+
+export interface MuseVideoRefData {
+  title: string
+  label: string
+  video: MuseVideoRef | null
+  [key: string]: unknown
+}
+
+export const VIDEO_REF_TITLE = 'Video tham chiếu'
+/** Video tải lên tối đa 300 MB (đi qua backend /api/ai/muse/upload) */
+export const VIDEO_REF_MAX_BYTES = 300 * 1024 * 1024
+export const VIDEO_REF_ACCEPT = ['video/mp4', 'video/webm', 'video/quicktime'] as const
+const VIDEO_REF_EXT = ['.mp4', '.webm', '.mov']
+
+export function createVideoRefNode(position: XYPosition, id = museNodeId('videoref')): MuseNodeLike {
+  const data: MuseVideoRefData = { title: VIDEO_REF_TITLE, label: '', video: null }
+  return { id, type: MUSE_NODE.videoRef, position, data }
+}
+
+const finiteNum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
+
+export function normalizeVideoRefData(raw: Record<string, unknown> | undefined): MuseVideoRefData {
+  const d = raw ?? {}
+  const v = d.video as Partial<MuseVideoRef> | null | undefined
+  const video: MuseVideoRef | null =
+    v && typeof v === 'object' && typeof v.path === 'string' && v.path
+      ? {
+          id: typeof v.id === 'string' ? v.id : v.path,
+          name: typeof v.name === 'string' && v.name ? v.name : (v.path.split(/[\\/]/).pop() ?? v.path),
+          path: v.path,
+          previewUrl: typeof v.previewUrl === 'string' ? v.previewUrl : '',
+          size: finiteNum(v.size),
+          durationSec: finiteNum(v.durationSec),
+          source: v.source === 'library' ? 'library' : 'upload',
+        }
+      : null
+  return { title: titleOr(d.title, VIDEO_REF_TITLE), label: typeof d.label === 'string' ? d.label : '', video }
+}
+
+/** Kiểm tra file video trước khi tải lên; null = hợp lệ. */
+export function validateVideoRefFile(file: { name: string; size: number; type?: string }): string | null {
+  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+  const okType = file.type ? (VIDEO_REF_ACCEPT as readonly string[]).includes(file.type) : false
+  if (!okType && !VIDEO_REF_EXT.includes(ext)) return `“${file.name}”: chỉ nhận video MP4, WebM hoặc MOV.`
+  if (file.size > VIDEO_REF_MAX_BYTES) return `“${file.name}”: quá ${VIDEO_REF_MAX_BYTES / 1024 / 1024} MB.`
+  if (file.size <= 0) return `“${file.name}”: file rỗng.`
+  return null
+}
+
+/** "12.3 s · 8.4 MB" (bỏ phần chưa biết). */
+export function videoRefMeta(v: Pick<MuseVideoRef, 'durationSec' | 'size'>): string {
+  const parts: string[] = []
+  if (v.durationSec > 0) parts.push(`${v.durationSec < 10 ? v.durationSec.toFixed(1) : Math.round(v.durationSec)} s`)
+  if (v.size > 0) parts.push(v.size >= 1024 * 1024 ? `${(v.size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(v.size / 1024))} KB`)
+  return parts.join(' · ')
+}
+
+// ---------------------------------------------------------------- node "Ô prompt" (độc lập)
+
+export interface MusePromptBoxData {
+  title: string
+  /** Tên ô (tùy chọn), vd. "Prompt catwalk" */
+  label: string
+  text: string
+  /** Thu gọn: chỉ còn đầu node + 1 dòng xem trước */
+  collapsed: boolean
+  [key: string]: unknown
+}
+
+export const PROMPT_BOX_TITLE = 'Ô prompt'
+/** Giới hạn chữ của 1 ô (bằng giới hạn prompt mặc định ở backend, MAX_PROMPT_CHARS) */
+export const PROMPT_BOX_MAX_CHARS = 20000
+
+export function createPromptBoxNode(position: XYPosition, id = museNodeId('promptbox'), text = ''): MuseNodeLike {
+  const data: MusePromptBoxData = { title: PROMPT_BOX_TITLE, label: '', text, collapsed: false }
+  return { id, type: MUSE_NODE.promptBox, position, data }
+}
+
+export function normalizePromptBoxData(raw: Record<string, unknown> | undefined): MusePromptBoxData {
+  const d = raw ?? {}
+  return {
+    title: titleOr(d.title, PROMPT_BOX_TITLE),
+    label: typeof d.label === 'string' ? d.label : '',
+    text: typeof d.text === 'string' ? d.text.slice(0, PROMPT_BOX_MAX_CHARS) : '',
+    collapsed: d.collapsed === true,
+  }
+}
+
+/** "1.168 ký tự · 172 từ" (rỗng -> "Trống"). */
+export function promptBoxStats(text: string): string {
+  const t = text.trim()
+  if (!t) return 'Trống'
+  const words = t.split(/\s+/).length
+  return `${text.length.toLocaleString('vi-VN')} ký tự · ${words.toLocaleString('vi-VN')} từ`
+}
+
+/** Dòng xem trước khi thu gọn: dòng chữ đầu tiên, cắt ngắn. */
+export function promptBoxPreview(text: string, max = 90): string {
+  const first = text.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? ''
+  return first.length > max ? `${first.slice(0, max - 1)}…` : first
 }
 
 // ---------------------------------------------------------------- dữ liệu node
@@ -548,25 +773,57 @@ export function rowFingerprint(input: ExtractInput): string {
   return [input.image?.path ?? '', ...(input.extra ?? []).map((x) => x.image?.path ?? '')].join('|')
 }
 
-/** Ảnh phụ (node Ảnh kết quả nối vào cổng phụ), theo thứ tự dây. */
+/** Ảnh phụ nối vào cổng phụ, theo thứ tự dây. Có `spec`: theo `jobPortFor`; không: chỉ node Ảnh kết quả (bản cũ). */
 export function secondaryInputsFromSources(
   sources: { id: string; type?: string; data?: Record<string, unknown> }[],
   rowLabel = 'Trang phục',
+  spec?: JobNodeSpec,
 ): ExtractInput[] {
   const seen = new Set<string>()
   const out: ExtractInput[] = []
   for (const s of sources) {
-    if (!s || seen.has(s.id) || s.type !== MUSE_NODE.output) continue
+    if (!s || seen.has(s.id)) continue
+    if (spec ? jobPortFor(spec, s) !== 'secondary' : s.type !== MUSE_NODE.output) continue
     seen.add(s.id)
-    const d = normalizeOutputData(s.data)
+    const d = s.type === MUSE_NODE.output ? normalizeOutputData(s.data) : normalizeInputData(s.data, s.type)
     out.push({ sourceNodeId: s.id, label: d.label.trim() || `${rowLabel} ${out.length + 1}`, image: d.image })
   }
   return out
 }
 
-/** Dòng chạy: không có ảnh phụ -> mỗi ảnh chính 1 dòng; có -> mỗi cặp ảnh chính × ảnh phụ 1 dòng. */
-export function buildJobRows(primary: ExtractInput[], secondary: ExtractInput[]): ExtractInput[] {
-  if (!secondary.length) return primary
+/**
+ * Ảnh chính của node chạy theo thứ tự dây: node ảnh vào `inputType` và (nếu spec cho phép) Ảnh kết quả của
+ * `primaryFromJobTypes`. Tên trống -> tên dòng gốc của Ảnh kết quả, rồi "<rowLabel> N".
+ */
+export function primaryInputsFromSources(
+  spec: JobNodeSpec,
+  sources: { id: string; type?: string; data?: Record<string, unknown> }[],
+): ExtractInput[] {
+  const rowLabel = INPUT_SPECS[spec.inputType]?.rowLabel ?? 'Ảnh'
+  const seen = new Set<string>()
+  const out: ExtractInput[] = []
+  for (const s of sources) {
+    if (!s || seen.has(s.id) || jobPortFor(spec, s) !== 'primary') continue
+    seen.add(s.id)
+    if (s.type === MUSE_NODE.output) {
+      const d = normalizeOutputData(s.data)
+      out.push({ sourceNodeId: s.id, label: d.label.trim() || d.origin?.rowLabel || `${rowLabel} ${out.length + 1}`, image: d.image })
+    } else {
+      const d = normalizeInputData(s.data, s.type ?? spec.inputType)
+      out.push({ sourceNodeId: s.id, label: d.label.trim() || `${rowLabel} ${out.length + 1}`, image: d.image })
+    }
+  }
+  return out
+}
+
+/**
+ * Dòng chạy: không có ảnh phụ -> mỗi ảnh chính 1 dòng; có -> mỗi cặp ảnh chính × ảnh phụ 1 dòng.
+ * `required` (ảnh phụ bắt buộc) mà chưa nối ảnh phụ nào -> mỗi ảnh chính 1 dòng thiếu ảnh phụ (không chạy được).
+ */
+export function buildJobRows(primary: ExtractInput[], secondary: ExtractInput[], required?: { rowLabel: string }): ExtractInput[] {
+  if (!secondary.length) {
+    return required ? primary.map((p) => ({ ...p, extra: [{ sourceNodeId: '', label: required.rowLabel, image: null }] })) : primary
+  }
   const rows: ExtractInput[] = []
   for (const p of primary) {
     for (const s of secondary) {
@@ -685,7 +942,8 @@ export function buildJobRequest(
   input: ExtractInput,
   secondaryPrompt = '',
 ): Record<string, unknown> {
-  const row = rowPromptAndRefs(input, prompt, secondaryPrompt)
+  // node không có prompt kết hợp (vd. Nhân vật trong bối cảnh): prompt chính gửi nguyên văn, không ghép gì
+  const row = rowPromptAndRefs(input, prompt, spec.secondary?.promptName ? secondaryPrompt : '')
   return {
     prompt: row.prompt,
     reference_images: row.refs,
@@ -731,7 +989,8 @@ export function buildGptJobRequest(
   input: ExtractInput,
   secondaryPrompt = '',
 ): Record<string, unknown> {
-  const row = rowPromptAndRefs(input, prompt, secondaryPrompt)
+  // node không có prompt kết hợp (vd. Nhân vật trong bối cảnh): prompt chính gửi nguyên văn, không ghép gì
+  const row = rowPromptAndRefs(input, prompt, spec.secondary?.promptName ? secondaryPrompt : '')
   return {
     prompt: row.prompt,
     reference_images: row.refs,
@@ -800,16 +1059,18 @@ export function newerOutputFor(output: MuseOutputData, jobData: (Partial<MuseJob
 // ---------------------------------------------------------------- nối dây "thông minh"
 
 /** Cổng có thể có của mỗi loại node (để tự chọn cổng khi thả dây vào thân node). */
-const SOURCE_HANDLES = [MUSE_HANDLE.imagesOut, MUSE_HANDLE.jobOut, MUSE_HANDLE.imageOut, MUSE_HANDLE.scriptOut, MUSE_HANDLE.videoOut, MUSE_HANDLE.clipOut, MUSE_HANDLE.clipVideoOut]
+const SOURCE_HANDLES = [MUSE_HANDLE.imagesOut, MUSE_HANDLE.jobOut, MUSE_HANDLE.imageOut, MUSE_HANDLE.scriptOut, MUSE_HANDLE.videoOut, MUSE_HANDLE.clipOut, MUSE_HANDLE.clipVideoOut, MUSE_HANDLE.refVideoOut]
 const TARGET_HANDLES = [
   MUSE_HANDLE.imagesIn,
   MUSE_HANDLE.outfitsIn,
+  MUSE_HANDLE.scenesIn,
   MUSE_HANDLE.imageIn,
   MUSE_HANDLE.refsIn,
   MUSE_HANDLE.scriptIn,
   MUSE_HANDLE.videoIn,
   MUSE_HANDLE.clipIn,
   MUSE_HANDLE.clipVideoIn,
+  MUSE_HANDLE.refVideoIn,
 ]
 
 /**
@@ -843,6 +1104,11 @@ const NODE_NAME: Record<string, string> = {
   [MUSE_NODE.extract]: 'Tách áo quần',
   [MUSE_NODE.character]: 'Nhân vật tham chiếu',
   [MUSE_NODE.characterSheet]: 'Bảng thiết kế nhân vật',
+  [MUSE_NODE.scene]: 'Tham chiếu bối cảnh',
+  [MUSE_NODE.scenePlace]: 'Nhân vật trong bối cảnh',
+  [MUSE_NODE.videoRef]: 'Video tham chiếu',
+  [MUSE_NODE.promptBox]: 'Ô prompt',
+  [MUSE_NODE.videoIngredients]: 'Ingredients (video + ảnh)',
   [MUSE_NODE.output]: 'Ảnh kết quả',
   [MUSE_NODE.script]: 'Kịch bản video',
   [MUSE_NODE.scriptText]: 'Kịch bản',
@@ -867,6 +1133,16 @@ export function explainMuseConnection(
   const sName = NODE_NAME[src.type ?? ''] ?? 'node'
   const dName = NODE_NAME[dst.type ?? ''] ?? 'node'
   if (edges.some((e) => e.source === srcId && e.target === dstId)) return `Hai node này đã được nối.`
+  if (dst.type === MUSE_NODE.videoIngredients) {
+    if (src.type === MUSE_NODE.videoRef) return 'Node Ingredients chỉ nhận 1 video tham chiếu — gỡ dây video cũ trước.'
+    if (SCRIPT_REF_SOURCE_TYPES.includes(src.type ?? ''))
+      return `Node Ingredients nhận tối đa ${VIDEO_INGR_MAX_REFS} ảnh tham chiếu (giới hạn của Flow) — gỡ bớt dây ảnh.`
+    return 'Node Ingredients nhận 1 “Video tham chiếu” (cổng Video) và tối đa 3 node có ảnh: Ảnh kết quả, Nhân vật, Trang phục, Bối cảnh (cổng Ảnh).'
+  }
+  if (src.type === MUSE_NODE.videoRef || dst.type === MUSE_NODE.videoRef)
+    return 'Node Video tham chiếu chỉ nối vào cổng “Video” của node Ingredients (video + ảnh).'
+  if (src.type === MUSE_NODE.promptBox || dst.type === MUSE_NODE.promptBox)
+    return 'Ô prompt đang độc lập — chưa có node nào nhận prompt từ ô, nên chưa nối được (bấm “Chép” để dán prompt vào node khác).'
   if (dst.type === MUSE_NODE.output && edges.some((e) => e.target === dstId))
     return 'Node Ảnh kết quả chỉ có 1 nguồn — gỡ dây cũ trước.'
   if (dst.type === MUSE_NODE.videoOutput)
@@ -876,16 +1152,18 @@ export function explainMuseConnection(
   if (dst.type === MUSE_NODE.scriptText)
     return src.type === MUSE_NODE.script
       ? 'Node Kịch bản chỉ có 1 nguồn kịch bản — gỡ dây cũ trước.'
-      : 'Node Kịch bản nhận kịch bản từ Kịch bản video và ảnh tham chiếu (Ảnh kết quả, Nhân vật, Trang phục) ở cổng “Tham chiếu”.'
+      : 'Node Kịch bản nhận kịch bản từ Kịch bản video và ảnh tham chiếu (Ảnh kết quả, Nhân vật, Trang phục, Bối cảnh) ở cổng “Tham chiếu”.'
   if (dst.type === MUSE_NODE.script)
-    return 'Kịch bản video nhận node có ảnh: Ảnh kết quả, Nhân vật tham chiếu, Trang phục (nối vào cổng “Tham chiếu”).'
+    return 'Kịch bản video nhận node có ảnh: Ảnh kết quả, Nhân vật tham chiếu, Trang phục, Tham chiếu bối cảnh (nối vào cổng “Tham chiếu”).'
   if (dst.type === MUSE_NODE.clipScript)
-    return 'Kịch bản tạo video nhận node có ảnh: Ảnh kết quả (bảng thiết kế), Nhân vật tham chiếu, Trang phục (nối vào cổng “Tham chiếu”).'
+    return 'Kịch bản tạo video nhận node có ảnh: Ảnh kết quả (bảng thiết kế), Nhân vật tham chiếu, Trang phục, Tham chiếu bối cảnh (nối vào cổng “Tham chiếu”).'
   if (dst.type === MUSE_NODE.clipPrompt)
     return src.type === MUSE_NODE.clipScript
       ? 'Node Clip chỉ có 1 nguồn — gỡ dây cũ trước.'
       : 'Node Clip chỉ nhận dây từ Kịch bản tạo video (dùng nút “Ra node” ở từng clip).'
   if (dst.type === MUSE_NODE.clipMerge) return 'Ghép video chỉ nhận dây từ node Clip (chấm xanh bên phải node Clip).'
+  if (dst.type === MUSE_NODE.scenePlace)
+    return 'Nhân vật trong bối cảnh nhận “Ảnh kết quả” của Bảng thiết kế nhân vật hoặc “Nhân vật tham chiếu” ở cổng “Nhân vật”, và “Tham chiếu bối cảnh” ở cổng “Bối cảnh”.'
   if (src.type === MUSE_NODE.clipScript) return 'Kịch bản tạo video chỉ nối ra node Clip — dùng nút “Ra node” ở từng clip.'
   if (src.type === MUSE_NODE.clipPrompt) return 'Node Clip chỉ nối ra node Ghép video (hoặc để trống).'
   if (src.type === MUSE_NODE.clipMerge) return 'Node Ghép video là node cuối — chưa nối ra node nào.'
@@ -900,10 +1178,12 @@ export function explainMuseConnection(
       : 'Ảnh kết quả này không rõ nguồn — chỉ nhận ảnh tách từ node Tách áo quần.'
   }
   if (src.type === MUSE_NODE.output)
-    return `Ảnh kết quả chỉ nối vào cổng “Trang phục” của Bảng thiết kế nhân vật hoặc cổng “Tham chiếu” của Kịch bản video.`
+    return `Ảnh kết quả chỉ nối vào cổng “Trang phục” của Bảng thiết kế nhân vật, cổng “Nhân vật” của Nhân vật trong bối cảnh (bảng thiết kế) hoặc cổng “Tham chiếu” của các node kịch bản.`
   if (src.type === MUSE_NODE.outfit) return `Node Trang phục chỉ nối vào Tách áo quần hoặc Kịch bản video (không nối vào ${dName}).`
   if (src.type === MUSE_NODE.character)
-    return `Node Nhân vật tham chiếu chỉ nối vào Bảng thiết kế nhân vật hoặc Kịch bản video (không nối vào ${dName}).`
+    return `Node Nhân vật tham chiếu chỉ nối vào Bảng thiết kế nhân vật, Nhân vật trong bối cảnh hoặc các node kịch bản (không nối vào ${dName}).`
+  if (src.type === MUSE_NODE.scene)
+    return `Node Tham chiếu bối cảnh chỉ nối vào cổng “Bối cảnh” của Nhân vật trong bối cảnh hoặc cổng “Tham chiếu” của Kịch bản video, Kịch bản, Kịch bản tạo video (không nối vào ${dName}).`
   if (isJobType(src.type)) return `${sName} chỉ nối ra node Ảnh kết quả — dùng nút “Ra node”.`
   return `Không nối được ${sName} → ${dName}.`
 }
@@ -958,13 +1238,15 @@ export interface MuseScriptData {
 }
 
 /** Vai trò của 1 ảnh tham chiếu — suy ra từ loại node nguồn, để Muse biết ảnh là gì. */
-export type ScriptRefKind = 'character' | 'board' | 'product' | 'outfit_photo' | 'image'
+export type ScriptRefKind = 'character' | 'board' | 'product' | 'outfit_photo' | 'scene' | 'scene_photo' | 'image'
 
 export const SCRIPT_REF_KINDS: Record<ScriptRefKind, { vi: string; en: string }> = {
   character: { vi: 'Nhân vật', en: 'character reference photo (identity: face, hairstyle, body)' },
   board: { vi: 'Bảng thiết kế', en: 'character design board (portrait + three-views + details + palette of one look)' },
   product: { vi: 'Ảnh sản phẩm', en: 'outfit product photo (garments only)' },
   outfit_photo: { vi: 'Ảnh trang phục', en: 'outfit photo (a person wearing the outfit)' },
+  scene_photo: { vi: 'Nhân vật trong bối cảnh', en: 'photo of the character in the scene (identity + outfit + location)' },
+  scene: { vi: 'Bối cảnh', en: 'scene / location reference (the place and background only — ignore any people or clothes in it)' },
   image: { vi: 'Ảnh', en: 'reference image' },
 }
 
@@ -1003,18 +1285,20 @@ export function normalizeScriptData(raw: Record<string, unknown> | undefined): M
 }
 
 /** Loại node được nối vào cổng Tham chiếu của Kịch bản video. */
-export const SCRIPT_REF_SOURCE_TYPES: string[] = [MUSE_NODE.output, MUSE_NODE.character, MUSE_NODE.outfit]
+export const SCRIPT_REF_SOURCE_TYPES: string[] = [MUSE_NODE.output, MUSE_NODE.character, MUSE_NODE.outfit, MUSE_NODE.scene]
 
 function refOf(s: { id: string; type?: string; data?: Record<string, unknown> }): ScriptRef | null {
   if (s.type === MUSE_NODE.output) {
     const d = normalizeOutputData(s.data)
     const job = d.origin?.jobType
-    const kind: ScriptRefKind = job === MUSE_NODE.characterSheet ? 'board' : job === MUSE_NODE.extract ? 'product' : 'image'
+    const kind: ScriptRefKind =
+      job === MUSE_NODE.characterSheet ? 'board' : job === MUSE_NODE.extract ? 'product' : job === MUSE_NODE.scenePlace ? 'scene_photo' : 'image'
     return { sourceNodeId: s.id, kind, label: d.label.trim() || d.origin?.rowLabel || '', image: d.image }
   }
-  if (s.type === MUSE_NODE.character || s.type === MUSE_NODE.outfit) {
+  if (s.type === MUSE_NODE.character || s.type === MUSE_NODE.outfit || s.type === MUSE_NODE.scene) {
     const d = normalizeInputData(s.data, s.type)
-    return { sourceNodeId: s.id, kind: s.type === MUSE_NODE.character ? 'character' : 'outfit_photo', label: d.label.trim(), image: d.image }
+    const kind: ScriptRefKind = s.type === MUSE_NODE.character ? 'character' : s.type === MUSE_NODE.scene ? 'scene' : 'outfit_photo'
+    return { sourceNodeId: s.id, kind, label: d.label.trim(), image: d.image }
   }
   return null
 }
@@ -1091,11 +1375,29 @@ export function buildScriptContext(refs: ScriptRef[], notes = ''): string {
       : '- Identity anchor: no separate character photo is attached — use the face and hairstyle of the person in the references (the portrait on the design boards if present) and call it Image 1 in the generation prompts.',
     '- Outfits: one image does NOT have to be one outfit. Several images may show the same outfit (e.g. a design board and a product photo of the same look) — group them into one outfit. Decide the outfit list, their order (keep my image order unless a stronger outfit should go last) and the number of outfits yourself.',
     '- Fill every [bracketed placeholder] in my inputs from these images (exact garments, colors, fabric details, one signature detail per outfit).',
-    'Do not ask me questions — write the complete output now.',
   )
+  const sceneLine = sceneInstruction(refs, 'Image')
+  if (sceneLine) lines.push(sceneLine)
+  lines.push('Do not ask me questions — write the complete output now.')
   const extra = notes.trim()
   if (extra) lines.push('', '## Extra notes from me', extra)
   return lines.join('\n')
+}
+
+/**
+ * Câu dặn về bối cảnh khi có ảnh "Bối cảnh" (node Tham chiếu bối cảnh): dùng đúng địa điểm đó làm phông nền khóa cho
+ * mọi cảnh / clip. `tag` = cách gọi ảnh ('Image' -> "Image 3", '#' -> "#3"); `numberOf(i)` = số thứ tự đính kèm của
+ * refs[i]. Không có ảnh bối cảnh -> ''.
+ */
+export function sceneInstruction(refs: ScriptRef[], tag: 'Image' | '#', numberOf: (i: number) => number = (i) => i + 1): string {
+  const nos = refs.map((r, i) => (r.kind === 'scene' ? numberOf(i) : 0)).filter((n) => n > 0)
+  if (!nos.length) return ''
+  const names = nos.map((n) => (tag === '#' ? `#${n}` : `Image ${n}`)).join(' + ')
+  return (
+    `- Location: ${names} ${nos.length > 1 ? 'show' : 'shows'} the scene / location. Use exactly this place (architecture, materials, ` +
+    'colors, props, light) as the single locked background of every shot and describe it in the background / STUDIO sentence instead of a ' +
+    'default studio. It is a background reference only: do not copy any person or clothing from it, and do not write a separate script or shot for it.'
+  )
 }
 
 /** Body POST /api/ai/muse/generate (output_kind=text): mọi ảnh tham chiếu theo thứ tự trong 1 tin. */
@@ -1175,15 +1477,68 @@ export function normalizeClipScriptData(raw: Record<string, unknown> | undefined
   return { ...d, title: titleOr((raw ?? {}).title, CLIP_SCRIPT_SPEC.title) }
 }
 
-/** Đoạn app tự gửi sau prompt: danh sách ảnh #k (vai trò + tên), số kịch bản bắt buộc, ghi chú của người dùng. */
-export function buildClipScriptContext(refs: ScriptRef[], notes = ''): string {
-  const n = refs.length
+/**
+ * Ảnh bối cảnh (node Tham chiếu bối cảnh) dùng chung cho mọi clip, KHÔNG phải 1 clip: tách khỏi ảnh clip.
+ * Ảnh clip giữ số #1..#N (clip k = ảnh #k), ảnh bối cảnh gửi SAU, mang số #N+1….
+ */
+export function splitClipRefs(refs: ScriptRef[]): { clips: ScriptRef[]; scenes: ScriptRef[] } {
+  return { clips: refs.filter((r) => r.kind !== 'scene'), scenes: refs.filter((r) => r.kind === 'scene') }
+}
+
+const SCENE_MARK = '||scene:'
+
+/** Dấu vân tay lúc viết: đường dẫn ảnh clip theo thứ tự (clip k = phần tử k) + ảnh bối cảnh (đổi bối cảnh -> bản cũ). */
+export function clipScriptFingerprint(refs: ScriptRef[]): string {
+  const { clips, scenes } = splitClipRefs(refs)
+  const base = scriptFingerprint(clips)
+  return scenes.length ? `${base}${SCENE_MARK}${scriptFingerprint(scenes)}` : base
+}
+
+/** Đường dẫn ảnh clip #1..#N đã gửi (bỏ phần bối cảnh; bản lưu trước khi có bối cảnh vẫn đọc đúng). */
+export function clipSentPaths(inputPath: string | null | undefined): string[] {
+  if (!inputPath) return []
+  const head = inputPath.split(SCENE_MARK)[0]
+  return head ? head.split('|') : []
+}
+
+/** Trạng thái node Kịch bản tạo video: cần ít nhất 1 ảnh clip; giới hạn ảnh tính cả ảnh bối cảnh. */
+export function clipScriptState(refs: ScriptRef[], result: MuseScriptResult | null): ScriptState {
+  if (result?.status === 'running') return 'running'
+  if (!splitClipRefs(refs).clips.length) return 'no_refs'
+  if (refs.length > CLIP_SCRIPT_MAX_REFS) return 'too_many'
+  if (refs.some((r) => !r.image)) return 'no_image'
+  if (!result) return 'pending'
+  if (result.status === 'done' && result.inputPath !== clipScriptFingerprint(refs)) return 'stale'
+  return result.status
+}
+
+/** Thời lượng cố định trong cấu hình Flow (0 = Tự động -> ChatGPT tự chọn 3–15 giây theo từng bộ). */
+export const fixedClipSeconds = (seconds: number | null | undefined) =>
+  typeof seconds === 'number' && Number.isInteger(seconds) && seconds >= CLIP_MIN_SECONDS && seconds <= CLIP_MAX_SECONDS ? seconds : 0
+
+/** Đoạn app tự gửi sau prompt: danh sách ảnh #k (vai trò + tên), ảnh bối cảnh, số kịch bản bắt buộc, độ dài cố định, ghi chú. */
+export function buildClipScriptContext(refs: ScriptRef[], notes = '', fixedSeconds = 0): string {
+  const { clips, scenes } = splitClipRefs(refs)
+  const n = clips.length
   const lines = ['## Reference images attached to this message (in this exact order)']
-  refs.forEach((r, i) => lines.push(`- #${i + 1}: ${SCRIPT_REF_KINDS[r.kind].en} — "${r.label}".`))
+  clips.forEach((r, i) => lines.push(`- #${i + 1}: ${SCRIPT_REF_KINDS[r.kind].en} — "${r.label}".`))
+  scenes.forEach((r, i) => lines.push(`- #${n + i + 1}: ${SCRIPT_REF_KINDS.scene.en} — "${r.label}" (shared by every clip, NOT a clip).`))
   lines.push(
     '',
-    `N = ${n}. Write exactly ${n} script${n === 1 ? '' : 's'} (=== SCRIPT 1/${n} … === SCRIPT ${n}/${n}), one per reference image, in this order.`,
+    `N = ${n}. Write exactly ${n} script${n === 1 ? '' : 's'} (=== SCRIPT 1/${n} … === SCRIPT ${n}/${n}), one per reference image #1–#${n}, in this order.`,
   )
+  if (scenes.length) {
+    lines.push(
+      sceneInstruction(scenes, '#', (i) => n + i + 1),
+      `- In every VIDEO PROMPT, replace the default STUDIO sentence with one locked sentence describing this location, word-for-word the same in every clip; hinge frames show this location empty. Keep saying "the reference image" for the outfit image #k only.`,
+    )
+  }
+  const fixed = fixedClipSeconds(fixedSeconds)
+  if (fixed) {
+    lines.push(
+      `Clip length is fixed by my settings: every clip is exactly ${fixed} seconds (D = ${fixed} in every "=== SCRIPT" line), with timestamped blocks covering 0 to ${fixed}s. This overrides any other length rule.`,
+    )
+  }
   const extra = notes.trim()
   lines.push('', '## User note', extra || '(none)')
   lines.push('', 'Do not ask me questions — write the complete output now.')
@@ -1196,18 +1551,21 @@ export function buildClipScriptRequest(
   prompt: string,
   refs: ScriptRef[],
   notes = '',
+  fixedSeconds = 0,
 ): Record<string, unknown> {
   if (!prompt.trim()) throw new Error('Prompt kịch bản đang trống.')
-  if (!refs.length) throw new Error('Chưa nối ảnh tham chiếu nào.')
-  if (refs.length > CLIP_SCRIPT_MAX_REFS) throw new Error(`Tối đa ${CLIP_SCRIPT_MAX_REFS} ảnh tham chiếu mỗi lượt ChatGPT.`)
-  const images = refs.map((r) => {
+  const { clips, scenes } = splitClipRefs(refs)
+  if (!clips.length) throw new Error(refs.length ? 'Chỉ có ảnh bối cảnh — nối thêm ảnh cho từng clip (vd. bảng thiết kế).' : 'Chưa nối ảnh tham chiếu nào.')
+  if (refs.length > CLIP_SCRIPT_MAX_REFS) throw new Error(`Tối đa ${CLIP_SCRIPT_MAX_REFS} ảnh tham chiếu mỗi lượt ChatGPT (tính cả ảnh bối cảnh).`)
+  // ảnh clip #1..#N trước, ảnh bối cảnh sau (khớp số thứ tự trong đoạn tự gửi)
+  const images = [...clips, ...scenes].map((r) => {
     if (!r.image) throw new Error(`${r.label}: chưa có ảnh.`)
     return r.image.path
   })
   return {
-    prompt: `${prompt.trim()}\n\n${buildClipScriptContext(refs, notes)}`,
+    prompt: `${prompt.trim()}\n\n${buildClipScriptContext(refs, notes, fixedSeconds)}`,
     reference_images: images,
-    chat_title: `${config.chatTitlePrefix} · ${CLIP_SCRIPT_SPEC.chatLabel} · ${refs.length} ảnh`.slice(0, 80),
+    chat_title: `${config.chatTitlePrefix} · ${CLIP_SCRIPT_SPEC.chatLabel} · ${clips.length} ảnh${scenes.length ? ` + ${scenes.length} bối cảnh` : ''}`.slice(0, 80),
     file_prefix: `${config.filePrefix}_${CLIP_SCRIPT_SPEC.fileSuffix}`.slice(0, 40),
   }
 }
@@ -1361,7 +1719,22 @@ export function parseClipScript(text: string, expected: number): ParsedClipScrip
 }
 
 /** Ước tính credit Flow ở 720p (theo số giây ghi ở tiêu đề). */
-export const clipCredits720p = (seconds: number) => Math.round(seconds * CLIP_CREDIT_PER_SECOND_720P)
+/**
+ * Credit Flow ước tính cho 1 clip Omni 1.2 (Ingredients): 10 giây đầu giá thường, phần vượt 10 giây giá gấp đôi.
+ * Khớp mọi mốc đã đo (campaign/graph.FLOW_CREDIT_R2V + HAR): 720p 6 s = 18, 8 s = 24, 10 s = 30, 13 s = 48,
+ * 15 s = 60 (giao diện Flow); 360p 10 s = 10, 15 s = 20. Trước đây tính phẳng 3/giây nên báo thiếu cho clip > 10 s.
+ */
+export function flowClipCredits(seconds: number, resolution: '720p' | '360p' = '720p'): number {
+  const rate = resolution === '360p' ? CLIP_CREDIT_PER_SECOND_720P / 3 : CLIP_CREDIT_PER_SECOND_720P
+  const s = Math.max(0, seconds)
+  return Math.round(Math.min(s, 10) * rate + Math.max(0, s - 10) * rate * 2)
+}
+
+export const clipCredits720p = (seconds: number) => flowClipCredits(seconds, '720p')
+
+/** Tổng credit của nhiều clip: tính giá TỪNG clip rồi cộng (giá theo bậc nên không được cộng giây trước). */
+export const clipsCredits = (seconds: (number | null)[], resolution: '720p' | '360p' = '720p') =>
+  seconds.reduce<number>((sum, s) => sum + (s ? flowClipCredits(s, resolution) : 0), 0)
 
 // ---------------------------------------------------------------- node "Clip" (1 clip tách từ Kịch bản tạo video)
 
@@ -1480,12 +1853,13 @@ export function planClipPromptNodes(
   const out = { nodes: [] as MuseNodeLike[], edges: [] as MuseEdgeLike[] }
   const r = normalizeClipScriptData(script.data).result
   if (!r || r.status !== 'done' || !r.text) return out
-  const sentPaths = r.inputPath ? r.inputPath.split('|') : []
-  const parsed = parseClipScript(r.text, sentPaths.length || refs.length)
+  const clipRefs = splitClipRefs(refs).clips
+  const sentPaths = clipSentPaths(r.inputPath)
+  const parsed = parseClipScript(r.text, sentPaths.length || clipRefs.length)
   for (const c of parsed.clips) {
     if (only != null && c.k !== only) continue
     if (findClipPromptNodeFor(nodes, script.id, r.updatedAt, c.k)) continue
-    const ref = refs[c.k - 1]
+    const ref = clipRefs[c.k - 1]
     const image = ref?.image && ref.image.path === sentPaths[c.k - 1] ? ref.image : null
     // node của cùng clip ở lần viết trước (nếu còn) -> đặt lệch một chút để không chồng lên
     const older = nodes.filter((n) => n.type === MUSE_NODE.clipPrompt && normalizeClipPromptData(n.data).origin?.clipScriptNodeId === script.id && normalizeClipPromptData(n.data).k === c.k).length
@@ -1504,7 +1878,7 @@ export function newerClipFor(
 ): { clip: ParsedClip; updatedAt: number; imagePath: string | null } | null {
   const r = scriptData?.result
   if (!clip.origin || !r || r.status !== 'done' || !r.text || r.updatedAt === clip.origin.updatedAt) return null
-  const sent = r.inputPath ? r.inputPath.split('|') : []
+  const sent = clipSentPaths(r.inputPath)
   const c = parseClipScript(r.text, sent.length).clips.find((x) => x.k === clip.k)
   return c ? { clip: c, updatedAt: r.updatedAt, imagePath: sent[clip.k - 1] ?? null } : null
 }
@@ -1573,8 +1947,7 @@ export const clipFlowSettings = (c: { flowProjectId: string; flowAspect: '9:16' 
 export const fileStem = (path: string) => (path.split(/[\\/]/).pop() || path).replace(/\.[^.]+$/, '')
 
 /** Credit Flow ước tính: ~3/giây ở 720p (đo được), 360p ≈ 1/3. */
-export const clipFlowCredits = (seconds: number, resolution: '720p' | '360p') =>
-  Math.round(seconds * (resolution === '360p' ? CLIP_CREDIT_PER_SECOND_720P / 3 : CLIP_CREDIT_PER_SECOND_720P))
+export const clipFlowCredits = (seconds: number, resolution: '720p' | '360p') => flowClipCredits(seconds, resolution)
 
 function hashText(text: string): string {
   let h = 5381
@@ -1636,6 +2009,212 @@ export const isSafeFlowError = (code?: string | null) => !!code && FLOW_SAFE_ERR
 
 /** Tab Flow bị đẩy về trang chủ — thường do project thuộc tài khoản Google khác (đã đổi tài khoản). */
 export const isProjectHomeError = (message?: string | null) => !!message && /home page|reCAPTCHA is not loaded|Open a Flow project/i.test(message)
+
+// ---------------------------------------------------------------- node "Ingredients (video + ảnh)" (Omni 1.2 video_edit)
+
+/**
+ * Omni 1.2 "chỉnh video" trên Flow (cùng đường với Motion Control): video tham chiếu (đã tải lên project Flow, lấy
+ * media id) cắt 3–15 s + 1–3 ảnh tham chiếu theo thứ tự → 1 video 720p. Giá đo 1 lần: đoạn 8 s = 30 credit.
+ * Giới hạn 15 s khớp backend (veo/service.MOTION_REF_MAX_SECONDS) và extension (page/video-http.js).
+ */
+export const VIDEO_INGR_SPEC = {
+  type: MUSE_NODE.videoIngredients,
+  title: 'Ingredients (video + ảnh)',
+  promptName: 'video_ingredients',
+} as const
+export const VIDEO_INGR_MAX_REFS = 3
+/** Biến thể tối đa mỗi lần bấm (khớp FLOW_MAX_VARIANTS ở cấu hình / backend) */
+export const VIDEO_INGR_MAX_VARIANTS = 4
+export const VIDEO_INGR_MIN_SECONDS = 3
+export const VIDEO_INGR_MAX_SECONDS = 15
+/** Chỉnh video Omni 1.2 mới xác minh 720p */
+export const VIDEO_INGR_RESOLUTION = '720p'
+
+export interface MuseVideoIngrData {
+  title: string
+  prompt: string
+  promptSource: 'default' | 'custom'
+  /** Thứ tự ảnh tham chiếu (id node nguồn); ảnh 1 = bộ mở đầu */
+  order: string[]
+  /** Đoạn cắt của video tham chiếu (giây); null = mặc định (0 → min(thời lượng, 15)) — cả video nếu ≤ 15 s */
+  trimStart: number | null
+  trimEnd: number | null
+  /** Video Flow đã tạo, theo biến thể: videos[i] = biến thể i + 1 (mỗi biến thể là 1 job Flow riêng) */
+  videos: MuseClipVideo[]
+  collapsed: boolean
+  [key: string]: unknown
+}
+
+export function createVideoIngrNode(position: XYPosition, prompt: string, id = museNodeId('vingr')): MuseNodeLike {
+  const data: MuseVideoIngrData = {
+    title: VIDEO_INGR_SPEC.title,
+    prompt,
+    promptSource: 'default',
+    order: [],
+    trimStart: null,
+    trimEnd: null,
+    videos: [],
+    collapsed: false,
+  }
+  return { id, type: MUSE_NODE.videoIngredients, position, data }
+}
+
+const secOrNull = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null)
+
+export function normalizeVideoIngrData(raw: Record<string, unknown> | undefined): MuseVideoIngrData {
+  const d = raw ?? {}
+  // bản lưu cũ có `video` (1 video) -> thành biến thể 1
+  const rawList: unknown[] = Array.isArray(d.videos) ? d.videos : d.video ? [d.video] : []
+  const videos = rawList
+    .filter((v): v is MuseClipVideo => !!v && typeof v === 'object' && typeof (v as MuseClipVideo).status === 'string')
+    .slice(0, VIDEO_INGR_MAX_VARIANTS)
+  return {
+    title: titleOr(d.title, VIDEO_INGR_SPEC.title),
+    prompt: typeof d.prompt === 'string' ? d.prompt : '',
+    promptSource: d.promptSource === 'custom' ? 'custom' : 'default',
+    order: Array.isArray(d.order) ? (d.order as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+    trimStart: secOrNull(d.trimStart),
+    trimEnd: secOrNull(d.trimEnd),
+    videos,
+    collapsed: d.collapsed === true,
+  }
+}
+
+/** Dữ liệu node + thời lượng trong cấu hình Flow (0 = Tự động). */
+export type VideoIngrInput = Pick<MuseVideoIngrData, 'prompt' | 'trimStart' | 'trimEnd'> & { targetSeconds?: number }
+
+/**
+ * Đoạn cắt đang dùng. Chưa tự cắt: dài đúng thời lượng cấu hình (3–15 s) tính từ giây bắt đầu; "Tự động" = cả video
+ * (tối đa 15 s). Luôn không vượt quá độ dài video.
+ */
+export function videoIngrTrim(d: Pick<VideoIngrInput, 'trimStart' | 'trimEnd' | 'targetSeconds'>, durationSec: number): { start: number; end: number; length: number } {
+  const start = d.trimStart ?? 0
+  const want = fixedClipSeconds(d.targetSeconds) || VIDEO_INGR_MAX_SECONDS
+  const fallbackEnd = durationSec > 0 ? Math.min(durationSec, start + want) : start + want
+  const end = d.trimEnd ?? fallbackEnd
+  return { start, end, length: Math.round((end - start) * 100) / 100 }
+}
+
+/** Credit ước tính cho chỉnh video: giá đo 1 lần (8 s = 30 credit), tính theo giây — đoạn > 8 s chưa đo. */
+export const videoIngrCredits = (seconds: number) => Math.round((seconds * 30) / 8)
+
+/** Tổng credit của n biến thể: mỗi biến thể là 1 job Flow riêng nên nhân n. */
+export const videoIngrTotalCredits = (seconds: number, variants: number) => videoIngrCredits(seconds) * Math.max(1, variants)
+
+/** Lần gửi kế tiếp của node (vào khóa chống trùng): lớn hơn mọi lần gửi trước. */
+export const videoIngrNextAttempt = (videos: Pick<MuseClipVideo, 'attempt'>[]) => videos.reduce((m, v) => Math.max(m, v.attempt || 0), 0) + 1
+
+/** Số ô biến thể hiển thị: theo cấu hình, nhưng không giấu video đã tạo khi cấu hình bị giảm. */
+export const videoIngrSlotCount = (configured: number, existing: number) => Math.min(VIDEO_INGR_MAX_VARIANTS, Math.max(1, configured, existing))
+
+export interface VideoIngrFlow {
+  /** VeoProject.id (app) */
+  projectId: string
+  /** Mã project trên Google Flow (để tải video tham chiếu lên) */
+  flowProjectId: string
+  aspect: '9:16' | '16:9'
+}
+
+/** Lỗi chặn "Tạo video" (kiểm tra TRƯỚC khi tải / gửi gì — không tốn credit). Rỗng = gửi được. */
+export function videoIngrBlockers(
+  d: VideoIngrInput,
+  video: MuseVideoRef | null,
+  refs: ScriptRef[],
+  flow: VideoIngrFlow | null,
+): string[] {
+  const b: string[] = []
+  if (!flow?.projectId) b.push('Chưa chọn project Flow — mở Cấu hình → Google Flow để chọn hoặc tạo project.')
+  else if (!flow.flowProjectId) b.push('Project Flow đã chọn chưa có mã project trên Google Flow.')
+  if (!video) b.push('Chưa nối “Video tham chiếu” (có video) vào cổng Video.')
+  if (!refs.length) b.push('Chưa nối ảnh tham chiếu nào vào cổng Ảnh (1–3 ảnh).')
+  if (refs.length > VIDEO_INGR_MAX_REFS) b.push(`Tối đa ${VIDEO_INGR_MAX_REFS} ảnh tham chiếu (giới hạn của Flow).`)
+  const noImg = refs.find((r) => !r.image)
+  if (noImg) b.push(`${noImg.label}: chưa có ảnh.`)
+  if (video) {
+    const t = videoIngrTrim(d, video.durationSec)
+    if (t.start < 0 || t.end <= t.start) b.push('Đoạn cắt video không hợp lệ (giây kết thúc phải sau giây bắt đầu).')
+    else if (t.length > VIDEO_INGR_MAX_SECONDS) b.push(`Đoạn cắt dài ${t.length}s — Flow chỉ nhận tối đa ${VIDEO_INGR_MAX_SECONDS} giây.`)
+    else if (t.length < VIDEO_INGR_MIN_SECONDS) b.push(`Đoạn cắt quá ngắn (${t.length}s) — tối thiểu ${VIDEO_INGR_MIN_SECONDS} giây.`)
+    else if (video.durationSec > 0 && t.end > video.durationSec + 0.05) b.push(`Giây kết thúc vượt quá độ dài video (${video.durationSec}s).`)
+  }
+  if (!d.prompt.trim()) b.push('Prompt đang trống.')
+  return b
+}
+
+/** Dấu vân tay lúc gửi: prompt + video + đoạn cắt + ảnh theo thứ tự + khung hình + project. Khác hiện tại = video cũ. */
+export function videoIngrFingerprint(
+  d: VideoIngrInput,
+  video: MuseVideoRef | null,
+  refs: ScriptRef[],
+  flow: VideoIngrFlow | null,
+): string {
+  const t = videoIngrTrim(d, video?.durationSec ?? 0)
+  return [
+    hashText(d.prompt.trim()),
+    video?.path ?? '',
+    t.start,
+    t.end,
+    refs.map((r) => r.image?.path ?? '').join(','),
+    flow?.aspect ?? '',
+    flow?.projectId ?? '',
+  ].join('|')
+}
+
+/** Body POST /api/veo/jobs (video_edit, Omni 1.2): media id của video tham chiếu đã tải lên project Flow. */
+export function buildVideoIngrRequest(
+  nodeId: string,
+  d: VideoIngrInput,
+  video: MuseVideoRef | null,
+  refs: ScriptRef[],
+  flow: VideoIngrFlow | null,
+  referenceVideoId: string,
+  attempt: number,
+  /** Biến thể thứ mấy (1–4): vào khóa chống trùng để mỗi biến thể là 1 job riêng, gửi lại cùng biến thể không tạo thêm job */
+  variant = 1,
+): Record<string, unknown> {
+  const blockers = videoIngrBlockers(d, video, refs, flow)
+  if (blockers.length) throw new Error(blockers[0])
+  if (!referenceVideoId) throw new Error('Chưa có mã video tham chiếu trên Flow.')
+  const t = videoIngrTrim(d, video!.durationSec)
+  return {
+    prompt: d.prompt.trim(),
+    model_display_name: CLIP_FLOW_MODEL,
+    input_mode: 'video_edit',
+    aspect_ratio: flow!.aspect,
+    duration_seconds: Math.min(VIDEO_INGR_MAX_SECONDS, Math.max(1, Math.ceil(t.length))),
+    resolution: VIDEO_INGR_RESOLUTION,
+    num_outputs: 1,
+    // backend chống trùng theo NỘI DUNG: biến thể 2–4 giống hệt biến thể 1 chỉ khác khóa thì bị coi là bản trùng và trả lại
+    // job của biến thể 1 (chỉ có 1 video). `variant` nằm trong fingerprint đó (không gửi lên Flow) để mỗi biến thể là 1 job riêng.
+    variant,
+    project_id: flow!.projectId,
+    ingredient_image_paths: refs.map((r) => r.image!.path),
+    reference_video_id: referenceVideoId,
+    reference_video_start_seconds: t.start,
+    reference_video_end_seconds: t.end,
+    idempotency_key: `musevingr-${nodeId}-${hashText(videoIngrFingerprint(d, video, refs, flow))}-a${attempt}-v${variant}`.slice(0, 128),
+  }
+}
+
+/** Trạng thái của MỘT biến thể so với nội dung hiện tại của node (video / đoạn cắt / ảnh / prompt / cấu hình). */
+export function videoIngrState(
+  v: MuseClipVideo | null | undefined,
+  d: VideoIngrInput,
+  video: MuseVideoRef | null,
+  refs: ScriptRef[],
+  flow: VideoIngrFlow | null,
+): ClipVideoState {
+  if (!v) return 'none'
+  if (v.status === 'running') return 'running'
+  if (v.status === 'error') return 'error'
+  return v.fingerprint === videoIngrFingerprint(d, video, refs, flow) ? 'done' : 'stale'
+}
+
+/** Trạng thái chung của node từ các biến thể: đang chạy > lỗi > cũ > xong > chưa có. */
+export function videoIngrOverallState(states: ClipVideoState[]): ClipVideoState {
+  for (const s of ['running', 'error', 'stale', 'done'] as const) if (states.includes(s)) return s
+  return 'none'
+}
 
 // ---------------------------------------------------------------- node "Ghép video" (các clip Flow đã tạo → 1 video)
 
@@ -2060,6 +2639,8 @@ export function buildScriptVideoInstruction(refs: ScriptRef[], aspectRatio: stri
         ? `Identity anchor: Image ${charNo} — the same person in every segment.`
         : 'Identity anchor: the person shown in the references (the portrait on the design boards) — the same person in every segment.',
     )
+    const sceneLine = sceneInstruction(refs, 'Image')
+    if (sceneLine) lines.push(sceneLine.replace(/^- /, ''))
   } else {
     lines.push('', 'No reference images are attached — follow the descriptions in the script.')
   }

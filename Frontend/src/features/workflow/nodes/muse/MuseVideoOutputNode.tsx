@@ -58,6 +58,8 @@ import {
   type BgmTrackLite,
 } from '../../services/museCanvasApi.ts'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { useMuseRuns } from './useMuseRuns'
+import { runKey } from '../../services/museRunRegistry.ts'
 import { BgmPicker } from './BgmPicker'
 
 type VideoNode = Node<Record<string, unknown>, string>
@@ -84,13 +86,13 @@ function saveDefaults(s: MuseFinishSettings): boolean {
   }
 }
 
-/** Lượt xuất đang chạy (giữ qua đổi tab / HMR). */
-const G = globalThis as unknown as { __museFinishInflight?: Map<string, Promise<MuseFinalResult>> }
-const inflight: Map<string, Promise<MuseFinalResult>> = (G.__museFinishInflight ??= new Map())
+// Lượt xuất đang chạy nằm ở `museRuns` (đổi tab / đổi project / HMR không làm mất).
 
 function MuseVideoOutputNodeImpl({ id, data: raw, selected }: NodeProps<VideoNode>) {
   const { updateNodeData } = useReactFlow()
   const data = normalizeVideoOutputData(raw)
+  const runs = useMuseRuns<MuseFinalResult>((_key, r) => updateNodeData(id, { final: r }))
+  const flight = runKey.finish(id)
   const [copied, setCopied] = useState(false)
   const [current, setCurrent] = useState<string>('')
   const [showFinish, setShowFinish] = useState(true)
@@ -122,9 +124,7 @@ function MuseVideoOutputNodeImpl({ id, data: raw, selected }: NodeProps<VideoNod
     if (!normalizeVideoOutputData(raw).finish) updateNodeData(id, { finish: loadDefaults() })
     const f = normalizeVideoOutputData(raw).final
     if (f?.status === 'running') {
-      const p = inflight.get(id)
-      if (p) p.then((r) => updateNodeData(id, { final: r }))
-      else {
+      if (!runs.resume(flight)) {
         const fixed = interruptFinal(f)
         if (fixed) updateNodeData(id, { final: fixed })
       }
@@ -161,7 +161,7 @@ function MuseVideoOutputNodeImpl({ id, data: raw, selected }: NodeProps<VideoNod
   }, [fRunning])
 
   const runFinish = useCallback(async () => {
-    if (inflight.has(id)) return
+    if (runs.isRunning(flight)) return
     setNote(null)
     const inputPath = finishFingerprint(data.paths, settings)
     let body: Record<string, unknown>
@@ -183,15 +183,12 @@ function MuseVideoOutputNodeImpl({ id, data: raw, selected }: NodeProps<VideoNod
         updatedAt: Date.now(),
       }))
       .catch((e: any) => ({ inputPath, status: 'error' as const, error: e?.message || 'Lỗi xuất video', updatedAt: Date.now() }))
-      .finally(() => inflight.delete(id))
-    inflight.set(id, job)
-    const r = await job
-    updateNodeData(id, { final: r })
+    const r = await runs.start(flight, job)
     if (r.status === 'done') {
       setViewFinal(true)
       notifyVideoLibraryChanged()
     }
-  }, [data.label, data.paths, id, settings, updateNodeData])
+  }, [data.label, data.paths, flight, id, runs, settings, updateNodeData])
 
   async function onLogoPicked(file: File | undefined) {
     if (!file) return

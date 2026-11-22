@@ -1,6 +1,7 @@
 /**
- * Node chạy Muse của Muse Canvas: "Tách áo quần" và "Bảng thiết kế nhân vật" (JOB_SPECS quyết định chữ / prompt).
- * Nhận dây từ nhiều node ảnh vào cùng họ. Với MỖI ảnh vào: gửi Muse (prompt của node + ảnh đó) → 1 ảnh.
+ * Node chạy Muse của Muse Canvas: "Tách áo quần", "Bảng thiết kế nhân vật" và "Nhân vật trong bối cảnh"
+ * (JOB_SPECS quyết định chữ / prompt / cổng nhận gì). Với MỖI dòng (ảnh chính, hoặc cặp ảnh chính × ảnh phụ):
+ * gửi Muse / ChatGPT (prompt của node + ảnh, ảnh chính trước) → 1 ảnh.
  * Kết quả lưu theo id node nguồn; từng dòng đã xong có thể tách ra node "Ảnh kết quả" (nối dây từ cổng ra).
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
@@ -23,6 +24,7 @@ import {
   ImageOff,
   LayoutPanelLeft,
   Link2Off,
+  MapPin,
   Loader2,
   LocateFixed,
   Play,
@@ -41,7 +43,6 @@ import {
   buildGptJobRequest,
   buildJobRequest,
   buildJobRows,
-  extractInputsFromSources,
   extractOutputs,
   extractRowState,
   findOutputNodeFor,
@@ -49,6 +50,7 @@ import {
   markInterrupted,
   normalizeJobData,
   planOutputNodes,
+  primaryInputsFromSources,
   rowFingerprint,
   secondaryInputsFromSources,
   type ExtractInput,
@@ -60,15 +62,17 @@ import { fetchMusePrompt, generateGptImage, generateMuseImage, museMediaUrl, sav
 import { notifyImageLibraryChanged } from '../../services/imageLibraryApi'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { useMuseRuns } from './useMuseRuns'
+import { runKey } from '../../services/museRunRegistry.ts'
 
 type JobNode = Node<Record<string, unknown>, string>
 
 /**
- * Lượt chạy đang chờ Muse, giữ ở cấp module: đổi tab làm node bị gỡ khỏi màn hình nhưng request vẫn chạy;
- * khi node hiện lại, nó gắn tiếp vào promise thay vì báo "gián đoạn" (tránh người dùng chạy lại → tốn lượt).
+ * Lượt chạy đang chờ Muse / ChatGPT nằm ở `museRuns` (services/museRunRegistry.ts): đổi tab / đổi project làm node bị
+ * gỡ khỏi màn hình nhưng request vẫn chạy; khi node hiện lại, nó gắn tiếp vào promise hoặc nhận kết quả đã về
+ * thay vì báo "gián đoạn" (tránh người dùng chạy lại → tốn lượt).
  */
-const inflight = new Map<string, Promise<MuseExtractResult>>()
-const flightKey = (nodeId: string, sourceId: string) => `${nodeId}::${sourceId}`
+const flightKey = runKey.job
 
 function basename(p: string): string {
   return p.split(/[\\/]/).pop() || p
@@ -80,6 +84,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const spec = JOB_SPECS[type] ?? JOB_SPECS[MUSE_NODE.extract]
   const rowLabel = INPUT_SPECS[spec.inputType].rowLabel
   const isCharacter = type === MUSE_NODE.characterSheet
+  const isScenePlace = type === MUSE_NODE.scenePlace
   const data = normalizeJobData(raw, spec.type)
   const [busy, setBusy] = useState<'' | 'reset' | 'save'>('')
   const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
@@ -88,18 +93,17 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const sec = spec.secondary
   const [now, setNow] = useState(Date.now())
 
-  // Đầu vào = các node ảnh vào đang nối vào cổng (theo thứ tự dây).
+  // Ảnh chính = node nối vào cổng chính (theo thứ tự dây): node ảnh vào cùng họ, hoặc Ảnh kết quả spec cho phép.
   const connections = useNodeConnections({ handleType: 'target', handleId: MUSE_HANDLE.imagesIn })
   const sourceIds = useMemo(() => connections.map((c) => c.source), [connections])
   const sources = useNodesData(sourceIds)
   const primary = useMemo(
     () =>
-      extractInputsFromSources(
+      primaryInputsFromSources(
+        spec,
         sources.filter(Boolean).map((s) => ({ id: s!.id, type: s!.type, data: s!.data as Record<string, unknown> })),
-        rowLabel,
-        spec.inputType,
       ),
-    [sources, rowLabel, spec.inputType],
+    [sources, spec],
   )
 
   // Cổng phụ (vd. trang phục đã tách → Bảng thiết kế nhân vật): mỗi cặp chính × phụ là 1 dòng.
@@ -111,10 +115,16 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
       secondaryInputsFromSources(
         secSources.filter(Boolean).map((s) => ({ id: s!.id, type: s!.type, data: s!.data as Record<string, unknown> })),
         sec?.rowLabel,
+        spec,
       ),
-    [secSources, sec],
+    [secSources, sec, spec],
   )
-  const inputs = useMemo(() => buildJobRows(primary, secondary), [primary, secondary])
+  // Ảnh phụ bắt buộc (vd. bối cảnh) mà chưa nối: dòng vẫn hiện nhưng thiếu ảnh phụ, không chạy được
+  const inputs = useMemo(
+    () => buildJobRows(primary, secondary, sec?.required ? { rowLabel: sec.rowLabel } : undefined),
+    [primary, secondary, sec],
+  )
+  const missingRequired = !!sec?.required && primary.length > 0 && secondary.length === 0
 
   // Các node Ảnh kết quả đang nối từ cổng ra -> biết dòng nào đã "ra node".
   const outConnections = useNodeConnections({ handleType: 'source', handleId: MUSE_HANDLE.jobOut })
@@ -137,6 +147,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
       })),
     [id, spec.type, updateNodeData],
   )
+  const runs = useMuseRuns<MuseExtractResult>((_key, r) => setResult(r))
 
   // Mở lại canvas: lượt còn "running" mà không còn request nào chờ -> gián đoạn; còn request -> gắn tiếp.
   useEffect(() => {
@@ -144,14 +155,12 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
     const orphaned: Record<string, MuseExtractResult> = {}
     for (const [src, r] of Object.entries(results)) {
       if (r.status !== 'running') continue
-      const p = inflight.get(flightKey(id, src))
-      if (p) p.then(setResult)
-      else orphaned[src] = r
+      if (!runs.resume(flightKey(id, src))) orphaned[src] = r
     }
     const fixed = markInterrupted(orphaned)
     if (fixed) updateNodeData(id, { results: { ...results, ...fixed } })
     // Node tạo trước khi có cổng phụ: nạp prompt kết hợp mặc định từ file
-    if (spec.secondary && typeof (raw as Record<string, unknown>).secondaryPrompt !== 'string') {
+    if (spec.secondary?.promptName && typeof (raw as Record<string, unknown>).secondaryPrompt !== 'string') {
       fetchMusePrompt(spec.secondary.promptName)
         .then((p) => updateNodeData(id, { secondaryPrompt: p.prompt, secondaryPromptSource: 'default' }))
         .catch(() => {})
@@ -177,7 +186,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const runOne = useCallback(
     async (input: ExtractInput) => {
       const key = flightKey(id, input.sourceNodeId)
-      if (inflight.has(key) || !input.image) return
+      if (runs.isRunning(key) || !input.image) return
       const provider: MuseImageProvider = data.provider
       const ap = activePrompt(spec, data)
       const extraPrompt = ap.useSecondary ? data.secondaryPrompt : ''
@@ -210,13 +219,11 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
           provider,
           updatedAt: Date.now(),
         }))
-        .finally(() => inflight.delete(key))
-      inflight.set(key, job)
-      const done = await job
-      setResult(done)
+      // runs.start tự giao kết quả cho node (hoặc giữ lại nếu node đã bị gỡ)
+      const done = await runs.start(key, job)
       if (done.status === 'done') notifyImageLibraryChanged()
     },
-    [config, data.prompt, data.gptPrompt, data.provider, data.secondaryPrompt, id, setResult, spec],
+    [config, data.prompt, data.gptPrompt, data.provider, data.secondaryPrompt, id, runs, setResult, spec],
   )
 
   /** Chạy nhiều ảnh vào, tối đa `maxParallel` lượt cùng lúc (mỗi tài khoản Muse/ChatGPT chạy 1 lượt một lúc). */
@@ -266,7 +273,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
     setBusy('reset')
     setNote(null)
     try {
-      if (which === 'secondary' && spec.secondary) {
+      if (which === 'secondary' && spec.secondary?.promptName) {
         const p = await fetchMusePrompt(spec.secondary.promptName)
         updateNodeData(id, { secondaryPrompt: p.prompt, secondaryPromptSource: 'default' })
         setNote({ kind: 'ok', text: 'Đã nạp prompt kết hợp mặc định.' })
@@ -288,7 +295,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
     setBusy('save')
     setNote(null)
     try {
-      if (which === 'secondary' && spec.secondary) {
+      if (which === 'secondary' && spec.secondary?.promptName) {
         await saveMusePromptDefault(spec.secondary.promptName, data.secondaryPrompt)
         updateNodeData(id, { secondaryPromptSource: 'default' })
         setNote({ kind: 'ok', text: 'Đã lưu prompt kết hợp làm mặc định.' })
@@ -318,17 +325,20 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const blocked = runBlockers.length > 0 || promptEmpty
   const unitCost = isGpt ? 'lượt tạo ảnh ChatGPT' : 'lượt Muse'
   const hasResults = Object.keys(data.results).length > 0
-  const Icon = isCharacter ? LayoutPanelLeft : Scissors
+  const Icon = isCharacter ? LayoutPanelLeft : isScenePlace ? MapPin : Scissors
+  const primaryTitle = spec.primaryFromJobTypes?.length
+    ? `Nối từ node ${INPUT_SPECS[spec.inputType].title} hoặc “Ảnh kết quả” của Bảng thiết kế nhân vật (nhiều dây được)`
+    : `Nối từ node ${INPUT_SPECS[spec.inputType].title} (nhiều dây được)`
 
   return (
-    <div className={`mc-node mc-node-extract ${isCharacter ? 'mc-node-charsheet' : ''} ${selected ? 'selected' : ''}`}>
+    <div className={`mc-node mc-node-extract ${isCharacter || isScenePlace ? 'mc-node-charsheet' : ''} ${selected ? 'selected' : ''}`}>
       <Handle
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.imagesIn}
         className={`mc-handle ${isCharacter ? 'mc-handle-character' : 'mc-handle-image'}`}
         style={sec ? { top: 40 } : undefined}
-        title={`Nối từ node ${INPUT_SPECS[spec.inputType].title} (nhiều dây được)`}
+        title={primaryTitle}
       />
       {sec && (
         <>
@@ -337,16 +347,16 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
             type="target"
             position={Position.Left}
             id={sec.handle}
-            className="mc-handle mc-handle-prompt"
+            className={`mc-handle ${sec.fromNodeType === MUSE_NODE.scene ? 'mc-handle-scene' : 'mc-handle-prompt'}`}
             style={{ top: 120 }}
-            title={`${sec.title}: nối từ node “Ảnh kết quả” của Tách áo quần — mỗi cặp nhân vật × trang phục ra 1 bảng`}
+            title={sec.handleTitle}
           />
           <span className="mc-port-label mc-port-secondary" style={{ top: 110 }}>{sec.rowLabel}</span>
         </>
       )}
 
       <div className="mc-node-head">
-        <span className={`mc-node-icon ${isCharacter ? 'mc-icon-charsheet' : 'mc-icon-prompt'}`}><Icon size={14} /></span>
+        <span className={`mc-node-icon ${isCharacter ? 'mc-icon-charsheet' : isScenePlace ? 'mc-icon-scene' : 'mc-icon-prompt'}`}><Icon size={14} /></span>
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small>{spec.subtitle}</small>
@@ -389,6 +399,13 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
           </div>
         </div>
 
+        {/* Ảnh phụ bắt buộc chưa nối (vd. bối cảnh) */}
+        {missingRequired && sec && (
+          <div className="mc-node-error">
+            <Link2Off size={12} /> Chưa nối {sec.rowLabel.toLowerCase()} — {sec.handleTitle.split(': ').slice(1).join(': ') || sec.handleTitle}
+          </div>
+        )}
+
         {/* Đầu vào → đầu ra */}
         {inputs.length === 0 ? (
           <div className="mc-inputs-empty">
@@ -399,7 +416,9 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
             {inputs.map((input) => {
               const state = extractRowState(input, data.results)
               const r = data.results[input.sourceNodeId]
-              const canRun = !blocked && !!input.image && state !== 'running'
+              const canRun = !blocked && state !== 'no_image' && state !== 'running'
+              // dòng thiếu ảnh phụ bắt buộc (chưa nối, vd. bối cảnh) — khác với node nguồn chưa có ảnh
+              const missingExtra = (input.extra ?? []).some((x) => !x.sourceNodeId)
               const outNode = state === 'done' ? outputNodeOf(input.sourceNodeId) : undefined
               return (
                 <div key={input.sourceNodeId} className={`mc-xrow mc-x-${state}`}>
@@ -441,7 +460,9 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
                           : state === 'error' || state === 'interrupted'
                             ? r?.error || 'Lỗi'
                             : state === 'no_image'
-                              ? 'Node nguồn chưa có ảnh'
+                              ? missingExtra
+                                ? `Chưa nối ${sec?.rowLabel.toLowerCase() ?? 'ảnh phụ'}`
+                                : 'Node nguồn chưa có ảnh'
                               : state === 'stale'
                                 ? 'Ảnh vào đã đổi — cần chạy lại'
                                 : 'Chưa chạy'}
@@ -517,7 +538,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         )}
 
         {/* Prompt ghép thêm khi dòng có ảnh phụ (trang phục) — chế độ GPT có prompt riêng thì không dùng */}
-        {sec && ap.useSecondary && (
+        {sec?.promptName && ap.useSecondary && (
           <>
             <button type="button" className="mc-xtoggle nodrag" onClick={() => setShowSecondary((v) => !v)}>
               {showSecondary ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Prompt kết hợp {sec.rowLabel.toLowerCase()}
@@ -555,7 +576,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         {runBlockers.length > 0 && <div className="mc-node-error">{runBlockers[0]}</div>}
         <button
           type="button"
-          className={`mc-run-btn nodrag ${isCharacter ? 'mc-run-character' : ''}`}
+          className={`mc-run-btn nodrag ${isCharacter ? 'mc-run-character' : isScenePlace ? 'mc-run-scene' : ''}`}
           disabled={blocked || toRun.length === 0}
           onClick={() => runMany(toRun)}
           title="Chỉ chạy dòng chưa chạy hoặc đã đổi ảnh. Dòng lỗi bấm “Chạy lại” riêng."
@@ -568,7 +589,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
               : `Không còn ${spec.unitNoun} cần chạy`}
         </button>
         <p className="mc-hint">
-          Mỗi {spec.unitNoun} tốn 1 {unitCost}{isGpt ? ' (tài khoản ở Cài đặt → Tài khoản ChatGPT)' : ''}.{sec ? ` Nối ${sec.rowLabel.toLowerCase()} vào cổng phụ: mỗi cặp ${rowLabel.toLowerCase()} × ${sec.rowLabel.toLowerCase()} ra 1 ${spec.unitNoun}.` : ''} Đã gửi thì không tự gửi lại; song song tối đa {config.maxParallel} (panel cấu hình). Ảnh
+          Mỗi {spec.unitNoun} tốn 1 {unitCost}{isGpt ? ' (tài khoản ở Cài đặt → Tài khoản ChatGPT)' : ''}.{sec ? ` Nối ${sec.rowLabel.toLowerCase()} vào cổng phụ${sec.required ? ' (bắt buộc)' : ''}: mỗi cặp ${rowLabel.toLowerCase()} × ${sec.rowLabel.toLowerCase()} ra 1 ${spec.unitNoun}.` : ''} Đã gửi thì không tự gửi lại; song song tối đa {config.maxParallel} (panel cấu hình). Ảnh
           ra tự lưu vào Thư Viện Ảnh; “Ra node” tách ảnh thành node riêng.
         </p>
       </div>

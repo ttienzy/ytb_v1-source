@@ -8,7 +8,7 @@ Internal model IDs chưa xác minh — sẽ được cập nhật sau runtime ve
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -114,6 +114,10 @@ class VeoJobRequest(BaseModel):
     resolution: str = Field(default="720p", description="Độ phân giải mong muốn")
     num_outputs: int = Field(default=1, ge=1, le=4, description="Số video output")
     seed: Optional[int] = Field(default=None, description="Random seed (không bảo đảm giống hệt)")
+    # Biến thể thứ mấy của CÙNG một yêu cầu (node Muse Canvas "Ingredients" tạo nhiều biến thể). KHÔNG gửi lên Flow: chỉ nằm
+    # trong fingerprint chống trùng, để biến thể 2–4 (giống hệt biến thể 1 về nội dung) không bị coi là bản trùng và trả về
+    # đúng job của biến thể 1 — khi đó người dùng trả tiền cho 1 video nhưng tưởng có nhiều biến thể.
+    variant: int = Field(default=1, ge=1, le=4, description="Biến thể 1–4 (chỉ để chống trùng)")
 
     # Project
     project_id: Optional[str] = Field(default=None, description="ID của VeoProject đã chọn")
@@ -198,6 +202,8 @@ class ExtensionInfo(BaseModel):
     """Thông tin Extension đang kết nối."""
     ext_fp: str = ""
     version: str = ""
+    # Năng lực của bản extension đang chạy (vd. {"motion_ref_max_seconds": 15}); rỗng = extension bản cũ không báo gì
+    capabilities: dict[str, Any] = Field(default_factory=dict)
     tab_count: int = 0
     last_heartbeat: Optional[str] = None
     connected: bool = False

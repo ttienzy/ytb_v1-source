@@ -34,6 +34,13 @@ const VERIFIED_FRAMES_MODEL = /^macaron_cookie_i2v_fl_(6|10)s(_360p)?$/;
 const VERIFIED_R2V_MODEL = /^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$/;
 // Motion Control chỉ có một model, 720p (360p chưa có HAR).
 const VERIFIED_EDIT_MODEL = /^macaron_cookie_edit$/;
+/**
+ * Đoạn video mẫu dài nhất (giây) extension nhận qua đường HTTP. Extension BÁO số này trong heartbeat
+ * (`capabilities.motion_ref_max_seconds`) để backend chặn sớm khi extension trong Chrome còn là bản cũ — bản cũ không báo gì
+ * và âm thầm rơi sang điều khiển giao diện Flow. Backend: veo/service.MOTION_REF_MAX_SECONDS (đổi thì đổi cả hai).
+ * runFlowHttpVideoInPage bị serialize vào tab nên không dùng được hằng này: nó lặp lại số 15 (có test giữ hai nơi khớp).
+ */
+export const MOTION_REF_MAX_SECONDS = 15;
 const MEDIA_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -89,7 +96,7 @@ export function canUseHttpVideo(req) {
     if (!MEDIA_ID_RE.test(String(req.reference_video_id || ''))) return false;
     const start = Number(req.reference_video_start_seconds || 0);
     const end = Number(req.reference_video_end_seconds);
-    if (!(start >= 0) || !(end > start) || end - start > 10) return false;   // Flow nhận tối đa 10 giây video mẫu
+    if (!(start >= 0) || !(end > start) || end - start > MOTION_REF_MAX_SECONDS) return false;   // Flow nhận tối đa 15 giây video mẫu
     if (!motionImageOrder(req)) return false;                                // 1–3 ảnh (HAR chỉ có trường hợp có ảnh)
   } else {
     return false;
@@ -269,8 +276,8 @@ export async function runFlowHttpVideoInPage(flowRequest, _captchaToken, opts = 
       if (!UUID_RE.test(videoId)) throw new Error('Motion Control cần mã video mẫu đã tải lên Flow');
       const startSec = Number(flowRequest.reference_video_start_seconds || 0);
       const endSec = Number(flowRequest.reference_video_end_seconds);
-      if (!(startSec >= 0) || !(endSec > startSec) || endSec - startSec > 10) {
-        throw new Error('Đoạn cắt video mẫu không hợp lệ (tối đa 10 giây)');
+      if (!(startSec >= 0) || !(endSec > startSec) || endSec - startSec > 15) {
+        throw new Error('Đoạn cắt video mẫu không hợp lệ (tối đa 15 giây)');
       }
       const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
       const inputs = Array.isArray(flowRequest.ingredient_inputs) && flowRequest.ingredient_inputs.length

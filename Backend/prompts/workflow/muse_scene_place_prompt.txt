@@ -1,0 +1,7 @@
+A realistic full-body candid photograph placing the character from Image 1 into the exact environment and background of Image 2.
+
+Subject & Outfit: Completely remove and replace the original person (and any objects they are holding) from Image 2 with the character from Image 1. Strictly preserve the character's exact facial features, hairstyle, body proportions, and every detail of their outfit from Image 1 (including colors, fabric textures, prints, logos, and accessories). If footwear is not visible in Image 1, pair the outfit with natural, matching casual shoes.
+
+Pose & Expression: Do NOT copy the original person's pose or props from Image 2. Instead, give the character a natural, relaxed, everyday standing pose and a subtle, candid expression that naturally matches the vibe and style of their outfit.
+
+Environment & Integration: Keep the background, camera angle, framing, perspective, and color tone of Image 2 100% identical. Seamlessly blend the character into the scene by matching the ambient lighting, realistic shadows cast on the ground, depth of field, and natural film grain of Image 2. Photorealistic, high detail, 9:16 vertical aspect ratio.

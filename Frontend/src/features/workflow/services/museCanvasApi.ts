@@ -1,10 +1,19 @@
 /**
- * Muse Canvas — lưu cấu hình + đồ thị: localStorage (nạp tức thì) và backend (bền vững).
- *   GET/PUT /api/workflow/muse/config   (config.json, khóa muse_canvas)
- *   GET/PUT /api/workflow/muse/canvas   (Data/muse_canvas.json)
+ * Muse Canvas — lưu cấu hình + project / đồ thị: localStorage (nạp tức thì) và backend (bền vững).
+ *   GET/PUT /api/workflow/muse/config               (config.json, khóa muse_canvas — cấu hình chung)
+ *   /api/workflow/muse/projects[/{id}[/canvas]]      (Data/muse_canvas_projects/ — mỗi project 1 đồ thị)
+ * /api/workflow/muse/canvas (project đang mở) chỉ còn cho bản frontend cũ.
  */
 import { API_URL } from '../../../shared/constants'
 import { fileStem } from './museCanvasNodes.ts'
+import {
+  normalizeProjectIndex,
+  normalizeProjectMeta,
+  projectSettingsToApi,
+  type MuseProjectIndex,
+  type MuseProjectMeta,
+  type MuseProjectSettings,
+} from './museProjects.ts'
 import {
   DEFAULT_MUSE_CANVAS_CONFIG,
   museCanvasConfigToApi,
@@ -14,7 +23,14 @@ import {
 } from './museCanvasConfig.ts'
 
 const CONFIG_KEY = 'muse_canvas_config_v1'
-const GRAPH_KEY = 'muse_canvas_graph_v1'
+/** Bản cache đồ thị trước khi có project (1 khóa cho cả canvas) — dọn đi, đồ thị cũ đã thành project ở backend. */
+const LEGACY_GRAPH_KEY = 'muse_canvas_graph_v1'
+const GRAPH_KEY_PREFIX = 'muse_canvas_graph_v1:'
+try {
+  if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_GRAPH_KEY)
+} catch {
+  /* bỏ qua */
+}
 
 export interface MuseCanvasGraph {
   nodes: any[]
@@ -66,30 +82,146 @@ export async function saveMuseCanvasConfig(cfg: MuseCanvasConfig): Promise<MuseC
   return normalizeMuseCanvasConfig(await res.json())
 }
 
-export function loadLocalMuseCanvasGraph(): MuseCanvasGraph {
-  const g = readLocal<MuseCanvasGraph>(GRAPH_KEY)
+// ---------------------------------------------------------------- project (mỗi project 1 đồ thị)
+//   GET/POST /api/workflow/muse/projects, PATCH/DELETE /projects/{id}, POST /projects/{id}/open,
+//   GET/PUT /projects/{id}/canvas   (app/workflow/muse_projects.py)
+
+const PROJECTS_KEY = 'muse_canvas_projects_v1'
+const projectGraphKey = (pid: string) => `${GRAPH_KEY_PREFIX}${pid}`
+
+/**
+ * Cache đồ thị của 1 project trên máy. localStorage chỉ vài MB cho cả app: đầy thì bỏ cache của các project khác
+ * (backend mới là bản gốc, mở project đó sẽ tải lại) rồi ghi lại.
+ */
+function writeProjectGraphLocal(pid: string, graph: MuseCanvasGraph): void {
+  const key = projectGraphKey(pid)
+  const blob = JSON.stringify(graph)
+  try {
+    window.localStorage.setItem(key, blob)
+    return
+  } catch {
+    /* đầy: dọn rồi thử lại */
+  }
+  try {
+    const others: string[] = []
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i)
+      if (k && k.startsWith(GRAPH_KEY_PREFIX) && k !== key) others.push(k)
+    }
+    others.forEach((k) => window.localStorage.removeItem(k))
+    window.localStorage.setItem(key, blob)
+  } catch {
+    /* vẫn không đủ chỗ: chỉ còn bản trên backend */
+  }
+}
+/** Lần lưu canvas đang gửi của từng project: đọc lại project đó phải chờ nó xong (đổi qua lại nhanh A → B → A). */
+const pendingSaves = new Map<string, Promise<unknown>>()
+/** Project vừa xóa: canvas đang đóng của nó không được lưu lại (khỏi ghi rác vào localStorage / lỗi 404). */
+const deletedProjects = new Set<string>()
+
+async function detailOrThrow(res: Response, fallback: string): Promise<any> {
+  const d = await res.json().catch(() => ({}))
+  if (res.status === 404 && d.detail === 'Not Found') throw new Error(`${fallback} — backend chưa có project Muse Canvas, hãy khởi động lại backend.`)
+  if (!res.ok) {
+    const detail = Array.isArray(d.detail) ? d.detail.map((x: any) => x?.msg).filter(Boolean).join('; ') : d.detail
+    throw new Error(typeof detail === 'string' && detail ? detail : `${fallback} (HTTP ${res.status})`)
+  }
+  return d
+}
+
+/** Danh sách project đã thấy lần trước (để vẽ ngay khi mở tab). */
+export function loadLocalProjectIndex(): MuseProjectIndex {
+  return normalizeProjectIndex(readLocal(PROJECTS_KEY))
+}
+
+export async function fetchMuseProjects(): Promise<MuseProjectIndex> {
+  const raw = await detailOrThrow(await fetch(`${API_URL}/api/workflow/muse/projects`), 'Không tải được danh sách project')
+  writeLocal(PROJECTS_KEY, raw)
+  return normalizeProjectIndex(raw)
+}
+
+export async function createMuseProject(body: {
+  name: string
+  graph?: MuseCanvasGraph
+  settings?: MuseProjectSettings
+  activate?: boolean
+}): Promise<MuseProjectMeta> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: body.name,
+      graph: body.graph,
+      settings: body.settings ? projectSettingsToApi(body.settings) : undefined,
+      activate: body.activate ?? true,
+    }),
+  })
+  const meta = normalizeProjectMeta(await detailOrThrow(res, 'Không tạo được project'))
+  if (!meta) throw new Error('Backend trả project không hợp lệ.')
+  return meta
+}
+
+export async function updateMuseProject(id: string, patch: { name?: string; settings?: MuseProjectSettings }): Promise<MuseProjectMeta> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/projects/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: patch.name, settings: patch.settings ? projectSettingsToApi(patch.settings) : undefined }),
+  })
+  const meta = normalizeProjectMeta(await detailOrThrow(res, 'Không lưu được project'))
+  if (!meta) throw new Error('Backend trả project không hợp lệ.')
+  return meta
+}
+
+export async function deleteMuseProject(id: string): Promise<MuseProjectIndex> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  const raw = await detailOrThrow(res, 'Không xóa được project')
+  deletedProjects.add(id)
+  try {
+    window.localStorage.removeItem(projectGraphKey(id))
+  } catch {
+    /* bỏ qua */
+  }
+  writeLocal(PROJECTS_KEY, raw)
+  return normalizeProjectIndex(raw)
+}
+
+/** Ghi nhớ project đang mở ở backend (mở lại app vào đúng project này). */
+export async function openMuseProject(id: string): Promise<MuseProjectIndex> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/projects/${encodeURIComponent(id)}/open`, { method: 'POST' })
+  const raw = await detailOrThrow(res, 'Không mở được project')
+  writeLocal(PROJECTS_KEY, raw)
+  return normalizeProjectIndex(raw)
+}
+
+export function loadLocalProjectGraph(pid: string): MuseCanvasGraph {
+  const g = readLocal<MuseCanvasGraph>(projectGraphKey(pid))
   return { nodes: g?.nodes ?? [], edges: g?.edges ?? [], viewport: g?.viewport ?? null }
 }
 
-export async function fetchMuseCanvasGraph(): Promise<MuseCanvasGraph> {
-  const res = await fetch(`${API_URL}/api/workflow/muse/canvas`)
-  if (!res.ok) throw new Error(`Không tải được canvas Muse (HTTP ${res.status})`)
-  const g = await res.json()
+export async function fetchMuseProjectGraph(pid: string): Promise<MuseCanvasGraph> {
+  await pendingSaves.get(pid)?.catch(() => {})
+  const g = await detailOrThrow(await fetch(`${API_URL}/api/workflow/muse/projects/${encodeURIComponent(pid)}/canvas`), 'Không tải được canvas của project')
   const graph = { nodes: g.nodes ?? [], edges: g.edges ?? [], viewport: g.viewport ?? null }
-  writeLocal(GRAPH_KEY, graph)
+  writeProjectGraphLocal(pid, graph)
   return graph
 }
 
-export async function saveMuseCanvasGraph(graph: MuseCanvasGraph): Promise<void> {
-  writeLocal(GRAPH_KEY, graph)
-  const res = await fetch(`${API_URL}/api/workflow/muse/canvas`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(graph),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(typeof err.detail === 'string' ? err.detail : `Không lưu được canvas Muse (HTTP ${res.status})`)
+export async function saveMuseProjectGraph(pid: string, graph: MuseCanvasGraph): Promise<void> {
+  if (deletedProjects.has(pid)) return
+  writeProjectGraphLocal(pid, graph)
+  const job = (async () => {
+    const res = await fetch(`${API_URL}/api/workflow/muse/projects/${encodeURIComponent(pid)}/canvas`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(graph),
+    })
+    await detailOrThrow(res, 'Không lưu được canvas')
+  })()
+  pendingSaves.set(pid, job)
+  try {
+    await job
+  } finally {
+    if (pendingSaves.get(pid) === job) pendingSaves.delete(pid)
   }
 }
 

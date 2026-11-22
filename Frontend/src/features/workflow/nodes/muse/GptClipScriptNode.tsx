@@ -25,6 +25,7 @@ import {
   ImageOff,
   Link2Off,
   Loader2,
+  MapPin,
   RotateCcw,
   Save,
 } from 'lucide-react'
@@ -37,6 +38,11 @@ import {
   buildClipScriptContext,
   buildClipScriptRequest,
   clipCredits720p,
+  clipsCredits,
+  fixedClipSeconds,
+  clipScriptFingerprint,
+  clipScriptState,
+  clipSentPaths,
   findClipPromptNodeFor,
   interruptClipScript,
   planClipPromptNodes,
@@ -46,20 +52,19 @@ import {
   normalizeClipMergeData,
   normalizeClipScriptData,
   parseClipScript,
-  scriptFingerprint,
   scriptRefsFromSources,
-  scriptState,
+  splitClipRefs,
   type MuseScriptResult,
 } from '../../services/museCanvasNodes.ts'
 import { fetchMusePrompt, generateGptClipScript, museMediaUrl, saveMusePromptDefault } from '../../services/museCanvasApi.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { useMuseRuns } from './useMuseRuns'
+import { runKey } from '../../services/museRunRegistry.ts'
 
 type ClipScriptNode = Node<Record<string, unknown>, string>
 
-/** Lượt ChatGPT đang chờ, giữ trên globalThis: đổi tab / Vite nạp lại không làm mất, node hiện lại thì gắn tiếp. */
-const G = globalThis as unknown as { __gptClipScriptInflight?: Map<string, Promise<MuseScriptResult>> }
-const inflight: Map<string, Promise<MuseScriptResult>> = (G.__gptClipScriptInflight ??= new Map())
+// Lượt ChatGPT đang chờ nằm ở `museRuns` (đổi tab / đổi project / HMR không làm mất; node hiện lại thì nhận tiếp).
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -90,7 +95,8 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
   const srcIds = useMemo(() => conns.map((c) => c.source), [conns])
   const srcNodes = useNodesData(srcIds)
   const orderKey = data.order.join(',')
-  const refs = useMemo(
+  // Mọi ảnh nối vào; `refs` = ảnh clip (#k = clip k), `scenes` = ảnh Tham chiếu bối cảnh (dùng chung, không thành clip)
+  const allRefs = useMemo(
     () =>
       scriptRefsFromSources(
         srcNodes.filter(Boolean).map((n) => ({ id: n!.id, type: n!.type, data: n!.data as Record<string, unknown> })),
@@ -98,14 +104,17 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
       ),
     [srcNodes, orderKey],
   )
+  const { clips: refs, scenes } = useMemo(() => splitClipRefs(allRefs), [allRefs])
 
   const result = data.result
-  const state = scriptState(refs, result, CLIP_SCRIPT_MAX_REFS)
+  const state = clipScriptState(allRefs, result)
   const parsed = useMemo(
-    () => (result?.text ? parseClipScript(result.text, result.inputPath ? result.inputPath.split('|').length : refs.length) : null),
+    () => (result?.text ? parseClipScript(result.text, clipSentPaths(result.inputPath).length || refs.length) : null),
     [result?.text, result?.inputPath, refs.length],
   )
   const setResult = useCallback((r: MuseScriptResult) => updateNodeData(id, { result: r }), [id, updateNodeData])
+  const runs = useMuseRuns<MuseScriptResult>((_key, r) => setResult(r))
+  const flight = runKey.clipScript(id)
 
   // Node Clip đã tách từ lần viết hiện tại (nối ở cổng ra "clips")
   const outConns = useNodeConnections({ handleType: 'source', handleId: MUSE_HANDLE.clipOut })
@@ -173,9 +182,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
   useEffect(() => {
     const r = normalizeClipScriptData(raw).result
     if (r?.status !== 'running') return
-    const p = inflight.get(id)
-    if (p) p.then(setResult)
-    else {
+    if (!runs.resume(flight)) {
       const fixed = interruptClipScript(r)
       if (fixed) setResult(fixed)
     }
@@ -191,7 +198,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
   }, [running])
 
   const run = useCallback(async () => {
-    if (inflight.has(id)) return
+    if (runs.isRunning(flight)) return
     if (result && state !== 'pending') {
       const ok = window.confirm(
         state === 'error' || state === 'interrupted'
@@ -200,10 +207,10 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
       )
       if (!ok) return
     }
-    const inputPath = scriptFingerprint(refs)
+    const inputPath = clipScriptFingerprint(allRefs)
     let body: Record<string, unknown>
     try {
-      body = buildClipScriptRequest(config, data.prompt, refs, data.notes)
+      body = buildClipScriptRequest(config, data.prompt, allRefs, data.notes, config.flowSeconds)
     } catch (e: any) {
       setResult({ inputPath, status: 'error', error: e?.message, updatedAt: Date.now() })
       return
@@ -212,11 +219,9 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
     const job: Promise<MuseScriptResult> = generateGptClipScript(body)
       .then((r) => ({ inputPath, status: 'done' as const, text: r.text, path: r.path, accountLabel: r.accountLabel, updatedAt: Date.now() }))
       .catch((e: any) => ({ inputPath, status: 'error' as const, error: e?.message || 'ChatGPT lỗi', updatedAt: Date.now() }))
-      .finally(() => inflight.delete(id))
-    inflight.set(id, job)
     setOpenClip({})
-    setResult(await job)
-  }, [config, data.notes, data.prompt, id, refs, result, setResult, state])
+    await runs.start(flight, job)
+  }, [allRefs, config, data.notes, data.prompt, flight, result, runs, setResult, state])
 
   async function resetToDefault() {
     setBusy('reset')
@@ -266,7 +271,8 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
 
   const promptEmpty = !data.prompt.trim()
   const canRun = !promptEmpty && ['pending', 'done', 'stale', 'error', 'interrupted'].includes(state)
-  const context = useMemo(() => buildClipScriptContext(refs, data.notes), [refs, data.notes])
+  const context = useMemo(() => buildClipScriptContext(allRefs, data.notes, config.flowSeconds), [allRefs, data.notes, config.flowSeconds])
+  const fixedSec = fixedClipSeconds(config.flowSeconds)
   const elapsed = running ? Math.max(0, Math.round((now - (result?.updatedAt || now)) / 1000)) : 0
   const collapsed = data.collapsed
   const allPrompts = parsed?.clips.map((c) => `# Clip ${c.k}/${c.n} — ${c.name} — ${c.seconds ?? '?'}s\n${c.videoPrompt}`).join('\n\n') ?? ''
@@ -358,7 +364,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
               {refs.length > 6 && <small>+{refs.length - 6}</small>}
             </span>
             <span className="mc-collapsed-meta">
-              {refs.length} ảnh tham chiếu
+              {refs.length} ảnh tham chiếu{scenes.length ? ` + ${scenes.length} bối cảnh` : ''}
               <small className={`mc-vstat mc-vstat-${state}`}>{statusText}</small>
             </span>
           </div>
@@ -376,7 +382,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
             <div className="mc-script-list">
               {refs.length === 0 ? (
                 <div className="mc-inputs-empty">
-                  <Link2Off size={12} /> Chưa có ảnh — nối dây từ node “Ảnh kết quả” (bảng thiết kế) vào chấm “Tham chiếu”. Mỗi ảnh là 1 clip.
+                  <Link2Off size={12} /> Chưa có ảnh — nối dây từ node “Ảnh kết quả” (bảng thiết kế) vào chấm “Tham chiếu”. Mỗi ảnh là 1 clip; ảnh từ node “Tham chiếu bối cảnh” dùng chung cho mọi clip.
                 </div>
               ) : (
                 refs.map((r, i) => (
@@ -418,6 +424,26 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
                   </div>
                 ))
               )}
+              {scenes.map((r) => (
+                <div key={r.sourceNodeId} className="mc-script-item mc-script-scene" title="Ảnh bối cảnh dùng chung cho mọi clip — không thành clip riêng">
+                  <span className="mc-script-no">
+                    <MapPin size={11} />
+                  </span>
+                  {r.image ? (
+                    <a href={museMediaUrl(r.image.previewUrl)} target="_blank" rel="noreferrer" className="nodrag" title="Mở ảnh">
+                      <img src={museMediaUrl(r.image.previewUrl)} alt={r.label} draggable={false} />
+                    </a>
+                  ) : (
+                    <span className="mc-xph"><ImageOff size={13} /></span>
+                  )}
+                  <span className="mc-script-label" title={r.label}>
+                    {r.label}
+                    <small>
+                      <span className="mc-ref-kind mc-ref-scene">{SCRIPT_REF_KINDS.scene.vi}</span> dùng chung mọi clip
+                    </small>
+                  </span>
+                </div>
+              ))}
             </div>
           )}
 
@@ -470,7 +496,15 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
           {showContext && <pre className="mc-script-context nodrag nowheel">{context}</pre>}
           {note && <div className={note.kind === 'ok' ? 'mc-node-ok' : 'mc-node-error'}>{note.text}</div>}
 
-          {state === 'too_many' && <div className="mc-node-error">Tối đa {CLIP_SCRIPT_MAX_REFS} ảnh mỗi lượt ChatGPT — gỡ bớt dây.</div>}
+          {fixedSec > 0 && (
+            <div className="mc-node-meta" title="Đổi ở Cấu hình → Google Flow → Thời lượng (Tự động = ChatGPT tự chọn 3–15 giây)">
+              Thời lượng cố định: mỗi clip đúng {fixedSec}s · ≈{clipCredits720p(fixedSec)} credit/clip (720p)
+            </div>
+          )}
+          {state === 'too_many' && <div className="mc-node-error">Tối đa {CLIP_SCRIPT_MAX_REFS} ảnh mỗi lượt ChatGPT (tính cả ảnh bối cảnh) — gỡ bớt dây.</div>}
+          {state === 'no_refs' && scenes.length > 0 && (
+            <div className="mc-node-error">Mới có ảnh bối cảnh — nối thêm ảnh cho từng clip (vd. Ảnh kết quả bảng thiết kế).</div>
+          )}
           {state === 'no_image' && <div className="mc-node-error">Có node nối vào chưa có ảnh.</div>}
           {runButton}
 
@@ -507,7 +541,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
                 <>
                   {!!parsed.clips.length && (
                     <div className="mc-clip-summary">
-                      <strong>{parsed.clips.length} clip</strong> · tổng {parsed.totalSeconds}s · ≈ {clipCredits720p(parsed.totalSeconds)} credit Flow (720p, ước tính)
+                      <strong>{parsed.clips.length} clip</strong> · tổng {parsed.totalSeconds}s · ≈ {clipsCredits(parsed.clips.map((c) => c.seconds))} credit Flow (720p, ước tính)
                     </div>
                   )}
                   {parsed.warnings.map((w) => (

@@ -33,10 +33,30 @@ export interface MuseCanvasConfig {
   flowProjectId: string
   flowAspect: FlowAspect
   flowResolution: FlowResolution
+  /** Thời lượng video Flow (giây): 0 = Tự động (theo kịch bản / video tham chiếu), 3–15 = cố định */
+  flowSeconds: number
+  /** Số biến thể mỗi lần bấm Tạo video (node Ingredients): 1–4, mỗi biến thể là 1 job Flow riêng */
+  flowVariants: number
 }
 
 export type FlowAspect = '9:16' | '16:9'
 export type FlowResolution = '720p' | '360p'
+
+/** Omni 1.2 trên Flow: Ingredients 3–15 giây, chỉnh video cắt 3–15 giây (khớp FLOW_MIN/MAX_SECONDS ở backend). */
+export const FLOW_MIN_SECONDS = 3
+export const FLOW_MAX_SECONDS = 15
+/** 0 = Tự động; còn lại 3–15 (số nguyên). Giá trị lạ -> Tự động. */
+export function normalizeFlowSeconds(v: unknown): number {
+  const n = Math.round(Number(v))
+  return Number.isFinite(n) && n >= FLOW_MIN_SECONDS && n <= FLOW_MAX_SECONDS ? n : 0
+}
+
+/** 1–4 biến thể (khớp FLOW_MAX_VARIANTS ở backend). Giá trị lạ -> 1. */
+export const FLOW_MAX_VARIANTS = 4
+export function normalizeFlowVariants(v: unknown): number {
+  const n = Math.round(Number(v))
+  return Number.isFinite(n) && n >= 1 && n <= FLOW_MAX_VARIANTS ? n : 1
+}
 
 /** Thời lượng Muse đã kiểm chứng ra video đúng (khớp DURATIONS ở backend). */
 export const MUSE_DURATIONS = [5, 10] as const
@@ -63,6 +83,8 @@ export const DEFAULT_MUSE_CANVAS_CONFIG: MuseCanvasConfig = {
   flowProjectId: '',
   flowAspect: '9:16',
   flowResolution: '720p',
+  flowSeconds: 0,
+  flowVariants: 1,
 }
 
 export interface MuseStylePreset {
@@ -123,6 +145,8 @@ export function normalizeMuseCanvasConfig(raw: unknown): MuseCanvasConfig {
     flowProjectId: text(get('flowProjectId', 'flow_project_id'), 64),
     flowAspect: pick(get('flowAspect', 'flow_aspect'), ['9:16', '16:9'] as const, d.flowAspect),
     flowResolution: pick(get('flowResolution', 'flow_resolution'), ['720p', '360p'] as const, d.flowResolution),
+    flowSeconds: normalizeFlowSeconds(get('flowSeconds', 'flow_seconds')),
+    flowVariants: normalizeFlowVariants(get('flowVariants', 'flow_variants')),
   }
 }
 
@@ -148,6 +172,8 @@ export function museCanvasConfigToApi(c: MuseCanvasConfig): Record<string, unkno
     flow_project_id: c.flowProjectId,
     flow_aspect: c.flowAspect,
     flow_resolution: c.flowResolution,
+    flow_seconds: c.flowSeconds,
+    flow_variants: c.flowVariants,
   }
 }
 

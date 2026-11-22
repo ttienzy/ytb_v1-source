@@ -53,9 +53,13 @@ import { NodeDeleteButton } from './NodeDeleteButton'
 
 type ClipNode = Node<Record<string, unknown>, string>
 
-/** Job Flow đang được theo dõi (giữ trên globalThis: đổi tab / nạp lại module không tạo 2 vòng hỏi cho 1 job). */
-const G = globalThis as unknown as { __clipVideoPollers?: Set<string> }
-const pollers: Set<string> = (G.__clipVideoPollers ??= new Set())
+/**
+ * Vòng hỏi đang chạy của từng job Flow: job -> token của vòng đang giữ quyền (giữ trên globalThis qua HMR).
+ * Lần gọi poll mới (vd. node vừa hiện lại sau khi đổi tab / đổi project) giành quyền, vòng cũ — đang ghi vào canvas
+ * đã gỡ — tự dừng. Nhờ vậy mỗi job chỉ có 1 vòng hỏi và luôn cập nhật node đang hiện.
+ */
+const G = globalThis as unknown as { __clipVideoPollOwners?: Map<string, object> }
+const pollers: Map<string, object> = (G.__clipVideoPollOwners ??= new Map())
 const POLL_MS = 4000
 const STEP_LABEL: Record<string, string> = {
   pending: 'Đang xếp hàng (một việc Flow mỗi lúc)',
@@ -161,11 +165,12 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
   /** Hỏi trạng thái job tới khi xong / lỗi (job Flow chạy ở backend, đóng / mở lại canvas vẫn theo dõi tiếp được). */
   const poll = useCallback(
     async (jobId: string) => {
-      if (pollers.has(jobId)) return
-      pollers.add(jobId)
+      const me = {}
+      pollers.set(jobId, me)
       try {
         for (;;) {
           await new Promise((r) => setTimeout(r, POLL_MS))
+          if (pollers.get(jobId) !== me) return // vòng mới đã giành quyền
           let job: VeoJobLite | null
           try {
             job = await getVeoJob(jobId)
@@ -188,7 +193,7 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
           }
         }
       } finally {
-        pollers.delete(jobId)
+        if (pollers.get(jobId) === me) pollers.delete(jobId)
       }
     },
     [getNode, id, updateNodeData],

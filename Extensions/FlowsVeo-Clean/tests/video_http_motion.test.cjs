@@ -73,7 +73,8 @@ test('canUseHttpVideo: Motion Control 1.2 đi HTTP khi đủ điều kiện đã
   assert.equal(canUseHttpVideo({ ...baseReq, provider_model_id: 'abra_edit' }), false);
   assert.equal(canUseHttpVideo({ ...baseReq, resolution: '360p' }), false);
   assert.equal(canUseHttpVideo({ ...baseReq, reference_video_id: 'not-a-uuid' }), false);
-  assert.equal(canUseHttpVideo({ ...baseReq, reference_video_end_seconds: 11 }), false);
+  assert.equal(canUseHttpVideo({ ...baseReq, reference_video_end_seconds: 15 }), true);   // Flow nhận tới 15 giây video mẫu
+  assert.equal(canUseHttpVideo({ ...baseReq, reference_video_end_seconds: 15.5 }), false);
   assert.equal(canUseHttpVideo({ ...baseReq, reference_video_start_seconds: 5, reference_video_end_seconds: 5 }), false);
   // Chưa có HAR cho trường hợp không ảnh -> vẫn đi giao diện
   assert.equal(canUseHttpVideo({ ...baseReq, ingredient_inputs: [], ingredient_media_ids: [] }), false);
@@ -143,4 +144,18 @@ test('video mẫu không còn trong project hoặc xử lý quá lâu: báo lỗ
   out = await run(baseReq, broken);
   assert.equal(out.result.submitted, false);
   assert.match(out.result.error, /trạng thái 7/);
+});
+
+test('giới hạn đoạn video mẫu: hằng số, canUseHttpVideo và số 15 trong hàm chạy trong trang luôn khớp', async () => {
+  const mod = await import('../src/providers/google-flow/page/video-http.js');
+  const limit = mod.MOTION_REF_MAX_SECONDS;
+  assert.equal(limit, 15);
+  assert.equal(mod.canUseHttpVideo({ ...baseReq, reference_video_start_seconds: 0, reference_video_end_seconds: limit }), true);
+  assert.equal(mod.canUseHttpVideo({ ...baseReq, reference_video_start_seconds: 0, reference_video_end_seconds: limit + 0.5 }), false);
+  // runFlowHttpVideoInPage bị serialize nên giữ số 15 dạng chữ: phải khớp hằng số (đổi một nơi mà quên nơi kia -> test đỏ)
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/providers/google-flow/page/video-http.js'), 'utf8');
+  assert.ok(src.includes(`endSec - startSec > ${limit}`), 'giới hạn trong runFlowHttpVideoInPage lệch hằng số MOTION_REF_MAX_SECONDS');
+  // heartbeat phải báo đúng hằng số này
+  const hb = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/background/runtime/heartbeat.js'), 'utf8');
+  assert.match(hb, /capabilities:\s*\{\s*motion_ref_max_seconds:\s*MOTION_REF_MAX_SECONDS\s*\}/);
 });

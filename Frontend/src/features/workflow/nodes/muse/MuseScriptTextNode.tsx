@@ -57,12 +57,12 @@ import {
 import { generateMuseVideo, museMediaUrl, openMuseVideoFolder } from '../../services/museCanvasApi.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { useMuseRuns } from './useMuseRuns'
+import { runKey } from '../../services/museRunRegistry.ts'
 
 type ScriptTextNode = Node<Record<string, unknown>, string>
 
-/** Lượt "Tạo video" đang chờ Muse (giữ qua đổi tab / HMR, như node Kịch bản video). */
-const G = globalThis as unknown as { __museScriptVideoInflight?: Map<string, Promise<MuseScriptVideo>> }
-const inflight: Map<string, Promise<MuseScriptVideo>> = (G.__museScriptVideoInflight ??= new Map())
+// Lượt "Tạo video" đang chờ Muse nằm ở `museRuns` (đổi tab / đổi project / HMR không làm mất).
 
 const basename = (p: string) => p.split(/[\\/]/).pop() || p
 
@@ -105,6 +105,8 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
   const vState = scriptVideoState(data.text, refs, video)
   const vRunning = vState === 'running'
   const setVideo = useCallback((v: MuseScriptVideo) => updateNodeData(id, { video: v }), [id, updateNodeData])
+  const runs = useMuseRuns<MuseScriptVideo>((_key, v) => setVideo(v))
+  const flight = runKey.scriptVideo(id)
 
   // Node "Video kết quả" đã tách từ lần tạo hiện tại (nối ở cổng ra video)?
   const vOutConns = useNodeConnections({ handleType: 'source', handleId: MUSE_HANDLE.videoOut })
@@ -148,9 +150,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
   useEffect(() => {
     const v = normalizeScriptTextData(raw).video
     if (v?.status !== 'running') return
-    const p = inflight.get(id)
-    if (p) p.then(setVideo)
-    else {
+    if (!runs.resume(flight)) {
       const fixed = interruptScriptVideo(v)
       if (fixed) setVideo(fixed)
     }
@@ -165,7 +165,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
   }, [vRunning])
 
   const makeVideo = useCallback(async () => {
-    if (inflight.has(id)) return // đang có lượt chờ Muse: không gửi thêm
+    if (runs.isRunning(flight)) return // đang có lượt chờ Muse: không gửi thêm
     if (!refs.length && !window.confirm('Chưa nối ảnh tham chiếu nào — Muse sẽ không giữ được mặt / bộ đồ. Vẫn tạo video?')) return
     if (video && vState !== 'pending') {
       const ok = window.confirm(
@@ -194,10 +194,8 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
         updatedAt: Date.now(),
       }))
       .catch((e: any) => ({ inputPath, status: 'error' as const, error: e?.message || 'Muse lỗi', updatedAt: Date.now() }))
-      .finally(() => inflight.delete(id))
-    inflight.set(id, job)
-    setVideo(await job)
-  }, [config, data.label, data.text, id, refs, setVideo, vState, video])
+    await runs.start(flight, job)
+  }, [config, data.label, data.text, flight, refs, runs, setVideo, vState, video])
 
   /** Nối lại các ảnh tham chiếu đang nối vào node Kịch bản video nguồn (giữ thứ tự của nó). */
   const copyParentRefs = useCallback(() => {

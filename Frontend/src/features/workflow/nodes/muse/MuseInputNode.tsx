@@ -1,10 +1,11 @@
 /**
- * Node ảnh vào của Muse Canvas — đúng 1 ảnh/node: "Trang phục" (nối vào "Tách áo quần") và
- * "Nhân vật tham chiếu" (nối vào "Bảng thiết kế nhân vật"). Loại node quyết định tiêu đề / chữ (INPUT_SPECS).
+ * Node ảnh vào của Muse Canvas — đúng 1 ảnh/node: "Trang phục" (nối vào "Tách áo quần"),
+ * "Nhân vật tham chiếu" (nối vào "Bảng thiết kế nhân vật") và "Tham chiếu bối cảnh" (độc lập: đưa ảnh địa điểm vào
+ * cổng "Tham chiếu" của các node kịch bản). Loại node quyết định tiêu đề / chữ (INPUT_SPECS).
  */
 import { memo, useRef, useState } from 'react'
 import { Handle, Position, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
-import { ImagePlus, Library, Loader2, RefreshCw, Shirt, UserRound, X } from 'lucide-react'
+import { ImagePlus, Library, Loader2, MapPin, RefreshCw, Shirt, UserRound, X } from 'lucide-react'
 import {
   INPUT_SPECS,
   MUSE_HANDLE,
@@ -25,6 +26,7 @@ function MuseInputNodeImpl({ id, type, data: raw, selected }: NodeProps<InputNod
   const { pickLibraryImage } = useMuseCanvas()
   const spec = INPUT_SPECS[type] ?? INPUT_SPECS[MUSE_NODE.outfit]
   const isCharacter = type === MUSE_NODE.character
+  const isScene = type === MUSE_NODE.scene
   const data = normalizeInputData(raw, spec.type)
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -74,10 +76,10 @@ function MuseInputNodeImpl({ id, type, data: raw, selected }: NodeProps<InputNod
   }
 
   return (
-    <div className={`mc-node mc-node-outfit ${isCharacter ? 'mc-node-character' : ''} ${selected ? 'selected' : ''}`}>
+    <div className={`mc-node mc-node-outfit ${isCharacter ? 'mc-node-character' : ''} ${isScene ? 'mc-node-scene' : ''} ${selected ? 'selected' : ''}`}>
       <div className="mc-node-head">
-        <span className={`mc-node-icon ${isCharacter ? 'mc-icon-character' : 'mc-icon-image'}`}>
-          {isCharacter ? <UserRound size={14} /> : <Shirt size={14} />}
+        <span className={`mc-node-icon ${isCharacter ? 'mc-icon-character' : isScene ? 'mc-icon-scene' : 'mc-icon-image'}`}>
+          {isCharacter ? <UserRound size={14} /> : isScene ? <MapPin size={14} /> : <Shirt size={14} />}
         </span>
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
@@ -151,8 +153,14 @@ function MuseInputNodeImpl({ id, type, data: raw, selected }: NodeProps<InputNod
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.imagesOut}
-        className={`mc-handle ${isCharacter ? 'mc-handle-character' : 'mc-handle-image'}`}
-        title={isCharacter ? 'Nối vào node Bảng thiết kế nhân vật' : 'Nối vào node Tách áo quần'}
+        className={`mc-handle ${isCharacter ? 'mc-handle-character' : isScene ? 'mc-handle-scene' : 'mc-handle-image'}`}
+        title={
+          isCharacter
+            ? 'Nối vào node Bảng thiết kế nhân vật'
+            : isScene
+              ? 'Nối vào cổng “Tham chiếu” của Kịch bản video / Kịch bản / Kịch bản tạo video'
+              : 'Nối vào node Tách áo quần'
+        }
       />
     </div>
   )

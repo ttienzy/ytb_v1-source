@@ -52,9 +52,13 @@ import { NodeDeleteButton } from './NodeDeleteButton'
 
 type MergeNode = Node<Record<string, unknown>, string>
 
-/** Job ghép đang được theo dõi (giữ trên globalThis: đổi tab / nạp lại module không tạo 2 vòng hỏi cho 1 job). */
-const G = globalThis as unknown as { __clipMergePollers?: Set<string> }
-const pollers: Set<string> = (G.__clipMergePollers ??= new Set())
+/**
+ * Vòng hỏi đang chạy của từng job ghép: job -> token của vòng đang giữ quyền (giữ trên globalThis qua HMR).
+ * Lần gọi poll mới (vd. node vừa hiện lại sau khi đổi tab / đổi project) giành quyền, vòng cũ — đang ghi vào canvas
+ * đã gỡ — tự dừng. Nhờ vậy mỗi job chỉ có 1 vòng hỏi và luôn cập nhật node đang hiện.
+ */
+const G = globalThis as unknown as { __clipMergePollOwners?: Map<string, object> }
+const pollers: Map<string, object> = (G.__clipMergePollOwners ??= new Map())
 const POLL_MS = 2000
 
 const STATUS_LABEL: Record<MergeClipRow['status'], string> = {
@@ -95,11 +99,12 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
   /** Hỏi tiến độ job ghép ở backend tới khi xong / lỗi. Node không còn running với job này (đã ghép lại / bị xóa) thì dừng. */
   const poll = useCallback(
     async (jobId: string) => {
-      if (pollers.has(jobId)) return
-      pollers.add(jobId)
+      const me = {}
+      pollers.set(jobId, me)
       try {
         for (;;) {
           await new Promise((r) => setTimeout(r, POLL_MS))
+          if (pollers.get(jobId) !== me) return // vòng mới đã giành quyền
           const cur = normalizeClipMergeData(getNode(id)?.data as Record<string, unknown> | undefined).merge
           if (!cur || cur.jobId !== jobId || cur.status !== 'running') break
           let job
@@ -127,7 +132,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
           }
         }
       } finally {
-        pollers.delete(jobId)
+        if (pollers.get(jobId) === me) pollers.delete(jobId)
       }
     },
     [getNode, id, updateNodeData],

@@ -1,9 +1,10 @@
 /**
  * Node "Ảnh kết quả": 1 ảnh đã tạo, tách ra từ 1 dòng của node chạy Muse (Tách áo quần / Bảng nhân vật).
  * Giữ ảnh riêng (không đổi khi node nguồn chạy lại) và nhớ nguồn; nếu nguồn có ảnh mới hơn thì báo + nút cập nhật.
+ * Node chưa có ảnh (vd. project "Làm mẫu" đã bỏ kết quả) thì tự nhận ảnh mới khi nguồn chạy xong — không có gì để mất.
  * Cổng ra "image" để nối tiếp sang node sau.
  */
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
 import { Check, Copy, ExternalLink, ImageIcon, RefreshCw } from 'lucide-react'
 import {
@@ -31,6 +32,10 @@ function MuseOutputNodeImpl({ id, data: raw, selected }: NodeProps<OutputNode>) 
     () => (parent && parent.type && JOB_SPECS[parent.type] ? newerOutputFor(data, normalizeJobData(parent.data as Record<string, unknown>, parent.type)) : null),
     [data, parent],
   )
+  // Node trống (project làm mẫu) tự nhận ảnh mới; node đã có ảnh thì vẫn chờ người dùng bấm "Dùng ảnh mới".
+  useEffect(() => {
+    if (!data.image && newer) updateNodeData(id, { image: newer })
+  }, [data.image, id, newer, updateNodeData])
   const fromText = data.origin
     ? `${JOB_SPECS[data.origin.jobType]?.title ?? 'Muse'} · ${data.origin.rowLabel}`
     : 'Ảnh kết quả'

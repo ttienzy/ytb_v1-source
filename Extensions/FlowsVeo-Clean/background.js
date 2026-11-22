@@ -5635,6 +5635,7 @@
   var VERIFIED_FRAMES_MODEL = /^macaron_cookie_i2v_fl_(6|10)s(_360p)?$/;
   var VERIFIED_R2V_MODEL = /^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$/;
   var VERIFIED_EDIT_MODEL = /^macaron_cookie_edit$/;
+  var MOTION_REF_MAX_SECONDS = 15;
   var MEDIA_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function motionImageOrder(req) {
     const images = Array.isArray(req?.ingredient_images) ? req.ingredient_images : [];
@@ -5680,7 +5681,7 @@
       if (!MEDIA_ID_RE.test(String(req.reference_video_id || ""))) return false;
       const start = Number(req.reference_video_start_seconds || 0);
       const end = Number(req.reference_video_end_seconds);
-      if (!(start >= 0) || !(end > start) || end - start > 10) return false;
+      if (!(start >= 0) || !(end > start) || end - start > MOTION_REF_MAX_SECONDS) return false;
       if (!motionImageOrder(req)) return false;
     } else {
       return false;
@@ -5883,8 +5884,8 @@
         if (!UUID_RE.test(videoId)) throw new Error("Motion Control cần mã video mẫu đã tải lên Flow");
         const startSec = Number(flowRequest.reference_video_start_seconds || 0);
         const endSec = Number(flowRequest.reference_video_end_seconds);
-        if (!(startSec >= 0) || !(endSec > startSec) || endSec - startSec > 10) {
-          throw new Error("Đoạn cắt video mẫu không hợp lệ (tối đa 10 giây)");
+        if (!(startSec >= 0) || !(endSec > startSec) || endSec - startSec > 15) {
+          throw new Error("Đoạn cắt video mẫu không hợp lệ (tối đa 15 giây)");
         }
         const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
         const inputs = Array.isArray(flowRequest.ingredient_inputs) && flowRequest.ingredient_inputs.length ? flowRequest.ingredient_inputs : [...(flowRequest.ingredient_media_ids || []).map((media_id) => ({ media_id })), ...images.map(() => ({ local: true }))];
@@ -7436,6 +7437,9 @@
         body: JSON.stringify({
           ext_fp: runtime.extFp,
           version: manifest.version || "?",
+          // Giới hạn của bản extension ĐANG CHẠY (cùng số phiên bản 2.2.0 nên version không phân biệt được bản mới / cũ):
+          // backend dựa vào đây để chặn việc gửi đoạn video mẫu mà extension này sẽ không đi HTTP được.
+          capabilities: { motion_ref_max_seconds: MOTION_REF_MAX_SECONDS },
           tab_count: tabs.length,
           tabs: tabs.map((t) => ({ id: t.id, url: t.url })),
           user_agent: navigator.userAgent.slice(0, 120)

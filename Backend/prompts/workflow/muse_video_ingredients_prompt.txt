@@ -1,0 +1,9 @@
+Recreate the exact pacing, locked static tripod camera, subway station lighting, and high-speed passing subway train transitions from the reference video, but completely replace the original person with the character from the provided reference images. Do not show the original person or any of their original props (such as a smartphone) at any point.
+
+Keep the camera 100% still with zero zoom, pan, or camera shake. Cycle cleanly and sequentially through every outfit shown in the reference images, strictly maintaining the character's exact facial features, hairstyle, and natural body proportions throughout the entire video:
+
+- Opening Look (First reference image): The character starts standing naturally at the center of the platform wearing the exact outfit from the first reference image, with a relaxed everyday posture, subtle natural micro-movements, and a candid facial expression that fits the mood of the outfit.
+- Passing Train Transitions: Each time a fast-moving metallic subway train rushes horizontally across the foreground with heavy motion blur, completely obscuring the frame, the character seamlessly changes into the exact outfit from the next reference image in order.
+- Subsequent Looks (Each following reference image): As the train clears after each transition, the character appears wearing the next look, strictly preserving all clothing details, colors, fabric textures, prints, and accessories from that reference image. With each outfit change, naturally vary the character's stance, hand placement, head tilt, gaze, and facial expression to match that specific outfit's aesthetic and vibe (shifting effortlessly between sweet, casual, energetic, or poised attitudes) without looking stiff or repetitive.
+
+Realistic ambient subway lighting, 100% consistent background tiles, floor, and yellow tactile paving, natural hair and fabric physics rustling from the wind of each passing train, photorealistic, 9:16 vertical video.

@@ -8,6 +8,7 @@ import {
   buildClipScriptRequest,
   checkClipBeats,
   clipCredits720p,
+  clipsCredits,
   createClipScriptNode,
   createOutputNode,
   explainMuseConnection,
@@ -68,7 +69,9 @@ test('clip script: tách bài theo dòng === SCRIPT k/N, lấy tên, số giây,
   assert.equal(c2.seconds, 9)
   assert.deepEqual(c2.warnings, ['Mốc cuối 8s khác độ dài clip 9s.'])
   assert.equal(p.totalSeconds, 17)
-  assert.equal(clipCredits720p(p.totalSeconds), 51)
+  // tổng = cộng giá từng clip (8 s = 24, 9 s = 27), không coi 17 s là một clip
+  assert.equal(clipsCredits(p.clips.map((c) => c.seconds)), 51)
+  assert.equal(clipCredits720p(8), 24)
 })
 
 test('clip script: cảnh báo sai số clip, quá 15s, mốc hở/chồng, thiếu prompt', () => {

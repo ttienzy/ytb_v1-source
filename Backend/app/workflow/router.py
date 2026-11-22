@@ -51,7 +51,7 @@ from app.workflow.schemas import (
     MotionCharacterSheetRequest,
     MotionCharacterSheetResponse,
 )
-from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_gpt_image, muse_merge
+from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_gpt_image, muse_merge, muse_projects
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
 from app.workflow.service import (
@@ -317,15 +317,72 @@ def update_muse_canvas_config(req: muse_canvas.MuseCanvasConfig) -> muse_canvas.
 
 @router.get("/muse/canvas", response_model=muse_canvas.MuseCanvasGraph)
 def get_muse_canvas_graph() -> muse_canvas.MuseCanvasGraph:
-    """Đồ thị Muse Canvas đã lưu (nodes, edges, viewport)."""
+    """Đồ thị của project Muse Canvas đang mở (giữ cho bản frontend cũ; bản mới dùng /muse/projects/{id}/canvas)."""
     return muse_canvas.get_graph()
 
 
 @router.put("/muse/canvas", response_model=muse_canvas.MuseCanvasGraph)
 def update_muse_canvas_graph(req: muse_canvas.MuseCanvasGraph) -> muse_canvas.MuseCanvasGraph:
-    """Lưu đồ thị Muse Canvas vào Data/muse_canvas.json."""
+    """Lưu đồ thị vào project Muse Canvas đang mở."""
     try:
         return muse_canvas.save_graph(req)
+    except ValueError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+
+
+def _muse_project_call(fn, *args):
+    try:
+        return fn(*args)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Không tìm thấy project Muse Canvas (đã bị xóa?).")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/muse/projects", response_model=muse_projects.MuseProjectIndex)
+def list_muse_projects() -> muse_projects.MuseProjectIndex:
+    """Danh sách project Muse Canvas + project đang mở."""
+    return muse_projects.list_projects()
+
+
+@router.post("/muse/projects", response_model=muse_projects.MuseProject)
+def create_muse_project(req: muse_projects.MuseProjectCreate) -> muse_projects.MuseProject:
+    """Tạo project (trống, hoặc từ đồ thị frontend gửi lên khi nhân bản / làm mẫu)."""
+    try:
+        return muse_projects.create_project(req)
+    except ValueError as e:
+        raise HTTPException(status_code=413 if "quá lớn" in str(e) else 400, detail=str(e))
+
+
+@router.patch("/muse/projects/{project_id}", response_model=muse_projects.MuseProject)
+def update_muse_project(project_id: str, req: muse_projects.MuseProjectPatch) -> muse_projects.MuseProject:
+    """Đổi tên / cài đặt riêng (project Flow, khung hình, chất lượng, tiền tố file)."""
+    return _muse_project_call(muse_projects.update_project, project_id, req)
+
+
+@router.delete("/muse/projects/{project_id}", response_model=muse_projects.MuseProjectIndex)
+def delete_muse_project(project_id: str) -> muse_projects.MuseProjectIndex:
+    """Bỏ project vào thùng rác (không xóa ảnh / video đã tạo)."""
+    return _muse_project_call(muse_projects.delete_project, project_id)
+
+
+@router.post("/muse/projects/{project_id}/open", response_model=muse_projects.MuseProjectIndex)
+def open_muse_project(project_id: str) -> muse_projects.MuseProjectIndex:
+    """Ghi nhớ project đang mở."""
+    return _muse_project_call(muse_projects.open_project, project_id)
+
+
+@router.get("/muse/projects/{project_id}/canvas", response_model=muse_canvas.MuseCanvasGraph)
+def get_muse_project_canvas(project_id: str) -> muse_canvas.MuseCanvasGraph:
+    return _muse_project_call(muse_projects.get_graph, project_id)
+
+
+@router.put("/muse/projects/{project_id}/canvas", response_model=muse_canvas.MuseCanvasGraph)
+def save_muse_project_canvas(project_id: str, req: muse_canvas.MuseCanvasGraph) -> muse_canvas.MuseCanvasGraph:
+    try:
+        return muse_projects.save_graph(project_id, req)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Không tìm thấy project Muse Canvas (đã bị xóa?).")
     except ValueError as e:
         raise HTTPException(status_code=413, detail=str(e))
 

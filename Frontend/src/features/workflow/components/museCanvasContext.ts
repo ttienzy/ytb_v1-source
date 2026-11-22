@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react'
 import { DEFAULT_MUSE_CANVAS_CONFIG, type MuseAccountLite, type MuseCanvasConfig } from '../services/museCanvasConfig.ts'
 import type { LibraryImage } from '../services/imageLibraryApi'
 import type { FlowProject } from '../services/museCanvasApi.ts'
+import type { ExportedVideoItem } from '../contracts'
 
 export interface MuseCanvasContextValue {
   config: MuseCanvasConfig
@@ -11,6 +12,8 @@ export interface MuseCanvasContextValue {
   blockers: string[]
   /** Mở Thư Viện Ảnh ở chế độ chọn; trả ảnh đã chọn hoặc null nếu đóng. */
   pickLibraryImage: (title?: string) => Promise<LibraryImage | null>
+  /** Mở Thư Viện Video ở chế độ chọn; trả video đã chọn hoặc null nếu đóng. */
+  pickLibraryVideo: (title?: string) => Promise<ExportedVideoItem | null>
   /** Project Flow đang chọn cho node Clip (null = chưa chọn / không còn trong app) */
   flowProject: FlowProject | null
 }
@@ -20,6 +23,7 @@ export const MuseCanvasContext = createContext<MuseCanvasContextValue>({
   accounts: [],
   blockers: [],
   pickLibraryImage: async () => null,
+  pickLibraryVideo: async () => null,
   flowProject: null,
 })
 

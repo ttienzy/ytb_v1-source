@@ -50,15 +50,12 @@ import {
 import { fetchMusePrompt, generateMuseText, museMediaUrl, saveMusePromptDefault } from '../../services/museCanvasApi.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { useMuseRuns } from './useMuseRuns'
+import { runKey } from '../../services/museRunRegistry.ts'
 
 type ScriptNode = Node<Record<string, unknown>, string>
 
-/**
- * Lượt viết đang chờ Muse, giữ trên globalThis: đổi tab (node bị gỡ) hay Vite nạp lại module đều không làm mất,
- * node hiện lại thì gắn tiếp vào promise thay vì báo "gián đoạn" (tránh người dùng chạy lại → tốn lượt).
- */
-const G = globalThis as unknown as { __museScriptInflight?: Map<string, Promise<MuseScriptResult>> }
-const inflight: Map<string, Promise<MuseScriptResult>> = (G.__museScriptInflight ??= new Map())
+// Lượt viết đang chờ Muse nằm ở `museRuns` (đổi tab / đổi project / HMR không làm mất; node hiện lại thì nhận tiếp).
 
 function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) {
   const { updateNodeData, getNode, getNodes, addNodes, addEdges, setCenter } = useReactFlow()
@@ -129,14 +126,14 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
     [getNode, setCenter],
   )
   const setResult = useCallback((r: MuseScriptResult) => updateNodeData(id, { result: r }), [id, updateNodeData])
+  const runs = useMuseRuns<MuseScriptResult>((_key, r) => setResult(r))
+  const flight = runKey.script(id)
 
   // Mở lại canvas: còn "running" mà không còn request chờ -> gián đoạn; còn request -> gắn tiếp.
   useEffect(() => {
     const r = normalizeScriptData(raw).result
     if (r?.status !== 'running') return
-    const p = inflight.get(id)
-    if (p) p.then(setResult)
-    else {
+    if (!runs.resume(flight)) {
       const fixed = interruptScript(r)
       if (fixed) setResult(fixed)
     }
@@ -152,7 +149,7 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
   }, [running])
 
   const run = useCallback(async () => {
-    if (inflight.has(id)) return // đang có lượt chờ Muse: không gửi thêm
+    if (runs.isRunning(flight)) return // đang có lượt chờ Muse: không gửi thêm
     if (result && state !== 'pending') {
       const ok = window.confirm(
         state === 'error' || state === 'interrupted'
@@ -181,10 +178,8 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
         updatedAt: Date.now(),
       }))
       .catch((e: any) => ({ inputPath, status: 'error' as const, error: e?.message || 'Muse lỗi', updatedAt: Date.now() }))
-      .finally(() => inflight.delete(id))
-    inflight.set(id, job)
-    setResult(await job)
-  }, [config, data.notes, data.prompt, id, refs, result, setResult, state])
+    await runs.start(flight, job)
+  }, [config, data.notes, data.prompt, flight, refs, result, runs, setResult, state])
 
   async function resetToDefault() {
     setBusy('reset')
