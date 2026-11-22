@@ -90,6 +90,76 @@ def wait_for_cdp(port: int, max_wait: float = 15.0) -> bool:
     return False
 
 
+def close_chrome_gracefully(browser, proc: subprocess.Popen, wait_seconds: float = 15.0) -> bool:
+    """Tắt Chrome bằng CDP `Browser.close` rồi chờ tiến trình thoát; trả True nếu Chrome tự thoát êm.
+
+    Chrome chỉ ghi cookie mới xuống ổ đĩa (Default/Network/Cookies) định kỳ ~30 giây hoặc khi tắt bình thường.
+    `proc.terminate()` trên Windows là TerminateProcess (giết ngay) → cookie vừa đăng nhập/vừa làm mới bị MẤT, profile
+    "ấm" thực ra đã đăng xuất và lần làm mới sau chắc chắn hỏng. Chỉ giết cứng khi Chrome không tự thoát kịp.
+    `browser.close()` của connect_over_cdp chỉ ngắt kết nối, không đóng Chrome."""
+    try:
+        browser.new_browser_cdp_session().send("Browser.close")
+    except Exception:  # noqa: BLE001 — Chrome đóng ngay nên kết nối CDP thường đứt giữa chừng: bình thường
+        pass
+    exited = False
+    try:
+        proc.wait(timeout=wait_seconds)
+        exited = True
+    except subprocess.TimeoutExpired:
+        logger.warning("Chrome không tự thoát sau %.0fs — buộc tắt (cookie mới có thể chưa được lưu).", wait_seconds)
+    try:
+        browser.close()
+    except Exception:  # noqa: BLE001
+        pass
+    if not exited and proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:  # noqa: BLE001
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+    return exited
+
+
+_CHROME_EPOCH_OFFSET_US = 11644473600 * 1_000_000  # 1601-01-01 → 1970-01-01, micro giây
+
+
+def profile_session_cookie_state(profile_dir: str | Path) -> Optional[bool]:
+    """Profile Chrome có lưu cookie `__Secure-next-auth.session-token*` còn hạn của chatgpt.com không.
+
+    True/False = đọc được DB cookie; None = chưa có DB (profile mới/lạ) → không kết luận được. Đọc trên bản sao để không
+    đụng khóa file khi Chrome đang mở. Chỉ đọc tên + hạn, không giải mã giá trị."""
+    import shutil
+    import sqlite3
+    import tempfile
+
+    base = Path(profile_dir) / "Default"
+    db = next((p for p in (base / "Network" / "Cookies", base / "Cookies") if p.is_file()), None)
+    if db is None:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / "Cookies"
+        try:
+            shutil.copyfile(db, copy)
+            conn = sqlite3.connect(str(copy))
+            try:
+                now_us = int(time.time() * 1_000_000) + _CHROME_EPOCH_OFFSET_US
+                row = conn.execute(
+                    "SELECT 1 FROM cookies WHERE host_key LIKE '%chatgpt.com' "
+                    "AND name LIKE '__Secure-next-auth.session-token%' "
+                    "AND (expires_utc = 0 OR expires_utc > ?) LIMIT 1",
+                    (now_us,),
+                ).fetchone()
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error) as exc:
+            logger.warning("Không đọc được cookie của profile %s: %s", profile_dir, exc)
+            return None
+    return row is not None
+
+
 def get_account_store() -> ChatgptAccountStore:
     return ChatgptAccountStore(DATA_DIR)
 
@@ -242,19 +312,12 @@ def chatgpt_login(timeout_seconds: int = 420) -> dict[str, Any]:
 
                 time.sleep(1.5)
         finally:
-            try:
-                browser.close()
-            except Exception:
-                pass
-            if proc.poll() is None:
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-                except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
+            close_chrome_gracefully(browser, proc)
+
+    if out and profile_session_cookie_state(profile_dir) is False:
+        # Không chặn việc thêm tài khoản (cookie trong JSON vẫn dùng được), nhưng làm mới về sau sẽ hỏng.
+        logger.warning("Profile %s không lưu được session-token sau khi tắt Chrome — làm mới cookie sẽ không chạy.",
+                       profile_dir)
 
     if not out:
         import shutil
@@ -289,6 +352,10 @@ def chatgpt_capture(profile_dir: str, timeout_seconds: int = 90) -> dict[str, An
 
     p_path = Path(profile_dir)
     if not p_path.exists():
+        return None
+    if profile_session_cookie_state(p_path) is False:
+        # Profile đã đăng xuất (không còn session-token) → mở Chrome chờ 90 giây cũng vô ích.
+        logger.info("Profile %s không còn session-token ChatGPT — cần đăng nhập lại.", p_path)
         return None
 
     cdp_port = find_free_cdp_port(9235)
@@ -390,19 +457,8 @@ def chatgpt_capture(profile_dir: str, timeout_seconds: int = 90) -> dict[str, An
 
                 time.sleep(1.5)
         finally:
-            try:
-                browser.close()
-            except Exception:
-                pass
-            if proc.poll() is None:
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-                except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
+            # Tắt êm để token ChatGPT vừa xoay vòng được ghi lại vào profile cho lần làm mới sau.
+            close_chrome_gracefully(browser, proc)
 
     return out
 
