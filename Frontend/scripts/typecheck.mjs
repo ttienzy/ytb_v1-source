@@ -4,7 +4,10 @@
 //   npm run typecheck -- --update      ghi lại danh sách lỗi cũ sau khi đã SỬA bớt lỗi (không dùng để nuốt lỗi mới)
 //
 // Trước đây `tsc --noEmit` chạy tsconfig.json gốc (`files: []`) nên không kiểm tra gì; phải tự đếm "vẫn 66 lỗi".
-// Lỗi so theo file + mã + nội dung (bỏ số dòng) để sửa code phía trên không làm lỗi cũ thành "mới".
+// Lỗi so theo file + mã lỗi + SỐ LƯỢNG (bỏ số dòng và câu chữ): sửa code phía trên không làm lỗi cũ thành "mới", và câu báo
+// lỗi của tsc không ổn định giữa các môi trường (thứ tự kiểu trong union đổi: máy dev in "failed" | "scheduled", bản checkout
+// sạch trên CI in "scheduled" | "failed" — từng làm CI v2.3.0 báo 13 lỗi "mới" dù tổng vẫn 70). Lỗi mới cùng mã ở cùng file
+// vẫn bị bắt vì số lượng tăng.
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -28,7 +31,7 @@ function runTsc(project) {
   return errors
 }
 
-const keyOf = (e) => `${e.file} | ${e.code} | ${e.message}`
+const keyOf = (e) => `${e.file} | ${e.code}`
 const countBy = (errors) => errors.reduce((m, e) => m.set(keyOf(e), (m.get(keyOf(e)) || 0) + 1), new Map())
 
 const errors = PROJECTS.flatMap(runTsc)
