@@ -295,6 +295,40 @@ async function waitHealthy(target, timeoutMs) {
 const WATCH_IGNORE = /(^|[\\/])(\.venv|venv|__pycache__|Data|node_modules|dist|build|tests|poc|\.git)([\\/]|$)/i
 const isBackendSource = rel => !!rel && /\.py$/i.test(rel) && !WATCH_IGNORE.test(rel)
 
+/**
+ * Lọc sự kiện fs.watch chỉ còn lần SỬA THẬT (file mới / bị xóa / mtime hoặc kích thước đổi).
+ *
+ * Trên Windows, fs.watch (libuv) nhận cả thay đổi "last access". Máy bật cập nhật last-access (mặc định "System
+ * Managed" trên Windows 11) thì chỉ cần ĐỌC một file .py chưa mở trong ~1 giờ (ripgrep, Pylance, antivirus, traceback
+ * đọc mã nguồn…) là có sự kiện "change" → backend bị restart, giết job Muse/Flow đang chạy giữa chừng.
+ */
+function createChangeFilter(statFn = p => fs.statSync(p)) {
+  const known = new Map() // đường dẫn tuyệt đối → "mtimeMs:size"
+  const sig = p => { try { const s = statFn(p); return `${s.mtimeMs}:${s.size}` } catch { return null } }
+  return {
+    seed(paths) { for (const p of paths) { const s = sig(p); if (s) known.set(p, s) } },
+    isRealChange(p) {
+      const now = sig(p)
+      const before = known.get(p) ?? null
+      if (now === before) return false // chỉ đọc/đổi thuộc tính, hoặc sự kiện lặp
+      if (now) known.set(p, now); else known.delete(p)
+      return true
+    },
+  }
+}
+
+function listBackendSources(dir, base = dir, out = []) {
+  let entries = []
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return out }
+  for (const e of entries) {
+    const abs = path.join(dir, e.name)
+    const rel = path.relative(base, abs)
+    if (e.isDirectory()) { if (!WATCH_IGNORE.test(rel)) listBackendSources(abs, base, out) }
+    else if (isBackendSource(rel)) out.push(abs)
+  }
+  return out
+}
+
 /** Dừng backend cũ (cả cây + giữ cổng) rồi chạy lại. Voice/Frontend giữ nguyên. */
 async function restartService(target, why) {
   dev(`${why} → khởi động lại ${target.name} (voice/frontend giữ nguyên)…`)
@@ -330,9 +364,12 @@ function watchBackend(target) {
       warn(`restart backend lỗi: ${error?.message || error}`)
     } finally { busy = false }
   }
+  const filter = createChangeFilter()
+  filter.seed(listBackendSources(dir))
   try {
     const watcher = fs.watch(dir, { recursive: true }, (_ev, rel) => {
       if (!isBackendSource(rel && String(rel))) return
+      if (!filter.isRealChange(path.join(dir, String(rel)))) return
       changed.add(String(rel).replace(/\\/g, '/'))
       clearTimeout(timer)
       timer = setTimeout(flush, 800)
@@ -345,7 +382,7 @@ function watchBackend(target) {
 }
 
 if (require.main !== module) {
-  module.exports = { collectVictims, isManagedChild, looksOurs, isBackendSource, PROTECTED, SPAWNED }
+  module.exports = { collectVictims, isManagedChild, looksOurs, isBackendSource, createChangeFilter, listBackendSources, PROTECTED, SPAWNED }
 } else {
 process.on('SIGINT', () => shutdown('Ctrl+C'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))

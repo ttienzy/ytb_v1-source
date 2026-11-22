@@ -166,6 +166,7 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
   const [accounts, setAccounts] = useState<MuseAccountLite[]>([])
   const [accountsLoading, setAccountsLoading] = useState(false)
   const [accountsLoaded, setAccountsLoaded] = useState(false)
+  const [accountsError, setAccountsError] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [configSave, setConfigSave] = useState<SaveState>('idle')
   const [graphSave, setGraphSave] = useState<SaveState>('idle')
@@ -208,12 +209,24 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
     }
   }, [])
 
+  // Lỗi tải danh sách ≠ "chưa có tài khoản": trước đây lỗi mạng (backend đang khởi động lại) làm danh sách thành rỗng
+  // và hiện nhầm "Chưa có tài khoản Muse" giữa lúc đang tạo. Giờ thử lại vài lần, lỗi hẳn thì giữ danh sách cũ + báo rõ.
   const loadAccounts = useCallback(async () => {
     setAccountsLoading(true)
     try {
-      setAccounts(await fetchMuseAccounts())
-    } catch {
-      setAccounts([])
+      for (let attempt = 1; ; attempt++) {
+        try {
+          setAccounts(await fetchMuseAccounts())
+          setAccountsError('')
+          return
+        } catch {
+          if (attempt >= 6) {
+            setAccountsError('Không tải được danh sách tài khoản Muse (backend chưa phản hồi — có thể đang khởi động lại). Bấm ⟳ để tải lại.')
+            return
+          }
+          await new Promise((r) => setTimeout(r, 2000))
+        }
+      }
     } finally {
       setAccountsLoading(false)
       setAccountsLoaded(true)
@@ -402,7 +415,11 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
   }, [])
 
   // chưa tải xong danh sách tài khoản thì chưa cảnh báo (tránh báo nhầm “Chưa có tài khoản”)
-  const warnings = useMemo(() => (accountsLoaded ? museConfigWarnings(config, accounts) : []), [config, accounts, accountsLoaded])
+  const warnings = useMemo(() => {
+    if (!accountsLoaded) return []
+    if (accountsError && accounts.length === 0) return [accountsError]
+    return [...(accountsError ? [accountsError] : []), ...museConfigWarnings(config, accounts)]
+  }, [config, accounts, accountsLoaded, accountsError])
   // Thư Viện Ảnh ở chế độ chọn — node gọi pickLibraryImage() và chờ kết quả.
   const [picker, setPicker] = useState<{ title?: string; resolve: (it: LibraryImage | null) => void } | null>(null)
   const pickLibraryImage = useCallback(
@@ -419,11 +436,15 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
       config,
       accounts,
       // chưa tải xong danh sách tài khoản thì đừng báo "Chưa có tài khoản" (chỉ chặn chạy tạm)
-      blockers: accountsLoaded ? museRunBlockers(config, accounts) : ['Đang tải tài khoản Muse…'],
+      blockers: !accountsLoaded
+        ? ['Đang tải tài khoản Muse…']
+        : accountsError && accounts.length === 0
+          ? [accountsError]
+          : museRunBlockers(config, accounts),
       pickLibraryImage,
       flowProject,
     }),
-    [config, accounts, accountsLoaded, pickLibraryImage, flowProject],
+    [config, accounts, accountsLoaded, accountsError, pickLibraryImage, flowProject],
   )
 
   async function createProject() {

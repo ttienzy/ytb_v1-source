@@ -1,7 +1,10 @@
 // Kiểm thử logic chọn tiến trình cần kill của dev.js (không kill gì thật). Chạy: npm test
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { collectVictims, isManagedChild, isBackendSource } = require('./dev.js')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { collectVictims, isManagedChild, isBackendSource, createChangeFilter, listBackendSources } = require('./dev.js')
 
 const T0 = Date.parse('2026-11-09T14:00:00Z')
 const p = (pid, ppid, name, cmd = '', createdOffsetMs = 0) => ({ pid, ppid, name, cmd, created: T0 + createdOffsetMs })
@@ -66,5 +69,42 @@ test('isBackendSource: chỉ .py của mã nguồn backend mới kích hoạt re
   for (const ignored of ['.venv/Lib/site-packages/x.py', 'app/__pycache__/x.cpython-311.pyc', 'Data/media/gen.py',
     'tests/discover/test_freshness.py', 'poc/campaign_look/a.py', 'app/discover/notes.txt', '', undefined]) {
     assert.equal(isBackendSource(ignored), false, String(ignored))
+  }
+})
+
+test('createChangeFilter: chỉ ĐỌC file .py (đổi last-access) KHÔNG restart; sửa/thêm/xóa thì có', () => {
+  // Lỗi thật: Windows bật cập nhật last-access → ripgrep/Pylance/antivirus đọc file .py cũ là fs.watch báo "change"
+  // → dev.js restart backend giữa chừng job Muse.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devwatch-'))
+  try {
+    fs.mkdirSync(path.join(dir, 'app'))
+    fs.mkdirSync(path.join(dir, 'tests'))
+    const mod = path.join(dir, 'app', 'mod.py')
+    fs.writeFileSync(mod, 'x = 1\n')
+    fs.writeFileSync(path.join(dir, 'tests', 'test_x.py'), '')
+    const old = new Date(Date.now() - 3 * 3600_000)
+    fs.utimesSync(mod, old, old)
+
+    assert.deepEqual(listBackendSources(dir), [mod]) // tests/ bị bỏ qua
+    const f = createChangeFilter()
+    f.seed(listBackendSources(dir))
+
+    fs.readFileSync(mod)
+    fs.utimesSync(mod, new Date(), old) // giả lập Windows cập nhật atime, mtime giữ nguyên
+    assert.equal(f.isRealChange(mod), false)
+
+    fs.writeFileSync(mod, 'x = 2\n')
+    assert.equal(f.isRealChange(mod), true)
+    assert.equal(f.isRealChange(mod), false) // sự kiện lặp cho cùng một lần lưu
+
+    const added = path.join(dir, 'app', 'new.py')
+    fs.writeFileSync(added, '')
+    assert.equal(f.isRealChange(added), true)
+
+    fs.unlinkSync(added)
+    assert.equal(f.isRealChange(added), true)
+    assert.equal(f.isRealChange(added), false)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
