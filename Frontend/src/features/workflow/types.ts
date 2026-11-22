@@ -404,6 +404,8 @@ export interface MotionReferenceAsset {
   durationSec?: number
   /** Ảnh nhân vật lấy từ node "Tạo ảnh nhân vật mới" (sheet: chân dung + áo nhiều góc), để prompt gọi đúng loại ảnh. */
   source?: 'character_sheet'
+  /** Ô nhân vật: người nào trong video mẫu được thay (tiếng Anh, vd. "the man in the blue shirt"); trống = theo thứ tự trái → phải. */
+  target?: string
 }
 
 export interface MotionCreativeDirection {
@@ -413,6 +415,10 @@ export interface MotionCreativeDirection {
   sceneAtmosphere: string
   styleDirection: string
   negativePrompt: string
+  /** Chỉ có ảnh nhân vật: nền giữ theo video mẫu (mặc định) hay lấy theo ảnh nhân vật. */
+  backgroundFrom?: 'video' | 'character_image'
+  /** Chip tùy chọn người dùng đã bật/tắt; thiếu khóa = theo mặc định của kiểu chỉnh (motionPromptBuilder). */
+  options?: Partial<Record<'keepBodyShape' | 'matchLighting' | 'hairFabric' | 'photoreal' | 'noExtras', boolean>>
 }
 
 export interface MotionPresetItem {

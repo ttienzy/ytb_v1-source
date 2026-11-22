@@ -17,6 +17,9 @@ import {
   FolderPlus,
   FolderOpen,
   Columns2,
+  UserPlus,
+  Lock,
+  AlertTriangle,
 } from 'lucide-react'
 import type {
   MotionReferenceAsset,
@@ -26,7 +29,13 @@ import type {
   MotionPresetItem,
   MotionVariantSlot,
 } from '../types'
-import type { StructuredPromptResult } from '../services/motionPromptBuilder'
+import {
+  MOTION_MODE_INFO,
+  MOTION_OPTION_LABELS,
+  type MotionPromptOptionKey,
+  type StructuredPromptResult,
+} from '../services/motionPromptBuilder'
+import { MAX_MOTION_REFERENCE_IMAGES, type MotionAssetRole } from '../services/motionReferences'
 import {
   MOTION_DURATION_OPTIONS,
   getAvailableAspectRatios,
@@ -48,10 +57,16 @@ interface MotionInspectorPanelProps {
   character: MotionReferenceAsset
   motion: MotionReferenceAsset
   scene: MotionReferenceAsset
-  onUploadFile: (role: 'character' | 'motion' | 'scene', file: File) => void
-  onClearAsset: (role: 'character' | 'motion' | 'scene') => void
-  onUpdateAssetMeta: (role: 'character' | 'motion' | 'scene', updates: Partial<MotionReferenceAsset>) => void
-  onOpenLibrary?: (role: 'character' | 'motion' | 'scene') => void
+  /** Ô nhân vật thêm (nhân vật 2, 3). */
+  extraCharacters?: MotionReferenceAsset[]
+  canAddCharacter?: boolean
+  onAddCharacter?: () => void
+  /** Ghi chú "thay người nào trong video" cho ô nhân vật thứ index (0 = ô chính). */
+  onUpdateCharacterTarget?: (index: number, target: string) => void
+  onUploadFile: (role: MotionAssetRole, file: File) => void
+  onClearAsset: (role: MotionAssetRole) => void
+  onUpdateAssetMeta: (role: MotionAssetRole, updates: Partial<MotionReferenceAsset>) => void
+  onOpenLibrary?: (role: MotionAssetRole) => void
   // Creative Direction
   creative: MotionCreativeDirection
   onUpdateCreative: (updates: Partial<MotionCreativeDirection>) => void
@@ -62,6 +77,9 @@ interface MotionInspectorPanelProps {
   customPromptText: string
   onUpdateCustomPromptText: (text: string) => void
   onResetToAutoPrompt: () => void
+  /** Ảnh tham chiếu đã đổi sau khi sửa tay prompt. */
+  isCustomPromptStale?: boolean
+  onKeepCustomPrompt?: () => void
   // Output
   outputConfig: MotionOutputConfig
   projects: VeoProject[]
@@ -97,6 +115,12 @@ export function MotionInspectorPanel({
   character,
   motion,
   scene,
+  extraCharacters = [],
+  canAddCharacter,
+  onAddCharacter,
+  onUpdateCharacterTarget,
+  isCustomPromptStale,
+  onKeepCustomPrompt,
   onUploadFile,
   onClearAsset,
   onUpdateAssetMeta,
@@ -137,6 +161,12 @@ export function MotionInspectorPanel({
   onSelectPreset,
 }: MotionInspectorPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Ô đang tải ảnh lên (ô nhân vật thêm dùng chung input file với ô chính).
+  const uploadRoleRef = useRef<MotionAssetRole>(activeRole)
+  const pickFile = (role: MotionAssetRole) => {
+    uploadRoleRef.current = role
+    fileInputRef.current?.click()
+  }
   const [copied, setCopied] = React.useState(false)
   const [newProjectName, setNewProjectName] = React.useState('Motion Control')
   const [projectActionError, setProjectActionError] = React.useState<string | null>(null)
@@ -202,10 +232,10 @@ export function MotionInspectorPanel({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Sliders size={16} color="#4F46E5" />
           <h3 style={{ margin: 0, fontSize: '13.5px', fontWeight: 700, color: '#1E293B' }}>
-            {selectedNodeType === 'reference' && 'Tùy Chỉnh Nguyên Liệu (References)'}
-            {selectedNodeType === 'creative' && 'Chỉ Dẫn Sáng Tạo (Creative Direction)'}
-            {selectedNodeType === 'preview' && 'Kiểm Tra Prompt Cấu Trúc (Preview)'}
-            {selectedNodeType === 'output' && 'Cấu Hình Xuất Video (Output)'}
+            {selectedNodeType === 'reference' && 'Nguyên Liệu Tham Chiếu'}
+            {selectedNodeType === 'creative' && 'Chỉ Dẫn Sáng Tạo'}
+            {selectedNodeType === 'preview' && 'Prompt Gửi Google Flow'}
+            {selectedNodeType === 'output' && 'Cấu Hình Xuất Video'}
             {!selectedNodeType && 'Bảng Điều Khiển Chi Tiết'}
           </h3>
         </div>
@@ -236,7 +266,7 @@ export function MotionInspectorPanel({
         onChange={(e) => {
           const file = e.target.files?.[0]
           if (file) {
-            onUploadFile(activeRole, file)
+            onUploadFile(uploadRoleRef.current, file)
           }
           e.target.value = ''
         }}
@@ -395,13 +425,13 @@ export function MotionInspectorPanel({
                         }}
                       >
                         <FolderOpen size={14} />
-                        <span>Chọn từ Thư viện Veo</span>
+                        <span>Chọn từ Thư viện</span>
                       </button>
                     )}
 
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={() => pickFile(activeRole)}
                       style={{
                         flex: onOpenLibrary ? '0 0 auto' : 1,
                         padding: '8px 12px',
@@ -502,111 +532,89 @@ export function MotionInspectorPanel({
             {activeRole === 'character' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Ảnh Nhân Vật (Tùy chọn)</span>
-                  <span style={{ fontSize: '11px', background: '#F1F5F9', color: '#64748B', padding: '1px 6px', borderRadius: '4px' }}>
-                    Optional
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Ảnh nhân vật (tùy chọn)</span>
+                  <span className="mf-insp-pill">
+                    {[character, ...extraCharacters, scene].filter((a) => a.filled).length}/{MAX_MOTION_REFERENCE_IMAGES} ảnh
                   </span>
                 </div>
+                <p className="mf-insp-hint">
+                  Mỗi ảnh là một người. Video mẫu có nhiều người: thêm ô Nhân vật 2, 3 — app ghép theo thứ tự trái → phải ở đầu video,
+                  hoặc ghi rõ người cần thay. Flow nhận tối đa {MAX_MOTION_REFERENCE_IMAGES} ảnh tính cả bối cảnh.
+                </p>
 
-                <div
-                  style={{
-                    width: '100%',
-                    height: 180,
-                    borderRadius: '8px',
-                    background: '#F8FAFC',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '1px solid #CBD5E1',
-                  }}
-                >
-                  {character.previewUrl ? (
-                    <img src={character.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#94A3B8' }}>
-                      <ImageIcon size={32} />
-                      <span style={{ fontSize: '11.5px' }}>Chưa chọn ảnh nhân vật</span>
+                {[character, ...extraCharacters].map((asset, index) => {
+                  const role: MotionAssetRole = index === 0 ? 'character' : (index === 1 ? 'character2' : 'character3')
+                  return (
+                    <div key={asset.id} className="mf-insp-card">
+                      <div className="mf-insp-card-h">
+                        <b>Nhân vật {index + 1}</b>
+                        {asset.source === 'character_sheet' && <span className="mf-insp-pill">Sheet</span>}
+                        <span style={{ flex: 1 }} />
+                        {(index > 0 || asset.filled) && (
+                          <button
+                            type="button"
+                            className="mf-insp-icon danger"
+                            onClick={() => onClearAsset(role)}
+                            title={index > 0 ? `Bỏ ô Nhân vật ${index + 1}` : 'Xóa ảnh nhân vật'}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="mf-insp-card-body">
+                        <div className="mf-insp-thumb">
+                          {asset.previewUrl ? (
+                            <img src={asset.previewUrl} alt="" />
+                          ) : (
+                            <ImageIcon size={22} color="#94A3B8" />
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            {onOpenLibrary && (
+                              <button type="button" className="mf-insp-btn primary" onClick={() => onOpenLibrary(role)}>
+                                <FolderOpen size={13} />
+                                <span>Thư viện</span>
+                              </button>
+                            )}
+                            <button type="button" className="mf-insp-btn" onClick={() => pickFile(role)} title="Tải ảnh từ máy tính">
+                              <Upload size={13} />
+                              <span>{asset.filled ? 'Đổi ảnh' : 'Tải lên'}</span>
+                            </button>
+                          </div>
+                          {onUpdateCharacterTarget && (
+                            <label className="mf-insp-field">
+                              <span>Thay người nào trong video? (tùy chọn, tiếng Anh)</span>
+                              <input
+                                type="text"
+                                value={asset.target || ''}
+                                onChange={(e) => onUpdateCharacterTarget(index, e.target.value)}
+                                placeholder={index === 0 ? 'vd. the woman in the red dress' : 'vd. the man on the right'}
+                              />
+                            </label>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
+                  )
+                })}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    {onOpenLibrary && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenLibrary('character')}
-                        style={{
-                          flex: 1,
-                          padding: '8px 10px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          background: 'linear-gradient(135deg, #4F46E5, #6366F1)',
-                          fontSize: '11.5px',
-                          fontWeight: 700,
-                          color: '#FFFFFF',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                          boxShadow: '0 2px 4px rgba(79, 70, 229, 0.2)',
-                        }}
-                      >
-                        <FolderOpen size={14} />
-                        <span>Chọn từ Thư viện Veo</span>
-                      </button>
-                    )}
+                {onAddCharacter && (
+                  <button
+                    type="button"
+                    className="mf-insp-btn"
+                    onClick={onAddCharacter}
+                    disabled={!canAddCharacter}
+                    title={canAddCharacter ? 'Thêm ô nhân vật cho video có nhiều người' : `Đã đủ ${MAX_MOTION_REFERENCE_IMAGES} ảnh (nhân vật + bối cảnh)`}
+                    style={{ justifyContent: 'center' }}
+                  >
+                    <UserPlus size={13} />
+                    <span>{canAddCharacter ? 'Thêm nhân vật' : `Đã đủ ${MAX_MOTION_REFERENCE_IMAGES} ảnh (nhân vật + bối cảnh)`}</span>
+                  </button>
+                )}
 
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      style={{
-                        flex: onOpenLibrary ? '0 0 auto' : 1,
-                        padding: '8px 12px',
-                        borderRadius: '6px',
-                        border: '1px solid #CBD5E1',
-                        background: '#FFFFFF',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                        color: '#334155',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '5px',
-                      }}
-                      title="Tải ảnh từ máy tính"
-                    >
-                      <Upload size={13} />
-                      <span>{character.filled ? 'Đổi ảnh' : 'Tải từ máy'}</span>
-                    </button>
-
-                    {character.filled && (
-                      <button
-                        type="button"
-                        onClick={() => onClearAsset('character')}
-                        style={{
-                          padding: '8px 12px',
-                          borderRadius: '6px',
-                          border: '1px solid #FCA5A5',
-                          background: '#FEF2F2',
-                          color: '#DC2626',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <small style={{ fontSize: '10.5px', color: '#64748B' }}>
-                  Ảnh chân dung góc thẳng, sáng rõ khuôn mặt giúp Veo tái tạo tốt nhất.
+                <small className="mf-insp-hint">
+                  Ảnh chân dung toàn thân, nhìn thẳng, sáng rõ mặt và trang phục cho kết quả ổn định nhất.
                 </small>
               </div>
             )}
@@ -614,11 +622,14 @@ export function MotionInspectorPanel({
             {activeRole === 'scene' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Ảnh Bối Cảnh (Tùy chọn)</span>
-                  <span style={{ fontSize: '11px', background: '#F1F5F9', color: '#64748B', padding: '1px 6px', borderRadius: '4px' }}>
-                    Optional
-                  </span>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Ảnh bối cảnh (tùy chọn)</span>
+                  <span className="mf-insp-pill">Image {[character, ...extraCharacters].filter((a) => a.filled).length + 1}</span>
                 </div>
+                <p className="mf-insp-hint">
+                  Có ảnh bối cảnh: người trong video được đưa sang nền này (không giữ nền gốc), app tự thêm yêu cầu khớp phối cảnh,
+                  ánh sáng và bóng đổ. Không có: giữ nguyên nền của video mẫu.
+                  {extraCharacters.length + 1 >= MAX_MOTION_REFERENCE_IMAGES && ' Đang mở đủ 3 ô nhân vật — bỏ bớt một ô để thêm bối cảnh.'}
+                </p>
 
                 <div
                   style={{
@@ -667,13 +678,13 @@ export function MotionInspectorPanel({
                         }}
                       >
                         <FolderOpen size={14} />
-                        <span>Chọn từ Thư viện Veo</span>
+                        <span>Chọn từ Thư viện</span>
                       </button>
                     )}
 
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={() => pickFile(activeRole)}
                       style={{
                         flex: onOpenLibrary ? '0 0 auto' : 1,
                         padding: '8px 12px',
@@ -724,294 +735,241 @@ export function MotionInspectorPanel({
         {/* ============================================================== */}
         {/* TAB 2: CREATIVE DIRECTION INSPECTOR */}
         {/* ============================================================== */}
-        {selectedNodeType === 'creative' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {/* Quick Action: Reset to Default Safe Prompt */}
-            {onResetDefaultPrompt && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 10px',
-                  background: '#F0FDF4',
-                  border: '1px solid #BBF7D0',
-                  borderRadius: '6px',
-                }}
-              >
-                <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>
-                  Prompt chuẩn an toàn từ file
-                </span>
-                <button
-                  type="button"
-                  onClick={onResetDefaultPrompt}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid #86EFAC',
-                    background: '#FFFFFF',
-                    color: '#15803D',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                  title="Khôi phục toàn bộ nội dung prompt mẫu chuẩn"
-                >
-                  <RotateCcw size={12} />
-                  <span>Khôi phục mẫu</span>
-                </button>
-              </div>
-            )}
-
-            {/* Bộ Mẫu Phong Cách Chuyển Động (Motion Presets) */}
-            {presets && presets.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', padding: '10px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Sparkles size={13} color="#4F46E5" />
-                    <span>Mẫu phong cách chuyển động</span>
-                  </label>
-                  <span style={{ fontSize: '9.5px', color: '#059669', fontWeight: 700 }}>✓ Tự động lưu</span>
+        {selectedNodeType === 'creative' && (() => {
+          const mode = structuredPrompt.mode
+          const info = MOTION_MODE_INFO[mode]
+          const filledCharacters = [character, ...extraCharacters].filter((a) => a.filled).length
+          const canChooseBackground = filledCharacters === 1 && !scene.filled
+          const background = creative.backgroundFrom === 'character_image' ? 'character_image' : 'video'
+          const isDescribe = mode === 'describe'
+          const opts = structuredPrompt.options
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Kiểu chỉnh tự nhận theo ảnh */}
+              <div className="mf-insp-mode">
+                <div className="mf-insp-mode-h">
+                  <span className="mf-insp-pill strong">Kiểu chỉnh: {info.label}</span>
+                  <span className="mf-insp-muted">tự nhận theo ảnh tham chiếu</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                  {presets.map((preset) => {
-                    const active = (activePresetId || outputConfig.activePresetId || 'choreography') === preset.id
+                <p>{info.summary}</p>
+                {canChooseBackground && (
+                  <div className="mf-insp-seg" role="radiogroup" aria-label="Nền lấy từ">
+                    <span>Nền lấy từ</span>
+                    <button
+                      type="button"
+                      className={background === 'video' ? 'on' : ''}
+                      onClick={() => onUpdateCreative({ backgroundFrom: 'video' })}
+                      title="Giữ nền, ánh sáng, máy quay của video mẫu; chỉ thay người"
+                    >
+                      Video mẫu
+                    </button>
+                    <button
+                      type="button"
+                      className={background === 'character_image' ? 'on' : ''}
+                      onClick={() => onUpdateCreative({ backgroundFrom: 'character_image' })}
+                      title="Áp động tác lên ảnh nhân vật, nền theo ảnh (mẫu của Google)"
+                    >
+                      Ảnh nhân vật
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Preset */}
+              {presets && presets.length > 0 && (
+                <div className="mf-insp-group">
+                  <div className="mf-insp-group-h">
+                    <Sparkles size={13} color="#4F46E5" />
+                    <span>Mẫu chỉ đạo</span>
+                    <span className="mf-insp-muted" style={{ marginLeft: 'auto' }}>ghi đè các ô bên dưới</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                    {presets.map((preset) => {
+                      const active = (activePresetId || outputConfig.activePresetId || 'choreography') === preset.id
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          className={`mf-insp-preset ${active ? 'on' : ''}`}
+                          onClick={() => onSelectPreset?.(preset.id)}
+                          title={preset.description}
+                        >
+                          <b>{preset.name}</b>
+                          <span>{preset.description}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <label className="mf-insp-field">
+                <span>
+                  {isDescribe ? 'Điều muốn thay đổi' : 'Chỉ đạo chính'}
+                  {isDescribe ? <em className="req"> * bắt buộc (chưa có ảnh)</em> : <em> tùy chọn</em>}
+                </span>
+                <textarea
+                  value={creative.creativeBrief}
+                  onChange={(e) => onUpdateCreative({ creativeBrief: e.target.value })}
+                  rows={3}
+                  placeholder={isDescribe
+                    ? 'vd. Change her outfit to a red evening dress'
+                    : 'vd. Energetic, joyful performance (để trống nếu chỉ cần thay người/bối cảnh)'}
+                />
+              </label>
+
+              <label className="mf-insp-field">
+                <span>Chuyển động chủ thể <em>tùy chọn</em></span>
+                <textarea
+                  value={creative.subjectAction}
+                  onChange={(e) => onUpdateCreative({ subjectAction: e.target.value })}
+                  rows={2}
+                  placeholder="vd. Arms swing sharply on every beat"
+                />
+              </label>
+
+              <label className="mf-insp-field">
+                <span>Không khí & ánh sáng <em>tùy chọn</em></span>
+                <input
+                  type="text"
+                  value={creative.sceneAtmosphere}
+                  onChange={(e) => onUpdateCreative({ sceneAtmosphere: e.target.value })}
+                  placeholder="vd. Warm late-afternoon light"
+                />
+              </label>
+
+              <label className="mf-insp-field">
+                <span>Đổi máy quay <em>để trống = giữ như video mẫu</em></span>
+                <input
+                  type="text"
+                  value={creative.cameraMovement}
+                  onChange={(e) => onUpdateCreative({ cameraMovement: e.target.value })}
+                  placeholder="vd. Slow push-in on the face"
+                />
+              </label>
+
+              <label className="mf-insp-field">
+                <span>Phong cách <em>tùy chọn</em></span>
+                <input
+                  type="text"
+                  value={creative.styleDirection}
+                  onChange={(e) => onUpdateCreative({ styleDirection: e.target.value })}
+                  placeholder="vd. Clean fashion-editorial look"
+                />
+              </label>
+
+              <div className="mf-insp-field">
+                <span>Tùy chọn thêm <em>mặc định theo kiểu chỉnh</em></span>
+                <div className="mf-insp-chips">
+                  {(Object.keys(MOTION_OPTION_LABELS) as MotionPromptOptionKey[]).map((key) => {
+                    const on = opts[key]
                     return (
                       <button
-                        key={preset.id}
+                        key={key}
                         type="button"
-                        onClick={() => onSelectPreset?.(preset.id)}
-                        style={{
-                          padding: '7px 8px',
-                          borderRadius: '7px',
-                          border: active ? '2px solid #4F46E5' : '1px solid #CBD5E1',
-                          background: active ? '#EEF2FF' : '#FFFFFF',
-                          color: active ? '#3730A3' : '#334155',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '2px',
-                        }}
+                        className={`mf-insp-chip ${on ? 'on' : ''}`}
+                        aria-pressed={on}
+                        title={MOTION_OPTION_LABELS[key].hint}
+                        onClick={() => onUpdateCreative({ options: { ...(creative.options || {}), [key]: !on } })}
                       >
-                        <div style={{ fontSize: '10.5px', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {preset.name}
-                        </div>
-                        <div style={{ fontSize: '9px', color: '#64748B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {preset.description}
-                        </div>
+                        {on && <Check size={11} />}
+                        {MOTION_OPTION_LABELS[key].label}
                       </button>
                     )
                   })}
                 </div>
               </div>
-            )}
 
-            {/* 1. Creative Brief */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
-                  Ý tưởng chính / Creative Brief
-                </label>
-                <span style={{ fontSize: '10.5px', color: '#DC2626', fontWeight: 600 }}>* Bắt buộc</span>
-              </div>
-              <textarea
-                value={creative.creativeBrief}
-                onChange={(e) => onUpdateCreative({ creativeBrief: e.target.value })}
-                rows={3}
-                placeholder="Mô tả ý đồ phân cảnh: nhân vật biểu diễn, tương tác, năng lượng..."
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  borderRadius: '6px',
-                  border: '1px solid #CBD5E1',
-                  fontSize: '12px',
-                  lineHeight: 1.4,
-                  boxSizing: 'border-box',
-                  resize: 'vertical',
-                }}
-              />
-            </div>
-
-            {/* 2. Subject Action & Motion */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
-                Hành động & chuyển động chủ thể
+              <label className="mf-insp-field">
+                <span>Điều cần tránh <em>thành câu “Do not add …”</em></span>
+                <input
+                  type="text"
+                  value={creative.negativePrompt}
+                  onChange={(e) => onUpdateCreative({ negativePrompt: e.target.value })}
+                  placeholder="vd. extra people or distorted hands"
+                />
               </label>
-              <textarea
-                value={creative.subjectAction}
-                onChange={(e) => onUpdateCreative({ subjectAction: e.target.value })}
-                rows={2}
-                placeholder="Ví dụ: Động tác nhảy nhịp nhàng theo nhạc, tay vung dứt khoát..."
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  borderRadius: '6px',
-                  border: '1px solid #CBD5E1',
-                  fontSize: '12px',
-                  lineHeight: 1.4,
-                  boxSizing: 'border-box',
-                  resize: 'vertical',
-                }}
-              />
-            </div>
 
-            {/* 3. Camera Movement */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
-                Góc máy & chuyển động camera
-              </label>
-              <input
-                type="text"
-                value={creative.cameraMovement}
-                onChange={(e) => onUpdateCreative({ cameraMovement: e.target.value })}
-                placeholder="Mô tả góc máy hoặc chuyển động camera mong muốn..."
-                style={{
-                  padding: '7px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #CBD5E1',
-                  fontSize: '12px',
-                }}
-              />
+              {onResetDefaultPrompt && (
+                <button type="button" className="mf-insp-btn" onClick={onResetDefaultPrompt} style={{ justifyContent: 'center' }}>
+                  <RotateCcw size={12} />
+                  <span>Về mặc định (chỉ giữ phần tự sinh theo ảnh)</span>
+                </button>
+              )}
             </div>
-
-            {/* 4. Look & Style */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
-                Phong cách & Thẩm mỹ
-              </label>
-              <input
-                type="text"
-                value={creative.styleDirection}
-                onChange={(e) => onUpdateCreative({ styleDirection: e.target.value })}
-                placeholder="Mô tả phong cách hình ảnh mong muốn..."
-                style={{
-                  padding: '7px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #CBD5E1',
-                  fontSize: '12px',
-                }}
-              />
-            </div>
-
-            {/* 5. Negative Prompt */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
-                Điều cần tránh (Negative Prompt)
-              </label>
-              <input
-                type="text"
-                value={creative.negativePrompt}
-                onChange={(e) => onUpdateCreative({ negativePrompt: e.target.value })}
-                placeholder="Ví dụ: mờ nhòe, méo mặt, chữ lạ, giật hình..."
-                style={{
-                  padding: '7px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #CBD5E1',
-                  fontSize: '12px',
-                }}
-              />
-            </div>
-
-          </div>
-        )}
+          )
+        })()}
 
         {/* ============================================================== */}
         {/* TAB 3: PROMPT PREVIEW INSPECTOR */}
         {/* ============================================================== */}
         {selectedNodeType === 'preview' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
-                Prompt Chuẩn Bị Gửi Veo Flow
-              </span>
-              <button
-                type="button"
-                onClick={handleCopyPrompt}
-                style={{
-                  border: 'none',
-                  background: '#F1F5F9',
-                  color: copied ? '#10B981' : '#475569',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Nội dung gửi đi</span>
+              <button type="button" className="mf-insp-btn" onClick={handleCopyPrompt}>
                 {copied ? <Check size={12} /> : <Copy size={12} />}
                 <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
               </button>
             </div>
 
+            {isCustomPrompt && isCustomPromptStale && (
+              <div className="mf-insp-alert danger">
+                <AlertTriangle size={14} />
+                <div>
+                  <b>Ảnh tham chiếu đã đổi sau khi bạn sửa tay.</b> Prompt có thể gọi sai “Image N”; app chặn chạy tới khi bạn chọn.
+                  <div className="mf-insp-alert-actions">
+                    <button type="button" className="mf-insp-btn primary" onClick={onResetToAutoPrompt}>
+                      <RotateCw size={12} /> Dựng lại prompt
+                    </button>
+                    {onKeepCustomPrompt && (
+                      <button type="button" className="mf-insp-btn" onClick={onKeepCustomPrompt}>Giữ bản sửa tay</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {!isCustomPrompt && structuredPrompt.blockers.map((b) => (
+              <div key={b} className="mf-insp-alert danger"><AlertCircle size={14} /><span>{b}</span></div>
+            ))}
+            {!isCustomPrompt && structuredPrompt.warnings.map((w) => (
+              <div key={w} className="mf-insp-alert warn"><AlertTriangle size={14} /><span>{w}</span></div>
+            ))}
+
             <textarea
+              className="mf-insp-prompt"
               value={isCustomPrompt ? customPromptText : structuredPrompt.fullPrompt}
               onChange={(e) => onUpdateCustomPromptText(e.target.value)}
-              rows={8}
-              style={{
-                width: '100%',
-                padding: '10px',
-                borderRadius: '6px',
-                border: '1px solid #CBD5E1',
-                fontSize: '12px',
-                lineHeight: 1.45,
-                boxSizing: 'border-box',
-                fontFamily: 'inherit',
-              }}
+              rows={9}
             />
-
-            {isCustomPrompt && (
-              <button
-                type="button"
-                onClick={onResetToAutoPrompt}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #CBD5E1',
-                  background: '#F8FAFC',
-                  color: '#475569',
-                  fontSize: '11.5px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '5px',
-                }}
-              >
-                <RotateCcw size={12} />
-                <span>Khôi phục theo mẫu tự động</span>
-              </button>
-            )}
-
-            {/* Sections Breakdown */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
-                Phân tích cấu trúc:
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span className="mf-insp-muted">
+                {(isCustomPrompt ? customPromptText : structuredPrompt.fullPrompt).length} ký tự ·{' '}
+                {isCustomPrompt ? 'bản sửa tay (đổi chỉ đạo/ảnh không cập nhật)' : 'tự dựng — gõ vào ô trên để sửa tay'}
               </span>
-              {(structuredPrompt?.sections || []).map((sec) => (
-                <div
-                  key={sec.id}
-                  style={{
-                    padding: '8px',
-                    borderRadius: '6px',
-                    background: '#F8FAFC',
-                    border: '1px solid #E2E8F0',
-                    fontSize: '11.5px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '2px' }}>
-                    <span style={{ fontSize: '9px', fontWeight: 700, color: sec.colorVar }}>{sec.tag}</span>
-                    <span style={{ color: '#64748B', fontSize: '10px' }}>({sec.label})</span>
-                  </div>
-                  <div style={{ color: '#1E293B' }}>{sec.content}</div>
-                </div>
-              ))}
+              {isCustomPrompt && (
+                <button type="button" className="mf-insp-btn" onClick={onResetToAutoPrompt}>
+                  <RotateCcw size={12} />
+                  <span>Về prompt tự động</span>
+                </button>
+              )}
             </div>
+
+            {!isCustomPrompt && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span className="mf-insp-label">Cấu trúc (theo thứ tự gửi)</span>
+                {structuredPrompt.sections.map((sec) => (
+                  <div key={sec.id} className={`mf-insp-sec ${sec.auto ? 'auto' : ''}`} style={{ borderLeftColor: sec.colorVar }}>
+                    <div className="mf-insp-sec-h">
+                      <b style={{ color: sec.colorVar }}>{sec.tag}</b>
+                      <span>{sec.label}</span>
+                      {sec.auto && <span className="mf-insp-pill"><Lock size={10} /> Tự sinh</span>}
+                    </div>
+                    <div>{sec.content}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

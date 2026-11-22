@@ -5,7 +5,7 @@ export const canvasAiDoc: HelpDoc = {
   title: 'Canvas AI (sơ đồ node, Motion Control, Muse Canvas)',
   summary:
     'Không gian node-graph để tự động hóa video từ ảnh sản phẩm (ảnh → Gemini phân tích → kịch bản → clip Flow → xuất video), tab Motion Control để chuyển động tác từ một video mẫu sang nhân vật/bối cảnh của bạn, và tab Muse Canvas (đang xây) để tạo video/ảnh bằng Meta Muse. Hai tab đầu chỉ dùng Omni 1.2 Flash qua Google Flow; mỗi clip tốn credit thật.',
-  verifiedAt: '2026-11-16',
+  verifiedAt: '2026-11-22',
   requires: [
     {
       label: 'Extension Flow đã nạp, tab Google Flow đã đăng nhập',
@@ -63,9 +63,13 @@ export const canvasAiDoc: HelpDoc = {
     {
       id: 'motion-control',
       name: 'Tab Motion Control',
-      what: 'Chuyển giao chuyển động từ video mẫu sang nhân vật và góc máy mới theo mô hình “Ingredient” của Google Flow. Thành phần: video chuyển động mẫu (bắt buộc; MP4, MOV, AVI hoặc WMV), ảnh nhân vật và bối cảnh (PNG, JPG, WebP), Creative Brief (đạo diễn, camera, phong cách), cấu hình khung hình và xuất. Mở “Inspector” để chỉnh chi tiết và xem “Kiểm Tra Prompt Cấu Trúc (Preview)” trước khi chạy.',
+      what: 'Chuyển động tác từ một video mẫu sang nhân vật và/hoặc bối cảnh của bạn bằng chế độ chỉnh video Omni 1.2 trên Google Flow. Thành phần: video chuyển động mẫu (bắt buộc; MP4, MOV, AVI hoặc WMV), ảnh nhân vật và bối cảnh (PNG, JPG, WebP), chỉ đạo thêm (tùy chọn), cấu hình khung hình và xuất. Prompt tự dựng theo ba phần: “Thay đổi” (tự sinh theo ảnh), chỉ đạo của bạn, “Giữ nguyên” (tự sinh) — mỗi ý chỉ nói một lần.',
       how: [
+        'Kiểu chỉnh tự nhận theo ảnh và hiện trên node Chỉ Dẫn Sáng Tạo: “Thay người” (chỉ có ảnh nhân vật — giữ nền, ánh sáng, máy quay của video mẫu), “Thay bối cảnh” (chỉ ảnh bối cảnh), “Thay người + bối cảnh”, “Chỉnh theo mô tả” (không ảnh — phải viết điều muốn đổi). Có đúng 1 ảnh nhân vật, không bối cảnh thì chọn được “Nền: Video mẫu | Ảnh nhân vật” (“Ảnh nhân vật” = làm sống ảnh, nền theo ảnh).',
+        'Inspector của Chỉ Dẫn Sáng Tạo: “Mẫu chỉ đạo”, các ô Chỉ đạo chính, Chuyển động chủ thể, Không khí & ánh sáng, Đổi máy quay (để trống = giữ máy quay video mẫu), Phong cách, Điều cần tránh, và chip “Tùy chọn thêm” (Giữ vóc dáng theo ảnh, Khớp ánh sáng & bóng đổ, Tóc & vải tự nhiên, Chân thực, Không thêm người/chữ — bật sẵn theo kiểu chỉnh). “Về mặc định” xóa chỉ đạo, chỉ giữ phần tự sinh.',
+        'Node Prompt Cấu Trúc / Inspector hiện từng khối theo thứ tự gửi, khối tự sinh có biểu tượng khóa. Gõ thẳng vào prompt = bản sửa tay (gửi nguyên văn, không tự cập nhật); “Về tự động” để quay lại.',
         'Chọn Flow project: “Project đã chọn” hoặc “Project mới / lượt”.',
+        'Video mẫu có nhiều người: bấm “Thêm nhân vật” trong node Nguyên Liệu Tham Chiếu để có ô Nhân Vật 2, 3 (nút X bỏ ô). Flow nhận tối đa 3 ảnh tham chiếu tính cả bối cảnh (góc node hiện “N/3 ảnh”), nên 3 nhân vật thì không thêm được bối cảnh. Ảnh gửi theo thứ tự Nhân Vật 1, 2, 3 rồi Bối Cảnh; prompt tự ghép người trong video mẫu với từng ảnh theo thứ tự từ trái sang phải lúc đầu video.',
         'Mỗi lượt tạo nhiều biến thể; biến thể lỗi bấm “Thử Lại” riêng, không cần tạo lại cả lượt.',
       ],
     },
@@ -153,8 +157,13 @@ export const canvasAiDoc: HelpDoc = {
       link: 'Veo Studio',
     },
     {
-      symptom: 'Báo “Thiếu Video chuyển động mẫu” hoặc “Thiếu ý tưởng chính (Creative Brief)”',
-      fix: 'Motion Control bắt buộc có video mẫu (MP4, MOV, AVI, WMV) và Creative Brief.',
+      symptom: 'Báo “Thiếu Video chuyển động mẫu” hoặc “Chưa có ảnh nhân vật/bối cảnh: hãy viết điều muốn thay đổi…”',
+      fix: 'Motion Control bắt buộc có video mẫu (MP4, MOV, AVI, WMV). Không nạp ảnh nhân vật/bối cảnh thì phải viết điều muốn thay đổi ở “Chỉ đạo chính” (Inspector của node Chỉ Dẫn Sáng Tạo); có ảnh thì ô này tùy chọn.',
+    },
+    {
+      symptom: 'Báo “Ảnh tham chiếu đã đổi sau khi bạn sửa tay prompt”',
+      cause: 'Bạn sửa tay prompt rồi thêm/bỏ ảnh hoặc đổi nguồn nền: bản sửa tay có thể gọi sai “Image N”.',
+      fix: 'Ở node Prompt Cấu Trúc hoặc Inspector bấm “Dựng lại prompt” (về prompt tự động) hoặc “Giữ bản sửa tay” nếu bạn đã tự sửa đúng thứ tự ảnh.',
     },
     {
       symptom: 'Lượt báo ALL_VARIANTS_FAILED hoặc FLOW_TIMEOUT',
@@ -187,6 +196,8 @@ export const canvasAiDoc: HelpDoc = {
   ],
   related: ['Veo Studio', 'Chiến dịch AI', 'Xóa Watermark', 'Voices', 'Thư viện nhạc', 'Cài đặt'],
   changes: [
+    { date: '2026-11-22', text: 'Motion Control: prompt dựng lại theo “Thay đổi → Chỉ đạo → Giữ nguyên” (hết lặp ý), kiểu chỉnh tự nhận theo ảnh (mặc định giữ nền video mẫu), chip tùy chọn, ghi chú “thay người nào trong video” cho từng nhân vật; không ảnh thì phải viết điều muốn đổi; sửa tay prompt rồi đổi ảnh sẽ được cảnh báo.' },
+    { date: '2026-11-22', text: 'Motion Control: nạp được nhiều nhân vật (“Thêm nhân vật” → ô Nhân Vật 2, 3) cho video mẫu có nhiều người; tối đa 3 ảnh tham chiếu tính cả bối cảnh.' },
     { date: '2026-11-16', text: 'Muse Canvas: node “Ghép video” — ghép các clip Flow đã tạo (xóa watermark từng clip, cắt đầu / cuối, xem điểm nối), thêm nhạc nền, tắt tiếng gốc, nhãn / logo kênh; chạy nền, kết quả vào Thư Viện Video → Hoàn chỉnh.' },
     { date: '2026-11-16', text: 'Node Clip: nút “Dừng chờ” và cảnh báo khi job Flow im lặng quá 25 phút; backend khởi động lại không còn làm job đang xếp hàng kẹt vô hạn (được đánh dấu “chưa gửi lên Flow”).' },
     { date: '2026-11-16', text: 'Muse Canvas: mục “Google Flow (Omni 1.2)” trong panel cấu hình (chọn / tạo / kiểm tra project theo tài khoản Google, khung hình 9:16 / 16:9, 720p / 360p) và nút “Tạo video” trên node Clip — hỏi credit trước, theo dõi job, phát video trong node, không tự gửi lại.' },

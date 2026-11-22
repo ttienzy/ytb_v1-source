@@ -14,30 +14,38 @@ import {
   Video as VideoIcon,
   Clock,
   Maximize2,
+  UserPlus,
+  X,
 } from 'lucide-react'
 import type { MotionReferenceAsset } from '../../types'
+import { EXTRA_CHARACTER_ROLES, type MotionAssetRole } from '../../services/motionReferences.ts'
 
 export interface MotionReferenceGroupNodeData {
   character: MotionReferenceAsset
   motion: MotionReferenceAsset
   scene: MotionReferenceAsset
+  /** Ô nhân vật thêm (nhân vật 2, 3); ảnh gửi Flow theo thứ tự nhân vật 1 → 3 rồi bối cảnh. */
+  extraCharacters?: MotionReferenceAsset[]
+  canAddCharacter?: boolean
+  maxImages?: number
+  onAddCharacter?: () => void
   selectedRole?: 'character' | 'motion' | 'scene' | null
   isRunning?: boolean
   onSelectRole?: (role: 'character' | 'motion' | 'scene') => void
-  onUploadFile?: (role: 'character' | 'motion' | 'scene', file: File) => void
-  onOpenLibrary?: (role: 'character' | 'motion' | 'scene') => void
-  onRemoveAsset?: (role: 'character' | 'motion' | 'scene') => void
+  onUploadFile?: (role: MotionAssetRole, file: File) => void
+  onOpenLibrary?: (role: MotionAssetRole) => void
+  onRemoveAsset?: (role: MotionAssetRole) => void
   onPreviewMedia?: (url: string, title?: string, isVideo?: boolean) => void
 }
 
 export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as MotionReferenceGroupNodeData
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const activeRoleRef = useRef<'character' | 'motion' | 'scene'>('motion')
+  const activeRoleRef = useRef<MotionAssetRole>('motion')
   const [fileInputAccept, setFileInputAccept] = useState<string>('video/mp4,video/quicktime,video/webm')
-  const [dragOverRole, setDragOverRole] = useState<'character' | 'motion' | 'scene' | null>(null)
+  const [dragOverRole, setDragOverRole] = useState<MotionAssetRole | null>(null)
 
-  const handleTriggerUpload = (role: 'character' | 'motion' | 'scene', e?: React.MouseEvent) => {
+  const handleTriggerUpload = (role: MotionAssetRole, e?: React.MouseEvent) => {
     e?.stopPropagation()
     activeRoleRef.current = role
     setFileInputAccept(role === 'motion' ? 'video/mp4,video/quicktime,video/webm' : 'image/png,image/jpeg,image/webp')
@@ -46,7 +54,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
     }, 10)
   }
 
-  const handleDropFile = (role: 'character' | 'motion' | 'scene', e: React.DragEvent) => {
+  const handleDropFile = (role: MotionAssetRole, e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setDragOverRole(null)
@@ -59,6 +67,10 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
   const motion = nodeData.motion || {}
   const character = nodeData.character || {}
   const scene = nodeData.scene || {}
+
+  const extras = nodeData.extraCharacters || []
+  const maxImages = nodeData.maxImages ?? 3
+  const imagesUsed = [character, ...extras, scene].filter((a) => a.filled).length
 
   const isMotionSelected = nodeData.selectedRole === 'motion'
   const isCharSelected = nodeData.selectedRole === 'character'
@@ -78,10 +90,14 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
           <h2 style={{ fontSize: '13.5px', margin: 0, fontWeight: 700, color: '#1E293B' }}>
             Nguyên Liệu Tham Chiếu
           </h2>
-          <small style={{ fontSize: '11px', color: '#64748B' }}>Reference Inputs (Ingredients)</small>
+          <small style={{ fontSize: '11px', color: '#64748B' }}>Video mẫu + ảnh nhân vật / bối cảnh</small>
         </div>
-        <span className="mf-tag" style={{ background: '#F1F5F9', color: '#475569', fontWeight: 600 }}>
-          3 Slots
+        <span
+          className="mf-tag"
+          style={{ background: '#F1F5F9', color: '#475569', fontWeight: 600 }}
+          title={`Flow nhận tối đa ${maxImages} ảnh tham chiếu (nhân vật + bối cảnh) cùng video mẫu`}
+        >
+          {imagesUsed}/{maxImages} ảnh
         </span>
       </header>
 
@@ -274,10 +290,10 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                 e.stopPropagation()
                 nodeData.onOpenLibrary?.('motion')
               }}
-              title="Chọn video có sẵn từ Thư viện Veo"
+              title="Chọn video có sẵn từ Thư Viện Video"
             >
               <FolderOpen size={15} />
-              <span>{motion.filled ? 'Đổi từ Thư Viện' : 'Thư Viện Veo'}</span>
+              <span>{motion.filled ? 'Đổi từ Thư Viện' : 'Thư Viện Video'}</span>
             </button>
 
             <button
@@ -322,7 +338,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
             <div className="mf-sub-header">
               <span className="mf-sub-title">
                 <User size={13} color="#10B981" />
-                <span>Nhân Vật</span>
+                <span>{extras.length > 0 ? 'Nhân Vật 1' : 'Nhân Vật'}</span>
               </span>
               <span style={{ fontSize: '10px', color: '#64748B' }}>Tùy chọn</span>
             </div>
@@ -387,7 +403,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                   e.stopPropagation()
                   nodeData.onOpenLibrary?.('character')
                 }}
-                title="Chọn ảnh từ Thư viện Veo"
+                title="Chọn ảnh từ Thư Viện Ảnh"
               >
                 <FolderOpen size={12} />
                 <span>Thư viện</span>
@@ -500,7 +516,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                   e.stopPropagation()
                   nodeData.onOpenLibrary?.('scene')
                 }}
-                title="Chọn ảnh từ Thư viện Veo"
+                title="Chọn ảnh từ Thư Viện Ảnh"
               >
                 <FolderOpen size={12} />
                 <span>Thư viện</span>
@@ -531,6 +547,107 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
             />
           </div>
         </div>
+
+        {/* ========================================================================= */}
+        {/* 3. NHÂN VẬT THÊM (2, 3) — video có nhiều người                              */}
+        {/* ========================================================================= */}
+        {extras.length > 0 && (
+          <div className="mf-secondary-grid">
+            {extras.map((asset, i) => {
+              const role = EXTRA_CHARACTER_ROLES[i]
+              return (
+                <div
+                  key={asset.id}
+                  className={`mf-sub-slot ${dragOverRole === role ? 'drag-over' : ''}`}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    setDragOverRole(role)
+                  }}
+                  onDragLeave={() => setDragOverRole(null)}
+                  onDrop={(e) => handleDropFile(role, e)}
+                >
+                  <div className="mf-sub-header">
+                    <span className="mf-sub-title">
+                      <User size={13} color="#10B981" />
+                      <span>Nhân Vật {i + 2}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="nodrag"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        nodeData.onRemoveAsset?.(role)
+                      }}
+                      disabled={nodeData.isRunning}
+                      title={`Bỏ ô Nhân Vật ${i + 2}`}
+                      style={{ border: 'none', background: 'transparent', color: '#94A3B8', cursor: 'pointer', padding: 0, display: 'flex' }}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <div className="mf-sub-preview-box">
+                    {asset.filled && asset.previewUrl ? (
+                      <img
+                        src={asset.previewUrl}
+                        alt={asset.fileName || `Character ${i + 2}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', color: '#94A3B8' }}>
+                        <ImageIcon size={18} />
+                        <span style={{ fontSize: '10px' }}>Thả ảnh vào đây</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mf-sub-btn-group">
+                    <button
+                      type="button"
+                      className="mf-sub-btn primary"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        nodeData.onOpenLibrary?.(role)
+                      }}
+                      title="Chọn ảnh từ Thư Viện Ảnh"
+                    >
+                      <FolderOpen size={12} />
+                      <span>Thư viện</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mf-sub-btn"
+                      onClick={(e) => handleTriggerUpload(role, e)}
+                      title="Tải ảnh từ máy tính"
+                    >
+                      <Upload size={12} />
+                      <span>Tải lên</span>
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {nodeData.onAddCharacter && (
+          <button
+            type="button"
+            className="mf-sub-btn nodrag"
+            onClick={(e) => {
+              e.stopPropagation()
+              nodeData.onAddCharacter?.()
+            }}
+            disabled={!nodeData.canAddCharacter || nodeData.isRunning}
+            title={nodeData.canAddCharacter
+              ? 'Thêm một ô nhân vật cho video có nhiều người (ghép theo thứ tự trái → phải trong video mẫu)'
+              : `Đã đủ ${maxImages} ảnh tham chiếu (nhân vật + bối cảnh)`}
+            style={{ width: '100%', justifyContent: 'center', marginTop: 8, opacity: nodeData.canAddCharacter ? 1 : 0.55 }}
+          >
+            <UserPlus size={12} />
+            <span>
+              {nodeData.canAddCharacter ? 'Thêm nhân vật' : `Đã đủ ${maxImages} ảnh (nhân vật + bối cảnh)`}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Footer hint */}

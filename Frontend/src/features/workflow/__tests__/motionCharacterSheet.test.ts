@@ -50,15 +50,15 @@ test('"đã dùng" chỉ khi ô Nhân Vật đang giữ đúng file kết quả 
 
 test('ảnh nhân vật dạng sheet: prompt Motion nói rõ chỉ một người, mặt từ chân dung, áo từ các góc', () => {
   const sheetOnly = buildStructuredPrompt(DEFAULT_MOTION_CREATIVE_DIRECTION, { character: true, characterSheet: true }).fullPrompt
-  assert.match(sheetOnly, /^Apply the pose and motion from the input video to the one person shown in the character sheet image/)
-  assert.match(sheetOnly, /face and hairstyle from the portrait/)
+  assert.match(sheetOnly, /^Replace the person in the input video with the person in Image 1 \(character reference\)/)
+  assert.match(sheetOnly, /Image 1 is a character sheet of one person: take the face and hairstyle from the portrait/)
   assert.match(sheetOnly, /The video shows only this one person/)
   assert.doesNotMatch(sheetOnly, /Image 2/)
   const withScene = referenceOpening({ character: true, characterSheet: true, scene: true })
-  assert.match(withScene, /shown in Image 1, a character sheet/)
+  assert.match(withScene, /Image 1 is a character sheet/)
   assert.match(withScene, /setting shown in Image 2/)
   // Không có ảnh nhân vật thì cờ sheet bị bỏ qua.
   assert.equal(referenceOpening({ characterSheet: true, scene: true }), referenceOpening({ scene: true }))
-  // Ảnh thường giữ nguyên câu cũ.
-  assert.match(referenceOpening({ character: true }), /to the person in the image\./)
+  // Ảnh thường không nhắc tới sheet.
+  assert.doesNotMatch(referenceOpening({ character: true }), /character sheet/)
 })

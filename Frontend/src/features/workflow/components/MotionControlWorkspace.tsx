@@ -40,8 +40,23 @@ import { MotionOutputNode } from '../nodes/motion/MotionOutputNode'
 import { MotionCharacterSheetNode } from '../nodes/motion/MotionCharacterSheetNode'
 
 // Services & Types
-import { buildStructuredPrompt, DEFAULT_MOTION_CREATIVE_DIRECTION, isLegacyDefaultBrief } from '../services/motionPromptBuilder'
-import { fetchMotionDefaultPrompt, fetchMotionPresets, generateMotionCharacterSheet } from '../services/workflowApi'
+import {
+  buildStructuredPrompt,
+  DEFAULT_MOTION_CREATIVE_DIRECTION,
+  motionPromptSignature,
+  type MotionReferenceRoles,
+} from '../services/motionPromptBuilder'
+import {
+  canAddMotionCharacter,
+  canAddMotionScene,
+  extraCharacterIndex,
+  filledCharacterCount,
+  MAX_MOTION_REFERENCE_IMAGES,
+  newExtraCharacterId,
+  orderedMotionImages,
+  type MotionAssetRole,
+} from '../services/motionReferences'
+import { fetchMotionPresets, generateMotionCharacterSheet } from '../services/workflowApi'
 import {
   CHARACTER_SHEET_EDGE_ID,
   CHARACTER_SHEET_NODE_ID,
@@ -193,6 +208,14 @@ export function MotionControlWorkspace({
     fileName: '',
   })
 
+  // Ô nhân vật thêm (nhân vật 2, 3). Tổng ảnh nhân vật + bối cảnh tối đa 3 (giới hạn của Flow cho chỉnh video).
+  const [extraCharacters, setExtraCharacters] = useState<MotionReferenceAsset[]>([])
+  const updateExtraCharacter = useCallback((id: string, fn: (prev: MotionReferenceAsset) => MotionReferenceAsset) => {
+    setExtraCharacters((prev) => prev.map((a) => (a.id === id ? fn(a) : a)))
+  }, [])
+  const characterCount = filledCharacterCount(characterAsset, extraCharacters)
+  const canAddCharacter = canAddMotionCharacter(extraCharacters.length, sceneAsset.filled)
+
   // -------------------------------------------------------------
   // 2. Creative Direction State (Director's Brief)
   // -------------------------------------------------------------
@@ -202,6 +225,10 @@ export function MotionControlWorkspace({
   // 3. Output Format Config
   // -------------------------------------------------------------
   const [outputConfig, setOutputConfig] = useState<MotionOutputConfig>(() => loadStoredMotionConfig())
+  const outputConfigRef = useRef(outputConfig)
+  useEffect(() => {
+    outputConfigRef.current = outputConfig
+  }, [outputConfig])
   const [motionPresets, setMotionPresets] = useState<MotionPresetItem[]>([])
   const [videoEditProfiles, setVideoEditProfiles] = useState<VeoCapabilityProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState('')
@@ -288,26 +315,7 @@ export function MotionControlWorkspace({
           }
         })
         .catch((err) => console.debug('Cannot load motion presets:', err))
-
-      // Tự động đồng bộ prompt mặc định từ file Backend nếu có
-      try {
-        const defaultPrompt = await fetchMotionDefaultPrompt()
-        if (!cancelled && defaultPrompt && defaultPrompt.trim()) {
-          setCreativeDirection((prev) => {
-            // Đã đúng prompt của backend thì trả lại đúng object cũ, không tạo state mới.
-            if (prev.creativeBrief === defaultPrompt.trim()) return prev
-            if (isLegacyDefaultBrief(prev.creativeBrief) || prev.creativeBrief === DEFAULT_MOTION_CREATIVE_DIRECTION.creativeBrief) {
-              return {
-                ...prev,
-                creativeBrief: defaultPrompt.trim(),
-              }
-            }
-            return prev
-          })
-        }
-      } catch (err) {
-        console.debug('Không thể nạp prompt mặc định từ backend:', err)
-      }
+      // Prompt v2: KHÔNG nạp "chỉ đạo chính mặc định" từ file backend nữa (câu đó lặp với khối "Giữ nguyên" tự sinh).
     }
 
     void loadBackendState()
@@ -316,23 +324,15 @@ export function MotionControlWorkspace({
     }
   }, [applyProfile])
 
-  const handleResetDefaultPrompt = useCallback(async () => {
-    try {
-      const backendPrompt = await fetchMotionDefaultPrompt()
-      if (backendPrompt && backendPrompt.trim()) {
-        setCreativeDirection({
-          ...DEFAULT_MOTION_CREATIVE_DIRECTION,
-          creativeBrief: backendPrompt.trim(),
-        })
-      } else {
-        setCreativeDirection(DEFAULT_MOTION_CREATIVE_DIRECTION)
-      }
-    } catch {
-      setCreativeDirection(DEFAULT_MOTION_CREATIVE_DIRECTION)
-    }
+  const handleResetDefaultPrompt = useCallback(() => {
+    setCreativeDirection(() => {
+      const next = { ...DEFAULT_MOTION_CREATIVE_DIRECTION, options: {} }
+      saveStoredCreativeDirection(next, outputConfigRef.current)
+      return next
+    })
     setIsCustomPrompt(false)
     setCustomPromptText('')
-    showToast('Đã khôi phục prompt Motion Control mặc định an toàn.')
+    showToast('Đã đưa chỉ đạo về mặc định: chỉ còn phần tự sinh theo ảnh (Thay đổi + Giữ nguyên).')
   }, [showToast])
 
   const selectedProfile = useMemo(
@@ -427,32 +427,66 @@ export function MotionControlWorkspace({
   // -------------------------------------------------------------
   const [isCustomPrompt, setIsCustomPrompt] = useState(false)
   const [customPromptText, setCustomPromptText] = useState('')
+  /** Chữ ký bộ ảnh lúc bắt đầu sửa tay; khác chữ ký hiện tại = prompt sửa tay có thể gọi sai "Image N". */
+  const [customPromptSignature, setCustomPromptSignature] = useState('')
 
-  const structuredPrompt = useMemo(() => {
-    // Câu mở đầu của prompt dựng theo ảnh thật sự đang nối (không bao giờ nhắc tới ảnh chưa có).
-    return buildStructuredPrompt(creativeDirection, {
-      character: characterAsset.filled,
-      scene: sceneAsset.filled,
-      characterSheet: characterAsset.filled && characterAsset.source === 'character_sheet',
-    })
-  }, [creativeDirection, characterAsset.filled, characterAsset.source, sceneAsset.filled])
+  // Ảnh gửi theo thứ tự nhân vật có ảnh (ô chính trước) rồi bối cảnh; ghi chú "thay người nào" đi theo đúng thứ tự đó.
+  const promptRoles = useMemo<MotionReferenceRoles>(() => ({
+    character: characterCount > 0,
+    characterCount,
+    scene: sceneAsset.filled,
+    characterSheet: characterAsset.filled && characterAsset.source === 'character_sheet',
+    characterTargets: [characterAsset, ...extraCharacters].filter((a) => a.filled).map((a) => a.target),
+  }), [characterAsset, characterCount, extraCharacters, sceneAsset.filled])
+
+  const structuredPrompt = useMemo(
+    () => buildStructuredPrompt(creativeDirection, promptRoles),
+    [creativeDirection, promptRoles],
+  )
+  const currentPromptSignature = motionPromptSignature(promptRoles, creativeDirection.backgroundFrom)
+  const customPromptStale = isCustomPrompt && customPromptSignature !== currentPromptSignature
 
   const activePrompt = isCustomPrompt ? customPromptText : structuredPrompt.fullPrompt
 
-  /** Ảnh nhân vật rồi bối cảnh cho Motion dài: tải lên backend nếu chưa có (cùng cách với lượt chạy thường). */
-  const getLongMotionImagePaths = useCallback(async (): Promise<string[]> => {
+  const handleEditCustomPrompt = useCallback((text: string) => {
+    if (!isCustomPrompt) setCustomPromptSignature(currentPromptSignature)
+    setIsCustomPrompt(true)
+    setCustomPromptText(text)
+  }, [currentPromptSignature, isCustomPrompt])
+
+  const handleResetToAutoPrompt = useCallback(() => {
+    setIsCustomPrompt(false)
+    setCustomPromptText('')
+  }, [])
+
+  /** Người dùng xác nhận prompt sửa tay vẫn đúng với bộ ảnh mới. */
+  const handleKeepCustomPrompt = useCallback(() => {
+    setCustomPromptSignature(currentPromptSignature)
+  }, [currentPromptSignature])
+
+  /**
+   * Đường dẫn backend của các ảnh tham chiếu theo đúng thứ tự gửi Flow (nhân vật 1, 2, 3 rồi bối cảnh); ảnh chưa có
+   * trên backend thì tải lên trước. Dùng chung cho lượt chạy thường và Motion dài.
+   */
+  const ensureMotionImagePaths = useCallback(async (onStage?: (text: string) => void): Promise<string[]> => {
     const paths: string[] = []
-    for (const [asset, setAsset] of [[characterAsset, setCharacterAsset], [sceneAsset, setSceneAsset]] as const) {
+    for (const asset of orderedMotionImages(characterAsset, extraCharacters, sceneAsset)) {
       let path = asset.backendPath
-      if (asset.filled && asset.file && !path) {
+      if (asset.file && !path) {
+        onStage?.(`Đang tải ${asset.role === 'scene' ? 'ảnh bối cảnh' : 'ảnh nhân vật'} (${asset.fileName}) lên Backend...`)
         const uploaded = await uploadImage(asset.file)
         path = uploaded.file_path
-        setAsset((prev) => ({ ...prev, backendPath: uploaded.file_path }))
+        const save = (prev: MotionReferenceAsset) => ({ ...prev, backendPath: uploaded.file_path })
+        if (asset.id === characterAsset.id) setCharacterAsset(save)
+        else if (asset.id === sceneAsset.id) setSceneAsset(save)
+        else updateExtraCharacter(asset.id, save)
       }
       if (path) paths.push(path)
     }
     return paths
-  }, [characterAsset, sceneAsset])
+  }, [characterAsset, extraCharacters, sceneAsset, updateExtraCharacter])
+
+  const getLongMotionImagePaths = useCallback(() => ensureMotionImagePaths(), [ensureMotionImagePaths])
 
   const referencePromptConflict = useMemo(() => {
     if (!characterAsset.filled || !activePrompt.trim()) return null
@@ -472,8 +506,14 @@ export function MotionControlWorkspace({
     if (!motionAsset.filled || (!motionAsset.file && !motionAsset.mediaId)) {
       reasons.push('Thiếu Video chuyển động mẫu (bắt buộc trong Motion Control)')
     }
-    if (!activePrompt.trim()) {
-      reasons.push('Thiếu ý tưởng chính (Creative Brief)')
+    if (isCustomPrompt) {
+      if (!activePrompt.trim()) reasons.push('Prompt sửa tay đang trống')
+      if (customPromptStale) {
+        reasons.push('Ảnh tham chiếu đã đổi sau khi bạn sửa tay prompt: bấm “Dựng lại prompt” hoặc “Giữ bản sửa tay” ở node Prompt / Inspector.')
+      }
+    } else {
+      reasons.push(...structuredPrompt.blockers)
+      if (!activePrompt.trim() && structuredPrompt.blockers.length === 0) reasons.push('Prompt đang trống')
     }
     if (referencePromptConflict) reasons.push(referencePromptConflict)
     if (!selectedProfile) {
@@ -488,14 +528,15 @@ export function MotionControlWorkspace({
       reasons.push('Đoạn video tham chiếu phải dài 3–10 giây và dùng mốc giây nguyên')
     }
     return reasons
-  }, [activePrompt, motionAsset, outputConfig.durationSeconds, outputConfig.projectMode, profileError, referencePromptConflict, selectedProfile, selectedProject])
+  }, [activePrompt, customPromptStale, isCustomPrompt, motionAsset, outputConfig.durationSeconds, outputConfig.projectMode, profileError,
+    referencePromptConflict, selectedProfile, selectedProject, structuredPrompt.blockers])
 
   const isReadyToRun = missingReasons.length === 0
 
   // -------------------------------------------------------------
   // 6. Asset Handlers
   // -------------------------------------------------------------
-  const handleUploadFile = useCallback((role: 'character' | 'motion' | 'scene', file: File) => {
+  const handleUploadFile = useCallback((role: MotionAssetRole, file: File) => {
     const extensionMatches = role === 'motion'
       ? /\.(mp4|mov|avi|wmv)$/i.test(file.name)
       : /\.(png|jpe?g|webp)$/i.test(file.name)
@@ -512,9 +553,22 @@ export function MotionControlWorkspace({
       showToast(role === 'motion' ? 'Video vượt quá giới hạn 1 GB.' : 'Ảnh vượt quá giới hạn 10 MB.')
       return
     }
+    if (role === 'scene' && !canAddMotionScene(extraCharacters.length)) {
+      showToast(`Flow nhận tối đa ${MAX_MOTION_REFERENCE_IMAGES} ảnh tham chiếu: bỏ bớt một ô nhân vật trước khi thêm bối cảnh.`)
+      return
+    }
+    const extraIdx = extraCharacterIndex(role)
+    const extra = extraIdx >= 0 ? extraCharacters[extraIdx] : undefined
+    if (extraIdx >= 0 && !extra) return
 
     const previewUrl = URL.createObjectURL(file)
-    if (role === 'character') {
+    if (extra) {
+      updateExtraCharacter(extra.id, (prev) => {
+        if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
+        return { ...prev, filled: true, previewUrl, fileName: file.name, file, backendPath: undefined, source: undefined }
+      })
+      showToast(`Đã nạp ảnh nhân vật ${extraIdx + 2}: ${file.name}`)
+    } else if (role === 'character') {
       setCharacterAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
         return { ...prev, filled: true, previewUrl, fileName: file.name, file, backendPath: undefined, source: undefined }
@@ -555,9 +609,36 @@ export function MotionControlWorkspace({
       })
       showToast(`Đã nạp ảnh bối cảnh: ${file.name}`)
     }
-  }, [showToast])
+  }, [extraCharacters, showToast, updateExtraCharacter])
 
-  const handleClearAsset = useCallback((role: 'character' | 'motion' | 'scene') => {
+  const handleAddCharacter = useCallback(() => {
+    if (!canAddMotionCharacter(extraCharacters.length, sceneAsset.filled)) {
+      showToast(`Flow nhận tối đa ${MAX_MOTION_REFERENCE_IMAGES} ảnh tham chiếu (nhân vật + bối cảnh).`)
+      return
+    }
+    const n = extraCharacters.length + 2
+    setExtraCharacters((prev) => [...prev, {
+      id: newExtraCharacterId(),
+      role: 'character',
+      title: `Ảnh Nhân Vật ${n}`,
+      required: false,
+      filled: false,
+      previewUrl: null,
+      fileName: '',
+    }])
+  }, [extraCharacters.length, sceneAsset.filled, showToast])
+
+  const handleClearAsset = useCallback((role: MotionAssetRole) => {
+    const extraIdx = extraCharacterIndex(role)
+    if (extraIdx >= 0) {
+      // Ô nhân vật thêm: xóa luôn ô (ô sau dồn lên), để thứ tự Image 1…N không bị lỗ.
+      setExtraCharacters((prev) => prev.filter((a, i) => {
+        if (i === extraIdx && a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
+        return i !== extraIdx
+      }))
+      showToast(`Đã bỏ ô nhân vật ${extraIdx + 2}`)
+      return
+    }
     if (role === 'character') {
       setCharacterAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
@@ -577,7 +658,16 @@ export function MotionControlWorkspace({
     showToast(`Đã xóa nguyên liệu ${role}`)
   }, [showToast])
 
-  const handleUpdateAssetMeta = useCallback((role: 'character' | 'motion' | 'scene', updates: Partial<MotionReferenceAsset>) => {
+  /** Ghi chú "thay người nào trong video" của ô nhân vật thứ `index` (0 = ô chính). */
+  const handleUpdateCharacterTarget = useCallback((index: number, target: string) => {
+    if (index === 0) setCharacterAsset((prev) => ({ ...prev, target }))
+    else {
+      const extra = extraCharacters[index - 1]
+      if (extra) updateExtraCharacter(extra.id, (prev) => ({ ...prev, target }))
+    }
+  }, [extraCharacters, updateExtraCharacter])
+
+  const handleUpdateAssetMeta = useCallback((role: MotionAssetRole, updates: Partial<MotionReferenceAsset>) => {
     if (role === 'character') setCharacterAsset((prev) => ({ ...prev, ...updates }))
     else if (role === 'motion') {
       setMotionAsset((prev) => {
@@ -595,16 +685,18 @@ export function MotionControlWorkspace({
   // -------------------------------------------------------------
   // Library Pickers State & Handlers
   // -------------------------------------------------------------
-  const [imagePickerRole, setImagePickerRole] = useState<'character' | 'scene' | null>(null)
+  const [imagePickerRole, setImagePickerRole] = useState<Exclude<MotionAssetRole, 'motion'> | null>(null)
   const [isVideoPickerOpen, setIsVideoPickerOpen] = useState(false)
 
-  const handleOpenLibrary = useCallback((role: 'character' | 'motion' | 'scene') => {
-    if (role === 'character' || role === 'scene') {
-      setImagePickerRole(role)
-    } else if (role === 'motion') {
+  const handleOpenLibrary = useCallback((role: MotionAssetRole) => {
+    if (role === 'motion') {
       setIsVideoPickerOpen(true)
+    } else if (role === 'scene' && !canAddMotionScene(extraCharacters.length)) {
+      showToast(`Flow nhận tối đa ${MAX_MOTION_REFERENCE_IMAGES} ảnh tham chiếu: bỏ bớt một ô nhân vật trước khi thêm bối cảnh.`)
+    } else {
+      setImagePickerRole(role)
     }
-  }, [])
+  }, [extraCharacters.length, showToast])
 
   const handleSelectImageFromLibrary = useCallback(async (
     dataUrl: string,
@@ -631,7 +723,23 @@ export function MotionControlWorkspace({
       console.warn('Không thể tạo File từ ảnh thư viện:', err)
     }
 
-    if (role === 'character') {
+    const extraIdx = extraCharacterIndex(role)
+    const extra = extraIdx >= 0 ? extraCharacters[extraIdx] : undefined
+    if (extra) {
+      updateExtraCharacter(extra.id, (prev) => {
+        if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
+        return {
+          ...prev,
+          filled: true,
+          previewUrl,
+          fileName: assetRef.fileName || `${item.id}.jpg`,
+          backendPath: assetRef.backendPath,
+          file,
+          source: undefined,
+        }
+      })
+      showToast(`Đã nạp ảnh nhân vật ${extraIdx + 2} từ Thư Viện Ảnh`)
+    } else if (role === 'character') {
       setCharacterAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
         return {
@@ -644,7 +752,7 @@ export function MotionControlWorkspace({
           source: undefined,
         }
       })
-      showToast(`Đã nạp ảnh nhân vật từ Thư viện Veo`)
+      showToast(`Đã nạp ảnh nhân vật từ Thư Viện Ảnh`)
     } else if (role === 'scene') {
       setSceneAsset((prev) => {
         if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
@@ -657,9 +765,9 @@ export function MotionControlWorkspace({
           file,
         }
       })
-      showToast(`Đã nạp ảnh bối cảnh từ Thư viện Veo`)
+      showToast(`Đã nạp ảnh bối cảnh từ Thư Viện Ảnh`)
     }
-  }, [imagePickerRole, showToast])
+  }, [extraCharacters, imagePickerRole, showToast, updateExtraCharacter])
 
   const handleSelectVideoFromLibrary = useCallback(async (clip: ExportedVideoItem) => {
     showToast(`Đang nạp video tham chiếu: ${clip.title || clip.filename}...`)
@@ -930,6 +1038,10 @@ export function MotionControlWorkspace({
             character: characterAsset,
             motion: motionAsset,
             scene: sceneAsset,
+            extraCharacters,
+            canAddCharacter,
+            maxImages: MAX_MOTION_REFERENCE_IMAGES,
+            onAddCharacter: handleAddCharacter,
             selectedRole: activeRole,
             isRunning,
             onSelectRole: (role: 'character' | 'motion' | 'scene') => {
@@ -971,7 +1083,12 @@ export function MotionControlWorkspace({
           ...node,
           data: {
             creative: creativeDirection,
+            mode: structuredPrompt.mode,
+            options: structuredPrompt.options,
+            characterCount,
+            hasScene: sceneAsset.filled,
             isRunning,
+            onUpdateCreative: handleUpdateCreative,
             onOpenInspector: () => {
               setSelectedNodeType('creative')
               setIsInspectorOpen(true)
@@ -985,12 +1102,15 @@ export function MotionControlWorkspace({
           data: {
             fullPrompt: activePrompt,
             sections: structuredPrompt.sections,
-            charCount: structuredPrompt.charCount,
+            charCount: activePrompt.length,
+            isCustom: isCustomPrompt,
+            isStale: customPromptStale,
+            blockers: isCustomPrompt ? [] : structuredPrompt.blockers,
+            warnings: isCustomPrompt ? [] : structuredPrompt.warnings,
             isRunning,
-            onPromptChange: (text: string) => {
-              setIsCustomPrompt(true)
-              setCustomPromptText(text)
-            },
+            onPromptChange: handleEditCustomPrompt,
+            onRebuild: handleResetToAutoPrompt,
+            onKeepCustom: handleKeepCustomPrompt,
             onOpenInspector: () => {
               setSelectedNodeType('preview')
               setIsInspectorOpen(true)
@@ -1040,6 +1160,9 @@ export function MotionControlWorkspace({
     characterAsset,
     motionAsset,
     sceneAsset,
+    extraCharacters,
+    canAddCharacter,
+    handleAddCharacter,
     activeRole,
     isRunning,
     handleUploadFile,
@@ -1047,6 +1170,13 @@ export function MotionControlWorkspace({
     creativeDirection,
     activePrompt,
     structuredPrompt,
+    characterCount,
+    handleUpdateCreative,
+    isCustomPrompt,
+    customPromptStale,
+    handleEditCustomPrompt,
+    handleResetToAutoPrompt,
+    handleKeepCustomPrompt,
     outputConfig,
     isReadyToRun,
     missingReasons,
@@ -1222,26 +1352,14 @@ export function MotionControlWorkspace({
         throw new Error('Video tham chiếu chưa có file gốc để upload vào Flow project mới. Hãy chọn lại video local.')
       }
 
-      const ingredientImagePaths: string[] = []
-      let characterPath = characterAsset.backendPath
-      if (characterAsset.filled && characterAsset.file && !characterPath) {
+      // Nhân vật 1, 2, 3 rồi bối cảnh — đúng thứ tự "Image N" trong prompt.
+      const ingredientImagePaths = await ensureMotionImagePaths((text) => {
         currentStage = 'image_upload'
-        setRunningStageText(`Đang tải ảnh nhân vật (${characterAsset.fileName}) lên Backend...`)
-        const uploaded = await uploadImage(characterAsset.file)
-        characterPath = uploaded.file_path
-        setCharacterAsset((prev) => ({ ...prev, backendPath: uploaded.file_path }))
+        setRunningStageText(text)
+      })
+      if (ingredientImagePaths.length > MAX_MOTION_REFERENCE_IMAGES) {
+        throw new Error(`Flow nhận tối đa ${MAX_MOTION_REFERENCE_IMAGES} ảnh tham chiếu (đang có ${ingredientImagePaths.length}).`)
       }
-      if (characterPath) ingredientImagePaths.push(characterPath)
-
-      let scenePath = sceneAsset.backendPath
-      if (sceneAsset.filled && sceneAsset.file && !scenePath) {
-        currentStage = 'image_upload'
-        setRunningStageText(`Đang tải ảnh bối cảnh (${sceneAsset.fileName}) lên Backend...`)
-        const uploaded = await uploadImage(sceneAsset.file)
-        scenePath = uploaded.file_path
-        setSceneAsset((prev) => ({ ...prev, backendPath: uploaded.file_path }))
-      }
-      if (scenePath) ingredientImagePaths.push(scenePath)
 
       const finishedUrls: string[] = []
 
@@ -1507,9 +1625,9 @@ export function MotionControlWorkspace({
         throw new Error('Không tìm thấy video tham chiếu để thử lại. Hãy chọn lại video local.')
       }
 
-      const ingredientImagePaths: string[] = []
-      if (characterAsset.backendPath) ingredientImagePaths.push(characterAsset.backendPath)
-      if (sceneAsset.backendPath) ingredientImagePaths.push(sceneAsset.backendPath)
+      const ingredientImagePaths = orderedMotionImages(characterAsset, extraCharacters, sceneAsset)
+        .map((a) => a.backendPath)
+        .filter((p): p is string => Boolean(p))
 
       const jobRes = await submitJob({
         project_id: projectId,
@@ -1636,7 +1754,9 @@ export function MotionControlWorkspace({
     }
   }, [
     activePrompt,
-    characterAsset.backendPath,
+    characterAsset,
+    extraCharacters,
+    sceneAsset,
     isRunning,
     motionAsset.file,
     motionAsset.fileName,
@@ -1644,7 +1764,6 @@ export function MotionControlWorkspace({
     motionAsset.trimEndSec,
     motionAsset.trimStartSec,
     outputConfig.durationSeconds,
-    sceneAsset.backendPath,
     selectedProfile,
     selectedProject,
   ])
@@ -1731,7 +1850,7 @@ export function MotionControlWorkspace({
       items: [
         {
           id: 'output',
-          name: 'Tạo Video (Veo)',
+          name: 'Tạo Video (Flow · Omni 1.2)',
           desc: 'Cấu hình khung hình & xuất video',
           icon: <Sparkles size={16} />,
           onClick: () => {
@@ -1938,14 +2057,14 @@ export function MotionControlWorkspace({
             structuredPrompt={structuredPrompt}
             isCustomPrompt={isCustomPrompt}
             customPromptText={customPromptText}
-            onUpdateCustomPromptText={(t) => {
-              setIsCustomPrompt(true)
-              setCustomPromptText(t)
-            }}
-            onResetToAutoPrompt={() => {
-              setIsCustomPrompt(false)
-              setCustomPromptText('')
-            }}
+            onUpdateCustomPromptText={handleEditCustomPrompt}
+            onResetToAutoPrompt={handleResetToAutoPrompt}
+            isCustomPromptStale={customPromptStale}
+            onKeepCustomPrompt={handleKeepCustomPrompt}
+            extraCharacters={extraCharacters}
+            canAddCharacter={canAddCharacter}
+            onAddCharacter={handleAddCharacter}
+            onUpdateCharacterTarget={handleUpdateCharacterTarget}
             outputConfig={outputConfig}
             projects={projects}
             activeProject={selectedProject || null}
@@ -1980,8 +2099,12 @@ export function MotionControlWorkspace({
             <VeoImagePickerModal
               isOpen={Boolean(imagePickerRole)}
               onClose={() => setImagePickerRole(null)}
-              targetLabel={imagePickerRole === 'character' ? 'Ảnh Nhân Vật' : 'Ảnh Bối Cảnh'}
-              kind={imagePickerRole === 'character' ? 'model' : 'scene'}
+              targetLabel={imagePickerRole === 'scene'
+                ? 'Ảnh Bối Cảnh'
+                : extraCharacterIndex(imagePickerRole!) >= 0
+                  ? `Ảnh Nhân Vật ${extraCharacterIndex(imagePickerRole!) + 2}`
+                  : 'Ảnh Nhân Vật'}
+              kind={imagePickerRole === 'scene' ? 'scene' : 'model'}
               onSelect={(dataUrl, assetRef, item) => {
                 handleSelectImageFromLibrary(dataUrl, assetRef, item)
               }}
