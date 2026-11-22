@@ -2,7 +2,7 @@ import { ensureTabVisible } from './visibility.js';
 import { imageUiStep } from './page/image-ui.js';
 import { sleep } from '../../shared/time.js';
 
-const aspectCodes = { '16:9': 3, '9:16': 2, '1:1': 1, '4:3': 4, '3:4': 5 };
+const aspectCodes = { '16:9': 3, '9:16': 2, '1:1': 1, '4:3': 5, '3:4': 4 };
 
 // Inspect only the matching native request; never log its tokens or headers.
 export function matchImageUiRequest(postData, expected) {
@@ -17,7 +17,9 @@ export function matchImageUiRequest(postData, expected) {
       if (item?.[8]?.[0]?.[0]?.[0] !== expected.prompt.trim()
           || item?.[7]?.[5] !== expected.project_id) continue;
       if (item[5] !== expected.model_key || item[4] !== aspectCodes[expected.aspect_ratio]
-          || item[2]?.length) throw new Error('Flow đã gửi cấu hình khác yêu cầu. Kiểm tra ảnh trên Flow trước khi thử lại.');
+          || item[2]?.length) {
+        throw new Error('Flow đã gửi cấu hình khác yêu cầu. Kiểm tra ảnh trên Flow trước khi thử lại.');
+      }
       return { seeds: items.map(it => it?.[3]).filter(Boolean), seed: item[3] };
     }
   } catch (error) {

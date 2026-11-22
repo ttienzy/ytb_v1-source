@@ -183,3 +183,41 @@ def test_http_routes_frame_and_job_lookup(env, monkeypatch):
     bad = client.post("/api/workflow/muse/merge", json={"clips": [{"path": str(a), "trim_start": 1.9, "trim_end": 0}]})
     assert bad.status_code == 400 and "Clip 1" in bad.json()["detail"]
     assert client.post("/api/workflow/muse/merge", json={"clips": []}).status_code == 422
+
+
+@needs_ffmpeg
+def test_cut_video_skips_watermark_removal_but_flow_clip_does_not(env, monkeypatch):
+    """Video của node Cắt video (đã mã hóa lại) đi kèm `remove_watermark: false`: không chạy gwr cho riêng nó (gwr chỉ làm
+    đúng trên clip Flow gốc, chạy vào là hỏng cả lần ghép); clip Flow gốc cùng lần ghép vẫn được xóa watermark."""
+    from app.workflow import muse_finish
+    import app.watermark.service as wm
+
+    flow_clip = make_clip(env["veo"] / "flow.mp4", 2.0, color="red")
+    cut = make_clip(env["veo"] / "cut_abc.mp4", 2.0, color="blue")
+    calls = []
+
+    def fake_gwr(src, dest, on_progress=None, cancelled=None):
+        calls.append(Path(src).name)
+        shutil.copy(src, dest)
+        return dest
+
+    monkeypatch.setattr(wm, "remove_video_watermark_sync", fake_gwr)
+    monkeypatch.setattr(muse_finish, "finish_video", lambda req: {"filename": "f.mp4", "file_path": "x", "video_url": "/x", "duration_sec": 1, "title": ""})
+    req = muse_merge.MuseMergeRequest(clips=[{"path": str(flow_clip)}, {"path": str(cut), "remove_watermark": False}], remove_watermark=True)
+    assert wait_done(muse_merge.start_merge(req))["status"] == "done"
+    assert calls == ["flow.mp4"]
+    # cờ riêng = None -> theo cài đặt chung (giữ hành vi cũ)
+    assert muse_merge.MergeClip(path="x.mp4").remove_watermark is None
+
+
+def test_cut_folder_is_an_allowed_merge_source(tmp_path, monkeypatch):
+    """Thư mục video của node Cắt video (Data/media/muse_cuts) nằm trong các thư mục ghép được."""
+    from app.workflow import muse_cut
+
+    cuts = tmp_path / "muse_cuts"
+    cuts.mkdir()
+    monkeypatch.setattr(muse_cut, "CUT_DIR", cuts)
+    assert cuts.resolve() in muse_merge._roots()
+    f = cuts / "cut_123456789abc.mp4"
+    f.write_bytes(b"x" * 64)
+    assert muse_merge.resolve_video(str(f)) == f.resolve()

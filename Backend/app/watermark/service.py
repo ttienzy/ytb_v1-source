@@ -264,7 +264,18 @@ def remove_video_watermark_sync(input_path: Path, output_path: Path, on_progress
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_output = destination.with_name(f".{destination.stem}.{secrets.token_hex(6)}{destination.suffix}")
-    cmd = [*_gwr_command(runtime), "remove", str(source), "--output", str(temp_output), "--overwrite"]
+    video_bitrate = os.environ.get("WATERMARK_VIDEO_BITRATE_MBPS", "16")
+    cmd = [
+        *_gwr_command(runtime),
+        "remove",
+        str(source),
+        "--output",
+        str(temp_output),
+        "--overwrite",
+        "--video-bitrate-mbps",
+        video_bitrate,
+        "--allow-low-confidence",
+    ]
     logger.info("[watermark.video] Running (%s): %s", runtime.source, " ".join(cmd))
     stderr_tail: list[str] = []
     stopped = False

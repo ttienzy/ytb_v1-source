@@ -118,6 +118,8 @@ export const runKey = {
   finish: (nodeId: string) => `finish:${nodeId}`,
   /** node Ingredients (video + ảnh): tải video tham chiếu lên Flow + gửi job (job Flow sau đó chạy ở backend) */
   videoIngr: (nodeId: string) => `videoIngr:${nodeId}`,
+  /** node Cắt video: ghép các đoạn giữ lại thành 1 video mới (ffmpeg ở backend, vài giây) */
+  videoCut: (nodeId: string) => `videoCut:${nodeId}`,
 }
 
 /** Id node trong một khóa lượt chạy (để biết lượt thuộc node nào / project nào). */

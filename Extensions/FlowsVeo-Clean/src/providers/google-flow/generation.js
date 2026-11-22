@@ -86,6 +86,60 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
   };
 
   logActivity('info', `Running ${useHttp ? 'HTTP (no-UI)' : 'In-Page RPC'} generation for ${flowRequest?.input_mode} on tab=${tabId}`);
+  // Mã riêng của lượt này: hàm trong trang ghi các media id đã gửi vào sessionStorage dưới mã đó để chạy tiếp được.
+  const nonce = useHttp ? (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`) : '';
+  const pageArgs = useHttp ? [flowRequest, captchaToken, { nonce }] : [flowRequest, captchaToken];
+  const multiOutput = Number(flowRequest?.num_outputs || 1) > 1;
+
+  /**
+   * Lệnh executeScript đang chờ bị mất (trang Flow tải lại / chuyển trang giữa lúc render): chạy lại hàm trong trang ở chế độ
+   * resume — đọc ĐÚNG các media id đã gửi rồi theo dõi tiếp. Trả null nếu tab không còn dấu vết lượt gửi (để bên gọi quyết định).
+   */
+  const resumeHttp = async (originalError) => {
+    logActivity('info', `Lost direct result (${originalError}). Resuming the same HTTP generation by its media ids...`);
+    const deadline = Date.now() + 15 * 60_000;
+    let attempt = 0;
+    while (Date.now() < deadline) {
+      attempt++;
+      await sleep(attempt === 1 ? 2_000 : 4_000);
+      try {
+        await waitForTabComplete(tabId, 20_000).catch(() => {});
+        const injected = await chrome.scripting.executeScript({
+          target: { tabId }, world: 'MAIN', func: runFlowHttpVideoInPage,
+          args: [flowRequest, null, { nonce, resume: true }],
+        });
+        const r = injected?.[0]?.result;
+        if (!r) continue;                                                     // trang lại đổi giữa chừng: thử tiếp
+        if (r.resume_missing) {
+          // vừa tải lại có thể chưa đọc được sessionStorage / session: thử thêm vài lần rồi mới bỏ
+          if (attempt < 4) continue;
+          return null;
+        }
+        if (!r.ok && /session config is incomplete|session ID không hợp lệ|mở một Dự án/i.test(r.error || '')) continue;
+        logActivity(r.ok ? 'info' : 'warn', `Resumed HTTP generation (attempt ${attempt}): ${r.ok ? 'ok' : r.error}`);
+        return r;
+      } catch (err) {
+        const msg = err?.message || String(err);
+        if (!/context invalidated|frame was removed|execution context|no result|No tab with id|Cannot access/i.test(msg)) {
+          return { ok: false, submitted: true, error: `${originalError}; resume failed: ${msg}` };
+        }
+      }
+    }
+    return { ok: false, submitted: true, error: `${originalError}; resume timed out (Flow đã nhận lệnh — xem trong project Flow)` };
+  };
+
+  /** Mất kết quả trực tiếp: HTTP thì chạy tiếp bằng media id; chỉ khi không còn dấu vết VÀ là 1 video mới khôi phục scene đang mở. */
+  const handleLost = async (originalError) => {
+    if (useHttp) {
+      const resumed = await resumeHttp(originalError);
+      if (resumed) return resumed;
+      if (multiOutput) {
+        // khôi phục scene chỉ lấy được MỘT video bất kỳ đang mở (có khi là ảnh) -> không dùng cho lệnh nhiều video
+        return { ok: false, error: `${originalError}; không còn dấu vết lượt gửi trong tab Flow — xem các video trong project Flow, KHÔNG gửi lại` };
+      }
+    }
+    return recoverLostResult(originalError);
+  };
 
   const recoverLostResult = async (originalError) => {
     // Khi executeScript bị ngắt (do Flow đổi router / DOM repaint / context reset),
@@ -132,7 +186,7 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId }, world: 'MAIN', func: generationFn,
-      args: [flowRequest, captchaToken],
+      args: pageArgs,
     });
     const result = injected?.[0]?.result;
     const uiFallback = await fallbackToUiIfNotSubmitted(result);
@@ -153,20 +207,20 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
       try {
         const retryInjected = await chrome.scripting.executeScript({
           target: { tabId }, world: 'MAIN', func: generationFn,
-          args: [flowRequest, captchaToken],
+          args: pageArgs,
         });
         const retryResult = retryInjected?.[0]?.result;
         const retryUiFallback = await fallbackToUiIfNotSubmitted(retryResult, true);
         if (retryUiFallback) return retryUiFallback;
         if (retryResult) {
           if (retryResult.ok || !/Flow page returned no result/i.test(retryResult.error || '')) return retryResult;
-          return recoverLostResult(retryResult.error);
+          return handleLost(retryResult.error);
         }
-        return recoverLostResult('Flow page returned no result after session reload');
+        return handleLost('Flow page returned no result after session reload');
       } catch (retryErr) {
         const retryMsg = retryErr?.message || String(retryErr);
         if (/context invalidated|frame was removed|execution context|no result/i.test(retryMsg)) {
-          return recoverLostResult(`Cannot execute Flow adapter after reload: ${retryMsg}`);
+          return handleLost(`Cannot execute Flow adapter after reload: ${retryMsg}`);
         }
         return { ok: false, error: `Cannot execute Flow adapter after reload: ${retryMsg}` };
       }
@@ -174,13 +228,13 @@ export async function generateFlowVideo(flowRequest, captchaToken) {
 
     if (result) {
       if (result.ok || !/Flow page returned no result/i.test(result.error || '')) return result;
-      return recoverLostResult(result.error);
+      return handleLost(result.error);
     }
-    return recoverLostResult('Flow page returned no result');
+    return handleLost('Flow page returned no result');
   } catch (error) {
     const message = error?.message || String(error);
     if (/context invalidated|frame was removed|execution context|no result/i.test(message)) {
-      return recoverLostResult(`Cannot execute Flow adapter: ${message}`);
+      return handleLost(`Cannot execute Flow adapter: ${message}`);
     }
     return { ok: false, error: `Cannot execute Flow adapter: ${message}` };
   }

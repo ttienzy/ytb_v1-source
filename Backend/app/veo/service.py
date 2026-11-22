@@ -242,6 +242,15 @@ OMNI_12_NAME = "Omni 1.2 Flash"
 # Chỉnh video theo video mẫu (Motion Control): cùng RPC jIps6 như Omni 1.1, chỉ đổi model id. HAR flow.google_video_motion.com
 # (2026-11-11): đoạn 0–240 khung, 1 ảnh tham chiếu, 720p, trừ 30 credit, xong sau ~75 giây. 360p chưa có HAR -> chưa mở.
 OMNI_12_EDIT = "macaron_cookie_edit"
+# 360p chỉnh video: HAR flow.google_video_2311.com (2026-11-23) — hậu tố _360p + cờ [4] ở item[12] (extension tự thêm).
+OMNI_12_EDIT_360P = "macaron_cookie_edit_360p"
+# Số video tối đa trong MỘT lệnh chỉnh video: giao diện Flow x1–x4; HAR x3 = 1 request jIps6 chứa 3 item giống hệt nhau.
+# Extension: page/video-http.js MOTION_MAX_OUTPUTS (báo trong heartbeat `capabilities.motion_max_outputs`).
+MOTION_MAX_OUTPUTS = 4
+# Ảnh tham chiếu tối đa của chỉnh video: 5 (người dùng xác nhận trên giao diện Flow 2026-11-23; HAR cũ chỉ có 1–3).
+# Extension: page/video-http.js MOTION_MAX_IMAGES (báo trong heartbeat `capabilities.motion_max_images`). Ingredients r2v vẫn 3.
+MOTION_MAX_IMAGES = 5
+LEGACY_EXTENSION_MOTION_MAX_IMAGES = 3
 # Đoạn video mẫu dài nhất Flow nhận cho chỉnh video (Omni 1.2). Trước là 10 giây; người dùng xác nhận Flow hiện nhận 15 giây
 # (2026-11-22). Extension kiểm cùng giới hạn trong page/video-http.js — đổi thì đổi cả hai.
 MOTION_REF_MAX_SECONDS = 15.0
@@ -260,6 +269,39 @@ def _extension_motion_ref_limit() -> float | None:
     except (TypeError, ValueError):
         return LEGACY_EXTENSION_MOTION_REF_SECONDS
     return reported if reported > 0 else LEGACY_EXTENSION_MOTION_REF_SECONDS
+
+
+def _require_extension_motion_features(num_outputs: int, resolution: str, num_images: int = 1) -> None:
+    """Chặn TRƯỚC khi tạo job nếu extension đang chạy chưa biết gửi nhiều video / 360p trong một lệnh chỉnh video.
+
+    Bản extension cũ thấy num_outputs > 1 hoặc 360p thì canUseHttpVideo() = false và rơi sang điều khiển giao diện Flow
+    (giao diện không làm được việc này). Lỗi ở bước tạo job nên chưa gửi gì, không mất credit.
+    """
+    info = bridge.get_extension_info() or {}
+    if not info.get("connected"):
+        return
+    caps = info.get("capabilities") or {}
+    try:
+        max_outputs = int(caps.get("motion_max_outputs") or 1)
+    except (TypeError, ValueError):
+        max_outputs = 1
+    try:
+        max_images = int(caps.get("motion_max_images") or LEGACY_EXTENSION_MOTION_MAX_IMAGES)
+    except (TypeError, ValueError):
+        max_images = LEGACY_EXTENSION_MOTION_MAX_IMAGES
+    missing = []
+    if num_images > max_images:
+        missing.append(f"{num_images} ảnh tham chiếu (bản đang chạy chỉ nhận {max_images})")
+    if num_outputs > max_outputs:
+        missing.append(f"{num_outputs} video trong một lệnh (bản đang chạy chỉ nhận {max_outputs})")
+    if (resolution or "720p").lower() == "360p" and not caps.get("motion_360p"):
+        missing.append("360p")
+    if missing:
+        raise ValueError(
+            "Extension FlowsVeo trong Chrome đang chạy bản cũ, chưa hỗ trợ " + " và ".join(missing) + " cho chế độ chỉnh video. "
+            "Mở chrome://extensions, bấm tải lại (Reload) FlowsVeo lúc không có job nào đang chạy, chờ khoảng 30 giây cho extension "
+            "kết nối lại rồi thử lại. Chưa gửi gì lên Flow nên chưa mất credit."
+        )
 
 
 def _require_extension_motion_limit(length_seconds: float) -> None:
@@ -996,6 +1038,10 @@ def submit_job(request: VeoJobRequest) -> VeoJobOut:
         if end_seconds - request.reference_video_start_seconds > MOTION_REF_MAX_SECONDS:
             raise ValueError(f"Flow video references support clips up to {MOTION_REF_MAX_SECONDS:g} seconds")
         _require_extension_motion_limit(end_seconds - request.reference_video_start_seconds)
+        n_images = len(request.ingredient_image_paths or []) + len(request.ingredient_media_ids or [])
+        if n_images > MOTION_MAX_IMAGES:
+            raise ValueError(f"Chỉnh video nhận tối đa {MOTION_MAX_IMAGES} ảnh tham chiếu (đang có {n_images}).")
+        _require_extension_motion_features(int(request.num_outputs or 1), request.resolution or "720p", n_images)
 
     job_id = str(uuid.uuid4())[:12]
     now = datetime.now(timezone.utc).isoformat()
@@ -1162,8 +1208,17 @@ def _process_job_in_slot(job_id: str, job: dict[str, Any]) -> None:
             return
         if flow_envelope.get("error"):
             flow_error = str(flow_envelope["error"])
+            failure = flow_envelope.get("failure") or {}
+            if failure.get("submitted") is False:
+                # Extension xác nhận CHƯA gửi lệnh tạo video: không có gì để khôi phục và không mất credit.
+                logger.warning("Job %s: chưa gửi lên Flow: %s", job_id, flow_error[:500])
+                _update_job(job, JobStatus.ERROR, error=f"Chưa gửi lên Flow (không mất credit): {flow_error}")
+                return
+            if failure.get("media_ids"):
+                job["provider_media_ids"] = list(failure["media_ids"])
             logger.warning("Job %s: Flow báo lỗi, thử khôi phục scene: %s", job_id, flow_error[:500])
-            if _try_recover_completed_scene(job):
+            # Nhiều video một lệnh: khôi phục scene chỉ lấy được MỘT video bất kỳ đang mở -> không dùng (dễ nhận nhầm).
+            if int(job.get("num_outputs") or 1) == 1 and _try_recover_completed_scene(job):
                 return
             _update_job(job, JobStatus.ERROR, error=f"Google Flow: {flow_error}")
             return
@@ -1183,6 +1238,10 @@ def _process_job_in_slot(job_id: str, job: dict[str, Any]) -> None:
                 job, JobStatus.ERROR,
                 error=f"Google Flow không trả video: {flow_error}",
             )
+            return
+
+        if isinstance(flow_result.get("outputs"), list) and len(flow_result["outputs"]) > 1:
+            _finish_multi_output_job(job, flow_result)
             return
 
         returned_media_id = flow_result.get("media_id")
@@ -1211,6 +1270,56 @@ def _process_job_in_slot(job_id: str, job: dict[str, Any]) -> None:
     except Exception as e:
         logger.exception("Job %s failed: %s", job_id, e)
         _update_job(job, JobStatus.ERROR, error=f"Lỗi không xác định: {str(e)}")
+
+
+def _finish_multi_output_job(job: dict[str, Any], flow_result: dict[str, Any]) -> None:
+    """Nhiều video trong một lệnh (chỉnh video x2–x4): mỗi biến thể có kết cục riêng (HAR: 2 xong, 1 bị bộ lọc chặn).
+
+    File: biến thể 1 = <job>.mp4, biến thể N = <job>_vN.mp4. `job["outputs"]` ghi kết cục từng biến thể theo thứ tự item;
+    job DONE nếu có ít nhất 1 video, ERROR nếu không có video nào (Flow đã nhận lệnh: không gửi lại).
+    """
+    job_id = job["job_id"]
+    entries: list[dict[str, Any]] = []
+    files: list[str] = []
+    for out in sorted(flow_result["outputs"], key=lambda o: int(o.get("index") or 0)):
+        index = int(out.get("index") or 0)
+        entry: dict[str, Any] = {"index": index, "media_id": out.get("media_id"), "status": "error", "file": None}
+        try:
+            if not (out.get("ok") and out.get("video_url")):
+                raise RuntimeError(f"Google Flow: {out.get('error') or 'không có video'}")
+            mid = out.get("media_id")
+            with _jobs_lock:
+                owner = next((oid for oid, other in _jobs.items() if oid != job_id and other.get("status") == JobStatus.DONE.value
+                              and mid and (other.get("provider_media_id") == mid or mid in (other.get("provider_media_ids") or []))), None)
+            if owner:
+                raise RuntimeError(f"Flow trả nhầm video (media_id={mid}) đã thuộc về job {owner}")
+            _update_job(job, JobStatus.DOWNLOADING, f"Đang tải video {len(files) + 1} từ Flow...")
+            path = _download_flow_video(job, {**flow_result, **out}, "" if index == 0 else f"_v{index + 1}")
+            entry.update(status="done", file=path.name)
+            files.append(path.name)
+        except Exception as exc:  # noqa: BLE001 - lỗi của một biến thể không được làm hỏng các biến thể khác
+            message = str(exc)
+            if not message.startswith("Google Flow:") and not message.startswith("Flow trả nhầm"):
+                message = f"Tải video thất bại: {message}"
+            meta = _classify_job_error(message)
+            entry.update(error=message, error_code=meta.get("error_code"), error_hint=meta.get("error_hint"))
+            logger.warning("Job %s: biến thể %d lỗi: %s", job_id, index + 1, message[:300])
+        entries.append(entry)
+    job["outputs"] = entries
+    job["output_files"] = files
+    job["provider_media_ids"] = [e.get("media_id") for e in entries]
+    job["provider_model_id"] = flow_result.get("provider_model_id") or _job_provider_model_id(job)
+    first_done = next((e for e in entries if e["status"] == "done"), None)
+    if not first_done:
+        _update_job(job, JobStatus.ERROR, error=" | ".join(e.get("error") or "" for e in entries))
+        return
+    job["provider_media_id"] = first_done.get("media_id")
+    failed = len(entries) - len(files)
+    _update_job(job, JobStatus.DONE, f"Hoàn tất — {len(files)}/{len(entries)} video đã lưu vào máy"
+                + (f" ({failed} biến thể lỗi, xem từng ô)" if failed else ""))
+    if job.get("project_id"):
+        for _ in files:
+            _increment_project_video_count(job["project_id"])
 
 
 def _encode_image_file(path_str: str | None) -> dict[str, Any] | None:
@@ -1268,7 +1377,7 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
 
     if input_mode == "video_edit":
         if model_name == OMNI_12_NAME.lower() or not job.get("model_display_name"):
-            return OMNI_12_EDIT
+            return OMNI_12_EDIT_360P if (job.get("resolution") or "720p").lower() == "360p" else OMNI_12_EDIT
         return "abra_edit_360p" if (job.get("resolution") or "720p").lower() == "360p" else "abra_edit"   # job cũ của Omni 1.1
 
     if model_name == OMNI_12_NAME.lower():
@@ -1311,12 +1420,12 @@ def _resolve_provider_model_id(job: dict[str, Any]) -> str:
 
 
 def _motion_image_order(req: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """Phản chiếu motionImageOrder() của extension: 1–3 ảnh theo ingredient_inputs (media id có sẵn hoặc ảnh có base64)."""
+    """Phản chiếu motionImageOrder() của extension: 1–MOTION_MAX_IMAGES ảnh theo ingredient_inputs (media id có sẵn hoặc ảnh có base64)."""
     images = req.get("ingredient_images") or []
     inputs = req.get("ingredient_inputs") or (
         [{"media_id": mid} for mid in (req.get("ingredient_media_ids") or [])] + [{"local": True} for _ in images]
     )
-    if not 1 <= len(inputs) <= 3:
+    if not 1 <= len(inputs) <= MOTION_MAX_IMAGES:
         return None
     order: list[dict[str, Any]] = []
     nxt = 0
@@ -1368,7 +1477,7 @@ def _http_video_eligible(req: dict[str, Any]) -> bool:
             return False
     elif mode == "video_edit":
         # Motion Control Omni 1.2 (HAR jIps6): 720p, video mẫu đã có media id, cắt tối đa MOTION_REF_MAX_SECONDS, 1–3 ảnh tham chiếu.
-        if model != OMNI_12_EDIT or (req.get("resolution") or "720p") != "720p":
+        if model not in (OMNI_12_EDIT, OMNI_12_EDIT_360P):   # 720p / 360p: hậu tố phải khớp resolution (kiểm ở dưới)
             return False
         if not _MEDIA_ID_RE.match(str(req.get("reference_video_id") or "")):
             return False
@@ -1388,7 +1497,10 @@ def _http_video_eligible(req: dict[str, Any]) -> bool:
         return False
     if req.get("aspect_ratio") not in ("16:9", "9:16"):
         return False
-    return int(req.get("num_outputs") or 1) == 1
+    # Nhiều video trong một lệnh: chỉ chỉnh video có HAR (N item); các chế độ khác 1. Khớp canUseHttpVideo() của extension.
+    outputs = req.get("num_outputs") or 1
+    max_outputs = MOTION_MAX_OUTPUTS if mode == "video_edit" else 1
+    return isinstance(outputs, int) and 1 <= outputs <= max_outputs
 
 
 def _job_provider_model_id(job: dict[str, Any]) -> str:
@@ -1413,8 +1525,6 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     if mode not in ("text_to_video", "frames", "ingredients", "video_edit"):
         raise ValueError(f"Unsupported input_mode: {mode}")
     if model_name == OMNI_12_NAME:
-        if mode == "video_edit" and res == "360p":
-            raise ValueError(f"{OMNI_12_NAME} chỉnh video mới xác minh 720p; 360p chưa có dữ liệu giao thức.")
         if mode == "ingredients":
             if dur not in OMNI_12_R2V_DURATIONS or res not in ("720p", "360p") or int(job.get("num_outputs") or 1) != 1:
                 raise ValueError(f"{OMNI_12_NAME} ingredients nhận 3–15 giây, 360p/720p, một video mỗi lượt (nhận {dur}s/{res}).")
@@ -1532,8 +1642,8 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Video edit mode requires an uploaded reference_video_id")
         if res not in ("360p", "720p"):
             raise ValueError("Video edit mode supports only 360p or 720p generation")
-        if int(job.get("num_outputs") or 1) != 1:
-            raise ValueError("Video edit adapter currently supports exactly one output")
+        if not 1 <= int(job.get("num_outputs") or 1) <= MOTION_MAX_OUTPUTS:
+            raise ValueError(f"Chỉnh video nhận 1–{MOTION_MAX_OUTPUTS} video mỗi lệnh")
         if reference_video_start_seconds < 0 or reference_video_end_seconds <= reference_video_start_seconds:
             raise ValueError("Reference video trim range is invalid")
         if reference_video_end_seconds - reference_video_start_seconds > MOTION_REF_MAX_SECONDS:
@@ -1616,6 +1726,13 @@ def _build_verified_flow_request(job: dict[str, Any]) -> dict[str, Any]:
     }
     # Đường HTTP tự tạo token reCAPTCHA tươi ngay trong trang ngay trước khi gửi -> không cần giải trước một token thừa.
     request["http_no_captcha"] = _http_video_eligible(request)
+    n_motion_images = len(request.get("ingredient_inputs") or []) or (len(ingredient_media_ids) + len(ingredient_data_list))
+    if mode == "video_edit" and not request["http_no_captcha"] and (
+        int(request.get("num_outputs") or 1) > 1 or res == "360p" or n_motion_images > LEGACY_EXTENSION_MOTION_MAX_IMAGES
+    ):
+        # Nhiều video một lệnh / 360p / hơn 3 ảnh chỉ có trên đường HTTP; đường giao diện cũ không làm được -> chặn, chưa tốn gì.
+        raise ValueError("Nhiều video trong một lệnh, 360p và hơn 3 ảnh tham chiếu của chế độ chỉnh video chỉ chạy qua đường HTTP; yêu cầu "
+                         f"này không đủ điều kiện (cần video mẫu đã tải lên, đoạn cắt ≤ 15 giây, 1–{MOTION_MAX_IMAGES} ảnh tham chiếu, khung 9:16 hoặc 16:9).")
     return request
 
 
@@ -1661,7 +1778,7 @@ def _reject_duplicate_recovery(job: dict[str, Any], output_path: Path) -> bool:
     return True
 
 
-def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any]) -> Path:
+def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any], name_suffix: str = "") -> Path:
     """Download a signed result URL to an atomic local file and write metadata."""
     url = str(flow_result.get("video_url") or "")
     logger.info("Downloading video for job %s, media=%s", job.get("job_id"), flow_result.get("media_id"))
@@ -1669,7 +1786,7 @@ def _download_flow_video(job: dict[str, Any], flow_result: dict[str, Any]) -> Pa
     if parsed.scheme != "https" or parsed.hostname != "flow-content.google":
         raise ValueError("Flow trả URL video không thuộc flow-content.google")
 
-    output_path = _VEO_DATA_DIR / f"{job['job_id']}.mp4"
+    output_path = _VEO_DATA_DIR / f"{job['job_id']}{name_suffix}.mp4"
     part_path = output_path.with_suffix(".mp4.part")
     max_bytes = 250 * 1024 * 1024
     written = 0
@@ -2029,6 +2146,7 @@ def _job_to_out(job: dict, deduplicated: bool = False) -> VeoJobOut:
         duration_seconds=job.get("duration_seconds", 8),
         resolution=job.get("resolution", "720p"),
         num_outputs=job.get("num_outputs", 1),
+        outputs=job.get("outputs") or [],
         deduplicated=deduplicated,
         current_step=job.get("current_step", ""),
         error_message=job.get("error_message"),

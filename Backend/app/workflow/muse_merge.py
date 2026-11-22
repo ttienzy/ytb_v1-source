@@ -36,6 +36,9 @@ class MergeClip(BaseModel):
     path: str = Field(..., min_length=1, max_length=1024)
     trim_start: float = Field(default=0, ge=0, le=60, description="Cắt bỏ N giây đầu clip")
     trim_end: float = Field(default=0, ge=0, le=60, description="Cắt bỏ N giây cuối clip")
+    # None = theo `remove_watermark` chung. False cho video đã cắt ở node Cắt video: đã mã hóa lại (có khi không phải video
+    # Flow), mà công cụ xóa watermark chỉ làm đúng trên clip Flow gốc — chạy vào sẽ làm hỏng cả lần ghép.
+    remove_watermark: Optional[bool] = None
 
 
 class MuseMergeRequest(BaseModel):
@@ -62,7 +65,9 @@ def _roots() -> list[Path]:
     from app.workflow.muse_finish import muse_video_dir
     from app.workflow.service import WORKFLOW_EXPORTS_DIR
 
-    roots = [Path(veo._VEO_DATA_DIR), Path(WORKFLOW_EXPORTS_DIR), CLEAN_DIR]
+    from app.workflow.muse_cut import CUT_DIR
+
+    roots = [Path(veo._VEO_DATA_DIR), Path(WORKFLOW_EXPORTS_DIR), CLEAN_DIR, CUT_DIR]  # CUT_DIR: video của node Cắt video
     muse = muse_video_dir()
     if muse:
         roots.append(Path(muse))
@@ -249,7 +254,7 @@ def _run_job(job_id: str, req: MuseMergeRequest, planned: list[tuple[Path, dict[
         processed: list[str] = []
         for i, ((src, info, length), clip) in enumerate(zip(planned, req.clips), start=1):
             use = src
-            if req.remove_watermark:
+            if req.remove_watermark if clip.remove_watermark is None else clip.remove_watermark:
                 _set(job_id, clip=i, step=f"Clip {i}/{n}: xóa watermark Flow (mất vài phút / clip, lần sau dùng cache)…")
 
                 def on_progress(done: int, total: int, i: int = i) -> None:

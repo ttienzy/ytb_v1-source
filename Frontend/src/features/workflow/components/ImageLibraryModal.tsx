@@ -42,6 +42,8 @@ interface ImageLibraryModalProps {
   pickMode?: boolean
   pickTitle?: string
   onPick?: (item: LibraryImage) => void
+  multiPick?: boolean
+  onPickMulti?: (items: LibraryImage[]) => void
 }
 
 const FILTERS: { id: Filter; label: string }[] = [
@@ -59,13 +61,14 @@ function formatTime(sec: number): string {
   return new Date(sec * 1000).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pickTitle, onPick }: ImageLibraryModalProps) {
+export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pickTitle, onPick, multiPick, onPickMulti }: ImageLibraryModalProps) {
   const [items, setItems] = useState<LibraryImage[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedMultiImages, setSelectedMultiImages] = useState<Map<string, LibraryImage>>(new Map())
   const [uploading, setUploading] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const [labelDraft, setLabelDraft] = useState('')
@@ -80,6 +83,7 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
       setItems(all)
       onCountChange?.(all.length)
       setSelectedId((cur) => (cur && all.some((i) => i.id === cur) ? cur : all[0]?.id ?? null))
+      setSelectedMultiImages(new Map())
     } catch (e: any) {
       setError(e?.message || 'Không tải được Thư Viện Ảnh')
     } finally {
@@ -204,6 +208,33 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
             ))}
           </div>
           <div className="il-actions">
+            {multiPick && (
+              <button
+                type="button"
+                className="il-primary"
+                disabled={selectedMultiImages.size === 0}
+                onClick={() => {
+                  onPickMulti?.(Array.from(selectedMultiImages.values()))
+                  onClose()
+                }}
+                style={{
+                  height: 30,
+                  padding: '0 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: selectedMultiImages.size === 0 ? '#94a3b8' : '#2563eb',
+                  color: '#ffffff',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: selectedMultiImages.size === 0 ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                <Check size={13} /> Thêm {selectedMultiImages.size} ảnh đã chọn
+              </button>
+            )}
             <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading > 0} title="Tải ảnh của bạn vào thư viện (hoặc kéo thả vào cửa sổ)">
               {uploading > 0 ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Tải ảnh lên
             </button>
@@ -246,25 +277,60 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
               </div>
             ) : (
               <div className="il-grid">
-                {visible.map((it) => (
-                  <button
-                    key={it.id}
-                    type="button"
-                    className={`il-card ${it.id === selectedId ? 'on' : ''}`}
-                    onClick={() => setSelectedId(it.id)}
-                    onDoubleClick={() => pickMode && onPick?.(it)}
-                    title={pickMode ? 'Nháy đúp để dùng ảnh này' : it.label}
-                  >
-                    <span className="il-thumb">
-                      <img src={libraryImageUrl(it)} alt={it.label} loading="lazy" draggable={false} />
-                    </span>
-                    <span className="il-card-meta">
-                      <span className="il-card-label">{it.label}</span>
-                      <span className={`il-src il-src-${it.source}`}>{SOURCE_LABEL[it.source] || it.source}</span>
-                    </span>
-                    {it.favorite && <Star size={12} className="il-star" />}
-                  </button>
-                ))}
+                {visible.map((it) => {
+                  const isMulti = multiPick && selectedMultiImages.has(it.id)
+                  return (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className={`il-card ${it.id === selectedId || isMulti ? 'on' : ''}`}
+                      onClick={() => {
+                        setSelectedId(it.id)
+                        if (multiPick) {
+                          setSelectedMultiImages((prev) => {
+                            const next = new Map(prev)
+                            if (next.has(it.id)) next.delete(it.id)
+                            else next.set(it.id, it)
+                            return next
+                          })
+                        }
+                      }}
+                      onDoubleClick={() => pickMode && !multiPick && onPick?.(it)}
+                      title={multiPick ? (isMulti ? 'Bấm để bỏ chọn' : 'Bấm để chọn') : pickMode ? 'Nháy đúp để dùng ảnh này' : it.label}
+                    >
+                      {multiPick && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: 6,
+                            left: 6,
+                            width: 20,
+                            height: 20,
+                            borderRadius: 4,
+                            background: isMulti ? '#2563eb' : 'rgba(0,0,0,0.4)',
+                            border: isMulti ? '2px solid #fff' : '1px solid rgba(255,255,255,0.8)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#fff',
+                            zIndex: 2,
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                          }}
+                        >
+                          {isMulti && <Check size={12} strokeWidth={3} />}
+                        </span>
+                      )}
+                      <span className="il-thumb">
+                        <img src={libraryImageUrl(it)} alt={it.label} loading="lazy" draggable={false} />
+                      </span>
+                      <span className="il-card-meta">
+                        <span className="il-card-label">{it.label}</span>
+                        <span className={`il-src il-src-${it.source}`}>{SOURCE_LABEL[it.source] || it.source}</span>
+                      </span>
+                      {it.favorite && <Star size={12} className="il-star" />}
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -320,9 +386,25 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
                 )}
                 <div className="il-path" title={selected.path}>{selected.path}</div>
                 <div className="il-detail-actions">
-                  {pickMode && (
+                  {pickMode && !multiPick && (
                     <button type="button" className="il-primary" onClick={() => onPick?.(selected)}>
                       <Check size={14} /> Dùng ảnh này
+                    </button>
+                  )}
+                  {multiPick && (
+                    <button
+                      type="button"
+                      className="il-primary"
+                      onClick={() => {
+                        setSelectedMultiImages((prev) => {
+                          const next = new Map(prev)
+                          if (next.has(selected.id)) next.delete(selected.id)
+                          else next.set(selected.id, selected)
+                          return next
+                        })
+                      }}
+                    >
+                      <Check size={14} /> {selectedMultiImages.has(selected.id) ? 'Bỏ chọn ảnh này' : 'Chọn ảnh này'}
                     </button>
                   )}
                   <button

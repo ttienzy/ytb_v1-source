@@ -167,7 +167,9 @@ test('HTTP job failure releases the counter and reports the error', async () => 
   await until(() => h.pending.has('http-f'));
   h.pending.get('http-f').resolve({ ok: false, submitted: true, error: 'Flow render ended with status 4' });
   await until(() => h.api.runtime.activeGenerationCount === 0);
-  assert.deepEqual(h.requests.find(r => r.path === '/flow/response').body, { request_id: 'http-f', result: null, error: 'Flow render ended with status 4' });
+  // trường cũ giữ nguyên; thêm `failure` để backend biết Flow ĐÃ nhận lệnh (đã trừ credit) -> không báo "chưa mất credit"
+  assert.deepEqual(h.requests.find(r => r.path === '/flow/response').body, { request_id: 'http-f', result: null, error: 'Flow render ended with status 4',
+    failure: { submitted: true, media_id: null, media_ids: [] } });
 });
 
 test('captcha is still pre-solved when the backend flag or the extension eligibility is missing (no backend hang)', async () => {

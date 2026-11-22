@@ -26,6 +26,7 @@
  * - Node "Ảnh kết quả": tách 1 ảnh đã tạo ra node riêng (giữ ảnh, nhớ nguồn) để dùng / nối tiếp.
  * Mọi node độc lập, thêm / xóa tự do.
  */
+import { cutCompleteVideo } from './museVideoCutKey.ts'
 import { museGenerateOptions, type MuseCanvasConfig } from './museCanvasConfig.ts'
 
 /** Id type node — giữ nguyên các id đã có: đồ thị đã lưu tham chiếu tới chúng. */
@@ -40,9 +41,11 @@ export const MUSE_NODE = {
   scenePlace: 'museScenePlace',
   /** "Video tham chiếu": độc lập, giữ 1 video mẫu (tải lên / Thư Viện Video) */
   videoRef: 'museVideoRef',
+  /** "Cắt video": độc lập, nhận 1 video, cắt nhiều khúc như CapCut (xem trước rồi "Cắt & lưu") -> video mới */
+  videoCut: 'museVideoCut',
   /** "Ô prompt": độc lập, nhập / giữ 1 prompt chữ (thêm bao nhiêu ô cũng được) */
   promptBox: 'musePromptBox',
-  /** "Ingredients (video + ảnh)": video tham chiếu + 1–3 ảnh → 1 video Omni 1.2 (video_edit) trên Flow */
+  /** "Ingredients (video + ảnh)": video tham chiếu + 1–5 ảnh → video Omni 1.2 (video_edit) trên Flow */
   videoIngredients: 'museVideoIngredients',
   output: 'museOutputImage',
   script: 'museVideoScript',
@@ -493,6 +496,18 @@ export function normalizeMuseEdges<E extends { type?: string; targetHandle?: str
  */
 type EdgeRef = Pick<MuseEdgeLike, 'source' | 'target'> & { targetHandle?: string | null }
 
+/** Đi ngược theo dây "Video" từ `from`: có gặp node `target` không? (chặn vòng giữa các node Cắt video) */
+function videoCutReaches(target: string, from: string, edges: EdgeRef[]): boolean {
+  const seen = new Set<string>()
+  let cur: string | undefined = from
+  while (cur && !seen.has(cur)) {
+    if (cur === target) return true
+    seen.add(cur)
+    cur = edges.find((e) => e.target === cur && (e.targetHandle ?? MUSE_HANDLE.refVideoIn) === MUSE_HANDLE.refVideoIn)?.source
+  }
+  return false
+}
+
 export function isValidMuseConnection(
   c: MuseConnectionLike,
   nodes: (Pick<MuseNodeLike, 'id' | 'type'> & { data?: Record<string, unknown> })[],
@@ -523,9 +538,9 @@ export function isValidMuseConnection(
       !edges.some((e) => e.target === c.target)
     )
   }
-  // node Ingredients (video + ảnh): cổng "Video" nhận đúng 1 Video tham chiếu; cổng "Ảnh" nhận tối đa 3 node có ảnh
+  // node Ingredients (video + ảnh): cổng "Video" nhận đúng 1 Video tham chiếu; cổng "Ảnh" nhận tối đa 5 node có ảnh
   if (dst.type === MUSE_NODE.videoIngredients) {
-    if (src.type === MUSE_NODE.videoRef) {
+    if (src.type === MUSE_NODE.videoRef || src.type === MUSE_NODE.videoCut) {
       return (
         (sh ?? MUSE_HANDLE.refVideoOut) === MUSE_HANDLE.refVideoOut &&
         (th ?? MUSE_HANDLE.refVideoIn) === MUSE_HANDLE.refVideoIn &&
@@ -537,6 +552,13 @@ export function isValidMuseConnection(
     if ((sh ?? imageOutHandle(src.type)) !== imageOutHandle(src.type)) return false
     return edges.filter((e) => e.target === c.target && e.targetHandle === MUSE_HANDLE.refsIn).length < VIDEO_INGR_MAX_REFS
   }
+  // node Cắt video: cổng "Video" nhận 1 Video tham chiếu hoặc 1 node Cắt video khác (nối tiếp, không được tạo vòng)
+  if (dst.type === MUSE_NODE.videoCut) {
+    if (src.type !== MUSE_NODE.videoRef && src.type !== MUSE_NODE.videoCut) return false
+    if ((sh ?? MUSE_HANDLE.refVideoOut) !== MUSE_HANDLE.refVideoOut || (th ?? MUSE_HANDLE.refVideoIn) !== MUSE_HANDLE.refVideoIn) return false
+    if (edges.some((e) => e.target === c.target && (e.targetHandle ?? MUSE_HANDLE.refVideoIn) === MUSE_HANDLE.refVideoIn)) return false
+    return !videoCutReaches(c.target, c.source, edges)
+  }
   if (dst.type === MUSE_NODE.clipPrompt) {
     return (
       src.type === MUSE_NODE.clipScript &&
@@ -546,11 +568,10 @@ export function isValidMuseConnection(
     )
   }
   if (dst.type === MUSE_NODE.clipMerge) {
-    return (
-      src.type === MUSE_NODE.clipPrompt &&
-      (sh ?? MUSE_HANDLE.clipVideoOut) === MUSE_HANDLE.clipVideoOut &&
-      (th ?? MUSE_HANDLE.clipVideoIn) === MUSE_HANDLE.clipVideoIn
-    )
+    if ((th ?? MUSE_HANDLE.clipVideoIn) !== MUSE_HANDLE.clipVideoIn) return false
+    // node Cắt video: chấm đỏ (video đã cắt) cũng ghép được, nối trước khi cắt xong vẫn được (node Ghép chờ video hoàn chỉnh)
+    if (src.type === MUSE_NODE.videoCut) return (sh ?? MUSE_HANDLE.refVideoOut) === MUSE_HANDLE.refVideoOut
+    return src.type === MUSE_NODE.clipPrompt && (sh ?? MUSE_HANDLE.clipVideoOut) === MUSE_HANDLE.clipVideoOut
   }
   if (src.type === MUSE_NODE.script || src.type === MUSE_NODE.scriptText || src.type === MUSE_NODE.videoOutput || src.type === MUSE_NODE.clipScript || src.type === MUSE_NODE.clipPrompt || src.type === MUSE_NODE.clipMerge) return false
   // Ảnh tham chiếu → cổng boards của Kịch bản video / Kịch bản tạo video hoặc của node Kịch bản (Tạo video)
@@ -1107,6 +1128,7 @@ const NODE_NAME: Record<string, string> = {
   [MUSE_NODE.scene]: 'Tham chiếu bối cảnh',
   [MUSE_NODE.scenePlace]: 'Nhân vật trong bối cảnh',
   [MUSE_NODE.videoRef]: 'Video tham chiếu',
+  [MUSE_NODE.videoCut]: 'Cắt video',
   [MUSE_NODE.promptBox]: 'Ô prompt',
   [MUSE_NODE.videoIngredients]: 'Ingredients (video + ảnh)',
   [MUSE_NODE.output]: 'Ảnh kết quả',
@@ -1134,13 +1156,22 @@ export function explainMuseConnection(
   const dName = NODE_NAME[dst.type ?? ''] ?? 'node'
   if (edges.some((e) => e.source === srcId && e.target === dstId)) return `Hai node này đã được nối.`
   if (dst.type === MUSE_NODE.videoIngredients) {
-    if (src.type === MUSE_NODE.videoRef) return 'Node Ingredients chỉ nhận 1 video tham chiếu — gỡ dây video cũ trước.'
+    if (src.type === MUSE_NODE.videoRef || src.type === MUSE_NODE.videoCut) return 'Node Ingredients chỉ nhận 1 video — gỡ dây video cũ trước.'
     if (SCRIPT_REF_SOURCE_TYPES.includes(src.type ?? ''))
       return `Node Ingredients nhận tối đa ${VIDEO_INGR_MAX_REFS} ảnh tham chiếu (giới hạn của Flow) — gỡ bớt dây ảnh.`
-    return 'Node Ingredients nhận 1 “Video tham chiếu” (cổng Video) và tối đa 3 node có ảnh: Ảnh kết quả, Nhân vật, Trang phục, Bối cảnh (cổng Ảnh).'
+    return `Node Ingredients nh?n 1 "Video tham chi?u" (c?ng Video) v� t?i da ${VIDEO_INGR_MAX_REFS} node c� ?nh: ?nh k?t qu?, Nh�n v?t, Trang ph?c, B?i c?nh (c?ng ?nh).`
   }
+  if (dst.type === MUSE_NODE.videoCut) {
+    if (src.type !== MUSE_NODE.videoRef && src.type !== MUSE_NODE.videoCut)
+      return 'Node Cắt video nhận 1 video từ node Video tham chiếu (hoặc từ một node Cắt video khác) ở cổng “Video”.'
+    if (edges.some((e) => e.target === dstId && (e.targetHandle ?? MUSE_HANDLE.refVideoIn) === MUSE_HANDLE.refVideoIn))
+      return 'Node Cắt video chỉ nhận 1 video — gỡ dây video cũ trước.'
+    return 'Hai node Cắt video không được nối thành vòng.'
+  }
+  if (src.type === MUSE_NODE.videoCut)
+    return 'Node Cắt video nối vào cổng “Video” của node Ingredients (video + ảnh), một node Cắt video khác, hoặc cổng “Clip” của node Ghép video.'
   if (src.type === MUSE_NODE.videoRef || dst.type === MUSE_NODE.videoRef)
-    return 'Node Video tham chiếu chỉ nối vào cổng “Video” của node Ingredients (video + ảnh).'
+    return 'Node Video tham chiếu nối vào cổng “Video” của node Ingredients (video + ảnh) hoặc node Cắt video.'
   if (src.type === MUSE_NODE.promptBox || dst.type === MUSE_NODE.promptBox)
     return 'Ô prompt đang độc lập — chưa có node nào nhận prompt từ ô, nên chưa nối được (bấm “Chép” để dán prompt vào node khác).'
   if (dst.type === MUSE_NODE.output && edges.some((e) => e.target === dstId))
@@ -1161,7 +1192,7 @@ export function explainMuseConnection(
     return src.type === MUSE_NODE.clipScript
       ? 'Node Clip chỉ có 1 nguồn — gỡ dây cũ trước.'
       : 'Node Clip chỉ nhận dây từ Kịch bản tạo video (dùng nút “Ra node” ở từng clip).'
-  if (dst.type === MUSE_NODE.clipMerge) return 'Ghép video chỉ nhận dây từ node Clip (chấm xanh bên phải node Clip).'
+  if (dst.type === MUSE_NODE.clipMerge) return 'Ghép video nhận dây từ node Clip (chấm xanh) hoặc node Cắt video (chấm đỏ bên phải).'
   if (dst.type === MUSE_NODE.scenePlace)
     return 'Nhân vật trong bối cảnh nhận “Ảnh kết quả” của Bảng thiết kế nhân vật hoặc “Nhân vật tham chiếu” ở cổng “Nhân vật”, và “Tham chiếu bối cảnh” ở cổng “Bối cảnh”.'
   if (src.type === MUSE_NODE.clipScript) return 'Kịch bản tạo video chỉ nối ra node Clip — dùng nút “Ra node” ở từng clip.'
@@ -1911,6 +1942,10 @@ export interface MuseClipVideo {
   backendUpdatedAt?: number
   error?: string
   errorCode?: string
+  /** Job nhiều video (Ingredients x2–x4 = MỘT lệnh Flow): ô này là video thứ mấy của job (0 = đầu). Không có = job 1 video. */
+  outputIndex?: number
+  /** Node "Video tham chiếu" đã tách ra từ video này ("Ra node") — còn trên canvas thì nút thành "Xem node" */
+  outNodeId?: string
   startedAt: number
   updatedAt: number
 }
@@ -2014,7 +2049,7 @@ export const isProjectHomeError = (message?: string | null) => !!message && /hom
 
 /**
  * Omni 1.2 "chỉnh video" trên Flow (cùng đường với Motion Control): video tham chiếu (đã tải lên project Flow, lấy
- * media id) cắt 3–15 s + 1–3 ảnh tham chiếu theo thứ tự → 1 video 720p. Giá đo 1 lần: đoạn 8 s = 30 credit.
+ * media id) cắt 3–15 s + 1–5 ảnh tham chiếu theo thứ tự → 1 video 720p. Giá đo 1 lần: đoạn 8 s = 30 credit.
  * Giới hạn 15 s khớp backend (veo/service.MOTION_REF_MAX_SECONDS) và extension (page/video-http.js).
  */
 export const VIDEO_INGR_SPEC = {
@@ -2022,7 +2057,7 @@ export const VIDEO_INGR_SPEC = {
   title: 'Ingredients (video + ảnh)',
   promptName: 'video_ingredients',
 } as const
-export const VIDEO_INGR_MAX_REFS = 3
+export const VIDEO_INGR_MAX_REFS = 5
 /** Biến thể tối đa mỗi lần bấm (khớp FLOW_MAX_VARIANTS ở cấu hình / backend) */
 export const VIDEO_INGR_MAX_VARIANTS = 4
 export const VIDEO_INGR_MIN_SECONDS = 3
@@ -2065,9 +2100,24 @@ export function normalizeVideoIngrData(raw: Record<string, unknown> | undefined)
   const d = raw ?? {}
   // bản lưu cũ có `video` (1 video) -> thành biến thể 1
   const rawList: unknown[] = Array.isArray(d.videos) ? d.videos : d.video ? [d.video] : []
-  const videos = rawList
+  const kept = rawList
     .filter((v): v is MuseClipVideo => !!v && typeof v === 'object' && typeof (v as MuseClipVideo).status === 'string')
     .slice(0, VIDEO_INGR_MAX_VARIANTS)
+  // Bản lưu trước bản sửa 2026-11-23: job nhiều video chỉ trả về 1 file thì MỌI ô của job cùng trỏ file đó (ô sau trùng ô đầu).
+  // Ô sau trùng đúng file của ô đầu cùng job = thật ra thiếu video -> hiện là thiếu, không phát trùng.
+  const fileKey = (v: MuseClipVideo) => (v.files ?? []).join('|')
+  const videos = kept.map((v) =>
+    v.status === 'done' && v.jobId && (v.outputIndex ?? 0) > 0 && fileKey(v) &&
+    kept.some((o) => o !== v && o.jobId === v.jobId && (o.outputIndex ?? 0) === 0 && fileKey(o) === fileKey(v))
+      ? {
+          ...v,
+          status: 'error' as const,
+          files: undefined,
+          errorCode: 'OUTPUT_MISSING',
+          error: 'Flow chỉ trả về 1 video cho lệnh này — video của biến thể này nằm trong project Flow (đã tính credit), không gửi lại.',
+        }
+      : v,
+  )
   return {
     title: titleOr(d.title, VIDEO_INGR_SPEC.title),
     prompt: typeof d.prompt === 'string' ? d.prompt : '',
@@ -2095,11 +2145,17 @@ export function videoIngrTrim(d: Pick<VideoIngrInput, 'trimStart' | 'trimEnd' | 
   return { start, end, length: Math.round((end - start) * 100) / 100 }
 }
 
-/** Credit ước tính cho chỉnh video: giá đo 1 lần (8 s = 30 credit), tính theo giây — đoạn > 8 s chưa đo. */
-export const videoIngrCredits = (seconds: number) => Math.round((seconds * 30) / 8)
+/**
+ * Credit ước tính cho MỘT video chỉnh video. 720p: giá đo 8 s = 30, 13 s = 48 (tính theo giây từ mốc 8 s).
+ * 360p: HAR 2026-11-23 — 3 video, đoạn 0–409 khung (13,63 s) = 48 credit (16/video) = giá theo bậc của Flow tính trên số
+ * giây NGUYÊN (bỏ phần lẻ: 10 + 2 × 3).
+ */
+export const videoIngrCredits = (seconds: number, resolution: '720p' | '360p' = '720p') =>
+  resolution === '360p' ? flowClipCredits(Math.floor(seconds), '360p') : Math.round((seconds * 30) / 8)
 
-/** Tổng credit của n biến thể: mỗi biến thể là 1 job Flow riêng nên nhân n. */
-export const videoIngrTotalCredits = (seconds: number, variants: number) => videoIngrCredits(seconds) * Math.max(1, variants)
+/** Tổng credit của n biến thể: Flow tính tiền từng video (HAR x3 360p 13 s: 48 = 3 × 16) dù chỉ gửi MỘT lệnh. */
+export const videoIngrTotalCredits = (seconds: number, variants: number, resolution: '720p' | '360p' = '720p') =>
+  videoIngrCredits(seconds, resolution) * Math.max(1, variants)
 
 /** Lần gửi kế tiếp của node (vào khóa chống trùng): lớn hơn mọi lần gửi trước. */
 export const videoIngrNextAttempt = (videos: Pick<MuseClipVideo, 'attempt'>[]) => videos.reduce((m, v) => Math.max(m, v.attempt || 0), 0) + 1
@@ -2113,6 +2169,8 @@ export interface VideoIngrFlow {
   /** Mã project trên Google Flow (để tải video tham chiếu lên) */
   flowProjectId: string
   aspect: '9:16' | '16:9'
+  /** 720p hoặc 360p (360p chỉnh video: HAR 2026-11-23). Không có = 720p. */
+  resolution?: '720p' | '360p'
 }
 
 /** Lỗi chặn "Tạo video" (kiểm tra TRƯỚC khi tải / gửi gì — không tốn credit). Rỗng = gửi được. */
@@ -2126,7 +2184,7 @@ export function videoIngrBlockers(
   if (!flow?.projectId) b.push('Chưa chọn project Flow — mở Cấu hình → Google Flow để chọn hoặc tạo project.')
   else if (!flow.flowProjectId) b.push('Project Flow đã chọn chưa có mã project trên Google Flow.')
   if (!video) b.push('Chưa nối “Video tham chiếu” (có video) vào cổng Video.')
-  if (!refs.length) b.push('Chưa nối ảnh tham chiếu nào vào cổng Ảnh (1–3 ảnh).')
+  if (!refs.length) b.push(`Chưa nối ảnh tham chiếu nào vào cổng Ảnh (1–${VIDEO_INGR_MAX_REFS} ảnh).`)
   if (refs.length > VIDEO_INGR_MAX_REFS) b.push(`Tối đa ${VIDEO_INGR_MAX_REFS} ảnh tham chiếu (giới hạn của Flow).`)
   const noImg = refs.find((r) => !r.image)
   if (noImg) b.push(`${noImg.label}: chưa có ảnh.`)
@@ -2157,10 +2215,16 @@ export function videoIngrFingerprint(
     refs.map((r) => r.image?.path ?? '').join(','),
     flow?.aspect ?? '',
     flow?.projectId ?? '',
+    // 720p giữ nguyên dấu vân tay cũ (video đã tạo không bị coi là bản cũ sau khi nâng cấp)
+    ...(flow?.resolution === '360p' ? ['360p'] : []),
   ].join('|')
 }
 
-/** Body POST /api/veo/jobs (video_edit, Omni 1.2): media id của video tham chiếu đã tải lên project Flow. */
+/**
+ * Body POST /api/veo/jobs (video_edit, Omni 1.2): media id của video tham chiếu đã tải lên project Flow.
+ * `outputs` > 1 = MỘT lệnh Flow ra nhiều video (như chọn x2–x4 trên giao diện Flow; HAR 2026-11-23): một lần tải video,
+ * một token reCAPTCHA, Flow trả từng video riêng. `variant` = ô thứ mấy khi tạo lại riêng một ô (1 video).
+ */
 export function buildVideoIngrRequest(
   nodeId: string,
   d: VideoIngrInput,
@@ -2169,32 +2233,112 @@ export function buildVideoIngrRequest(
   flow: VideoIngrFlow | null,
   referenceVideoId: string,
   attempt: number,
-  /** Biến thể thứ mấy (1–4): vào khóa chống trùng để mỗi biến thể là 1 job riêng, gửi lại cùng biến thể không tạo thêm job */
+  /** Ô thứ mấy (1–4) khi tạo lại riêng một ô: vào khóa chống trùng + `variant` của backend */
   variant = 1,
+  /** Số video trong MỘT lệnh (1–4) */
+  outputs = 1,
 ): Record<string, unknown> {
   const blockers = videoIngrBlockers(d, video, refs, flow)
   if (blockers.length) throw new Error(blockers[0])
   if (!referenceVideoId) throw new Error('Chưa có mã video tham chiếu trên Flow.')
   const t = videoIngrTrim(d, video!.durationSec)
+  const n = Math.min(VIDEO_INGR_MAX_VARIANTS, Math.max(1, Math.floor(outputs) || 1))
   return {
     prompt: d.prompt.trim(),
     model_display_name: CLIP_FLOW_MODEL,
     input_mode: 'video_edit',
     aspect_ratio: flow!.aspect,
     duration_seconds: Math.min(VIDEO_INGR_MAX_SECONDS, Math.max(1, Math.ceil(t.length))),
-    resolution: VIDEO_INGR_RESOLUTION,
-    num_outputs: 1,
-    // backend chống trùng theo NỘI DUNG: biến thể 2–4 giống hệt biến thể 1 chỉ khác khóa thì bị coi là bản trùng và trả lại
-    // job của biến thể 1 (chỉ có 1 video). `variant` nằm trong fingerprint đó (không gửi lên Flow) để mỗi biến thể là 1 job riêng.
-    variant,
+    resolution: flow!.resolution ?? VIDEO_INGR_RESOLUTION,
+    num_outputs: n,
+    // backend chống trùng theo NỘI DUNG: tạo lại riêng ô 2 và ô 3 cùng lúc (cùng nội dung) sẽ bị coi là một nếu thiếu
+    // `variant` (nằm trong fingerprint chống trùng, không gửi lên Flow).
+    variant: n > 1 ? 1 : variant,
     project_id: flow!.projectId,
     ingredient_image_paths: refs.map((r) => r.image!.path),
     reference_video_id: referenceVideoId,
     reference_video_start_seconds: t.start,
     reference_video_end_seconds: t.end,
-    idempotency_key: `musevingr-${nodeId}-${hashText(videoIngrFingerprint(d, video, refs, flow))}-a${attempt}-v${variant}`.slice(0, 128),
+    idempotency_key: `musevingr-${nodeId}-${hashText(videoIngrFingerprint(d, video, refs, flow))}-a${attempt}-${n > 1 ? `x${n}` : `v${variant}`}`.slice(0, 128),
   }
 }
+
+/** Job backend tối thiểu để cập nhật một ô (giống VeoJobLite của museCanvasApi, khai báo lại để module này vẫn thuần). */
+export interface VideoIngrJob {
+  job_id: string
+  status: string
+  current_step?: string
+  error_code?: string | null
+  error_message?: string | null
+  output_files?: string[]
+  outputs?: { index: number; status: string; file?: string | null; error?: string | null; error_code?: string | null }[]
+  updated_at?: string
+}
+
+/**
+ * Cập nhật MỘT ô từ job backend. Job nhiều video: ô lấy kết cục của đúng video `outputIndex` (mỗi biến thể có kết cục
+ * riêng — HAR: 1 bị bộ lọc chặn, 2 xong); lỗi chung của cả job (vd. chưa gửi được) áp cho mọi ô của job đó.
+ */
+export function videoIngrFromJob(v: MuseClipVideo, job: VideoIngrJob, now = Date.now()): MuseClipVideo {
+  const status: MuseClipVideo['status'] = job.status === 'done' ? 'done' : job.status === 'error' ? 'error' : 'running'
+  const base: MuseClipVideo = {
+    ...v,
+    jobId: job.job_id,
+    status,
+    step: job.status,
+    detail: job.current_step || v.detail,
+    backendUpdatedAt: job.updated_at ? Date.parse(job.updated_at) || v.backendUpdatedAt : v.backendUpdatedAt,
+    error: undefined,
+    errorCode: undefined,
+    updatedAt: now,
+  }
+  const outs = job.outputs || []
+  if (status !== 'running' && v.outputIndex != null && outs.length) {
+    const o = outs.find((x) => x.index === v.outputIndex)
+    if (o?.status === 'done' && o.file) return { ...base, status: 'done', files: [o.file] }
+    return {
+      ...base,
+      status: 'error',
+      error: o?.error || (o ? 'Flow báo lỗi cho video này' : 'Flow không trả video này'),
+      errorCode: o?.error_code || undefined,
+    }
+  }
+  if (status === 'done' && v.outputIndex != null && v.outputIndex > 0) {
+    // job nhiều video nhưng backend chỉ nhận được 1 video (mất kết quả trực tiếp, phải khôi phục scene): KHÔNG gán video
+    // của biến thể 1 cho ô này — báo thiếu để người dùng xem trong project Flow (Flow đã nhận lệnh, đã tính credit).
+    return {
+      ...base,
+      status: 'error',
+      errorCode: 'OUTPUT_MISSING',
+      error: 'Flow chỉ trả về 1 video cho lệnh này — video của biến thể này nằm trong project Flow (đã tính credit), không gửi lại.',
+    }
+  }
+  if (status === 'done') return { ...base, files: job.output_files?.length ? job.output_files : v.files }
+  if (status === 'error') return { ...base, error: job.error_message || 'Flow báo lỗi', errorCode: job.error_code || undefined }
+  return base
+}
+
+/**
+ * "Ra node": video Flow đã tạo -> 1 node Video tham chiếu (giữ tên file Veo; backend tự tìm trong thư mục video Veo) để nối
+ * tiếp vào node Cắt video / Ingredients khác. Trả null nếu ô chưa có video.
+ */
+export function videoIngrTileToRef(v: MuseClipVideo | null | undefined, previewUrl: (file: string) => string): MuseVideoRef | null {
+  const file = v?.files?.[v.files.length - 1]
+  if (!v || !file || (v.status !== 'done')) return null
+  return {
+    id: `flow-${file.replace(/\.[^.]+$/, '')}`,
+    name: file.split(/[\\/]/).pop() ?? file,
+    path: file,
+    previewUrl: previewUrl(file),
+    size: 0,
+    durationSec: 0,
+    source: 'library',
+  }
+}
+
+/** Ô này thuộc job nhiều video? ("Tìm lại video" của backend chỉ lấy được MỘT video bất kỳ đang mở -> không dùng cho ô này.) */
+export const videoIngrIsBatchTile = (v: MuseClipVideo | null | undefined, all: MuseClipVideo[]) =>
+  !!v?.jobId && v.outputIndex != null && all.filter((x) => x.jobId === v.jobId).length > 1
 
 /** Trạng thái của MỘT biến thể so với nội dung hiện tại của node (video / đoạn cắt / ảnh / prompt / cấu hình). */
 export function videoIngrState(
@@ -2267,6 +2411,8 @@ export interface MuseClipMergeData {
   order: string[]
   trims: Record<string, MergeTrim>
   removeWatermark: boolean
+  /** Các dòng (id node nguồn) KHÔNG xóa logo dù "Xóa watermark Flow" đang bật — vd. video tự quay không có logo Flow */
+  wmOff: string[]
   finish: MuseFinishSettings
   merge: MuseMergeResult | null
   /** Tạo từ nút "Ghép video" của node Kịch bản tạo video nào (chống tạo trùng) */
@@ -2282,6 +2428,7 @@ export function createClipMergeNode(position: XYPosition, origin: MuseClipMergeD
     order: [],
     trims: {},
     removeWatermark: true,
+    wmOff: [],
     finish: { ...DEFAULT_MERGE_FINISH },
     merge: null,
     origin,
@@ -2309,6 +2456,7 @@ export function normalizeClipMergeData(raw: Record<string, unknown> | undefined)
     order: Array.isArray(d.order) ? (d.order as unknown[]).filter((x): x is string => typeof x === 'string') : [],
     trims,
     removeWatermark: d.removeWatermark !== false,
+    wmOff: Array.isArray(d.wmOff) ? (d.wmOff as unknown[]).filter((x): x is string => typeof x === 'string') : [],
     finish: d.finish ? normalizeFinishSettings(d.finish) : { ...DEFAULT_MERGE_FINISH },
     merge: m && typeof m === 'object' && typeof m.status === 'string' && typeof m.inputPath === 'string' ? m : null,
     origin: o && typeof o === 'object' && typeof o.clipScriptNodeId === 'string' ? o : null,
@@ -2316,7 +2464,7 @@ export function normalizeClipMergeData(raw: Record<string, unknown> | undefined)
   }
 }
 
-export type MergeClipStatus = 'ready' | 'no_video' | 'running' | 'error'
+export type MergeClipStatus = 'ready' | 'no_video' | 'running' | 'error' | 'stale'
 
 export interface MergeClipRow {
   nodeId: string
@@ -2326,7 +2474,12 @@ export interface MergeClipRow {
   /** File video của lần tạo gần nhất đã xong (tên file Veo hoặc đường dẫn); null = chưa có */
   file: string | null
   status: MergeClipStatus
+  /** 'clip' = node Clip (video Flow gốc); 'cut' = node Cắt video (đã mã hóa lại — không chạy xóa watermark Flow) */
+  kind: 'clip' | 'cut'
 }
+
+/** Tên dòng trong node Ghép video: "Clip 3" hoặc tên video đã cắt. */
+export const mergeRowTitle = (r: Pick<MergeClipRow, 'kind' | 'k' | 'name'>) => (r.kind === 'cut' ? r.name || 'Video đã cắt' : `Clip ${r.k}`)
 
 /** Các node Clip đang nối vào, xếp theo `order` rồi số k. */
 export function mergeRowsFromSources(
@@ -2336,7 +2489,25 @@ export function mergeRowsFromSources(
   const seen = new Set<string>()
   const rows: MergeClipRow[] = []
   for (const s of sources) {
-    if (!s || s.type !== MUSE_NODE.clipPrompt || seen.has(s.id)) continue
+    if (!s || seen.has(s.id)) continue
+    if (s.type === MUSE_NODE.videoCut) {
+      seen.add(s.id)
+      const d = s.data ?? {}
+      const done = cutCompleteVideo(d)
+      const hasVideo = !!(d.video && typeof d.video === 'object')
+      const label = typeof d.label === 'string' && d.label.trim() ? d.label.trim() : ''
+      rows.push({
+        nodeId: s.id,
+        k: 1000, // chưa xếp thứ tự thì đứng sau các clip
+        name: label || 'Video đã cắt',
+        seconds: done && done.durationSec > 0 ? Math.round(done.durationSec * 10) / 10 : null,
+        file: done ? done.path : null,
+        status: done ? 'ready' : d.status === 'cutting' ? 'running' : hasVideo ? 'stale' : 'no_video',
+        kind: 'cut',
+      })
+      continue
+    }
+    if (s.type !== MUSE_NODE.clipPrompt) continue
     seen.add(s.id)
     const d = normalizeClipPromptData(s.data)
     const v = d.video
@@ -2348,6 +2519,7 @@ export function mergeRowsFromSources(
       seconds: d.seconds,
       file: done,
       status: done ? 'ready' : v?.status === 'running' ? 'running' : v?.status === 'error' ? 'error' : 'no_video',
+      kind: 'clip',
     })
   }
   const rank = (id: string) => {
@@ -2375,21 +2547,34 @@ export function mergeBlockers(rows: MergeClipRow[], trims: Record<string, MergeT
   const b: string[] = []
   if (rows.length > MERGE_MAX_CLIPS) b.push(`Tối đa ${MERGE_MAX_CLIPS} clip mỗi bản ghép.`)
   for (const r of rows) {
+    const name = mergeRowTitle(r)
     if (!r.file) {
-      b.push(r.status === 'running' ? `Clip ${r.k}: video đang tạo — chờ xong rồi ghép.` : `Clip ${r.k}: chưa có video — tạo video ở node Clip trước.`)
+      if (r.kind === 'cut')
+        b.push(
+          r.status === 'running' ? `${name}: đang cắt — chờ xong rồi ghép.`
+            : r.status === 'stale' ? `${name}: đã chỉnh sau lần cắt — bấm “Cắt & lưu bản mới” ở node Cắt video.`
+              : `${name}: chưa cắt — bấm “Cắt & lưu video” ở node Cắt video.`,
+        )
+      else b.push(r.status === 'running' ? `${name}: video đang tạo — chờ xong rồi ghép.` : `${name}: chưa có video — tạo video ở node Clip trước.`)
       continue
     }
     const t = trimOf(trims, r.nodeId)
     if (r.seconds != null && r.seconds - t.start - t.end < MERGE_MIN_SECONDS)
-      b.push(`Clip ${r.k}: cắt đầu ${t.start}s + cuối ${t.end}s làm clip ${r.seconds}s chỉ còn dưới ${MERGE_MIN_SECONDS}s.`)
+      b.push(`${name}: cắt đầu ${t.start}s + cuối ${t.end}s làm clip ${r.seconds}s chỉ còn dưới ${MERGE_MIN_SECONDS}s.`)
   }
   return b
 }
 
-export function mergeFingerprint(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings): string {
+/** Dòng này có chạy xóa logo Flow không: theo công tắc chung, trừ các dòng người dùng tắt riêng. */
+export const mergeRowRemovesWatermark = (r: Pick<MergeClipRow, 'nodeId'>, removeWatermark: boolean, wmOff: string[] = []) =>
+  removeWatermark && !wmOff.includes(r.nodeId)
+
+export function mergeFingerprint(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings, wmOff: string[] = []): string {
+  // giữ đúng dạng cũ khi không tắt riêng dòng nào (bản ghép đã có không bị coi là bản cũ)
+  const off = removeWatermark ? rows.filter((r) => wmOff.includes(r.nodeId)).map((r) => r.nodeId) : []
   return JSON.stringify([
     rows.map((r) => [r.file, trimOf(trims, r.nodeId).start, trimOf(trims, r.nodeId).end]),
-    removeWatermark,
+    off.length ? [removeWatermark, off] : removeWatermark,
     s.muteOriginal, s.muteOriginal ? 0 : s.originalVolume,
     s.bgmTrackIds, s.bgmTrackIds.length ? s.bgmVolume : 0,
     s.labelText.trim(), s.labelText.trim() ? [s.labelPosition, s.labelSize] : 0,
@@ -2399,12 +2584,12 @@ export function mergeFingerprint(rows: MergeClipRow[], trims: Record<string, Mer
 
 export type MergeState = 'no_clips' | 'missing' | 'pending' | 'running' | 'done' | 'stale' | 'error' | 'interrupted'
 
-export function mergeState(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings, merge: MuseMergeResult | null): MergeState {
+export function mergeState(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings, merge: MuseMergeResult | null, wmOff: string[] = []): MergeState {
   if (merge?.status === 'running') return 'running'
   if (!rows.length) return 'no_clips'
   if (rows.some((r) => !r.file)) return 'missing'
   if (!merge) return 'pending'
-  if (merge.status === 'done' && merge.inputPath !== mergeFingerprint(rows, trims, removeWatermark, s)) return 'stale'
+  if (merge.status === 'done' && merge.inputPath !== mergeFingerprint(rows, trims, removeWatermark, s, wmOff)) return 'stale'
   return merge.status
 }
 
@@ -2415,11 +2600,18 @@ export function buildMergeRequest(
   removeWatermark: boolean,
   s: MuseFinishSettings,
   title = '',
+  wmOff: string[] = [],
 ): Record<string, unknown> {
   const blockers = mergeBlockers(rows, trims)
   if (blockers.length) throw new Error(blockers[0])
   return {
-    clips: rows.map((r) => ({ path: r.file, trim_start: trimOf(trims, r.nodeId).start, trim_end: trimOf(trims, r.nodeId).end })),
+    // dòng người dùng tắt riêng (vd. video tự quay không có logo Flow) -> backend bỏ qua xóa logo cho riêng clip đó
+    clips: rows.map((r) => ({
+      path: r.file,
+      trim_start: trimOf(trims, r.nodeId).start,
+      trim_end: trimOf(trims, r.nodeId).end,
+      ...(removeWatermark && wmOff.includes(r.nodeId) ? { remove_watermark: false } : {}),
+    })),
     remove_watermark: removeWatermark,
     title: title.trim().slice(0, 120),
     mute_original: s.muteOriginal,
@@ -2436,10 +2628,11 @@ export function buildMergeRequest(
 }
 
 /** Tóm tắt 1 dòng các bước sẽ chạy. */
-export function mergeSummary(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings, trackName: (id: string) => string = (id) => id): string {
+export function mergeSummary(rows: MergeClipRow[], trims: Record<string, MergeTrim>, removeWatermark: boolean, s: MuseFinishSettings, trackName: (id: string) => string = (id) => id, wmOff: string[] = []): string {
   const cut = rows.filter((r) => trimOf(trims, r.nodeId).start || trimOf(trims, r.nodeId).end).length
   const parts = [`${rows.length} clip`]
-  if (removeWatermark) parts.push('xóa watermark Flow')
+  const skipped = removeWatermark ? rows.filter((r) => wmOff.includes(r.nodeId)).length : 0
+  if (removeWatermark) parts.push(skipped ? `xóa watermark Flow (bỏ ${skipped} clip)` : 'xóa watermark Flow')
   if (cut) parts.push(`cắt ${cut} clip`)
   parts.push(finishSummary(s, trackName))
   return parts.join(' · ')

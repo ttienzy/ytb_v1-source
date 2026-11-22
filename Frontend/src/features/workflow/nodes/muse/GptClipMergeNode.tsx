@@ -25,6 +25,8 @@ import {
   MUSE_HANDLE,
   buildMergeRequest,
   mergeBlockers,
+  mergeRowRemovesWatermark,
+  mergeRowTitle,
   mergeFingerprint,
   mergeFromJob,
   mergeRowsFromSources,
@@ -66,6 +68,7 @@ const STATUS_LABEL: Record<MergeClipRow['status'], string> = {
   no_video: 'Chưa có video',
   running: 'Đang tạo',
   error: 'Tạo lỗi',
+  stale: 'Đã chỉnh, chưa cắt lại',
 }
 
 function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>) {
@@ -88,7 +91,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
   )
 
   const merge = data.merge
-  const state = mergeState(rows, data.trims, data.removeWatermark, data.finish, merge)
+  const state = mergeState(rows, data.trims, data.removeWatermark, data.finish, merge, data.wmOff)
   const blockers = useMemo(() => mergeBlockers(rows, data.trims), [rows, data.trims])
   const running = state === 'running'
   const trackName = useCallback((tid: string) => tracks.find((t) => t.id === tid)?.name ?? 'nhạc đã chọn', [tracks])
@@ -153,11 +156,11 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
 
   async function runMerge() {
     if (busy || running || blockers.length) return
-    const inputPath = mergeFingerprint(rows, data.trims, data.removeWatermark, data.finish)
+    const inputPath = mergeFingerprint(rows, data.trims, data.removeWatermark, data.finish, data.wmOff)
     const base: MuseMergeResult = { status: 'running', inputPath, step: 'Đang gửi…', startedAt: Date.now(), updatedAt: Date.now() }
     setBusy(true)
     try {
-      const body = buildMergeRequest(rows, data.trims, data.removeWatermark, data.finish, data.label)
+      const body = buildMergeRequest(rows, data.trims, data.removeWatermark, data.finish, data.label, data.wmOff)
       const jobId = await startMerge(body)
       updateNodeData(id, { merge: { ...base, jobId } })
       poll(jobId)
@@ -170,7 +173,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
 
   const finalUrl = merge?.status === 'done' && merge.filename ? exportVideoUrl(merge.filename) : ''
   const elapsed = running && merge ? Math.max(0, Math.round((now - merge.startedAt) / 1000)) : 0
-  const summary = mergeSummary(rows, data.trims, data.removeWatermark, data.finish, trackName)
+  const summary = mergeSummary(rows, data.trims, data.removeWatermark, data.finish, trackName, data.wmOff)
   const pairs = rows.slice(0, -1).map((a, i) => [a, rows[i + 1]] as const).filter(([a, b]) => a.file && b.file)
 
   return (
@@ -180,7 +183,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
         position={Position.Left}
         id={MUSE_HANDLE.clipVideoIn}
         className="mc-handle mc-handle-video"
-        title="Clip: nối chấm xanh bên phải của các node Clip đã có video (nhiều dây). Xếp thứ tự trong node."
+        title="Clip: nối chấm xanh bên phải của các node Clip đã có video, hoặc chấm đỏ của node Cắt video (nhiều dây). Xếp thứ tự trong node."
       />
 
       <div className="mc-node-head">
@@ -205,7 +208,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
         {/* Clip, theo thứ tự ghép */}
         {rows.length === 0 ? (
           <div className="mc-inputs-empty">
-            <Link2Off size={12} /> Chưa có clip — nối chấm xanh bên phải của các node Clip vào chấm bên trái node này (hoặc bấm “Ghép video” ở node Kịch bản tạo video).
+            <Link2Off size={12} /> Chưa có clip — nối chấm xanh bên phải của các node Clip, hoặc chấm đỏ của node Cắt video, vào chấm bên trái node này (hoặc bấm “Ghép video” ở node Kịch bản tạo video).
           </div>
         ) : (
           <div className="mc-merge-list">
@@ -215,15 +218,37 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
                 <div key={r.nodeId} className={`mc-merge-row mc-merge-${r.status}`}>
                   <span className="mc-script-no">#{i + 1}</span>
                   {r.file ? (
-                    <img className="mc-merge-thumb" src={mergeFrameUrl(r.file, 'first', 120)} alt={`Clip ${r.k}`} draggable={false} loading="lazy" />
+                    <img className="mc-merge-thumb" src={mergeFrameUrl(r.file, 'first', 120)} alt={mergeRowTitle(r)} draggable={false} loading="lazy" />
                   ) : (
                     <span className="mc-xph mc-merge-thumb" />
                   )}
                   <span className="mc-merge-info">
-                    <b title={r.name}>Clip {r.k}{r.name ? ` · ${r.name}` : ''}</b>
+                    <b title={r.name}>{r.kind === 'cut' ? <><Scissors size={10} /> {mergeRowTitle(r)}</> : <>Clip {r.k}{r.name ? ` · ${r.name}` : ''}</>}</b>
                     <small>
                       {r.seconds != null ? `${r.seconds}s · ` : ''}
-                      <span className={`mc-merge-chip mc-merge-chip-${r.status}`}>{STATUS_LABEL[r.status]}</span>
+                      <span className={`mc-merge-chip mc-merge-chip-${r.status}`}>{r.kind === 'cut' && r.status === 'ready' ? 'Hoàn chỉnh' : r.kind === 'cut' && r.status === 'no_video' ? 'Chưa cắt' : r.kind === 'cut' && r.status === 'running' ? 'Đang cắt' : STATUS_LABEL[r.status]}</span>
+                      {data.removeWatermark && (
+                        <label
+                          className="mc-merge-wm nodrag"
+                          title={
+                            mergeRowRemovesWatermark(r, data.removeWatermark, data.wmOff)
+                              ? 'Xóa logo Flow ở clip này khi ghép. Bỏ tick nếu clip không có logo Flow (vd. video tự quay) — xóa logo trên video không có logo có thể làm lệch màu.'
+                              : 'Clip này được ghép nguyên bản, không xóa logo.'
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={mergeRowRemovesWatermark(r, data.removeWatermark, data.wmOff)}
+                            disabled={running}
+                            onChange={(e) =>
+                              updateNodeData(id, {
+                                wmOff: e.target.checked ? data.wmOff.filter((x) => x !== r.nodeId) : [...data.wmOff.filter((x) => x !== r.nodeId), r.nodeId],
+                              })
+                            }
+                          />
+                          xóa logo
+                        </label>
+                      )}
                     </small>
                   </span>
                   <span className="mc-merge-trims nodrag" title="Cắt bỏ N giây ở đầu / cuối clip khi ghép (mặc định 0)">
@@ -258,7 +283,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
               <div className="mc-splice-list">
                 {pairs.map(([a, b]) => (
                   <div key={`${a.nodeId}-${b.nodeId}`} className="mc-splice">
-                    <span className="mc-node-meta">Clip {a.k} → Clip {b.k}</span>
+                    <span className="mc-node-meta">{mergeRowTitle(a)} → {mergeRowTitle(b)}</span>
                     <div className="mc-splice-frames">
                       <img src={mergeFrameUrl(a.file!, 'last', 200)} alt={`Khung cuối clip ${a.k}`} draggable={false} loading="lazy" />
                       <span aria-hidden>→</span>

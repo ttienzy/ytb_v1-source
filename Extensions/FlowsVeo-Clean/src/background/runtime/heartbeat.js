@@ -3,7 +3,7 @@ import { fetchBridgeSecret } from '../../bridge/config.js';
 import { HEARTBEAT_MS } from '../../config/defaults.js';
 import { getExtFp } from '../../platform/storage.js';
 import { findAllLabsTabs } from '../../providers/google-flow/tabs.js';
-import { MOTION_REF_MAX_SECONDS } from '../../providers/google-flow/page/video-http.js';
+import { MOTION_MAX_IMAGES, MOTION_MAX_OUTPUTS, MOTION_REF_MAX_SECONDS } from '../../providers/google-flow/page/video-http.js';
 import { logActivity } from './log.js';
 import { runtime } from './state.js';
 
@@ -22,7 +22,7 @@ export async function sendHeartbeat() {
         version: manifest.version || '?',
         // Giới hạn của bản extension ĐANG CHẠY (cùng số phiên bản 2.2.0 nên version không phân biệt được bản mới / cũ):
         // backend dựa vào đây để chặn việc gửi đoạn video mẫu mà extension này sẽ không đi HTTP được.
-        capabilities: { motion_ref_max_seconds: MOTION_REF_MAX_SECONDS },
+        capabilities: { motion_ref_max_seconds: MOTION_REF_MAX_SECONDS, motion_max_outputs: MOTION_MAX_OUTPUTS, motion_360p: true, motion_max_images: MOTION_MAX_IMAGES },
         tab_count: tabs.length,
         tabs: tabs.map((t) => ({ id: t.id, url: t.url })),
         user_agent: navigator.userAgent.slice(0, 120),

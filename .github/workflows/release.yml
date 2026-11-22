@@ -333,6 +333,11 @@ jobs:
           ) | ForEach-Object {
             if (-not (Test-Path $_)) { throw "Missing release resource: $_" }
           }
+          # gwr phải được patch-gwr.mjs vá (postinstall): thiếu thì xóa logo Flow 360p / video dọc hỏng âm thầm
+          $gwrApp = 'Frontend\watermark-runtime\node_modules\@pilio\gemini-watermark-remover\dist\video-app.js'
+          if (-not (Select-String -Path $gwrApp -Pattern 'veo-360x640-portrait-relocated-24' -SimpleMatch -Quiet)) {
+            throw 'gwr chưa được vá (Frontend/watermark-runtime/patch-gwr.mjs)'
+          }
 
       - name: Cache Electron and electron-builder downloads
         uses: actions/cache@v6

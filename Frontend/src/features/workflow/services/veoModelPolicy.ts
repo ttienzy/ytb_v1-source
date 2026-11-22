@@ -1,7 +1,7 @@
 /**
  * Quy tắc chọn chế độ Veo cho clip của Canvas AI (thuần TS, test được bằng node:test).
  *
- * - Omni 1.2 Flash (đi HTTP, nhanh): clip có ảnh tham chiếu -> Ingredients 3–15 giây, tối đa 3 ảnh. Clip nối tiếp dùng khung
+ * - Omni 1.2 Flash (đi HTTP, nhanh): clip có ảnh tham chiếu -> Ingredients 3–15 giây, tối đa 5 ảnh. Clip nối tiếp dùng khung
  *   cuối của clip trước làm ảnh tham chiếu ĐẦU TIÊN (Omni 1.2 chưa có chế độ chỉ-khung-đầu: clip sau giống clip trước nhưng
  *   không bắt đầu đúng khung đó). Không có ảnh nào -> tạo từ chữ, chỉ 10 giây.
  * - Omni 1.1 đã bỏ (2026-11-11): workflow chỉ dùng Omni 1.2.
@@ -46,8 +46,8 @@ export function clipCredit(profiles: ProfileLike[], model: string, aspect: strin
   return { credit: p?.credit_cost ?? null, verified: !!p?.runtime_verified && !/dự kiến/i.test(p?.note ?? '') }
 }
 
-/** Ảnh tham chiếu cho Omni 1.2 (tối đa 3, bỏ trùng). Mỗi loại một ảnh trước: khung cuối clip trước (nếu nối), ảnh sản phẩm
- * đầu tiên, người mẫu, bối cảnh; sau đó mới tới các ảnh sản phẩm còn lại. Nhờ vậy 3 ảnh sản phẩm không đẩy mất người mẫu,
+/** Ảnh tham chiếu cho Omni 1.2 (tối đa 5, bỏ trùng). Mỗi loại một ảnh trước: khung cuối clip trước (nếu nối), ảnh sản phẩm
+ * đầu tiên, người mẫu, bối cảnh; sau đó mới tới các ảnh sản phẩm còn lại. Nhờ vậy 5 ảnh sản phẩm không đẩy mất người mẫu,
  * và khi nối clip thì bối cảnh bị bỏ trước (khung cuối đã chứa sẵn nơi quay). */
 export function pickReferencePaths(startFramePath: string | null | undefined, assets: AssetRef[]): string[] {
   const path = (a?: AssetRef) => a?.backendPath?.trim() || ''

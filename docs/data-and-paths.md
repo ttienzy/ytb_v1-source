@@ -20,7 +20,7 @@ Hai mốc gốc, định nghĩa ở [`Backend/app/core/config.py`](../Backend/ap
 
 | # | Cách | Dev ra | Bản cài ra | Dùng ở |
 |---|---|---|---|---|
-| **A** | `DATA_DIR / ...` hoặc `settings.*` (đúng) | `Backend/Data/…` | `userData/Data/…` | DB, `config.json`, profile Chrome, `chatgpt-profiles/`, `campaigns/`, `workflow_*`, `media/videos`, `watermark/` |
+| **A** | `DATA_DIR / ...` hoặc `settings.*` (đúng) | `Backend/Data/…` | `userData/Data/…` | DB, `config.json`, profile Chrome, `chatgpt-profiles/`, `campaigns/`, `workflow_*`, `media/videos`, `watermark/`, Muse Canvas: `media/muse_cuts` (video đã cắt của node Cắt video) và `media/muse_strips` (cache dải khung hình timeline) |
 | **B** | `TOOLS_DIR / "Backend" / "Data" / ...` | `Backend/Data/…` | `userData/Backend/Data/…` (**khác A**) | Recap `Downloads/`, kho nhạc `media/bgm`, các file JSON của Discover, `pippit_tasks.json`, `youtube_tasks.json`, `youtube_uploads/` |
 | **C** | `TOOLS_DIR / "Data" / ...` | `Data/…` ở **gốc repo** | `userData/Data/…` (trùng A) | Thư mục audio `media/videos/Viaudio` (`media/audio_workflow.py`) |
 | **D** | Tính từ `__file__` (`Backend/Data/…`) | `Backend/Data/…` | **bên trong thư mục giải nén tạm của PyInstaller** | Veo (`veo_outputs`, `veo_images`, `veo_uploads`, `veo_jobs.json`, `veo_media_registry.json`, `veo_references`, `motion_uploads`, `veo_images_clean`), `motion_long`, `muse_uploads` |

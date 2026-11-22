@@ -109,6 +109,11 @@ export async function postFlowResponse(requestId, result) {
         request_id: requestId,
         result: result?.ok ? result : null,
         error: result?.ok ? null : (result?.error || 'Unknown Flow error'),
+        // Thêm (không đổi các trường cũ): khi thất bại mà biết Flow đã nhận lệnh hay chưa, backend cần biết để báo đúng
+        // "chưa mất credit" và không đi khôi phục scene vô ích. Backend cũ bỏ qua trường lạ.
+        ...(!result?.ok && typeof result?.submitted === 'boolean'
+          ? { failure: { submitted: result.submitted, media_id: result.media_id || null, media_ids: result.media_ids || [] } }
+          : {}),
       }),
       signal: AbortSignal.timeout(8_000),
     });

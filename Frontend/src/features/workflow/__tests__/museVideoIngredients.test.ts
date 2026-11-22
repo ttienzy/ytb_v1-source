@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   MUSE_HANDLE,
   MUSE_NODE,
+  VIDEO_INGR_MAX_REFS,
   autoMuseConnection,
   buildVideoIngrRequest,
   createInputNode,
@@ -18,10 +19,13 @@ import {
   videoIngrBlockers,
   videoIngrCredits,
   videoIngrFingerprint,
+  videoIngrFromJob,
+  videoIngrIsBatchTile,
   videoIngrNextAttempt,
   videoIngrOverallState,
   videoIngrSlotCount,
   videoIngrState,
+  videoIngrTileToRef,
   videoIngrTotalCredits,
   videoIngrTrim,
   type MuseNodeLike,
@@ -62,8 +66,7 @@ test('dây: cổng Video nhận đúng 1 Video tham chiếu; cổng Ảnh nhận
     videoRefNode('v2'),
     board('b1'),
     board('b2'),
-    board('b3'),
-    board('b4'),
+    ...Array.from({ length: VIDEO_INGR_MAX_REFS + 1 }, (_, i) => board(`b${i + 3}`)), // đủ node để thử đúng giới hạn + 1
     createInputNode(MUSE_NODE.scene, { x: 0, y: 0 }, 'sc'),
     createVideoIngrNode({ x: 0, y: 0 }, 'P', 'vi'),
     createScriptNode({ x: 0, y: 0 }, 'P', 'vs'),
@@ -78,11 +81,14 @@ test('dây: cổng Video nhận đúng 1 Video tham chiếu; cổng Ảnh nhận
   // đã có 1 video -> video thứ 2 không vào được
   const vEdge = museEdge('v1', 'vi', MUSE_HANDLE.refVideoOut, MUSE_HANDLE.refVideoIn)
   assert.equal(ok('v2', MUSE_HANDLE.refVideoOut, MUSE_HANDLE.refVideoIn, [vEdge]), false)
-  assert.match(explainMuseConnection('v2', 'source', 'vi', nodes, [vEdge]), /chỉ nhận 1 video tham chiếu/)
+  assert.match(explainMuseConnection('v2', 'source', 'vi', nodes, [vEdge]), /chỉ nhận 1 video/)
   // đã có 3 ảnh -> ảnh thứ 4 không vào được
-  const three = ['b1', 'b2', 'b3'].map((b) => museEdge(b, 'vi', MUSE_HANDLE.imageOut, MUSE_HANDLE.refsIn))
-  assert.equal(ok('b4', MUSE_HANDLE.imageOut, MUSE_HANDLE.refsIn, three), false)
-  assert.match(explainMuseConnection('b4', 'source', 'vi', nodes, three), /tối đa 3 ảnh/)
+  // đã đủ VIDEO_INGR_MAX_REFS ảnh -> ảnh kế tiếp không vào được (giới hạn lấy từ hằng số, không ghi cứng)
+  const full = ['b1', 'b2', ...Array.from({ length: VIDEO_INGR_MAX_REFS - 2 }, (_, i) => `b${i + 3}`)].map((b) => museEdge(b, 'vi', MUSE_HANDLE.imageOut, MUSE_HANDLE.refsIn))
+  const extra = `b${VIDEO_INGR_MAX_REFS + 1}`
+  assert.equal(full.length, VIDEO_INGR_MAX_REFS)
+  assert.equal(ok(extra, MUSE_HANDLE.imageOut, MUSE_HANDLE.refsIn, full), false)
+  assert.match(explainMuseConnection(extra, 'source', 'vi', nodes, full), new RegExp(`tối đa ${VIDEO_INGR_MAX_REFS} ảnh`))
   // thả lên thân node -> tự chọn đúng cổng
   assert.equal(autoMuseConnection('v1', 'source', MUSE_HANDLE.refVideoOut, 'vi', nodes, [])?.targetHandle, MUSE_HANDLE.refVideoIn)
   assert.equal(autoMuseConnection('b1', 'source', MUSE_HANDLE.imageOut, 'vi', nodes, [])?.targetHandle, MUSE_HANDLE.refsIn)
@@ -193,4 +199,84 @@ test('lượt tải / gửi chạy qua museRuns; làm mẫu giữ prompt, bỏ v
   assert.deepEqual((copy.nodes[0].data.videos as { status: string }[]).map((v) => v.status), ['done', 'error'])
   const tpl = copyGraph({ nodes: [withVideo], edges: [] }, 'template', (p) => `${p}-new`)
   assert.deepEqual([tpl.nodes[0].data.videos, tpl.nodes[0].data.prompt, tpl.nodes[0].data.trimEnd], [[], 'P', 8])
+})
+
+test('x2–x4 = MỘT job Flow ra nhiều video (HAR 2026-11-23): num_outputs = số biến thể, 360p theo cấu hình', () => {
+  const d = normalizeVideoIngrData({ prompt: 'P' })
+  const refs = scriptRefsFromSources([board('b1'), board('b2')])
+  const F360: VideoIngrFlow = { ...FLOW, resolution: '360p' }
+  const body = buildVideoIngrRequest('vingr-1', d, VIDEO, refs, F360, 'media-123', 1, 1, 3)
+  assert.equal(body.num_outputs, 3)
+  assert.equal(body.resolution, '360p')
+  assert.equal(body.variant, 1)
+  assert.match(String(body.idempotency_key), /-a1-x3$/)
+  // một ô tạo lại riêng: 1 video, khóa + variant theo ô
+  const one = buildVideoIngrRequest('vingr-1', d, VIDEO, refs, F360, 'media-123', 2, 3)
+  assert.deepEqual([one.num_outputs, one.variant], [1, 3])
+  assert.match(String(one.idempotency_key), /-a2-v3$/)
+  // không có resolution (bản lưu cũ) = 720p; 720p giữ nguyên dấu vân tay cũ, 360p khác
+  assert.equal(buildVideoIngrRequest('vingr-1', d, VIDEO, refs, FLOW, 'media-123', 1).resolution, '720p')
+  assert.equal(videoIngrFingerprint(d, VIDEO, refs, { ...FLOW, resolution: '720p' }), videoIngrFingerprint(d, VIDEO, refs, FLOW))
+  assert.notEqual(videoIngrFingerprint(d, VIDEO, refs, F360), videoIngrFingerprint(d, VIDEO, refs, FLOW))
+  // giá: HAR 3 video 13 s 360p = 48 credit (16/video); 720p giữ giá đo cũ
+  assert.equal(videoIngrCredits(13, '360p'), 16)
+  assert.equal(videoIngrCredits(13.63, '360p'), 16)                     // đúng đoạn trong HAR: Flow bỏ phần giây lẻ
+  assert.equal(videoIngrTotalCredits(13, 3, '360p'), 48)
+  assert.equal(videoIngrCredits(8), 30)
+})
+
+test('mỗi ô lấy kết cục của đúng video của mình trong job nhiều video', () => {
+  const tile = (k: number) => ({ status: 'running' as const, fingerprint: 'f', attempt: 1, startedAt: 0, updatedAt: 0, outputIndex: k, jobId: 'J' })
+  const job = { job_id: 'J', status: 'done', output_files: ['J_v2.mp4', 'J_v3.mp4'], outputs: [
+    { index: 0, status: 'error', error: 'Google Flow: … PROMINENT_PEOPLE …', error_code: 'FLOW_PROMINENT_PEOPLE' },
+    { index: 1, status: 'done', file: 'J_v2.mp4' },
+    { index: 2, status: 'done', file: 'J_v3.mp4' },
+  ] }
+  const [a, b, c] = [0, 1, 2].map((k) => videoIngrFromJob(tile(k), job, 5))
+  assert.deepEqual([a.status, a.errorCode], ['error', 'FLOW_PROMINENT_PEOPLE'])
+  assert.deepEqual([b.status, b.files], ['done', ['J_v2.mp4']])
+  assert.deepEqual([c.status, c.files], ['done', ['J_v3.mp4']])
+  // job đang chạy: mọi ô cùng bước; lỗi chung của cả job (chưa gửi được) áp cho mọi ô
+  assert.equal(videoIngrFromJob(tile(2), { job_id: 'J', status: 'generating', current_step: 'Đang tạo' }).detail, 'Đang tạo')
+  const fail = videoIngrFromJob(tile(1), { job_id: 'J', status: 'error', error_message: 'Chưa gửi lên Flow (không mất credit): x', error_code: 'NOT_SUBMITTED' })
+  assert.deepEqual([fail.status, fail.errorCode], ['error', 'NOT_SUBMITTED'])
+  // job 1 video (không outputIndex) giữ hành vi cũ
+  const single = videoIngrFromJob({ status: 'running', fingerprint: 'f', attempt: 1, startedAt: 0, updatedAt: 0 }, { job_id: 'K', status: 'done', output_files: ['K.mp4'] })
+  assert.deepEqual(single.files, ['K.mp4'])
+  // job nhiều video mà backend chỉ nhận được 1 video: ô đầu có video, ô sau báo thiếu (không gán trùng video ô đầu)
+  const lost = { job_id: 'J', status: 'done', output_files: ['J.mp4'], outputs: [] }
+  assert.deepEqual(videoIngrFromJob(tile(0), lost).files, ['J.mp4'])
+  const missing = videoIngrFromJob(tile(1), lost)
+  assert.deepEqual([missing.status, missing.errorCode, missing.files], ['error', 'OUTPUT_MISSING', undefined])
+  // "Tìm lại video" chỉ cho ô của job 1 video
+  const all = [tile(0), tile(1), { ...tile(0), jobId: 'K', outputIndex: undefined }]
+  assert.deepEqual(all.map((v) => videoIngrIsBatchTile(v, all)), [true, true, false])
+})
+
+test('Ra node: video Flow đã tạo -> dữ liệu node Video tham chiếu (tên file Veo, URL phát); ô chưa xong thì không', () => {
+  const done = { status: 'done' as const, fingerprint: 'f', attempt: 1, startedAt: 0, updatedAt: 0, files: ['a8aa718a-689_v2.mp4'] }
+  const ref = videoIngrTileToRef(done, (f) => `http://x/api/veo/history/${f}/file`)
+  assert.deepEqual(ref, {
+    id: 'flow-a8aa718a-689_v2', name: 'a8aa718a-689_v2.mp4', path: 'a8aa718a-689_v2.mp4',
+    previewUrl: 'http://x/api/veo/history/a8aa718a-689_v2.mp4/file', size: 0, durationSec: 0, source: 'library',
+  })
+  assert.equal(videoIngrTileToRef({ ...done, status: 'running' }, String), null)
+  assert.equal(videoIngrTileToRef({ ...done, status: 'error' }, String), null)
+  assert.equal(videoIngrTileToRef({ ...done, files: [] }, String), null)
+  assert.equal(videoIngrTileToRef(undefined, String), null)
+})
+
+test('bản lưu cũ: ô sau của cùng job trỏ trùng file ô đầu -> hiện là thiếu video (không phát trùng)', () => {
+  const base = { status: 'done' as const, fingerprint: 'f', attempt: 8, startedAt: 0, updatedAt: 0, jobId: 'a8aa718a-689', files: ['a8aa718a-689.mp4'] }
+  const d = normalizeVideoIngrData({ videos: [{ ...base, outputIndex: 0 }, { ...base, outputIndex: 1 }] })
+  assert.deepEqual(d.videos.map((v) => [v.status, v.errorCode ?? null, v.files ?? null]), [
+    ['done', null, ['a8aa718a-689.mp4']],
+    ['error', 'OUTPUT_MISSING', null],
+  ])
+  // job nhiều video đúng (mỗi ô 1 file riêng) giữ nguyên
+  const good = normalizeVideoIngrData({ videos: [{ ...base, outputIndex: 0 }, { ...base, outputIndex: 1, files: ['a8aa718a-689_v2.mp4'] }] })
+  assert.deepEqual(good.videos.map((v) => v.status), ['done', 'done'])
+  // các ô của những job 1 video khác nhau (tạo lại riêng từng ô) không bị đụng tới
+  const singles = normalizeVideoIngrData({ videos: [{ ...base, jobId: 'A' }, { ...base, jobId: 'B' }] })
+  assert.deepEqual(singles.videos.map((v) => v.status), ['done', 'done'])
 })

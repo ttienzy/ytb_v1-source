@@ -51,7 +51,7 @@ from app.workflow.schemas import (
     MotionCharacterSheetRequest,
     MotionCharacterSheetResponse,
 )
-from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_gpt_image, muse_merge, muse_projects
+from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_cut, muse_gpt_image, muse_merge, muse_projects
 from app.ai.gemini.service import login_and_save_cookie
 from app.ai.gemini.recap import _fresh_tokens, _gemini_config
 from app.workflow.service import (
@@ -535,6 +535,48 @@ async def muse_merge_frame(path: str = Query(..., min_length=1), at: str = Query
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.get("/muse/video-strip")
+async def muse_video_strip(path: str = Query(..., min_length=1), w: int = Query(960, ge=160, le=4096), h: int = Query(56, ge=24, le=160)):
+    """Dải khung hình của video (1 ảnh JPEG) để vẽ timeline node "Cắt video"."""
+    from fastapi.responses import Response
+
+    try:
+        video = muse_cut.resolve_source(path)
+        data = await run_in_threadpool(muse_cut.video_strip, video, w, h)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, PermissionError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/muse/video-cut/file")
+def muse_video_cut_file(name: str = Query(..., min_length=5, max_length=80)):
+    """Phát video đã cắt (Data/media/muse_cuts)."""
+    from fastapi.responses import FileResponse
+
+    safe = Path(name).name
+    target = muse_cut.CUT_DIR / safe
+    if not (safe.startswith("cut_") and safe.endswith(".mp4")) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Không thấy video đã cắt này (file đã bị xóa?). Bấm “Cắt & lưu” lại.")
+    return FileResponse(path=str(target), media_type="video/mp4")
+
+
+@router.post("/muse/video-cut")
+async def muse_video_cut(req: muse_cut.MuseCutRequest) -> dict:
+    """Node "Cắt video": giữ các đoạn đã chọn rồi ghép thành 1 video mới (chạy đồng bộ, không tốn credit)."""
+    try:
+        return await run_in_threadpool(muse_cut.cut_video, req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, PermissionError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/muse/merge")

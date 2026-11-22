@@ -8,11 +8,13 @@ import {
   Eye,
   FileImage,
   FileVideo,
+  Film,
   FolderOpen,
   HardDrive,
   Loader2,
   Play,
   RefreshCw,
+  Sparkles,
   Trash2,
   UploadCloud,
   X,
@@ -21,6 +23,11 @@ import {
 import { API_URL } from '../../shared/constants'
 import { fmtBytes } from '../../shared/utils/formatters'
 import type { QueuedFile, WatermarkBatchJob, WatermarkVideoItem } from './types'
+import { VeoVideoPickerModal } from '../workflow/components/VeoVideoPickerModal'
+import { ImageLibraryModal } from '../workflow/components/ImageLibraryModal'
+import { VideoPlayerModal } from '../workflow/components/VideoPlayerModal'
+import type { ExportedVideoItem } from '../workflow/contracts'
+import type { LibraryImage } from '../workflow/services/imageLibraryApi'
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp']
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm']
@@ -35,6 +42,8 @@ export function WatermarkPage() {
   // Separate Queues
   const [imageQueue, setImageQueue] = useState<QueuedFile[]>([])
   const [videoQueue, setVideoQueue] = useState<QueuedFile[]>([])
+  const [isVideoPickerOpen, setIsVideoPickerOpen] = useState(false)
+  const [isImagePickerOpen, setIsImagePickerOpen] = useState(false)
 
   // Modal Preview
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<{
@@ -42,6 +51,11 @@ export function WatermarkPage() {
     item: WatermarkVideoItem
     previewType: 'clean' | 'orig'
   } | null>(null)
+  const [selectedPreviewVideo, setSelectedPreviewVideo] = useState<{
+    job_id: string
+    item: WatermarkVideoItem
+  } | null>(null)
+  const [selectedHistoryJob, setSelectedHistoryJob] = useState<WatermarkBatchJob | null>(null)
 
   // Jobs
   const [currentJob, setCurrentJob] = useState<WatermarkBatchJob | null>(null)
@@ -275,6 +289,52 @@ export function WatermarkPage() {
     }
   }
 
+  function handleAddLibraryVideos(clips: ExportedVideoItem[]) {
+    if (!clips || clips.length === 0) return
+    setErrorMsg('')
+    const newItems: QueuedFile[] = []
+
+    for (const clip of clips) {
+      const p = clip.filePath?.trim()
+      if (!p) continue
+      if (!videoQueue.some(q => q.path === p)) {
+        newItems.push({
+          path: p,
+          name: clip.filename || clip.title || 'video.mp4',
+          size: clip.sizeBytes || 0,
+          media_type: 'video',
+        })
+      }
+    }
+
+    if (newItems.length > 0) {
+      setVideoQueue(prev => [...prev, ...newItems])
+    }
+  }
+
+  function handleAddLibraryImages(images: LibraryImage[]) {
+    if (!images || images.length === 0) return
+    setErrorMsg('')
+    const newItems: QueuedFile[] = []
+
+    for (const img of images) {
+      const p = img.path?.trim()
+      if (!p) continue
+      if (!imageQueue.some(q => q.path === p)) {
+        newItems.push({
+          path: p,
+          name: img.file_name || img.label || 'image.png',
+          size: img.size || 0,
+          media_type: 'image',
+        })
+      }
+    }
+
+    if (newItems.length > 0) {
+      setImageQueue(prev => [...prev, ...newItems])
+    }
+  }
+
   async function handleStartProcess(targetQueue: QueuedFile[], isImage: boolean) {
     if (targetQueue.length === 0) return
     setErrorMsg('')
@@ -283,7 +343,7 @@ export function WatermarkPage() {
     try {
       const hasFileObjects = targetQueue.some(q => q.file)
       const hasValidPaths = targetQueue.some(
-        q => q.path && q.path !== q.name && !q.path.includes(' ')
+        q => q.path && q.path !== q.name && (q.path.includes('\\') || q.path.includes('/') || q.path.length > q.name.length)
       )
 
       let res: Response
@@ -750,7 +810,7 @@ export function WatermarkPage() {
                           <CheckCircle2 size={13} /> Hoàn thành
                         </span>
 
-                        {isImg && (
+                        {isImg ? (
                           <button
                             type="button"
                             onClick={() =>
@@ -775,6 +835,32 @@ export function WatermarkPage() {
                             }}
                           >
                             <Eye size={12} /> So sánh
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedPreviewVideo({
+                                job_id: currentJob.job_id,
+                                item: v,
+                              })
+                            }
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              fontSize: 11,
+                              background: '#ede9fe',
+                              border: '1px solid #ddd6fe',
+                              borderRadius: 4,
+                              color: '#6d28d9',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Play size={11} fill="currentColor" /> Xem video
                           </button>
                         )}
 
@@ -911,6 +997,31 @@ export function WatermarkPage() {
                 ? 'Hỗ trợ PNG, JPG, JPEG, WEBP · Mọi tỷ lệ 9:16, 1:1, 16:9, 3:4'
                 : 'Hỗ trợ MP4, MOV, WEBM'}
             </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 12,
+                color: '#6366f1',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 12px',
+                background: '#eef2ff',
+                border: '1px solid #e0e7ff',
+                borderRadius: 20,
+                transition: 'all 0.15s ease',
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (isImageTab) setIsImagePickerOpen(true)
+                else setIsVideoPickerOpen(true)
+              }}
+            >
+              {isImageTab ? <Sparkles size={13} /> : <Film size={13} />}
+              <span>Hoặc bấm để chọn nhanh từ <b>{isImageTab ? 'Thư Viện Ảnh' : 'Thư Viện Video'}</b> (không cần tải về máy)</span>
+            </div>
           </div>
 
           {/* Action Bar */}
@@ -924,7 +1035,7 @@ export function WatermarkPage() {
               gap: 10,
             }}
           >
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={() => handleStartProcess(activeQueue, isImageTab)}
@@ -951,6 +1062,56 @@ export function WatermarkPage() {
                 )}
                 Bắt đầu xử lý ({activeQueue.length} {isImageTab ? 'ảnh' : 'video'})
               </button>
+
+              {isImageTab ? (
+                <button
+                  type="button"
+                  onClick={() => setIsImagePickerOpen(true)}
+                  disabled={isProcessing}
+                  style={{
+                    height: 36,
+                    padding: '0 14px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    background: '#ede9fe',
+                    color: '#6d28d9',
+                    border: '1px solid #ddd6fe',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Chọn ảnh có sẵn từ Thư Viện Ảnh (Muse/GPT) để đưa vào hàng đợi"
+                >
+                  <Sparkles size={14} /> Chọn từ Thư viện ảnh
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsVideoPickerOpen(true)}
+                  disabled={isProcessing}
+                  style={{
+                    height: 36,
+                    padding: '0 14px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    background: '#ede9fe',
+                    color: '#6d28d9',
+                    border: '1px solid #ddd6fe',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Chọn video có sẵn từ Thư Viện Video (Veo/Muse/Workflow) để đưa vào hàng đợi"
+                >
+                  <Film size={14} /> Chọn từ Thư viện video
+                </button>
+              )}
 
               <button
                 type="button"
@@ -1147,9 +1308,7 @@ export function WatermarkPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setCurrentJob(job)
-                      if (isImageTab) setImageQueue([])
-                      else setVideoQueue([])
+                      setSelectedHistoryJob(job)
                     }}
                     style={{
                       height: 28,
@@ -1160,9 +1319,12 @@ export function WatermarkPage() {
                       border: 'none',
                       borderRadius: 6,
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
                     }}
                   >
-                    Xem chi tiết
+                    <Eye size={12} /> Xem chi tiết
                   </button>
                 </div>
               </div>
@@ -1328,6 +1490,355 @@ export function WatermarkPage() {
           </div>
         </div>
       )}
+
+      {/* ── History Job Detail Modal ── */}
+      {selectedHistoryJob && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 99998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+          onClick={() => setSelectedHistoryJob(null)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 12,
+              width: '100%',
+              maxWidth: 780,
+              maxHeight: '85vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+              overflow: 'hidden',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: '14px 20px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: '#f8fafc',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                  Chi tiết đợt xử lý: {selectedHistoryJob.job_id}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    background:
+                      selectedHistoryJob.status === 'done'
+                        ? '#ecfdf5'
+                        : selectedHistoryJob.status === 'running'
+                        ? '#eff6ff'
+                        : '#fef2f2',
+                    color:
+                      selectedHistoryJob.status === 'done'
+                        ? '#059669'
+                        : selectedHistoryJob.status === 'running'
+                        ? '#2563eb'
+                        : '#dc2626',
+                  }}
+                >
+                  {selectedHistoryJob.status === 'done'
+                    ? 'Hoàn thành'
+                    : selectedHistoryJob.status === 'running'
+                    ? 'Đang xử lý'
+                    : 'Lỗi'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedHistoryJob(null)}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Meta */}
+            <div style={{ padding: '10px 20px', background: '#ffffff', borderBottom: '1px solid #f1f5f9', fontSize: 12, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Thời gian tạo: {new Date(selectedHistoryJob.created_at).toLocaleString()}</span>
+              <span>Đã hoàn thành: <b>{selectedHistoryJob.done}</b> / {selectedHistoryJob.total} tệp</span>
+            </div>
+
+            {/* Videos/Images List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {selectedHistoryJob.videos.map((v, i) => {
+                const isImg = v.media_type === 'image' || detectMediaType(v.name) === 'image'
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      background: '#f8fafc',
+                      borderRadius: 8,
+                      border: '1px solid #e2e8f0',
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      {isImg ? <FileImage size={18} color="#64748b" /> : <FileVideo size={18} color="#64748b" />}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 }}>
+                          {v.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
+                          {fmtBytes(v.size_bytes)} {v.processed_frames != null ? `· ${v.processed_frames} frames` : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {v.status === 'done' && (
+                        <>
+                          <span style={{ fontSize: 11.5, color: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <CheckCircle2 size={13} /> Sạch
+                          </span>
+
+                          {isImg ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedPreviewImage({
+                                  job_id: selectedHistoryJob.job_id,
+                                  item: v,
+                                  previewType: 'clean',
+                                })
+                              }
+                              style={{
+                                height: 26,
+                                padding: '0 8px',
+                                fontSize: 11,
+                                background: '#fff',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: 4,
+                                color: '#334155',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <Eye size={12} /> So sánh
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedPreviewVideo({
+                                  job_id: selectedHistoryJob.job_id,
+                                  item: v,
+                                })
+                              }
+                              style={{
+                                height: 26,
+                                padding: '0 8px',
+                                fontSize: 11,
+                                background: '#ede9fe',
+                                border: '1px solid #ddd6fe',
+                                borderRadius: 4,
+                                color: '#6d28d9',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <Play size={11} fill="currentColor" /> Xem video
+                            </button>
+                          )}
+
+                          {v.drive_status === 'done' && v.drive_url && (
+                            <a
+                              href={v.drive_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                height: 26,
+                                padding: '0 8px',
+                                fontSize: 11,
+                                background: '#fff',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: 4,
+                                color: '#2563eb',
+                                textDecoration: 'none',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              <ExternalLink size={11} /> Drive
+                            </a>
+                          )}
+
+                          <a
+                            href={`${API_URL}/api/watermark/download/${selectedHistoryJob.job_id}/${encodeURIComponent(v.name)}`}
+                            download={v.name}
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              fontSize: 11,
+                              background: '#fff',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: 4,
+                              color: '#334155',
+                              textDecoration: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Download size={12} /> Tải về
+                          </a>
+                        </>
+                      )}
+
+                      {v.status === 'error' && (
+                        <span style={{ fontSize: 12, color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <XCircle size={13} /> {v.error || 'Lỗi'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                padding: '12px 20px',
+                background: '#f8fafc',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', gap: 8 }}>
+                {selectedHistoryJob.done > 0 && (
+                  <a
+                    href={`${API_URL}/api/watermark/download-all/${selectedHistoryJob.job_id}`}
+                    download={`watermark_clean_${selectedHistoryJob.job_id}.zip`}
+                    style={{
+                      height: 32,
+                      padding: '0 12px',
+                      fontSize: 12,
+                      background: '#0f172a',
+                      borderRadius: 6,
+                      color: '#fff',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <Download size={13} /> Tải tất cả ({selectedHistoryJob.done} tệp ZIP)
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentJob(selectedHistoryJob)
+                    setSelectedHistoryJob(null)
+                    window.scrollTo({ top: 0, behavior: 'smooth' })
+                  }}
+                  style={{
+                    height: 32,
+                    padding: '0 12px',
+                    fontSize: 12,
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 6,
+                    color: '#334155',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Đưa lên làm đợt hiện tại
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedHistoryJob(null)}
+                style={{
+                  height: 32,
+                  padding: '0 14px',
+                  fontSize: 12,
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#475569',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Video Player Modal (xem trước & đối chiếu video sạch vs gốc) ── */}
+      {selectedPreviewVideo && (
+        <VideoPlayerModal
+          isOpen={Boolean(selectedPreviewVideo)}
+          onClose={() => setSelectedPreviewVideo(null)}
+          videoUrl={`${API_URL}/api/watermark/preview/${selectedPreviewVideo.job_id}/${encodeURIComponent(
+            selectedPreviewVideo.item.name
+          )}?type=clean`}
+          referenceVideoUrl={`${API_URL}/api/watermark/preview/${selectedPreviewVideo.job_id}/${encodeURIComponent(
+            selectedPreviewVideo.item.name
+          )}?type=orig`}
+          title={`Xem Video: ${selectedPreviewVideo.item.name}`}
+        />
+      )}
+
+      {/* Video Library Picker Modal */}
+      <VeoVideoPickerModal
+        isOpen={isVideoPickerOpen}
+        onClose={() => setIsVideoPickerOpen(false)}
+        multiSelect={true}
+        title="Chọn Video từ Thư Viện để Xóa Watermark"
+        subtitle="Chọn 1 hoặc nhiều video đã xuất từ Veo Studio, Muse Canvas, Workflow để đưa vào hàng đợi xử lý"
+        onSelectClips={handleAddLibraryVideos}
+      />
+
+      {/* Image Library Picker Modal */}
+      <ImageLibraryModal
+        isOpen={isImagePickerOpen}
+        onClose={() => setIsImagePickerOpen(false)}
+        pickMode={true}
+        multiPick={true}
+        pickTitle="Chọn Ảnh từ Thư Viện để Xóa Watermark"
+        onPickMulti={handleAddLibraryImages}
+        onPick={(item) => handleAddLibraryImages([item])}
+      />
     </div>
   )
 }

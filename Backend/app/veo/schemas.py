@@ -131,15 +131,16 @@ class VeoJobRequest(BaseModel):
     image_path: Optional[str] = Field(default=None, description="Đường dẫn ảnh input / Frame đầu (local)")
     end_image_path: Optional[str] = Field(default=None, description="Ảnh Frame cuối (nếu có)")
 
-    # Cho mode ingredients (tối đa 3 ảnh: Subject, Scene, Style)
+    # Ảnh tham chiếu. Giới hạn theo chế độ kiểm ở service: Ingredients r2v 1–3, chỉnh video (video_edit) 1–5
+    # (người dùng xác nhận trên giao diện Flow 2026-11-23). Ở đây chỉ chặn trần chung.
     ingredient_image_paths: list[str] = Field(
         default_factory=list,
-        max_length=3,
-        description="Danh sách ảnh thành phần tham chiếu (tối đa 3 ảnh: Subject, Scene, Style)",
+        max_length=5,
+        description="Danh sách ảnh tham chiếu (Ingredients r2v tối đa 3, chỉnh video tối đa 5)",
     )
     ingredient_media_ids: list[str] = Field(
         default_factory=list,
-        max_length=3,
+        max_length=5,
         description="Danh sách media_id ảnh/video đã upload lên cùng Flow project",
     )
 
@@ -190,6 +191,9 @@ class VeoJobOut(BaseModel):
 
     # Output
     output_files: list[str] = Field(default_factory=list, description="Danh sách file paths")
+    # Nhiều video trong một lệnh (chỉnh video x2–x4): kết cục từng biến thể theo thứ tự item
+    # [{index, status: done|error, file, media_id, error?, error_code?, error_hint?}]; rỗng với job 1 video.
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
 

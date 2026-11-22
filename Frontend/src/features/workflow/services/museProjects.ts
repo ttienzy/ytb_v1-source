@@ -181,6 +181,9 @@ function templateData(type: string | undefined, data: Record<string, unknown>): 
     case MUSE_NODE.videoIngredients:
       // giữ prompt / đoạn cắt / thứ tự ảnh, bỏ video Flow đã tạo
       return { ...data, videos: [], video: undefined }
+    case MUSE_NODE.videoCut:
+      // giữ các vết cắt, bỏ video đã cắt (cắt lại ở project mới)
+      return { ...data, video: null, resultKey: '', status: 'idle', error: '' }
     default:
       return data
   }

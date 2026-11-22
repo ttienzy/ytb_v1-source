@@ -1,9 +1,10 @@
 /**
  * Node "Ingredients (video + ảnh)" của Muse Canvas — Omni 1.2 "chỉnh video" trên Google Flow (cùng đường với Motion
- * Control): cổng "Video" nhận 1 node Video tham chiếu (cắt 3–10 s), cổng "Ảnh" nhận 1–3 node có ảnh (thứ tự = ảnh 1, 2, 3
- * trong prompt). "Tạo video": tải video tham chiếu lên project Flow (backend tự dùng lại media id nếu đã tải) → gửi job
- * video_edit 720p → theo dõi job (job chạy ở backend: đóng / mở lại canvas vẫn theo dõi tiếp). Không bao giờ tự gửi lại;
- * lỗi sau khi Flow có thể đã nhận lệnh thì "Tìm lại video" (recover-current).
+ * Control): cổng "Video" nhận 1 node Video tham chiếu (cắt 3–15 s), cổng "Ảnh" nhận 1–3 node có ảnh (thứ tự = ảnh 1, 2, 3
+ * trong prompt). "Tạo video": tải video tham chiếu lên project Flow (backend tự dùng lại media id nếu đã tải) → gửi MỘT job
+ * video_edit (720p / 360p theo cấu hình) ra N video (Biến thể 1–4 = như chọn x1–x4 trên Flow) → theo dõi job (job chạy ở
+ * backend: đóng / mở lại canvas vẫn theo dõi tiếp). Không bao giờ tự gửi lại; job 1 video lỗi sau khi Flow có thể đã nhận
+ * lệnh thì "Tìm lại video" (recover-current).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
@@ -15,8 +16,10 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Clapperboard,
+  ArrowUpRight,
   ExternalLink,
   ImageOff,
+  LocateFixed,
   Link2Off,
   Loader2,
   Maximize2,
@@ -36,7 +39,6 @@ import {
   videoIngrOverallState,
   videoIngrSlotCount,
   videoIngrTotalCredits,
-  VIDEO_INGR_RESOLUTION,
   VIDEO_INGR_SPEC,
   buildVideoIngrRequest,
   clipVideoStalled,
@@ -50,7 +52,11 @@ import {
   videoIngrBlockers,
   videoIngrCredits,
   videoIngrFingerprint,
+  videoIngrFromJob,
+  videoIngrIsBatchTile,
   videoIngrState,
+  videoIngrTileToRef,
+  createVideoRefNode,
   videoIngrTrim,
   type ClipVideoState,
   type MuseClipVideo,
@@ -88,26 +94,12 @@ const STEP_LABEL: Record<string, string> = {
   downloading: 'Đang tải video về',
 }
 
-/** Kết quả gửi MỘT biến thể (chờ ở frontend, qua museRuns): job đã tạo, hoặc lỗi trước khi Flow nhận lệnh. */
+/** Kết quả tải video + gửi MỘT job (chờ ở frontend, qua museRuns): job đã tạo, hoặc lỗi trước khi Flow nhận lệnh. */
 type SubmitOutcome = { job: VeoJobLite } | { error: string }
-/** Một lần bấm gửi nhiều biến thể: kết quả từng biến thể theo chỉ số (0 = biến thể 1). */
+/** Một lần bấm: các ô (0 = biến thể 1) cùng nhận kết quả của MỘT job (ô thứ k = video thứ k của job). */
 type BatchOutcome = { index: number; outcome: SubmitOutcome }[]
 
-function videoFromJob(v: MuseClipVideo, job: VeoJobLite): MuseClipVideo {
-  const status = job.status === 'done' ? 'done' : job.status === 'error' ? 'error' : 'running'
-  return {
-    ...v,
-    jobId: job.job_id,
-    status,
-    step: job.status,
-    detail: job.current_step || v.detail,
-    backendUpdatedAt: job.updated_at ? Date.parse(job.updated_at) || v.backendUpdatedAt : v.backendUpdatedAt,
-    files: job.output_files?.length ? job.output_files : v.files,
-    error: status === 'error' ? job.error_message || 'Flow báo lỗi' : undefined,
-    errorCode: status === 'error' ? job.error_code || undefined : undefined,
-    updatedAt: Date.now(),
-  }
-}
+const videoFromJob = (v: MuseClipVideo, job: VeoJobLite) => videoIngrFromJob(v, job)
 
 /** File video tham chiếu từ URL phát của backend (node chỉ giữ đường dẫn; upload-video cần nội dung file). */
 async function fetchVideoFile(previewUrl: string, name: string): Promise<File> {
@@ -129,9 +121,14 @@ function VariantTile(props: {
   credits: number | null
   /** Lý do chặn gửi (rỗng = gửi được) */
   disabledReason: string
+  /** Ô thuộc job nhiều video: "Tìm lại video" của backend chỉ lấy được 1 video bất kỳ -> ẩn, chỉ dẫn xem trong Flow */
+  batchTile: boolean
+  /** Đã có node Video tham chiếu tách từ video này (còn trên canvas) */
+  hasNode: boolean
   onStop: () => void
   onRecover: () => void
   onRetry: () => void
+  onToNode: () => void
 }) {
   const { index, total, video, state, now, busy, credits, disabledReason } = props
   const file = video?.files?.[video.files.length - 1]
@@ -177,7 +174,9 @@ function VariantTile(props: {
               ? 'Tab Flow bị đẩy về trang chủ: project này không mở được với tài khoản Google đang đăng nhập. Chưa mất credit — vào Cấu hình → Google Flow → “Tạo project mới”, rồi tạo lại.'
               : isSafeFlowError(video.errorCode)
                 ? 'Lỗi xảy ra trước khi gửi lên Flow — chưa mất credit, có thể tạo lại.'
-                : 'Flow có thể đã nhận lệnh (và trừ credit). Bấm “Tìm lại video” trước khi tạo lại.'}
+                : props.batchTile
+                  ? 'Flow đã nhận lệnh cho video này (đã tính credit). Xem trong project Flow trước khi tạo lại.'
+                  : 'Flow có thể đã nhận lệnh (và trừ credit). Bấm “Tìm lại video” trước khi tạo lại.'}
           </div>
         </div>
       )}
@@ -187,7 +186,7 @@ function VariantTile(props: {
             Dừng chờ
           </button>
         )}
-        {state === 'error' && video?.jobId && !safeErr && (
+        {state === 'error' && video?.jobId && !safeErr && !props.batchTile && (
           <button type="button" className="mc-mini-btn nodrag" onClick={props.onRecover} disabled={busy} title="Đọc video đã tạo trong project Flow (khớp mediaId) — không gửi lại">
             <Search size={11} /> Tìm lại video
           </button>
@@ -197,13 +196,23 @@ function VariantTile(props: {
             <ExternalLink size={11} /> Mở
           </a>
         )}
+        {(state === 'done' || state === 'stale') && file && (
+          <button
+            type="button"
+            className="mc-mini-btn nodrag"
+            onClick={props.onToNode}
+            title={props.hasNode ? 'Đến node Video tham chiếu đã tách từ video này' : 'Tách video này thành node “Video tham chiếu” — nối tiếp vào node Cắt video / Ingredients khác'}
+          >
+            {props.hasNode ? <><LocateFixed size={11} /> Xem node</> : <><ArrowUpRight size={11} /> Ra node</>}
+          </button>
+        )}
         {total > 1 && state !== 'running' && state !== 'none' && (
           <button
             type="button"
             className="mc-mini-btn nodrag"
             onClick={props.onRetry}
             disabled={busy || !!disabledReason}
-            title={disabledReason || `Gửi lại riêng ${label.toLowerCase()} (1 job Flow, tốn credit)`}
+            title={disabledReason || `Gửi lại riêng ${label.toLowerCase()} (1 video, tốn credit)`}
           >
             <RotateCcw size={11} /> Tạo lại{credits != null ? ` · ≈${credits}` : ''}
           </button>
@@ -214,7 +223,7 @@ function VariantTile(props: {
 }
 
 function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIngrNode>) {
-  const { updateNodeData, getNode } = useReactFlow()
+  const { updateNodeData, getNode, addNodes, setCenter } = useReactFlow()
   const { config, flowProject } = useMuseCanvas()
   // thời lượng trong cấu hình Flow (0 = Tự động) quyết định đoạn cắt mặc định
   const data = { ...normalizeVideoIngrData(raw), targetSeconds: config.flowSeconds }
@@ -246,7 +255,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
   )
 
   const flow: VideoIngrFlow | null = flowProject
-    ? { projectId: flowProject.id, flowProjectId: flowProject.flow_project_id, aspect: config.flowAspect }
+    ? { projectId: flowProject.id, flowProjectId: flowProject.flow_project_id, aspect: config.flowAspect, resolution: config.flowResolution }
     : null
   const trim = videoIngrTrim(data, refVideo?.durationSec ?? 0)
   const blockers = useMemo(
@@ -256,7 +265,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
       return b
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.prompt, data.trimStart, data.trimEnd, data.targetSeconds, refVideo, refs, flowProject, config.flowProjectId, config.flowAspect],
+    [data.prompt, data.trimStart, data.trimEnd, data.targetSeconds, refVideo, refs, flowProject, config.flowProjectId, config.flowAspect, config.flowResolution],
   )
   const videos = data.videos
   const variants = config.flowVariants
@@ -282,18 +291,22 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
           } catch {
             continue // backend đang khởi động lại: hỏi tiếp
           }
-          const cur = normalizeVideoIngrData(getNode(id)?.data as Record<string, unknown> | undefined).videos.find((v) => v.jobId === jobId)
-          if (!cur || cur.status !== 'running') break
+          // job nhiều video: mọi ô của job cùng được cập nhật (ô đã "Dừng chờ" thì thôi)
+          const cur = normalizeVideoIngrData(getNode(id)?.data as Record<string, unknown> | undefined).videos
+          if (!cur.some((v) => v.jobId === jobId && v.status === 'running')) break
           const missing = job === null
           updateNodeData(id, (node) => {
             const list = normalizeVideoIngrData(node.data as Record<string, unknown>).videos
-            const i = list.findIndex((v) => v.jobId === jobId && v.status === 'running')
-            if (i < 0) return {}
-            const next = [...list]
-            next[i] = missing
-              ? { ...list[i], status: 'error', error: 'Backend không còn job này — xem Thư Viện Video / Veo Studio.', updatedAt: Date.now() }
-              : videoFromJob(list[i], job!)
-            return { videos: next }
+            if (!list.some((v) => v.jobId === jobId && v.status === 'running')) return {}
+            return {
+              videos: list.map((v) =>
+                v.jobId !== jobId || v.status !== 'running'
+                  ? v
+                  : missing
+                    ? { ...v, status: 'error' as const, error: 'Backend không còn job này — xem Thư Viện Video / Veo Studio.', updatedAt: Date.now() }
+                    : videoFromJob(v, job!),
+              ),
+            }
           })
           if (missing || job!.status === 'done' || job!.status === 'error') {
             if (job?.status === 'done') notifyVideoLibraryChanged()
@@ -322,10 +335,11 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
         }
         return { videos: next }
       })
-      for (const { outcome } of batch) {
-        if (!('job' in outcome)) continue
-        if (outcome.job.status === 'done') notifyVideoLibraryChanged()
-        else if (outcome.job.status !== 'error') poll(outcome.job.job_id)
+      const jobs = new Map<string, VeoJobLite>()
+      for (const { outcome } of batch) if ('job' in outcome) jobs.set(outcome.job.job_id, outcome.job)
+      for (const job of jobs.values()) {
+        if (job.status === 'done') notifyVideoLibraryChanged()
+        else if (job.status !== 'error') poll(job.job_id)
       }
     },
     [id, poll, updateNodeData],
@@ -367,24 +381,27 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
   }, [running])
 
   /**
-   * Gửi các biến thể `indices` (0 = biến thể 1). Bấm là gửi ngay (giống node Clip): tổng credit ghi sẵn trên nút, mỗi biến thể
-   * là 1 job Flow riêng với khóa chống trùng riêng, video tham chiếu chỉ tải lên 1 lần, không bao giờ tự gửi lại.
+   * Tạo video cho các ô `indices` (0 = biến thể 1) bằng MỘT job Flow ra `indices.length` video (như chọn x2–x4 trên giao diện
+   * Flow): một lần tải video tham chiếu, một lệnh, ô thứ k nhận video thứ k. Bấm là gửi ngay (giống node Clip), tổng credit
+   * ghi sẵn trên nút, không bao giờ tự gửi lại.
    */
   function createVideos(indices: number[]) {
     if (running || blockers.length || runs.isRunning(flight) || !refVideo || !flow || !indices.length) return
     const attempt = videoIngrNextAttempt(videos)
     const started = Date.now()
-    const fresh = (): MuseClipVideo => ({
+    const multi = indices.length > 1
+    const fresh = (k: number): MuseClipVideo => ({
       status: 'running',
       fingerprint,
       attempt,
+      ...(multi ? { outputIndex: k } : {}),
       step: 'uploading',
       detail: `Đang tải “${refVideo.name}” lên project Flow (lần sau dùng lại)…`,
       startedAt: started,
       updatedAt: started,
     })
     const next = [...videos]
-    for (const i of indices) next[i] = fresh()
+    indices.forEach((i, k) => { next[i] = fresh(k) })
     updateNodeData(id, { videos: next })
     const snapshot = { prompt: data.prompt, trimStart: data.trimStart, trimEnd: data.trimEnd, targetSeconds: data.targetSeconds }
     const batch: Promise<BatchOutcome> = (async () => {
@@ -396,16 +413,14 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
         const outcome: SubmitOutcome = { error: e?.message || 'Không tải được video tham chiếu lên Flow' }
         return indices.map((index) => ({ index, outcome }))
       }
-      const done: BatchOutcome = []
-      for (const index of indices) {
-        try {
-          const body = buildVideoIngrRequest(id, snapshot, refVideo, refs, flow, mediaId, attempt, index + 1)
-          done.push({ index, outcome: { job: await submitVeoJob(body) } })
-        } catch (e: any) {
-          done.push({ index, outcome: { error: e?.message || 'Không gửi được job' } })
-        }
+      let outcome: SubmitOutcome
+      try {
+        const body = buildVideoIngrRequest(id, snapshot, refVideo, refs, flow, mediaId, attempt, indices[0] + 1, indices.length)
+        outcome = { job: await submitVeoJob(body) }
+      } catch (e: any) {
+        outcome = { error: e?.message || 'Không gửi được job' }
       }
-      return done
+      return indices.map((index) => ({ index, outcome }))
     })()
     runs.start(flight, batch)
   }
@@ -433,6 +448,41 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
     } finally {
       setBusy('')
     }
+  }
+
+  /** Đưa khung nhìn tới một node. */
+  function focusNode(nodeId: string) {
+    const n = getNode(nodeId)
+    if (!n) return
+    setCenter(n.position.x + (n.measured?.width ?? 280) / 2, n.position.y + (n.measured?.height ?? 300) / 2, { zoom: 1, duration: 400 })
+  }
+
+  /** "Ra node": tách video của các ô thành node Video tham chiếu bên phải node này (đã có node thì chỉ đến node đó). */
+  function toNodes(indices: number[]) {
+    const me = getNode(id)
+    if (!me) return
+    const x = me.position.x + (me.measured?.width ?? 460) + 90
+    const made: { index: number; nodeId: string }[] = []
+    const fresh = indices.filter((i) => !(videos[i]?.outNodeId && getNode(videos[i]!.outNodeId!)))
+    if (indices.length === 1 && !fresh.length) {
+      focusNode(videos[indices[0]]!.outNodeId!)
+      return
+    }
+    fresh.forEach((i, k) => {
+      const ref = videoIngrTileToRef(videos[i], veoVideoUrl)
+      if (!ref) return
+      const node = createVideoRefNode({ x, y: me.position.y + k * 430 })
+      const label = `${data.title} · ${slotCount > 1 ? `biến thể ${i + 1}` : 'video'}`.slice(0, 60)
+      addNodes({ ...node, data: { ...node.data, label, video: ref } } as Node)
+      made.push({ index: i, nodeId: node.id })
+    })
+    if (!made.length) return
+    updateNodeData(id, (n) => {
+      const list = [...normalizeVideoIngrData(n.data as Record<string, unknown>).videos]
+      for (const m of made) if (list[m.index]) list[m.index] = { ...list[m.index], outNodeId: m.nodeId }
+      return { videos: list }
+    })
+    if (made.length === 1) setTimeout(() => focusNode(made[0].nodeId), 60)
   }
 
   function stopWaiting(index: number) {
@@ -498,13 +548,15 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
   }
 
   const trimOk = trim.length >= VIDEO_INGR_MIN_SECONDS && trim.length <= VIDEO_INGR_MAX_SECONDS && trim.end > trim.start
-  const credits = trimOk ? videoIngrCredits(trim.length) : null
-  const totalCredits = trimOk ? videoIngrTotalCredits(trim.length, variants) : null
+  const credits = trimOk ? videoIngrCredits(trim.length, config.flowResolution) : null
+  const totalCredits = trimOk ? videoIngrTotalCredits(trim.length, variants, config.flowResolution) : null
   const collapsed = data.collapsed
   const dur = refVideo?.durationSec || Math.max(trim.end, VIDEO_INGR_MAX_SECONDS)
   const pct = (t: number) => `${Math.min(100, Math.max(0, (t / dur) * 100))}%`
   const fmt = (t: number) => `${(Math.round(t * 10) / 10).toFixed(1)}s`
   const slots = Array.from({ length: VIDEO_INGR_MAX_REFS }, (_, i) => refs[i] ?? null)
+  // các ô đã có video mà chưa tách thành node (cho nút "Tất cả ra node")
+  const toNodeAll = videos.flatMap((v, i) => (videoIngrTileToRef(v, veoVideoUrl) && !(v.outNodeId && getNode(v.outNodeId)) ? [i] : []))
 
   return (
     <div className={`mc-node mc-node-vingr ${selected ? 'selected' : ''}`}>
@@ -531,7 +583,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
         <span className="mc-node-icon mc-icon-videoref"><Clapperboard size={14} /></span>
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
-          <small>Omni 1.2 · chỉnh video theo video mẫu · {VIDEO_INGR_RESOLUTION}</small>
+          <small>Omni 1.2 · chỉnh video theo video mẫu · {config.flowResolution}</small>
         </div>
         <span className="mc-node-count" title="Ảnh tham chiếu đã nối / tối đa">{refs.length}/{VIDEO_INGR_MAX_REFS} ảnh</span>
         <button
@@ -739,8 +791,13 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
         <div className={`mc-clipvideo mc-cv-${vstate}`}>
           <div className="mc-clipvideo-head">
             <Clapperboard size={13} /> Video Flow
+            {toNodeAll.length > 1 && (
+              <button type="button" className="mc-mini-btn nodrag mc-vingr-allnode" onClick={() => toNodes(toNodeAll)} title="Tách mọi video đã tạo (chưa có node) thành node Video tham chiếu">
+                <ArrowUpRight size={11} /> Tất cả ra node
+              </button>
+            )}
             <small>
-              {config.flowAspect} · {VIDEO_INGR_RESOLUTION} · {variants} biến thể · {flowProject ? flowProject.name : 'chưa chọn project'}
+              {config.flowAspect} · {config.flowResolution} · {variants} biến thể · {flowProject ? flowProject.name : 'chưa chọn project'}
               {flowProject?.account_email ? ` · ${flowProject.account_email}` : ''}
             </small>
           </div>
@@ -759,8 +816,11 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
                   credits={credits}
                   disabledReason={blockers[0] ?? ''}
                   onStop={() => stopWaiting(i)}
+                  batchTile={videoIngrIsBatchTile(videos[i], videos)}
                   onRecover={() => recoverVideo(i)}
                   onRetry={() => createVideos([i])}
+                  hasNode={!!(videos[i]?.outNodeId && getNode(videos[i]!.outNodeId!))}
+                  onToNode={() => toNodes([i])}
                 />
               ))}
             </div>
@@ -775,7 +835,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
               onClick={createAll}
               title={
                 variants > 1
-                  ? `Gửi ${variants} job Flow riêng (mỗi biến thể 1 lượt, tốn credit riêng; video tham chiếu chỉ tải lên 1 lần) — tốn credit, bấm là gửi ngay; không bao giờ tự gửi lại`
+                  ? `Gửi MỘT lệnh Flow ra ${variants} video (như chọn x${variants} trên Flow; video tham chiếu chỉ tải lên 1 lần, Flow tính credit từng video) — bấm là gửi ngay; không bao giờ tự gửi lại`
                   : 'Tải video tham chiếu lên Flow (nếu chưa) rồi gửi Omni 1.2 chỉnh video — tốn credit, bấm là gửi ngay; không bao giờ tự gửi lại'
               }
             >

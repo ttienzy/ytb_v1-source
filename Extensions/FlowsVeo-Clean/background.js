@@ -257,7 +257,10 @@
         body: JSON.stringify({
           request_id: requestId,
           result: result?.ok ? result : null,
-          error: result?.ok ? null : result?.error || "Unknown Flow error"
+          error: result?.ok ? null : result?.error || "Unknown Flow error",
+          // Thêm (không đổi các trường cũ): khi thất bại mà biết Flow đã nhận lệnh hay chưa, backend cần biết để báo đúng
+          // "chưa mất credit" và không đi khôi phục scene vô ích. Backend cũ bỏ qua trường lạ.
+          ...!result?.ok && typeof result?.submitted === "boolean" ? { failure: { submitted: result.submitted, media_id: result.media_id || null, media_ids: result.media_ids || [] } } : {}
         }),
         signal: AbortSignal.timeout(8e3)
       });
@@ -2017,7 +2020,7 @@
   }
 
   // src/providers/google-flow/image-ui.js
-  var aspectCodes = { "16:9": 3, "9:16": 2, "1:1": 1, "4:3": 4, "3:4": 5 };
+  var aspectCodes = { "16:9": 3, "9:16": 2, "1:1": 1, "4:3": 5, "3:4": 4 };
   function matchImageUiRequest(postData, expected) {
     try {
       const batches = JSON.parse(new URLSearchParams(postData).get("f.req"));
@@ -2028,7 +2031,9 @@
         if (!Array.isArray(items) || items.length === 0) continue;
         const item = items[0];
         if (item?.[8]?.[0]?.[0]?.[0] !== expected.prompt.trim() || item?.[7]?.[5] !== expected.project_id) continue;
-        if (item[5] !== expected.model_key || item[4] !== aspectCodes[expected.aspect_ratio] || item[2]?.length) throw new Error("Flow đã gửi cấu hình khác yêu cầu. Kiểm tra ảnh trên Flow trước khi thử lại.");
+        if (item[5] !== expected.model_key || item[4] !== aspectCodes[expected.aspect_ratio] || item[2]?.length) {
+          throw new Error("Flow đã gửi cấu hình khác yêu cầu. Kiểm tra ảnh trên Flow trước khi thử lại.");
+        }
         return { seeds: items.map((it) => it?.[3]).filter(Boolean), seed: item[3] };
       }
     } catch (error) {
@@ -5634,13 +5639,15 @@
   var VERIFIED_HTTP_MODEL = /^macaron_cookie_t2v_10s(_360p)?$/;
   var VERIFIED_FRAMES_MODEL = /^macaron_cookie_i2v_fl_(6|10)s(_360p)?$/;
   var VERIFIED_R2V_MODEL = /^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$/;
-  var VERIFIED_EDIT_MODEL = /^macaron_cookie_edit$/;
+  var VERIFIED_EDIT_MODEL = /^macaron_cookie_edit(_360p)?$/;
+  var MOTION_MAX_OUTPUTS = 4;
+  var MOTION_MAX_IMAGES = 5;
   var MOTION_REF_MAX_SECONDS = 15;
   var MEDIA_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function motionImageOrder(req) {
     const images = Array.isArray(req?.ingredient_images) ? req.ingredient_images : [];
     const inputs = Array.isArray(req?.ingredient_inputs) && req.ingredient_inputs.length ? req.ingredient_inputs : [...(req?.ingredient_media_ids || []).map((media_id) => ({ media_id })), ...images.map(() => ({ local: true }))];
-    if (inputs.length < 1 || inputs.length > 3) return null;
+    if (inputs.length < 1 || inputs.length > MOTION_MAX_IMAGES) return null;
     let next = 0;
     const order = [];
     for (const input of inputs) {
@@ -5677,7 +5684,7 @@
       if (total < 1 || total > 3 || !images.every((i) => i && i.base64)) return false;
       if (!ids.every((x) => typeof x === "string" && MEDIA_ID_RE.test(x))) return false;
     } else if (mode === "video_edit") {
-      if (!VERIFIED_EDIT_MODEL.test(model) || (req.resolution || "720p") !== "720p") return false;
+      if (!VERIFIED_EDIT_MODEL.test(model)) return false;
       if (!MEDIA_ID_RE.test(String(req.reference_video_id || ""))) return false;
       const start = Number(req.reference_video_start_seconds || 0);
       const end = Number(req.reference_video_end_seconds);
@@ -5689,16 +5696,56 @@
     if (model.endsWith("_360p") !== ((req.resolution || "720p") === "360p")) return false;
     if (!["720p", "360p"].includes(req.resolution || "720p")) return false;
     if (!["16:9", "9:16"].includes(req.aspect_ratio)) return false;
-    if (Number(req.num_outputs || 1) !== 1) return false;
+    const outputs = Number(req.num_outputs || 1);
+    const maxOutputs = mode === "video_edit" ? MOTION_MAX_OUTPUTS : 1;
+    if (!Number.isInteger(outputs) || outputs < 1 || outputs > maxOutputs) return false;
     return true;
   }
   async function runFlowHttpVideoInPage(flowRequest, _captchaToken, opts = {}) {
     const pollMs = opts.pollMs ?? 5e3;
     const timeoutMs = opts.timeoutMs ?? 6e5;
+    const nonce = typeof opts.nonce === "string" ? opts.nonce : "";
+    const resume = opts.resume === true && Boolean(nonce);
+    const storeKey = nonce ? `_vf_http_gen:${nonce}` : "";
+    const store = {
+      read() {
+        try {
+          return storeKey ? JSON.parse(globalThis.sessionStorage?.getItem(storeKey) || "null") : null;
+        } catch {
+          return null;
+        }
+      },
+      write(value) {
+        try {
+          if (!storeKey || !globalThis.sessionStorage) return;
+          const ss = globalThis.sessionStorage;
+          for (let i = ss.length - 1; i >= 0; i--) {
+            const k = ss.key(i);
+            if (k && k.startsWith("_vf_http_gen:")) {
+              try {
+                if (Date.now() - (JSON.parse(ss.getItem(k) || "{}").at || 0) > 864e5) ss.removeItem(k);
+              } catch {
+                ss.removeItem(k);
+              }
+            }
+          }
+          ss.setItem(storeKey, JSON.stringify({ ...value, at: Date.now() }));
+        } catch {
+        }
+      },
+      forget() {
+        try {
+          if (storeKey) globalThis.sessionStorage?.removeItem(storeKey);
+        } catch {
+        }
+      }
+    };
     const sleep2 = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const w = typeof window !== "undefined" ? window : globalThis;
     let submitted = false;
     let mediaId = null;
+    let mediaIds = [];
+    let createdRecords = [];
     let credit = null;
     let startMediaId = null;
     let endMediaId = null;
@@ -5722,7 +5769,7 @@
       const isFrames = (flowRequest?.input_mode || "text_to_video") === "frames";
       const isIngredients = flowRequest?.input_mode === "ingredients";
       const isEdit = flowRequest?.input_mode === "video_edit";
-      const modelOk = isFrames ? /^macaron_cookie_i2v_fl_(6|10)s(_360p)?$/.test(modelId) : isIngredients ? /^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$/.test(modelId) : isEdit ? modelId === "macaron_cookie_edit" : /^macaron_cookie_t2v_10s(_360p)?$/.test(modelId);
+      const modelOk = isFrames ? /^macaron_cookie_i2v_fl_(6|10)s(_360p)?$/.test(modelId) : isIngredients ? /^macaron_cookie_r2v_([3-9]|1[0-5])s(_360p)?$/.test(modelId) : isEdit ? /^macaron_cookie_edit(_360p)?$/.test(modelId) : /^macaron_cookie_t2v_10s(_360p)?$/.test(modelId);
       if (!modelOk) throw new Error(`HTTP path không hỗ trợ model ${modelId || "(trống)"}`);
       const aspectEnum = { "9:16": 1, "16:9": 2 }[flowRequest?.aspect_ratio];
       if (!aspectEnum) throw new Error(`HTTP path không hỗ trợ aspect_ratio ${flowRequest?.aspect_ratio || "(trống)"}`);
@@ -5744,9 +5791,9 @@
       const sourcePath = `${accountPath}/project/${projectId}`;
       const hl = String(document?.documentElement?.lang || "en").split("-")[0];
       const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : "00000000-0000-4000-8000-000000000000").toUpperCase();
-      async function rpc(rpcId2, payload) {
+      async function rpc(rpcId, payload) {
         const query = new URLSearchParams({
-          rpcids: rpcId2,
+          rpcids: rpcId,
           "source-path": sourcePath,
           bl: String(bl),
           "f.sid": String(sid),
@@ -5755,7 +5802,7 @@
           rt: "c"
         });
         const body = new URLSearchParams({
-          "f.req": JSON.stringify([[[rpcId2, JSON.stringify(payload), null, "generic"]]]),
+          "f.req": JSON.stringify([[[rpcId, JSON.stringify(payload), null, "generic"]]]),
           at: String(at)
         });
         const res = await fetch(`${location.origin}${accountPath}/_/AiSandboxAngularFrontend/data/batchexecute?${query}`, {
@@ -5765,7 +5812,7 @@
           headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Same-Domain": "1" },
           body: body.toString()
         });
-        if (!res.ok) throw new Error(`Flow RPC ${rpcId2} failed: HTTP ${res.status}`);
+        if (!res.ok) throw new Error(`Flow RPC ${rpcId} failed: HTTP ${res.status}`);
         const text = await res.text();
         let envelopeError = null;
         for (const line of text.split(/\r?\n/)) {
@@ -5779,15 +5826,15 @@
           if (!Array.isArray(frames)) continue;
           for (const item of frames) {
             if (!Array.isArray(item)) continue;
-            if (item[0] === "wrb.fr" && item[1] === rpcId2) {
+            if (item[0] === "wrb.fr" && item[1] === rpcId) {
               if (typeof item[2] === "string") return JSON.parse(item[2]);
-              envelopeError = `Flow RPC ${rpcId2} envelope error: ${JSON.stringify(item.slice(2, 6))}`;
+              envelopeError = `Flow RPC ${rpcId} envelope error: ${JSON.stringify(item.slice(2, 6))}`;
             } else if (item[0] === "er") {
               envelopeError = `Flow server error (er): ${JSON.stringify(item)}`;
             }
           }
         }
-        throw new Error(envelopeError || `Flow RPC ${rpcId2} returned no usable payload`);
+        throw new Error(envelopeError || `Flow RPC ${rpcId} returned no usable payload`);
       }
       async function freshCaptchaToken() {
         const g = w.grecaptcha?.enterprise;
@@ -5857,122 +5904,147 @@
         if (!id) throw new Error(`Upload ảnh lên Flow không trả media id: ${JSON.stringify(data).slice(0, 160)}`);
         return id;
       }
-      let rpcId = "YhhmEf";
-      let createPayload;
-      if (isFrames) {
-        const targetAspect = flowRequest.aspect_ratio === "9:16" ? 9 / 16 : 16 / 9;
-        startMediaId = await uploadImage(flowRequest.image_base64, flowRequest.image_mime, flowRequest.image_name);
-        endMediaId = await uploadImage(flowRequest.end_image_base64, flowRequest.end_image_mime, flowRequest.end_image_name);
-        const slot = (id, w2, h) => [null, id, null, null, null, centerCrop(Number(w2), Number(h), targetAspect)];
-        const token = await freshCaptchaToken();
-        rpcId = "nprQif";
-        createPayload = [
-          [[
+      if (resume) {
+        const saved = store.read();
+        if (!saved || !Array.isArray(saved.mediaIds) || !saved.mediaIds.length) {
+          return { ok: false, resume_missing: true, transport: "http", error: "Không còn thông tin lượt tạo video trong tab Flow" };
+        }
+        if (saved.projectId && saved.projectId !== projectId) {
+          return { ok: false, resume_missing: true, transport: "http", error: "Tab Flow đã sang project khác" };
+        }
+        mediaIds = saved.mediaIds.filter((x) => typeof x === "string");
+        mediaId = mediaIds[0] || null;
+        credit = Number.isFinite(Number(saved.credit)) ? Number(saved.credit) : null;
+        ingredientMediaIds = Array.isArray(saved.ingredientMediaIds) ? saved.ingredientMediaIds : null;
+        startMediaId = saved.startMediaId || null;
+        endMediaId = saved.endMediaId || null;
+        submitted = true;
+      } else {
+        let rpcId = "YhhmEf";
+        let createPayload;
+        if (isFrames) {
+          const targetAspect = flowRequest.aspect_ratio === "9:16" ? 9 / 16 : 16 / 9;
+          startMediaId = await uploadImage(flowRequest.image_base64, flowRequest.image_mime, flowRequest.image_name);
+          endMediaId = await uploadImage(flowRequest.end_image_base64, flowRequest.end_image_mime, flowRequest.end_image_name);
+          const slot = (id, w2, h) => [null, id, null, null, null, centerCrop(Number(w2), Number(h), targetAspect)];
+          const token = await freshCaptchaToken();
+          rpcId = "nprQif";
+          createPayload = [
+            [[
+              [null, null, [[[prompt]]]],
+              modelId,
+              aspectEnum,
+              null,
+              slot(startMediaId, flowRequest.image_width, flowRequest.image_height),
+              slot(endMediaId, flowRequest.end_image_width, flowRequest.end_image_height),
+              [null, null, null, null, uuid(), uuid()]
+            ]],
+            [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+            [uuid(), 2]
+          ];
+        } else if (isEdit) {
+          const videoId = String(flowRequest.reference_video_id || "");
+          if (!UUID_RE.test(videoId)) throw new Error("Motion Control cần mã video mẫu đã tải lên Flow");
+          const startSec = Number(flowRequest.reference_video_start_seconds || 0);
+          const endSec = Number(flowRequest.reference_video_end_seconds);
+          if (!(startSec >= 0) || !(endSec > startSec) || endSec - startSec > 15) {
+            throw new Error("Đoạn cắt video mẫu không hợp lệ (tối đa 15 giây)");
+          }
+          const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
+          const inputs = Array.isArray(flowRequest.ingredient_inputs) && flowRequest.ingredient_inputs.length ? flowRequest.ingredient_inputs : [...(flowRequest.ingredient_media_ids || []).map((media_id) => ({ media_id })), ...images.map(() => ({ local: true }))];
+          if (inputs.length < 1 || inputs.length > 5) throw new Error("Motion Control cần 1–5 ảnh tham chiếu");
+          ingredientMediaIds = [];
+          let nextImage = 0;
+          for (const input of inputs) {
+            if (input?.media_id) {
+              if (!UUID_RE.test(String(input.media_id))) throw new Error("Mã media ảnh tham chiếu không hợp lệ");
+              ingredientMediaIds.push(String(input.media_id));
+            } else {
+              const img = images[nextImage];
+              nextImage += 1;
+              if (!img?.base64) throw new Error("Thiếu dữ liệu ảnh tham chiếu Motion Control");
+              ingredientMediaIds.push(await uploadImage(img.base64, img.mime, img.filename));
+            }
+          }
+          const readyDeadline = Date.now() + (opts.sourceReadyTimeoutMs ?? 24e4);
+          for (; ; ) {
+            const polled = await rpc("jwpduf", [null, null, [[videoId]]]);
+            const rec = polled?.[2]?.find?.((r) => r?.[0] === videoId);
+            if (!rec) throw new Error("Flow không tìm thấy video mẫu trong project này (hãy tải lại video mẫu)");
+            const sourceState = rec?.[5]?.[8]?.[0];
+            if (sourceState === 3) break;
+            if (![1, 2, 6, void 0, null].includes(sourceState)) throw new Error(`Flow xử lý video mẫu bị lỗi (trạng thái ${sourceState})`);
+            if (Date.now() > readyDeadline) throw new Error("Video mẫu chưa xử lý xong trên Flow; chưa gửi lệnh tạo video, hãy thử lại sau");
+            await sleep2(pollMs);
+          }
+          const token = await freshCaptchaToken();
+          rpcId = "jIps6";
+          const count = Math.min(4, Math.max(1, Math.floor(Number(flowRequest.num_outputs || 1)) || 1));
+          const editItem = () => {
+            const item = [
+              [null, videoId, Math.round(startSec * 30), Math.round(endSec * 30)],
+              [null, null, [[[prompt]]]],
+              modelId,
+              1,
+              [null, null, null, null, uuid(), uuid()],
+              null,
+              null,
+              null,
+              ingredientMediaIds.map((id) => [null, id])
+            ];
+            if (modelId.endsWith("_360p")) item.push(null, null, null, [4]);
+            return item;
+          };
+          createPayload = [
+            Array.from({ length: count }, editItem),
+            [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+            [uuid(), 2]
+          ];
+        } else if (isIngredients) {
+          const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
+          const existing = Array.isArray(flowRequest.ingredient_media_ids) ? flowRequest.ingredient_media_ids.filter(Boolean) : [];
+          if (images.length + existing.length < 1 || images.length + existing.length > 3) throw new Error("Ingredients cần 1–3 ảnh tham chiếu");
+          if (!existing.every((x) => UUID_RE.test(String(x)))) throw new Error("Mã media ảnh tham chiếu không hợp lệ");
+          ingredientMediaIds = [...existing];
+          for (const img of images) ingredientMediaIds.push(await uploadImage(img.base64, img.mime, img.filename));
+          const token = await freshCaptchaToken();
+          rpcId = "MZZa6b";
+          const item = [
             [null, null, [[[prompt]]]],
+            ingredientMediaIds.map((id) => [null, id]),
             modelId,
             aspectEnum,
             null,
-            slot(startMediaId, flowRequest.image_width, flowRequest.image_height),
-            slot(endMediaId, flowRequest.end_image_width, flowRequest.end_image_height),
             [null, null, null, null, uuid(), uuid()]
-          ]],
-          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
-          [uuid(), 2]
-        ];
-      } else if (isEdit) {
-        const videoId = String(flowRequest.reference_video_id || "");
-        if (!UUID_RE.test(videoId)) throw new Error("Motion Control cần mã video mẫu đã tải lên Flow");
-        const startSec = Number(flowRequest.reference_video_start_seconds || 0);
-        const endSec = Number(flowRequest.reference_video_end_seconds);
-        if (!(startSec >= 0) || !(endSec > startSec) || endSec - startSec > 15) {
-          throw new Error("Đoạn cắt video mẫu không hợp lệ (tối đa 15 giây)");
+          ];
+          if (modelId.endsWith("_360p")) item.push(null, null, null, null, null, [4]);
+          createPayload = [
+            [item],
+            [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+            [uuid(), 2]
+          ];
+        } else {
+          const token = await freshCaptchaToken();
+          createPayload = [
+            [[[null, null, [[[prompt]]]], modelId, aspectEnum, null, [null, null, null, null, uuid(), uuid()]]],
+            [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
+            [uuid(), 2]
+          ];
         }
-        const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
-        const inputs = Array.isArray(flowRequest.ingredient_inputs) && flowRequest.ingredient_inputs.length ? flowRequest.ingredient_inputs : [...(flowRequest.ingredient_media_ids || []).map((media_id) => ({ media_id })), ...images.map(() => ({ local: true }))];
-        if (inputs.length < 1 || inputs.length > 3) throw new Error("Motion Control cần 1–3 ảnh tham chiếu");
-        ingredientMediaIds = [];
-        let nextImage = 0;
-        for (const input of inputs) {
-          if (input?.media_id) {
-            if (!UUID_RE.test(String(input.media_id))) throw new Error("Mã media ảnh tham chiếu không hợp lệ");
-            ingredientMediaIds.push(String(input.media_id));
-          } else {
-            const img = images[nextImage];
-            nextImage += 1;
-            if (!img?.base64) throw new Error("Thiếu dữ liệu ảnh tham chiếu Motion Control");
-            ingredientMediaIds.push(await uploadImage(img.base64, img.mime, img.filename));
-          }
+        const created = await rpc(rpcId, createPayload);
+        createdRecords = Array.isArray(created?.[3]) ? created[3] : [];
+        mediaIds = createdRecords.map((r) => typeof r?.[0] === "string" ? r[0] : null).filter(Boolean);
+        mediaId = mediaIds[0] || null;
+        credit = Number.isFinite(Number(created?.[1])) ? Number(created[1]) : null;
+        if (!mediaId) {
+          throw new Error(`Flow create response did not contain a media id: ${JSON.stringify(created).slice(0, 200)}`);
         }
-        const readyDeadline = Date.now() + (opts.sourceReadyTimeoutMs ?? 24e4);
-        for (; ; ) {
-          const polled = await rpc("jwpduf", [null, null, [[videoId]]]);
-          const rec = polled?.[2]?.find?.((r) => r?.[0] === videoId);
-          if (!rec) throw new Error("Flow không tìm thấy video mẫu trong project này (hãy tải lại video mẫu)");
-          const sourceState = rec?.[5]?.[8]?.[0];
-          if (sourceState === 3) break;
-          if (![1, 2, 6, void 0, null].includes(sourceState)) throw new Error(`Flow xử lý video mẫu bị lỗi (trạng thái ${sourceState})`);
-          if (Date.now() > readyDeadline) throw new Error("Video mẫu chưa xử lý xong trên Flow; chưa gửi lệnh tạo video, hãy thử lại sau");
-          await sleep2(pollMs);
+        submitted = true;
+        store.write({ mediaIds, credit, projectId, modelId, ingredientMediaIds, startMediaId, endMediaId });
+        try {
+          w.__FLOW_ACTIVE_GENERATION__ = { mediaId, projectId, modelId, startTime: Date.now(), prompt };
+        } catch {
         }
-        const token = await freshCaptchaToken();
-        rpcId = "jIps6";
-        createPayload = [
-          [[
-            [null, videoId, Math.round(startSec * 30), Math.round(endSec * 30)],
-            [null, null, [[[prompt]]]],
-            modelId,
-            Number(flowRequest.num_outputs || 1),
-            [null, null, null, null, uuid(), uuid()],
-            null,
-            null,
-            null,
-            ingredientMediaIds.map((id) => [null, id])
-          ]],
-          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
-          [uuid(), 2]
-        ];
-      } else if (isIngredients) {
-        const images = Array.isArray(flowRequest.ingredient_images) ? flowRequest.ingredient_images : [];
-        const existing = Array.isArray(flowRequest.ingredient_media_ids) ? flowRequest.ingredient_media_ids.filter(Boolean) : [];
-        if (images.length + existing.length < 1 || images.length + existing.length > 3) throw new Error("Ingredients cần 1–3 ảnh tham chiếu");
-        if (!existing.every((x) => UUID_RE.test(String(x)))) throw new Error("Mã media ảnh tham chiếu không hợp lệ");
-        ingredientMediaIds = [...existing];
-        for (const img of images) ingredientMediaIds.push(await uploadImage(img.base64, img.mime, img.filename));
-        const token = await freshCaptchaToken();
-        rpcId = "MZZa6b";
-        const item = [
-          [null, null, [[[prompt]]]],
-          ingredientMediaIds.map((id) => [null, id]),
-          modelId,
-          aspectEnum,
-          null,
-          [null, null, null, null, uuid(), uuid()]
-        ];
-        if (modelId.endsWith("_360p")) item.push(null, null, null, null, null, [4]);
-        createPayload = [
-          [item],
-          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
-          [uuid(), 2]
-        ];
-      } else {
-        const token = await freshCaptchaToken();
-        createPayload = [
-          [[[null, null, [[[prompt]]]], modelId, aspectEnum, null, [null, null, null, null, uuid(), uuid()]]],
-          [null, 22, null, null, null, projectId, null, null, null, null, [token, 1]],
-          [uuid(), 2]
-        ];
-      }
-      const created = await rpc(rpcId, createPayload);
-      const record = created?.[3]?.[0];
-      mediaId = typeof record?.[0] === "string" ? record[0] : null;
-      credit = Number.isFinite(Number(created?.[1])) ? Number(created[1]) : null;
-      if (!mediaId) {
-        throw new Error(`Flow create response did not contain a media id: ${JSON.stringify(created).slice(0, 200)}`);
-      }
-      submitted = true;
-      try {
-        w.__FLOW_ACTIVE_GENERATION__ = { mediaId, projectId, modelId, startTime: Date.now(), prompt };
-      } catch {
       }
       const stateOf = (r) => r?.[5]?.[8]?.[0];
       const describeFailure = (rec) => {
@@ -5993,37 +6065,65 @@
           return "";
         }
       };
-      let state = stateOf(record);
-      const deadline = Date.now() + timeoutMs;
+      const states = {};
+      const failures = {};
+      for (const id of mediaIds) states[id] = stateOf(createdRecords.find((r) => r?.[0] === id));
+      const isDone = (id) => states[id] === 3 || Boolean(failures[id]);
+      const submittedAt = Date.now();
+      const deadline = submittedAt + timeoutMs;
+      const NOT_FOUND_GRACE_MS = 12e4;
       let consecutiveErrors = 0;
-      while (state !== 3) {
-        if (Date.now() > deadline) throw new Error("Timed out waiting for Flow render");
+      while (!mediaIds.every(isDone)) {
+        if (Date.now() > deadline) {
+          for (const id of mediaIds) if (!isDone(id)) failures[id] = "Timed out waiting for Flow render";
+          break;
+        }
         await sleep2(pollMs);
+        const pending = mediaIds.filter((id) => !isDone(id));
         try {
-          const polled = await rpc("jwpduf", [null, null, [[mediaId]]]);
-          const rec = polled?.[2]?.find?.((r) => r?.[0] === mediaId);
-          if (!rec) throw new Error("poll response has no record for this media id");
+          const polled = await rpc("jwpduf", [null, null, pending.map((id) => [id])]);
+          const recs = Array.isArray(polled?.[2]) ? polled[2] : [];
+          if (!pending.some((id) => recs.some((r) => r?.[0] === id))) throw new Error("poll response has no record for these media ids");
           consecutiveErrors = 0;
-          state = stateOf(rec);
-          if (state === void 0 || state === null) continue;
-          if (![1, 2, 3, 6].includes(state)) throw new Error(`Flow render ended with status ${state}${describeFailure(rec)}`);
+          for (const id of pending) {
+            const rec = recs.find((r) => r?.[0] === id);
+            const st = stateOf(rec);
+            if (!rec || st === void 0 || st === null) continue;
+            if ([1, 2, 3, 6].includes(st)) {
+              states[id] = st;
+              continue;
+            }
+            const notYet = st === 4 && /Media not found/i.test(JSON.stringify(rec?.[5]?.[8] ?? "")) && Date.now() - submittedAt < NOT_FOUND_GRACE_MS;
+            if (!notYet) failures[id] = `Flow render ended with status ${st}${describeFailure(rec)}`;
+          }
         } catch (err) {
-          if (String(err?.message || "").startsWith("Flow render ended")) throw err;
           if (++consecutiveErrors >= 5) throw err;
         }
       }
-      let asset = null;
-      let videoUrl = null;
-      for (let attempt = 0; attempt < 4 && !videoUrl; attempt++) {
-        if (attempt) await sleep2(Math.min(pollMs, 2e3));
-        asset = await rpc("as29s", [mediaId]);
-        const candidate = asset?.[7]?.[0]?.[8];
-        if (typeof candidate === "string" && candidate.startsWith("https://flow-content.google/video/")) videoUrl = candidate;
+      const outputs = [];
+      for (const [index, id] of mediaIds.entries()) {
+        if (failures[id]) {
+          outputs.push({ index, ok: false, media_id: id, error: failures[id] });
+          continue;
+        }
+        let asset = null;
+        let url = null;
+        for (let attempt = 0; attempt < 4 && !url; attempt++) {
+          if (attempt) await sleep2(Math.min(pollMs, 2e3));
+          asset = await rpc("as29s", [id]);
+          const candidate = asset?.[7]?.[0]?.[8];
+          if (typeof candidate === "string" && candidate.startsWith("https://flow-content.google/video/")) url = candidate;
+        }
+        outputs.push(url ? { index, ok: true, media_id: id, video_url: url, image_url: typeof asset?.[5]?.[10] === "string" ? asset[5][10] : null } : { index, ok: false, media_id: id, error: "Flow render xong nhưng không lấy được URL video (as29s)" });
       }
-      if (!videoUrl) throw new Error("Flow render xong nhưng không lấy được URL video (as29s)");
-      const imageUrl = typeof asset?.[5]?.[10] === "string" ? asset[5][10] : null;
+      const firstOk = outputs.find((o) => o.ok);
+      store.forget();
+      if (!firstOk) throw new Error(outputs.map((o) => o.error).join(" | "));
+      mediaId = firstOk.media_id;
+      const videoUrl = firstOk.video_url;
+      const imageUrl = firstOk.image_url;
       try {
-        if (w.__FLOW_ACTIVE_GENERATION__?.mediaId === mediaId) w.__FLOW_ACTIVE_GENERATION__ = null;
+        if (mediaIds.includes(w.__FLOW_ACTIVE_GENERATION__?.mediaId)) w.__FLOW_ACTIVE_GENERATION__ = null;
       } catch {
       }
       return {
@@ -6032,6 +6132,9 @@
         video_url: videoUrl,
         image_url: imageUrl,
         media_id: mediaId,
+        // Nhiều biến thể trong một lệnh: kết quả từng biến thể theo thứ tự item (ok + video_url, hoặc error).
+        ...mediaIds.length > 1 ? { outputs } : {},
+        ...resume ? { resumed_after_lost_result: true } : {},
         provider_model_id: modelId,
         project_id: projectId,
         credit_balance: credit,
@@ -6056,6 +6159,7 @@
         ok: false,
         submitted,
         media_id: mediaId,
+        media_ids: mediaIds,
         credit_balance: credit,
         transport: "http",
         error: error?.message || String(error),
@@ -6122,6 +6226,53 @@
       return generateVideoThroughUi(flowRequest, tabId);
     };
     logActivity("info", `Running ${useHttp ? "HTTP (no-UI)" : "In-Page RPC"} generation for ${flowRequest?.input_mode} on tab=${tabId}`);
+    const nonce = useHttp ? globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` : "";
+    const pageArgs = useHttp ? [flowRequest, captchaToken, { nonce }] : [flowRequest, captchaToken];
+    const multiOutput = Number(flowRequest?.num_outputs || 1) > 1;
+    const resumeHttp = async (originalError) => {
+      logActivity("info", `Lost direct result (${originalError}). Resuming the same HTTP generation by its media ids...`);
+      const deadline = Date.now() + 15 * 6e4;
+      let attempt = 0;
+      while (Date.now() < deadline) {
+        attempt++;
+        await sleep(attempt === 1 ? 2e3 : 4e3);
+        try {
+          await waitForTabComplete(tabId, 2e4).catch(() => {
+          });
+          const injected = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: runFlowHttpVideoInPage,
+            args: [flowRequest, null, { nonce, resume: true }]
+          });
+          const r = injected?.[0]?.result;
+          if (!r) continue;
+          if (r.resume_missing) {
+            if (attempt < 4) continue;
+            return null;
+          }
+          if (!r.ok && /session config is incomplete|session ID không hợp lệ|mở một Dự án/i.test(r.error || "")) continue;
+          logActivity(r.ok ? "info" : "warn", `Resumed HTTP generation (attempt ${attempt}): ${r.ok ? "ok" : r.error}`);
+          return r;
+        } catch (err) {
+          const msg = err?.message || String(err);
+          if (!/context invalidated|frame was removed|execution context|no result|No tab with id|Cannot access/i.test(msg)) {
+            return { ok: false, submitted: true, error: `${originalError}; resume failed: ${msg}` };
+          }
+        }
+      }
+      return { ok: false, submitted: true, error: `${originalError}; resume timed out (Flow đã nhận lệnh — xem trong project Flow)` };
+    };
+    const handleLost = async (originalError) => {
+      if (useHttp) {
+        const resumed = await resumeHttp(originalError);
+        if (resumed) return resumed;
+        if (multiOutput) {
+          return { ok: false, error: `${originalError}; không còn dấu vết lượt gửi trong tab Flow — xem các video trong project Flow, KHÔNG gửi lại` };
+        }
+      }
+      return recoverLostResult(originalError);
+    };
     const recoverLostResult = async (originalError) => {
       logActivity("info", `Lost direct result (${originalError}). Starting patient scene recovery...`);
       const recoveryDeadline = Date.now() + 3e5;
@@ -6162,7 +6313,7 @@
         target: { tabId },
         world: "MAIN",
         func: generationFn,
-        args: [flowRequest, captchaToken]
+        args: pageArgs
       });
       const result = injected?.[0]?.result;
       const uiFallback = await fallbackToUiIfNotSubmitted(result);
@@ -6182,33 +6333,33 @@
             target: { tabId },
             world: "MAIN",
             func: generationFn,
-            args: [flowRequest, captchaToken]
+            args: pageArgs
           });
           const retryResult = retryInjected?.[0]?.result;
           const retryUiFallback = await fallbackToUiIfNotSubmitted(retryResult, true);
           if (retryUiFallback) return retryUiFallback;
           if (retryResult) {
             if (retryResult.ok || !/Flow page returned no result/i.test(retryResult.error || "")) return retryResult;
-            return recoverLostResult(retryResult.error);
+            return handleLost(retryResult.error);
           }
-          return recoverLostResult("Flow page returned no result after session reload");
+          return handleLost("Flow page returned no result after session reload");
         } catch (retryErr) {
           const retryMsg = retryErr?.message || String(retryErr);
           if (/context invalidated|frame was removed|execution context|no result/i.test(retryMsg)) {
-            return recoverLostResult(`Cannot execute Flow adapter after reload: ${retryMsg}`);
+            return handleLost(`Cannot execute Flow adapter after reload: ${retryMsg}`);
           }
           return { ok: false, error: `Cannot execute Flow adapter after reload: ${retryMsg}` };
         }
       }
       if (result) {
         if (result.ok || !/Flow page returned no result/i.test(result.error || "")) return result;
-        return recoverLostResult(result.error);
+        return handleLost(result.error);
       }
-      return recoverLostResult("Flow page returned no result");
+      return handleLost("Flow page returned no result");
     } catch (error) {
       const message = error?.message || String(error);
       if (/context invalidated|frame was removed|execution context|no result/i.test(message)) {
-        return recoverLostResult(`Cannot execute Flow adapter: ${message}`);
+        return handleLost(`Cannot execute Flow adapter: ${message}`);
       }
       return { ok: false, error: `Cannot execute Flow adapter: ${message}` };
     }
@@ -7439,7 +7590,7 @@
           version: manifest.version || "?",
           // Giới hạn của bản extension ĐANG CHẠY (cùng số phiên bản 2.2.0 nên version không phân biệt được bản mới / cũ):
           // backend dựa vào đây để chặn việc gửi đoạn video mẫu mà extension này sẽ không đi HTTP được.
-          capabilities: { motion_ref_max_seconds: MOTION_REF_MAX_SECONDS },
+          capabilities: { motion_ref_max_seconds: MOTION_REF_MAX_SECONDS, motion_max_outputs: MOTION_MAX_OUTPUTS, motion_360p: true, motion_max_images: MOTION_MAX_IMAGES },
           tab_count: tabs.length,
           tabs: tabs.map((t) => ({ id: t.id, url: t.url })),
           user_agent: navigator.userAgent.slice(0, 120)

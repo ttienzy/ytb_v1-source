@@ -137,6 +137,8 @@ import {
 } from '../services/museCanvasApi.ts'
 import { MuseInputNode } from '../nodes/muse/MuseInputNode'
 import { MuseVideoRefNode } from '../nodes/muse/MuseVideoRefNode'
+import { MuseVideoCutNode } from '../nodes/muse/MuseVideoCutNode'
+import { createVideoCutNode } from '../services/museVideoCut.ts'
 import { MusePromptBoxNode } from '../nodes/muse/MusePromptBoxNode'
 import { MuseVideoIngredientsNode } from '../nodes/muse/MuseVideoIngredientsNode'
 import { MuseJobNode } from '../nodes/muse/MuseJobNode'
@@ -164,6 +166,7 @@ const MUSE_NODE_TYPES: NodeTypes = {
   [MUSE_NODE.scene]: MuseInputNode,
   [MUSE_NODE.scenePlace]: MuseJobNode,
   [MUSE_NODE.videoRef]: MuseVideoRefNode,
+  [MUSE_NODE.videoCut]: MuseVideoCutNode,
   [MUSE_NODE.promptBox]: MusePromptBoxNode,
   [MUSE_NODE.videoIngredients]: MuseVideoIngredientsNode,
   [MUSE_NODE.output]: MuseOutputNode,
@@ -819,8 +822,8 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
           </div>
           {cfg.flowVariants > 1 && (
             <p className="mc-hint">
-              Mỗi lần bấm “Tạo video” ở node Ingredients gửi {cfg.flowVariants} job Flow riêng (mỗi biến thể 1 lượt, tốn credit riêng — tổng
-              credit ghi sẵn trên nút). Node Clip vẫn tạo 1 video.
+              Mỗi lần bấm “Tạo video” ở node Ingredients gửi MỘT lệnh Flow ra {cfg.flowVariants} video (như chọn x{cfg.flowVariants} trên Flow):
+              video tham chiếu tải lên 1 lần, mỗi video có kết quả riêng. Flow tính credit từng video — tổng ghi sẵn trên nút. Node Clip vẫn tạo 1 video.
             </p>
           )}
           <p className="mc-hint">
@@ -1072,7 +1075,7 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
    * 'starter' (ảnh vào nối sẵn vào node chạy cùng họ). `type` là id type node (MUSE_NODE).
    */
   const addNode = useCallback(
-    async (kind: 'input' | 'job' | 'starter' | 'script' | 'clipScript' | 'clipMerge' | 'videoRef' | 'promptBox' | 'videoIngr', type: string) => {
+    async (kind: 'input' | 'job' | 'starter' | 'script' | 'clipScript' | 'clipMerge' | 'videoRef' | 'videoCut' | 'promptBox' | 'videoIngr', type: string) => {
       setAddError('')
       setMenuOpen(false)
       const pos = centerPosition()
@@ -1082,6 +1085,10 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
       }
       if (kind === 'videoRef') {
         setNodes((ns) => [...ns, createVideoRefNode(pos) as Node])
+        return
+      }
+      if (kind === 'videoCut') {
+        setNodes((ns) => [...ns, createVideoCutNode(pos) as Node])
         return
       }
       if (kind === 'promptBox') {
@@ -1186,8 +1193,11 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
             <button type="button" role="menuitem" onClick={() => addNode('videoRef', MUSE_NODE.videoRef)}>
               <Film size={13} /> Video tham chiếu <small title="1 video mẫu">1 video mẫu</small>
             </button>
+            <button type="button" role="menuitem" onClick={() => addNode('videoCut', MUSE_NODE.videoCut)}>
+              <Scissors size={13} /> Cắt video <small title="cắt nhiều khúc như CapCut, xem trước rồi lưu">cắt nhiều khúc, xem trước, lưu video mới</small>
+            </button>
             <button type="button" role="menuitem" onClick={() => addNode('videoIngr', MUSE_NODE.videoIngredients)}>
-              <Clapperboard size={13} /> Ingredients (video + ảnh) <small title="video mẫu + 1–3 ảnh → video Flow">video mẫu + 1–3 ảnh → video Flow</small>
+              <Clapperboard size={13} /> Ingredients (video + ảnh) <small title="video mẫu + 1–5 ảnh → video Flow">video mẫu + 1–5 ảnh → video Flow</small>
             </button>
             <button type="button" role="menuitem" onClick={() => addNode('script', MUSE_NODE.script)}>
               <FileText size={13} /> Kịch bản video <small title="bảng thiết kế → kịch bản + prompt">bảng thiết kế → kịch bản + prompt</small>

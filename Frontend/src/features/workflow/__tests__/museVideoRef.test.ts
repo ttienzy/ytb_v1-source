@@ -67,7 +67,7 @@ test('chỉ nối vào node Ingredients: các node khác không nhận, có câu
     for (const th of [MUSE_HANDLE.refsIn, MUSE_HANDLE.imagesIn, MUSE_HANDLE.scenesIn])
       assert.equal(isValidMuseConnection({ source: 'v', target: t, sourceHandle: MUSE_HANDLE.refVideoOut, targetHandle: th }, nodes), false)
   assert.equal(autoMuseConnection('v', 'source', MUSE_HANDLE.refVideoOut, 'vs', nodes, []), null)
-  assert.match(explainMuseConnection('v', 'source', 'vs', nodes, []), /Video tham chiếu chỉ nối vào cổng “Video” của node Ingredients/)
+  assert.match(explainMuseConnection('v', 'source', 'vs', nodes, []), /Video tham chiếu nối vào cổng “Video” của node Ingredients \(video \+ ảnh\) hoặc node Cắt video/)
 })
 
 test('nhân bản / làm mẫu: giữ video (là đầu vào), id node mới', () => {

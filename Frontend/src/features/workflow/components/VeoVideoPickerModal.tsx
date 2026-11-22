@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Sparkles,
   FolderOpen,
+  Check,
 } from 'lucide-react'
 import type { ExportedVideoItem } from '../contracts'
 import { fetchExportedVideos } from '../services/workflowApi'
@@ -17,7 +18,9 @@ import * as veoApi from '../../veo-studio/services/veoApi'
 interface Props {
   isOpen: boolean
   onClose: () => void
-  onSelectClip: (clip: ExportedVideoItem) => void
+  onSelectClip?: (clip: ExportedVideoItem) => void
+  onSelectClips?: (clips: ExportedVideoItem[]) => void
+  multiSelect?: boolean
   targetSceneIndex?: number
   title?: string
   subtitle?: string
@@ -48,6 +51,8 @@ export function VeoVideoPickerModal({
   isOpen,
   onClose,
   onSelectClip,
+  onSelectClips,
+  multiSelect = false,
   targetSceneIndex,
   title,
   subtitle,
@@ -58,6 +63,7 @@ export function VeoVideoPickerModal({
   const [filterSource, setFilterSource] = useState<'all' | 'veo_history' | 'veo_scene' | 'export'>('all')
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null)
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
+  const [selectedMultiClips, setSelectedMultiClips] = useState<Map<string, ExportedVideoItem>>(new Map())
 
   const loadClips = async () => {
     setLoading(true)
@@ -117,6 +123,7 @@ export function VeoVideoPickerModal({
       loadClips()
       setSearchQuery('')
       setSelectedClipId(null)
+      setSelectedMultiClips(new Map())
       setFilterSource('all')
     }
   }, [isOpen])
@@ -428,6 +435,54 @@ export function VeoVideoPickerModal({
           <span style={{ fontSize: 11.5, color: '#64748b', whiteSpace: 'nowrap' }}>
             Hiển thị <b>{filteredClips.length}</b> / {clips.length} clip
           </span>
+
+          {multiSelect && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5' }}>
+                Đã chọn: {selectedMultiClips.size} video
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const allMap = new Map(selectedMultiClips)
+                  for (const c of filteredClips) {
+                    allMap.set(c.id, c)
+                  }
+                  setSelectedMultiClips(allMap)
+                }}
+                style={{
+                  padding: '4px 9px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  fontSize: 11,
+                  color: '#334155',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Chọn tất cả ({filteredClips.length})
+              </button>
+              {selectedMultiClips.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedMultiClips(new Map())}
+                  style={{
+                    padding: '4px 9px',
+                    borderRadius: 6,
+                    border: '1px solid #fecaca',
+                    background: '#fef2f2',
+                    fontSize: 11,
+                    color: '#dc2626',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  Bỏ chọn tất cả
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Clips Grid */}
@@ -488,12 +543,25 @@ export function VeoVideoPickerModal({
             >
               {filteredClips.map((clip) => {
                 const isHovered = hoveredClipId === clip.id
-                const isSelected = selectedClipId === clip.id
+                const isSelected = multiSelect
+                  ? selectedMultiClips.has(clip.id)
+                  : selectedClipId === clip.id
 
                 return (
                   <div
                     key={clip.id}
-                    onClick={() => setSelectedClipId(clip.id)}
+                    onClick={() => {
+                      if (multiSelect) {
+                        setSelectedMultiClips((prev) => {
+                          const next = new Map(prev)
+                          if (next.has(clip.id)) next.delete(clip.id)
+                          else next.set(clip.id, clip)
+                          return next
+                        })
+                      } else {
+                        setSelectedClipId(clip.id)
+                      }
+                    }}
                     onMouseEnter={() => setHoveredClipId(clip.id)}
                     onMouseLeave={() => setHoveredClipId(null)}
                     style={{
@@ -615,6 +683,31 @@ export function VeoVideoPickerModal({
                         </span>
                       </div>
 
+                      {/* Checkbox badge in multiSelect mode */}
+                      {multiSelect && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            width: 22,
+                            height: 22,
+                            borderRadius: 6,
+                            background: isSelected ? '#4f46e5' : 'rgba(0, 0, 0, 0.45)',
+                            border: isSelected ? '2px solid #ffffff' : '2px solid rgba(255, 255, 255, 0.7)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#ffffff',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                            transition: 'all 0.15s ease',
+                            zIndex: 5,
+                          }}
+                        >
+                          {isSelected && <Check size={14} strokeWidth={3} />}
+                        </div>
+                      )}
+
                       <span
                         style={{
                           position: 'absolute',
@@ -699,8 +792,17 @@ export function VeoVideoPickerModal({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation()
-                          onSelectClip(clip)
-                          onClose()
+                          if (multiSelect) {
+                            setSelectedMultiClips((prev) => {
+                              const next = new Map(prev)
+                              if (next.has(clip.id)) next.delete(clip.id)
+                              else next.set(clip.id, clip)
+                              return next
+                            })
+                          } else {
+                            onSelectClip?.(clip)
+                            onClose()
+                          }
                         }}
                         style={{
                           marginTop: 4,
@@ -727,7 +829,11 @@ export function VeoVideoPickerModal({
                       >
                         <CheckCircle2 size={12} />
                         <span>
-                          {targetSceneIndex !== undefined
+                          {multiSelect
+                            ? isSelected
+                              ? '✓ Đã chọn (Bấm để bỏ)'
+                              : '+ Chọn video này'
+                            : targetSceneIndex !== undefined
                             ? `Gán vào Cảnh #${targetSceneIndex + 1}`
                             : 'Chọn Video Này'}
                         </span>
@@ -743,7 +849,7 @@ export function VeoVideoPickerModal({
         {/* Footer */}
         <div
           style={{
-            padding: '10px 20px',
+            padding: '12px 20px',
             background: '#ffffff',
             borderTop: '1px solid #e2e8f0',
             display: 'flex',
@@ -753,25 +859,54 @@ export function VeoVideoPickerModal({
           }}
         >
           <div style={{ fontSize: 11, color: '#64748b' }}>
-            💡 <b>Mẹo tái sử dụng:</b> Bạn có thể chọn bất kỳ clip nào trong thư viện Veo để làm mẫu chuyển động hoặc ghép phân cảnh mà không tốn credit!
+            💡 <b>Mẹo:</b> Các video đã tạo/xuất đều có sẵn đường dẫn file trên máy, có thể đưa vào xử lý ngay mà không cần tải về máy local!
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 6,
-              border: '1px solid #cbd5e1',
-              background: '#ffffff',
-              color: '#334155',
-              fontSize: 11.5,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Đóng
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {multiSelect && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectClips?.(Array.from(selectedMultiClips.values()))
+                  onClose()
+                }}
+                disabled={selectedMultiClips.size === 0}
+                style={{
+                  padding: '7px 18px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: selectedMultiClips.size === 0 ? '#94a3b8' : '#4f46e5',
+                  color: '#ffffff',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: selectedMultiClips.size === 0 ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  boxShadow: selectedMultiClips.size > 0 ? '0 2px 4px rgba(79, 70, 229, 0.25)' : 'none',
+                }}
+              >
+                <Check size={14} /> Thêm {selectedMultiClips.size} video đã chọn
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: '7px 16px',
+                borderRadius: 6,
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#334155',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Đóng
+            </button>
+          </div>
         </div>
       </div>
     </div>,

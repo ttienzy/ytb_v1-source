@@ -732,6 +732,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     _flow_results[request_id] = {
                         "result": data.get("result"),
                         "error": data.get("error"),
+                        # extension mới: khi lỗi báo Flow đã nhận lệnh chưa ({submitted, media_id, media_ids})
+                        "failure": data.get("failure") if isinstance(data.get("failure"), dict) else None,
                         "logs": logs,
                         "received_at": time.time(),
                     }

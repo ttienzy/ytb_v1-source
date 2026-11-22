@@ -386,6 +386,67 @@
 .mc-vingr-mini { display: flex; flex-direction: column; gap: 6px; }
 .mc-vingr-mini .mc-node-meta { display: inline-flex; align-items: center; gap: 4px; }
 
+/* ---- Cắt video (timeline kiểu CapCut) ---- */
+.mc-node-vcut { width: 540px; }
+.mc-vcut-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 14px; border: 1.5px dashed #cbd5e1; border-radius: 10px; color: #64748b; font-size: 12px; text-align: center; }
+.mc-vcut-empty small { color: #94a3b8; font-size: 10.5px; }
+.mc-vcut-editor { display: flex; flex-direction: column; gap: 7px; outline: none; border-radius: 10px; }
+.mc-vcut-editor:focus-visible { box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.25); }
+.mc-vcut-stage { position: relative; display: flex; justify-content: center; background: #0b1220; border-radius: 10px; overflow: hidden; }
+.mc-vcut-stage video { display: block; max-width: 100%; height: 270px; object-fit: contain; background: #0b1220; cursor: pointer; }
+.mc-vcut-cutmark { position: absolute; left: 8px; top: 8px; padding: 3px 8px; border-radius: 6px; background: rgba(185, 28, 28, 0.92); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-flex; gap: 5px; align-items: center; }
+.mc-vcut-cutmark.loading { background: rgba(15, 23, 42, 0.8); }
+.mc-vcut-controls, .mc-vcut-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.mc-vcut-spacer { flex: 1; }
+.mc-vcut-sep { width: 1px; height: 18px; background: #e2e8f0; margin: 0 3px; }
+.mc-vcut-play { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 0; background: #0f172a; color: #fff; cursor: pointer; }
+.mc-vcut-play:disabled { opacity: 0.45; cursor: not-allowed; }
+.mc-vcut-time { font-size: 11px; color: #64748b; font-variant-numeric: tabular-nums; margin-left: 4px; white-space: nowrap; }
+.mc-vcut-time strong { color: #0f172a; }
+.mc-vcut-time.result { color: #166534; background: #f0fdf4; padding: 2px 6px; border-radius: 6px; }
+.mc-vcut-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 999px; border: 1px solid #e2e8f0; background: #fff; color: #64748b; font-size: 11px; font-weight: 600; cursor: pointer; }
+.mc-vcut-toggle.on { border-color: #86efac; background: #f0fdf4; color: #166534; }
+.mc-vcut-tool { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; color: #0f172a; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.mc-vcut-tool:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; }
+.mc-vcut-tool.danger:not(:disabled) { color: #b91c1c; }
+.mc-vcut-tool:disabled { opacity: 0.45; cursor: not-allowed; }
+.mc-vcut-zoom { width: 64px; accent-color: #b91c1c; }
+.mc-vingr-allnode { margin-left: auto; font-weight: 600; }
+.mc-vcut-tools .mc-icon-btn, .mc-vcut-controls .mc-icon-btn { margin-left: 0; }
+.mc-vcut-save { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; flex: none; }
+.mc-vcut-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; padding-bottom: 2px; }
+.mc-vcut-timeline { position: relative; min-width: 100%; user-select: none; touch-action: none; cursor: crosshair; }
+.mc-vcut-timeline.disabled { opacity: 0.55; pointer-events: none; }
+.mc-vcut-ruler { position: relative; height: 20px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+.mc-vcut-tick { position: absolute; top: 0; height: 100%; }
+.mc-vcut-tick i { position: absolute; left: 0; bottom: 0; width: 1px; height: 6px; background: #94a3b8; }
+.mc-vcut-tick em { position: absolute; left: 3px; top: 2px; font-style: normal; font-size: 9.5px; color: #64748b; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mc-vcut-track { position: relative; background: #1e293b; overflow: hidden; }
+.mc-vcut-strip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.mc-vcut-piece { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border-left: 1px solid rgba(255, 255, 255, 0.55); border-right: 1px solid rgba(255, 255, 255, 0.55); display: flex; align-items: flex-end; overflow: hidden; pointer-events: none; }
+.mc-vcut-piece span { margin: 0 0 3px 4px; padding: 1px 5px; border-radius: 4px; background: rgba(15, 23, 42, 0.72); color: #fff; font-size: 9.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mc-vcut-piece.sel { box-shadow: inset 0 0 0 2px #fbbf24; z-index: 1; }
+.mc-vcut-piece.removed { background: repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.78) 0 6px, rgba(127, 29, 29, 0.78) 6px 12px); }
+.mc-vcut-piece.removed span { background: rgba(185, 28, 28, 0.9); }
+.mc-vcut-edge { position: absolute; top: 0; bottom: 0; width: 11px; margin-left: -5px; z-index: 3; cursor: ew-resize; display: flex; justify-content: center; }
+.mc-vcut-edge::after { content: ''; width: 3px; height: 100%; background: #fff; border-radius: 2px; box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.45); }
+.mc-vcut-edge:hover::after { background: #fbbf24; }
+.mc-vcut-playhead { position: absolute; top: 0; bottom: 0; width: 0; z-index: 5; pointer-events: none; }
+.mc-vcut-playhead::before { content: ''; position: absolute; left: -1px; top: 0; bottom: 0; width: 2px; background: #ef4444; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); }
+.mc-vcut-playhead b { position: absolute; left: -6px; top: 0; width: 12px; height: 12px; border-radius: 3px 3px 6px 6px; background: #ef4444; }
+.mc-vcut-help { font-size: 10px; color: #94a3b8; line-height: 1.45; }
+.mc-vcut-help b { color: #64748b; }
+.mc-vcut-summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; padding: 6px 9px; border-radius: 8px; background: #f0fdf4; color: #166534; font-size: 11px; }
+.mc-vcut-summary strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.mc-vcut-summary.warn { background: #fffbeb; color: #92400e; }
+.mc-vcut-summary small { flex-basis: 100%; font-size: 10.5px; }
+.mc-vcut-result { display: flex; flex-direction: column; gap: 7px; }
+.mc-vcut-out { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid #bbf7d0; border-radius: 10px; background: #f0fdf4; }
+.mc-vcut-out.stale { border-color: #fde68a; background: #fffbeb; }
+.mc-vcut-out-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.mc-vcut-out-head small { color: #64748b; margin-left: auto; }
+.mc-vcut-out video { display: block; width: 100%; max-height: 180px; object-fit: contain; background: #0b1220; border-radius: 8px; }
+
 /* video tham chiếu: khung 9:16 bên trái, cắt đoạn bên phải */
 .mc-vingr-video { display: grid; grid-template-columns: 136px 1fr; gap: 12px; align-items: start; }
 .mc-vingr-player { width: 136px; height: 242px; object-fit: contain; background: #0f172a; border-radius: 8px; display: block; }
@@ -1309,6 +1370,12 @@ a.mc-mini-btn { text-decoration: none; }
 .mc-merge-chip-ready { color: #15803d; }
 .mc-merge-chip-no_video, .mc-merge-chip-error { color: #b91c1c; }
 .mc-merge-chip-running { color: #4338ca; }
+.mc-merge-chip-stale { color: #b45309; }
+.mc-merge-wm { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; font-size: 10.5px; color: #475569; cursor: pointer; white-space: nowrap; }
+.mc-merge-wm input { margin: 0; }
+.mc-vcut-done { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.mc-node-vcut.complete { border-color: #86efac; box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18); }
+.mc-node-vcut.complete .react-flow__handle.source { background: #16a34a !important; }
 .mc-merge-trims { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #64748b; }
 .mc-merge-trims input { width: 46px; height: 24px; box-sizing: border-box; padding: 0 4px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11.5px; text-align: center; }
 .mc-splice-list { display: flex; flex-direction: column; gap: 8px; }

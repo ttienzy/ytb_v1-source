@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   DEFAULT_MERGE_FINISH,
+  MUSE_HANDLE,
   MUSE_NODE,
   autoMuseConnection,
   buildMergeRequest,
@@ -13,6 +14,8 @@ import {
   mergeBlockers,
   mergeFingerprint,
   mergeFromJob,
+  mergeRowTitle,
+  mergeRowRemovesWatermark,
   mergeRowsFromSources,
   mergeState,
   mergeSummary,
@@ -138,8 +141,60 @@ test('merge: dây chỉ từ node Clip → cổng clipvideos của Ghép video; 
   assert.equal(isValidMuseConnection(wire('cs', 'm1', 'clips'), nodes), false) // chỉ node Clip có video để ghép
   assert.equal(isValidMuseConnection(wire('clip1', 'm1', 'clips'), nodes), false) // sai cổng ra (cổng clips là Kịch bản → Clip)
   assert.equal(isValidMuseConnection(wire('m1', 'clip1'), nodes), false) // Ghép video là node cuối
-  assert.match(explainMuseConnection('cs', 'source', 'm1', nodes, []), /chỉ nhận dây từ node Clip/)
+  assert.match(explainMuseConnection('cs', 'source', 'm1', nodes, []), /nhận dây từ node Clip \(chấm xanh\) hoặc node Cắt video/)
   assert.match(explainMuseConnection('m1', 'source', 'clip1', nodes, []), /Node Clip chỉ nhận dây từ Kịch bản tạo video/)
   const auto = autoMuseConnection('clip1', 'source', 'sai', 'm1', nodes, [])
   assert.deepEqual([auto?.sourceHandle, auto?.targetHandle], ['clipvideo', 'clipvideos'])
+})
+
+test('Ghép video nhận node Cắt video: chỉ video HOÀN CHỈNH (đã cắt & lưu, chưa chỉnh sau đó); xóa logo theo công tắc, tắt riêng được', () => {
+  const cutData = (over: Record<string, unknown> = {}) => ({
+    label: 'Mở đầu', sourcePath: 'D:/v.mp4', duration: 10, status: 'idle',
+    pieces: [{ start: 0, end: 4, removed: false }, { start: 4, end: 10, removed: true }],
+    video: { path: 'D:/Data/media/muse_cuts/cut_abc.mp4', previewUrl: '/api/workflow/muse/video-cut/file?name=cut_abc.mp4', durationSec: 4 },
+    resultKey: 'D:/v.mp4|0.00-4.00',
+    ...over,
+  })
+  const cutNode = (id: string, over?: Record<string, unknown>) => ({ id, type: MUSE_NODE.videoCut, data: cutData(over) })
+  const [ready] = mergeRowsFromSources([cutNode('c1')])
+  assert.deepEqual([ready.kind, ready.status, ready.file, ready.seconds, ready.name], ['cut', 'ready', 'D:/Data/media/muse_cuts/cut_abc.mp4', 4, 'Mở đầu'])
+  assert.equal(mergeRowTitle(ready), 'Mở đầu')
+  // chỉnh sau khi cắt -> chưa hoàn chỉnh, chặn ghép
+  const [stale] = mergeRowsFromSources([cutNode('c1', { pieces: [{ start: 0, end: 5, removed: false }, { start: 5, end: 10, removed: true }] })])
+  assert.deepEqual([stale.status, stale.file], ['stale', null])
+  assert.match(mergeBlockers([stale], {})[0], /đã chỉnh sau lần cắt/)
+  const [never] = mergeRowsFromSources([cutNode('c1', { video: null, resultKey: '' })])
+  assert.equal(never.status, 'no_video')
+  assert.match(mergeBlockers([never], {})[0], /chưa cắt/)
+  const [busy] = mergeRowsFromSources([cutNode('c1', { video: null, status: 'cutting' })])
+  assert.match(mergeBlockers([busy], {})[0], /đang cắt/)
+  // trộn clip Flow + video đã cắt: chưa xếp thì video cắt đứng sau
+  const clip = { id: 'k1', type: MUSE_NODE.clipPrompt, data: { k: 1, name: 'A', seconds: 8, video: { status: 'done', fingerprint: 'f', attempt: 1, startedAt: 0, updatedAt: 0, files: ['f1.mp4'] } } }
+  const rows = mergeRowsFromSources([cutNode('c1'), clip])
+  assert.deepEqual(rows.map((r) => r.kind), ['clip', 'cut'])
+  // mặc định MỌI dòng (kể cả video đã cắt) theo công tắc chung — gwr đã vá xóa được logo trên video Flow đã cắt
+  type Body = { clips: Record<string, unknown>[]; remove_watermark: boolean }
+  const body = buildMergeRequest(rows, {}, true, DEFAULT_MERGE_FINISH) as Body
+  assert.equal(body.remove_watermark, true)
+  assert.deepEqual(body.clips.map((c) => 'remove_watermark' in c), [false, false])
+  // tắt riêng dòng video đã cắt (vd. video tự quay không có logo)
+  const off = buildMergeRequest(rows, {}, true, DEFAULT_MERGE_FINISH, '', ['c1']) as Body
+  assert.deepEqual(off.clips.map((c) => c.remove_watermark), [undefined, false])
+  assert.equal(mergeRowRemovesWatermark(rows[1], true, ['c1']), false)
+  assert.equal(mergeRowRemovesWatermark(rows[0], true, ['c1']), true)
+  // công tắc chung tắt: không gửi cờ riêng nào (backend đằng nào cũng không xóa)
+  const none = buildMergeRequest(rows, {}, false, DEFAULT_MERGE_FINISH, '', ['c1']) as Body
+  assert.deepEqual(none.clips.map((c) => 'remove_watermark' in c), [false, false])
+  // tắt riêng một dòng làm bản ghép cũ thành "bản cũ"; không tắt dòng nào thì dấu vân tay giữ dạng cũ
+  assert.equal(mergeFingerprint(rows, {}, true, DEFAULT_MERGE_FINISH), mergeFingerprint(rows, {}, true, DEFAULT_MERGE_FINISH, []))
+  assert.notEqual(mergeFingerprint(rows, {}, true, DEFAULT_MERGE_FINISH, ['c1']), mergeFingerprint(rows, {}, true, DEFAULT_MERGE_FINISH))
+  assert.match(mergeSummary(rows, {}, true, DEFAULT_MERGE_FINISH, String, ['c1']), /xóa watermark Flow \(bỏ 1 clip\)/)
+  assert.deepEqual(normalizeClipMergeData({ wmOff: ['c1', 3, null] }).wmOff, ['c1'])
+  assert.deepEqual(normalizeClipMergeData({}).wmOff, [])
+  // dây: chấm đỏ của Cắt video -> cổng Clip của Ghép video (nối được cả trước khi cắt xong); thả lên thân node tự chọn cổng
+  const nodes = [{ id: 'c1', type: MUSE_NODE.videoCut }, { id: 'm1', type: MUSE_NODE.clipMerge }]
+  assert.equal(isValidMuseConnection({ source: 'c1', target: 'm1', sourceHandle: MUSE_HANDLE.refVideoOut, targetHandle: MUSE_HANDLE.clipVideoIn }, nodes), true)
+  assert.equal(isValidMuseConnection({ source: 'c1', target: 'm1', sourceHandle: MUSE_HANDLE.refVideoOut, targetHandle: MUSE_HANDLE.clipIn }, nodes), false)
+  const auto = autoMuseConnection('c1', 'source', MUSE_HANDLE.refVideoOut, 'm1', nodes, [])
+  assert.deepEqual([auto?.sourceHandle, auto?.targetHandle], [MUSE_HANDLE.refVideoOut, MUSE_HANDLE.clipVideoIn])
 })

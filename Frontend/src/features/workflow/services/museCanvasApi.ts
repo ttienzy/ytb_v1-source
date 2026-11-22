@@ -532,8 +532,19 @@ export interface VeoJobLite {
   error_code?: string | null
   error_message?: string | null
   output_files?: string[]
+  /** Nhiều video trong một lệnh (chỉnh video x2–x4): kết cục từng biến thể theo thứ tự item; rỗng với job 1 video */
+  outputs?: VeoJobOutput[]
   deduplicated?: boolean
   updated_at?: string
+}
+
+export interface VeoJobOutput {
+  index: number
+  status: 'done' | 'error'
+  file?: string | null
+  media_id?: string | null
+  error?: string | null
+  error_code?: string | null
 }
 
 export async function submitVeoJob(body: Record<string, unknown>): Promise<VeoJobLite> {
@@ -561,6 +572,32 @@ export async function recoverVeoJob(jobId: string): Promise<VeoJobLite> {
   const res = await fetch(`${API_URL}/api/veo/jobs/${encodeURIComponent(jobId)}/recover-current`, { method: 'POST' })
   return jsonOrThrow<VeoJobLite>(res, 'Không tìm lại được video')
 }
+
+export interface MuseCutResult {
+  file_name: string
+  file_path: string
+  preview_url: string
+  file_size: number
+  duration: number
+  width: number
+  height: number
+  segments: { start: number; end: number }[]
+  cached: boolean
+}
+
+/** Node Cắt video: giữ các đoạn đã chọn rồi ghép thành 1 video mới (không tốn credit). */
+export async function cutMuseVideo(path: string, segments: { start: number; end: number }[], keepAudio = true): Promise<MuseCutResult> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/video-cut`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, segments, keep_audio: keepAudio }),
+  })
+  return detailOrThrow(res, 'Không cắt được video')
+}
+
+/** Dải khung hình (1 ảnh) của video để vẽ timeline. */
+export const museVideoStripUrl = (path: string, width: number, height: number) =>
+  `${API_URL}/api/workflow/muse/video-strip?path=${encodeURIComponent(path)}&w=${width}&h=${height}`
 
 export const veoVideoUrl = (path: string) => `${API_URL}/api/veo/history/${encodeURIComponent(fileStem(path))}/file`
 
