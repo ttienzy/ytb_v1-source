@@ -74,6 +74,8 @@ jobs:
 
       - name: Build standalone backend executable
         if: steps.cache-backend.outputs.cache-hit != 'true'
+        env:
+          PYTHONUTF8: "1"
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true

@@ -9,6 +9,12 @@ máy dev. Template giờ nằm trong resources/ (app.ai.gemini.template); script
 import sys
 from pathlib import Path
 
+# CI Windows runner dùng cp1252 → không encode được tiếng Việt; ép UTF-8 để tránh UnicodeEncodeError.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from PyInstaller.archive.readers import CArchiveReader
 
 REQUIRED = {
