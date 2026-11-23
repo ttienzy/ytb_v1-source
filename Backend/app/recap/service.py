@@ -30,7 +30,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 
-from app.core.config import TOOLS_DIR
+from app.core.config import PROMPTS_DIR, TOOLS_DIR
 from app.ai.gemini.recap import (
     RecapConfigError,
     _auto_refresh_cookies,
@@ -79,7 +79,7 @@ from app.voices import voice_client
 
 logger = logging.getLogger(__name__)
 
-PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "recap" / "food_review_chunk.prompt.txt"
+PROMPT_PATH = PROMPTS_DIR / "recap" / "food_review_chunk.prompt.txt"
 
 
 # ── Cookie pre-check helper ───────────────────────────────────────────────────

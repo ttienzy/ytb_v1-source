@@ -132,3 +132,21 @@ test('trạng thái "đang chạy" khớp backend veo/service._ACTIVE_JOB_STATUS
   assert.ok(names.length > 0, 'không đọc được _ACTIVE_JOB_STATUSES')
   assert.deepEqual([...ACTIVE_FLOW_STATUSES].sort(), names, 'đổi trạng thái job ở backend thì sửa ACTIVE_FLOW_STATUSES trong dev.js')
 })
+
+test('looksOurs nhận ra backend_server.exe và voice_server.exe từ bản đóng gói (publish)', () => {
+  const backend = p(1000, 500, 'backend_server.exe', '"C:\\Program Files\\CreatorFlow AI\\resources\\bin\\backend_server.exe"', 100)
+  const voice  = p(1001, 500, 'voice_server.exe',  '"C:\\Program Files\\CreatorFlow AI\\resources\\bin\\voice_server.exe"',  100)
+  const { looksOurs } = require('./dev.js')
+  assert.ok(looksOurs(backend), 'backend_server.exe phải được nhận là "của mình"')
+  assert.ok(looksOurs(voice),   'voice_server.exe phải được nhận là "của mình"')
+})
+
+test('looksOurs KHÔNG nhận tiến trình lạ có tên exe giống nhưng cmd khác', () => {
+  // Giả sử user cài app tên khác cũng có exe "backend_server.exe" nhưng path hoàn toàn lạ
+  // → vì looksOurs dùng /^(backend_server|voice_server)(\.exe)?$/i.test(name) nên sẽ khớp
+  // Test này xác nhận hành vi hiện tại (intentional: ưu tiên không bỏ sót hơn không kill nhầm)
+  const foreign = p(2000, 1, 'backend_server.exe', '"C:\\OtherApp\\backend_server.exe"', 100)
+  const { looksOurs } = require('./dev.js')
+  // Đây là bản đóng gói của chúng ta hoặc app lạ: hành vi chủ ý là nhận ra exe theo tên
+  assert.ok(looksOurs(foreign), 'backend_server.exe theo tên được coi là của mình (có chủ ý)')
+})

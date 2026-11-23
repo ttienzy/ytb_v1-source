@@ -14,7 +14,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.config import DATA_DIR
+from app.core.config import DATA_DIR, PROMPTS_DIR
 from app.core.storage import read_config, write_config
 
 CONFIG_KEY = "muse_canvas"
@@ -190,6 +190,9 @@ def _bundled_prompt_path(name: str) -> Optional[Path]:
     fname = PROMPT_FILES.get(name)
     if not fname:
         return None
+    p = PROMPTS_DIR / "workflow" / fname
+    if p.exists():
+        return p
     candidates = []
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:  # PyInstaller: backend.spec gói Backend/prompts vào <bundle>/prompts

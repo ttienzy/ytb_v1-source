@@ -20,13 +20,13 @@ from typing import Any, Callable
 import httpx
 
 from app.ai.gemini.template import load_bundled_inner_template
-from app.core.config import TOOLS_DIR
+from app.core.config import PROMPTS_DIR, TOOLS_DIR
 from app.core.storage import read_config
 from app.recap.chunker import build_dynamic_chunks, extract_transcript_entries
 from app.recap.merger import extract_scene_titles, merge_chunk_outputs
 
-DEFAULT_CHUNK_PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "recap" / "food_review_chunk.prompt.txt"
-DEFAULT_CAPTION_PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "recap" / "social_caption.prompt.txt"
+DEFAULT_CHUNK_PROMPT_PATH = PROMPTS_DIR / "recap" / "food_review_chunk.prompt.txt"
+DEFAULT_CAPTION_PROMPT_PATH = PROMPTS_DIR / "recap" / "social_caption.prompt.txt"
 
 
 def _log(msg: str) -> None:
@@ -583,7 +583,7 @@ def generate_recap(
     caption_tpl_path = caption_template_path or DEFAULT_CAPTION_PROMPT_PATH
 
     if not chunk_tpl_path.exists():
-        old_prompt = TOOLS_DIR / "Backend" / "prompts" / "System Prompt Food Review Recap.txt"
+        old_prompt = PROMPTS_DIR / "System Prompt Food Review Recap.txt"
         if old_prompt.exists():
             chunk_tpl_path = old_prompt
         else:

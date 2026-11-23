@@ -138,7 +138,7 @@ function listeningPids(port) {
 /** Không bao giờ kill các tiến trình lõi của hệ điều hành, dù có chuyện gì xảy ra. */
 const PROTECTED = /^(system|smss|csrss|wininit|winlogon|services|lsass|lsm|svchost|dwm|fontdrvhost|explorer|sihost|taskhostw|registry|idle|memory compression|conhost|ctfmon|runtimebroker|searchhost|startmenuexperiencehost|shellexperiencehost)(\.exe)?$/i
 /** Loại tiến trình mà chuỗi service của dev.js thực sự sinh ra. */
-const SPAWNED = /^(python|pythonw|uv|uvx|uvicorn|node|electron|esbuild)(\d|\.)*(\.exe)?$/i
+const SPAWNED = /^(python|pythonw|uv|uvx|uvicorn|node|electron|esbuild|backend_server|voice_server)(\d|\.)*(\.exe)?$/i
 
 /** Có được coi là "con cháu hợp lệ" của một tiến trình trong tập không. Windows TÁI SỬ DỤNG số PID, nên chỉ nhìn
  *  ParentProcessId là không đủ: tiến trình hệ thống (csrss, winlogon, dwm…) có thể mang một PID cha cũ trùng ngẫu nhiên
@@ -182,7 +182,13 @@ function killPids(pids) {
 /** Tiến trình trông như của dự án này (để không kill nhầm chương trình lạ đang dùng cổng). */
 function looksOurs(p) {
   const cmd = p.cmd.toLowerCase()
-  return cmd.includes(ROOT.toLowerCase()) || /uvicorn|multiprocessing\.spawn|electron-vite|voice-service|app\.main/.test(cmd)
+  const name = (p.name || '').toLowerCase()
+  return (
+    cmd.includes(ROOT.toLowerCase()) ||
+    /uvicorn|multiprocessing\.spawn|electron-vite|voice-service|app\.main/.test(cmd) ||
+    // Bản đóng gói (publish): backend_server.exe và voice_server.exe từ CreatorFlow AI installer
+    /^(backend_server|voice_server)(\.exe)?$/i.test(name)
+  )
 }
 
 /** Dọn cổng: kill người đang listen + con cháu + worker mồ côi, lặp tới khi cổng trống. Trả {freed, foreign, killed}. */

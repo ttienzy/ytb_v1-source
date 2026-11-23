@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, s
 import type { AppUpdater } from 'electron-updater'
 import { isNewerVersion } from './version.ts'
 import { basename, delimiter, join } from 'node:path'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import http from 'node:http'
@@ -73,7 +73,14 @@ function killProcessTree(pid?: number) {
   if (!pid) return
   if (process.platform === 'win32') {
     try {
-      spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', shell: true })
+      // spawnSync (không phải spawn): Electron PHẢI đợi taskkill hoàn thành trước khi
+      // app.quit() chạy, nếu không backend_server.exe sẽ sống sót thành tiến trình mồ côi.
+      spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], {
+        stdio: 'ignore',
+        shell: false,
+        windowsHide: true,
+        timeout: 5000,
+      })
     } catch {
       /* ignore */
     }
@@ -183,6 +190,8 @@ async function startProductionBackend() {
           WATERMARK_NODE_IS_ELECTRON: '1',
           WATERMARK_GWR_SCRIPT: watermarkGwrScript,
           WATERMARK_PLAYWRIGHT_BROWSERS_PATH: watermarkBrowsersDir,
+          PLAYWRIGHT_BROWSERS_PATH: watermarkBrowsersDir,
+          PARENT_PID: String(process.pid),
         },
       })
       backendProcesses.push(backendProc)
@@ -297,6 +306,19 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // Phím tắt Debug: F12 hoặc Ctrl+Shift+I để mở DevTools, F5 hoặc Ctrl+R để reload
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown') {
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        mainWindow?.webContents.toggleDevTools()
+        event.preventDefault()
+      } else if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) {
+        mainWindow?.webContents.reload()
+        event.preventDefault()
+      }
+    }
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

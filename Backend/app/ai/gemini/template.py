@@ -13,6 +13,8 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
+from app.core.config import RESOURCES_DIR
+
 # idx 3 = relate-token (!...), idx 4 = conversation/response-id (32 hex), idx 59 = client request UUID.
 # Prompt 1 lần không cần thừa kế hội thoại → null cho template "hội thoại mới", không gắn tài khoản.
 SANITIZE_INDICES = (3, 4, 59)
@@ -22,6 +24,9 @@ _RELATIVE = Path("resources") / "gemini" / "inner_template.json"
 
 def bundled_template_path() -> Path:
     """Bản đóng gói: thư mục giải nén của PyInstaller (backend.spec đưa cả `resources/`); dev: Backend/resources."""
+    direct = RESOURCES_DIR / "gemini" / "inner_template.json"
+    if direct.is_file():
+        return direct
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle and (Path(bundle) / _RELATIVE).is_file():
         return Path(bundle) / _RELATIVE

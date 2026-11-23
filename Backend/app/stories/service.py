@@ -17,7 +17,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import TOOLS_DIR
+from app.core.config import RESOURCES_DIR, TOOLS_DIR
 from app.core.database import SessionLocal
 from app.stories.models import CrawledChapter, CrawledStory
 
@@ -530,6 +530,8 @@ class DaoTruyenClient:
 
 def _resource_dir() -> Path:
     """Tìm resources ở cả source tree và thư mục bundle PyInstaller."""
+    if RESOURCES_DIR.exists():
+        return RESOURCES_DIR
     candidates = [
         TOOLS_DIR / "Backend" / "resources",
         Path(__file__).resolve().parents[2] / "resources",

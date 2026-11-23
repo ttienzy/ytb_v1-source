@@ -5,9 +5,9 @@ import json
 import re
 from typing import Any
 
-from app.core.config import TOOLS_DIR
+from app.core.config import PROMPTS_DIR, TOOLS_DIR
 
-RECOMMEND_PROMPT_PATH = TOOLS_DIR / "Backend" / "prompts" / "discover" / "recommend_channels.prompt.txt"
+RECOMMEND_PROMPT_PATH = PROMPTS_DIR / "discover" / "recommend_channels.prompt.txt"
 
 
 def scout_channels_with_gemini(query: str) -> list[dict[str, Any]]:

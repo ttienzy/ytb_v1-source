@@ -20,7 +20,14 @@ from PyInstaller.archive.readers import CArchiveReader
 REQUIRED = {
     "resources/gemini/inner_template.json": "template request Gemini (Phân tích Gemini, Recap trên máy cài mới)",
     "playwright/driver/node.exe": "driver Playwright (đăng nhập Gemini/ChatGPT/YouTube qua Chrome)",
+    "prompts/recap/food_review_chunk.prompt.txt": "template chunk prompt cho Recap LLM (bắt buộc khi chạy Recap)",
+    "prompts/recap/social_caption.prompt.txt": "template caption prompt cho Recap LLM",
+    "prompts/discover/recommend_channels.prompt.txt": "prompt gợi ý kênh trong Khám phá kênh",
+    "prompts/workflow/gemini_product_analysis.txt": "prompt phân tích sản phẩm Gemini",
+    "prompts/workflow/gpt_sales_script.txt": "prompt kịch bản bán hàng GPT",
+    "prompts/workflow/motion_control_prompt.txt": "prompt Motion Control",
     "prompts/workflow/motion_prompt_presets.json": "preset Motion Control",
+    "prompts/workflow/workflow_prompt_presets.json": "preset prompt workflow hệ thống",
 }
 
 

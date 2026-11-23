@@ -27,6 +27,34 @@ except OSError:
 DEFAULT_DATABASE_URL = f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
 
 
+def _resolve_bundled_dir(rel_name: str) -> Path:
+    """Xác định đường dẫn thư mục tài nguyên đóng gói sẵn (prompts, resources...).
+
+    - Khi chạy exe đóng gói PyInstaller: sys._MEIPASS / rel_name
+    - Khi chạy dev từ mã nguồn: Backend / rel_name
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        p = Path(bundle) / rel_name
+        if p.exists():
+            return p
+    # Thử từ vị trí của file config.py: Backend/{rel_name}
+    backend_dir = Path(__file__).resolve().parents[2]
+    p = backend_dir / rel_name
+    if p.exists():
+        return p
+    # Thử từ repo root (dev mode)
+    repo_root = Path(__file__).resolve().parents[3]
+    p = repo_root / "Backend" / rel_name
+    if p.exists():
+        return p
+    return backend_dir / rel_name
+
+
+PROMPTS_DIR = _resolve_bundled_dir("prompts")
+RESOURCES_DIR = _resolve_bundled_dir("resources")
+
+
 def _detect_chrome_executable() -> Path:
     """Tự động phát hiện đường dẫn Google Chrome khả dụng trên Windows."""
     candidates = [
@@ -43,6 +71,34 @@ def _detect_chrome_executable() -> Path:
         if c.is_file():
             return c
     return candidates[0]
+
+
+def _ensure_playwright_browsers_path() -> None:
+    """Đảm bảo PLAYWRIGHT_BROWSERS_PATH trỏ đúng thư mục browser hợp lệ.
+
+    Khi chạy trong file .exe đóng gói bởi PyInstaller (sys.frozen = True), Playwright mặc định
+    gán PLAYWRIGHT_BROWSERS_PATH = '0' nếu biến này chưa được set. Giá trị '0' ép Playwright tìm
+    Chromium trong _MEIPASS/.local-browsers (thư mục tạm giải nén của PyInstaller) — nơi không chứa
+    browser nặng 200MB, gây ra lỗi 'Executable doesn't exist at ...\\_MEI...\\chrome.exe'.
+
+    Để khắc phục triệt để, ta chủ động set PLAYWRIGHT_BROWSERS_PATH:
+      1. WATERMARK_PLAYWRIGHT_BROWSERS_PATH (nếu Electron bundle sẵn browser)
+      2. %LOCALAPPDATA%/ms-playwright (nơi playwright install lưu browser mặc định trên Windows)
+    """
+    current = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if not current or current == "0":
+        watermark_pw = os.environ.get("WATERMARK_PLAYWRIGHT_BROWSERS_PATH")
+        if watermark_pw and Path(watermark_pw).is_dir():
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = watermark_pw
+            return
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            ms_pw = Path(local_app_data) / "ms-playwright"
+            if ms_pw.is_dir():
+                os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(ms_pw)
+
+
+_ensure_playwright_browsers_path()
 
 
 class Settings(BaseSettings):

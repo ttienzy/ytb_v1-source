@@ -22,7 +22,7 @@ from app.ai.gemini.recap import (
     _auto_refresh_cookies,
     RecapConfigError,
 )
-from app.core.config import TOOLS_DIR, DATA_DIR
+from app.core.config import DATA_DIR, PROMPTS_DIR, TOOLS_DIR
 from app.core.storage import read_config, write_config
 from app.recap.ffmpeg import concat_segments, ffprobe_duration
 from app.workflow.schemas import (
@@ -60,7 +60,7 @@ class GeminiAttachmentError(RuntimeError):
     pass
 
 
-PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "gemini_product_analysis.txt"
+PROMPT_FILE = PROMPTS_DIR / "workflow" / "gemini_product_analysis.txt"
 GEMINI_PROMPT_DATA_FILE = DATA_DIR / "gemini_product_analysis.txt"
 
 
@@ -466,11 +466,11 @@ def parse_analysis_to_structured(raw_text: str, provider_used: str = "gemini") -
     )
 
 
-GPT_PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "gpt_sales_script.txt"
+GPT_PROMPT_FILE = PROMPTS_DIR / "workflow" / "gpt_sales_script.txt"
 
 
 PROMPT_PRESETS_FILE = DATA_DIR / "workflow_prompt_presets.json"
-PROMPT_PRESETS_SYSTEM_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "workflow_prompt_presets.json"
+PROMPT_PRESETS_SYSTEM_FILE = PROMPTS_DIR / "workflow" / "workflow_prompt_presets.json"
 
 
 def get_all_prompt_presets() -> list[dict[str, Any]]:
@@ -543,7 +543,7 @@ def get_default_gpt_prompt(preset_id: str | None = None, content_mode: str | Non
     )
 
 
-MOTION_PROMPT_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "motion_control_prompt.txt"
+MOTION_PROMPT_FILE = PROMPTS_DIR / "workflow" / "motion_control_prompt.txt"
 
 
 def get_default_motion_prompt() -> str:
@@ -557,7 +557,7 @@ def get_default_motion_prompt() -> str:
     return "Keep the movement natural and fluid, matching the timing and rhythm of the input video."
 
 
-MOTION_PRESETS_FILE = TOOLS_DIR / "Backend" / "prompts" / "workflow" / "motion_prompt_presets.json"
+MOTION_PRESETS_FILE = PROMPTS_DIR / "workflow" / "motion_prompt_presets.json"
 MOTION_PRESETS_DATA_FILE = DATA_DIR / "motion_prompt_presets.json"
 
 
