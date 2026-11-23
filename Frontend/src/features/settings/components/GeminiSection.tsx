@@ -15,6 +15,7 @@ import {
   Sparkles,
   Trash2,
   Tv,
+  Wand2,
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 import type { UpdaterStatusEvent } from '../../../vite-env'
@@ -186,6 +187,26 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       setMessageType('success')
     } catch {
       setMessage('Lưu cấu hình thất bại.')
+      setMessageType('error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  /** Bắt lại khung request Gemini từ profile đã đăng nhập — chỉ cần khi Gemini đổi giao thức. */
+  async function captureTemplate() {
+    setLoading(true)
+    setMessage('Đang mở Chrome (profile Gemini) để bắt khung request — không tạo lịch sử chat...')
+    setMessageType('info')
+    try {
+      const response = await fetch(`${API_URL}/api/settings/gemini/capture-template`, { method: 'POST' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Không cập nhật được template Gemini')
+      setState(prev => ({ ...prev, template_source: 'captured', template_saved_at: result.template_saved_at }))
+      setMessage('Đã cập nhật template Gemini từ phiên đăng nhập trên máy này.')
+      setMessageType('success')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Không cập nhật được template Gemini.')
       setMessageType('error')
     } finally {
       setLoading(false)
@@ -459,6 +480,21 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
               <ChromeBrandIcon size={15} />
               <span>Đăng nhập Gemini (Chrome)</span>
             </button>
+
+            {state.has_cookie && (
+              <button
+                type="button"
+                className="btn-gemini-chrome"
+                onClick={captureTemplate}
+                disabled={loading}
+                title={state.template_source === 'captured'
+                  ? `Template bắt trên máy này${state.template_saved_at ? ` lúc ${new Date(state.template_saved_at).toLocaleString('vi-VN')}` : ''}. Bấm để bắt lại khi Gemini đổi giao thức.`
+                  : 'Đang dùng template đóng gói theo app. Chỉ cần bấm khi gọi Gemini báo lỗi lạ dù cookie còn tốt (Gemini đổi giao thức).'}
+              >
+                <Wand2 size={14} />
+                <span>Cập nhật template Gemini</span>
+              </button>
+            )}
 
             {state.has_cookie && (
               <button

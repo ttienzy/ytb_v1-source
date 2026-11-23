@@ -70,6 +70,7 @@ import {
   setDefaultPromptPreset,
   deletePromptPreset,
 } from './services/workflowApi'
+import { analysisNeedsLogin } from './services/analysisError'
 import {
   buildClipPlans,
   DEFAULT_CLIP_DURATION_SECONDS,
@@ -938,7 +939,7 @@ function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => v
     }
 
     setNodes((nds) =>
-      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: true, analysisError: null } } : n))
+      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: true, analysisError: null, analysisNeedsLogin: false } } : n))
     )
 
     const stillCurrent = captureRevision(nodeId)
@@ -957,6 +958,7 @@ function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => v
                 analysisResult: data,
                 providerUsed: data.providerUsed || provider,
                 analysisError: null,
+                analysisNeedsLogin: false,
               },
             }
           }
@@ -965,10 +967,11 @@ function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => v
       )
     } catch (err: any) {
       if (!stillCurrent()) return
-      console.error('Analysis error:', err)
+      console.warn('Analysis error (đã hiện trên node):', err)
       const errMsg = err?.message || `Có lỗi xảy ra khi phân tích bằng ${provider}`
+      const needsLogin = analysisNeedsLogin(err)
       setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: false, analysisError: errMsg } } : n))
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isAnalyzing: false, analysisError: errMsg, analysisNeedsLogin: needsLogin } } : n))
       )
     } finally {
       taskKeys.current.delete(nodeId)
@@ -989,8 +992,9 @@ function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => v
       await handleAnalyzeGemini(nodeId, 'gemini')
     } catch (err: any) {
       const errMsg = err?.message || 'Làm mới cookie Gemini thất bại'
+      // Làm mới cookie hỏng: vẫn là chuyện đăng nhập → giữ nút "Làm mới Cookie" để thử lại.
       setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isRefreshingCookie: false, analysisError: errMsg } } : n))
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isRefreshingCookie: false, analysisError: errMsg, analysisNeedsLogin: true } } : n))
       )
     }
   }, [handleAnalyzeGemini])

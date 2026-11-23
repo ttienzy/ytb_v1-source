@@ -3,6 +3,7 @@
  * Gọi trực tiếp các endpoint backend chuẩn hóa: Asset Upload, Gemini, GPT, và FFmpeg Export.
  */
 
+import { analysisErrorFromResponse } from './analysisError.ts'
 import { API_URL } from '../../../shared/constants.ts'
 import type {
   AssetBundle,
@@ -213,7 +214,7 @@ export async function callGeminiAnalysis(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || `Lỗi phân tích ${provider} (HTTP ${res.status})`)
+    throw analysisErrorFromResponse(res.status, err.detail, provider)
   }
 
   const data = await res.json()

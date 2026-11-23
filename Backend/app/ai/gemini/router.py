@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
+from app.ai.gemini.capture import GeminiTemplateCaptureError, capture_template
 from app.ai.gemini.schemas import GeminiSettingsPayload
 from app.ai.gemini.service import login_and_save_cookie
 from app.core.storage import mark_saved, read_config, write_config
@@ -14,7 +16,16 @@ router = APIRouter(prefix="/api/settings/gemini", tags=["Gemini"])
 def get_settings() -> dict:
     config = read_config()
     data = config["gemini"]
-    return {"has_cookie": bool(data.get("cookies")), "cookie_count": data.get("cookie_count", 0), "saved_at": data.get("saved_at"), "client_context_token": data.get("client_context_token", ""), "app_url": data.get("app_url", "https://gemini.google.com/app")}
+    return {
+        "has_cookie": bool(data.get("cookies")),
+        "cookie_count": data.get("cookie_count", 0),
+        "saved_at": data.get("saved_at"),
+        "client_context_token": data.get("client_context_token", ""),
+        "app_url": data.get("app_url", "https://gemini.google.com/app"),
+        # "captured" = bản bắt từ Gemini trên máy này; "bundled" = bản đóng gói sẵn theo app.
+        "template_source": "captured" if data.get("inner_template") else "bundled",
+        "template_saved_at": data.get("template_saved_at") if data.get("inner_template") else None,
+    }
 
 
 @router.put("")
@@ -61,3 +72,12 @@ def reset_cookie() -> dict:
 @router.post("/login")
 def login() -> dict:
     return login_and_save_cookie()
+
+
+@router.post("/capture-template")
+async def capture_gemini_template() -> dict:
+    """Bắt lại khung request Gemini từ profile đã đăng nhập (dùng khi Gemini đổi giao thức). Không tạo lịch sử chat."""
+    try:
+        return await run_in_threadpool(capture_template)
+    except GeminiTemplateCaptureError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error

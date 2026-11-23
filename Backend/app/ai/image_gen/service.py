@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from playwright.sync_api import sync_playwright
 
+from app.core.chrome import close_chrome_gracefully  # noqa: F401 — dùng trong file + test cũ import từ đây
 from app.core.config import DATA_DIR, settings
 from app.core.storage import mark_saved, read_config, write_config
 from app.ai.image_gen.gptimage.accounts import ChatgptAccountStore
@@ -88,39 +89,6 @@ def wait_for_cdp(port: int, max_wait: float = 15.0) -> bool:
         except Exception:
             time.sleep(0.4)
     return False
-
-
-def close_chrome_gracefully(browser, proc: subprocess.Popen, wait_seconds: float = 15.0) -> bool:
-    """Tắt Chrome bằng CDP `Browser.close` rồi chờ tiến trình thoát; trả True nếu Chrome tự thoát êm.
-
-    Chrome chỉ ghi cookie mới xuống ổ đĩa (Default/Network/Cookies) định kỳ ~30 giây hoặc khi tắt bình thường.
-    `proc.terminate()` trên Windows là TerminateProcess (giết ngay) → cookie vừa đăng nhập/vừa làm mới bị MẤT, profile
-    "ấm" thực ra đã đăng xuất và lần làm mới sau chắc chắn hỏng. Chỉ giết cứng khi Chrome không tự thoát kịp.
-    `browser.close()` của connect_over_cdp chỉ ngắt kết nối, không đóng Chrome."""
-    try:
-        browser.new_browser_cdp_session().send("Browser.close")
-    except Exception:  # noqa: BLE001 — Chrome đóng ngay nên kết nối CDP thường đứt giữa chừng: bình thường
-        pass
-    exited = False
-    try:
-        proc.wait(timeout=wait_seconds)
-        exited = True
-    except subprocess.TimeoutExpired:
-        logger.warning("Chrome không tự thoát sau %.0fs — buộc tắt (cookie mới có thể chưa được lưu).", wait_seconds)
-    try:
-        browser.close()
-    except Exception:  # noqa: BLE001
-        pass
-    if not exited and proc.poll() is None:
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:  # noqa: BLE001
-            try:
-                proc.kill()
-            except Exception:  # noqa: BLE001
-                pass
-    return exited
 
 
 _CHROME_EPOCH_OFFSET_US = 11644473600 * 1_000_000  # 1601-01-01 → 1970-01-01, micro giây

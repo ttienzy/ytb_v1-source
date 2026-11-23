@@ -1,4 +1,5 @@
 /** Reachable DAG execution. Flow handlers build plans; they never submit video jobs. */
+import { analysisNeedsLogin } from './analysisError.ts'
 import type { Node, Edge } from '@xyflow/react'
 import type { ScriptGenerationConfig } from '../contracts'
 import type * as WorkflowApi from './workflowApi'
@@ -50,7 +51,7 @@ interface RunContext {
 interface NodeHandler {
   preflight: (context: RunContext, node: Node) => void
   execute: (context: RunContext, node: Node) => Promise<void>
-  failurePatch?: (message: string) => Record<string, any>
+  failurePatch?: (message: string, error: unknown) => Record<string, any>
 }
 
 function input(context: RunContext, node: Node) {
@@ -130,7 +131,7 @@ const handlers: Record<WorkflowStartType, NodeHandler> = {
       }), node)
       context.patch(node, { isAnalyzing: false, analysisResult, analysisError: null, providerUsed: analysisResult.providerUsed || provider })
     },
-    failurePatch: (message) => ({ isAnalyzing: false, analysisError: message }),
+    failurePatch: (message, error) => ({ isAnalyzing: false, analysisError: message, analysisNeedsLogin: analysisNeedsLogin(error) }),
   },
   gptScript: {
     preflight(context, node) {
@@ -244,7 +245,7 @@ export async function runRealWorkflow(params: {
     const nodeId = error instanceof WorkflowGraphError ? error.nodeId : activeId
     const message = error instanceof Error ? error.message : String(error)
     const node = nodes.find((candidate) => candidate.id === nodeId)
-    const patch = node && handlers[node.type as WorkflowStartType]?.failurePatch?.(message)
+    const patch = node && handlers[node.type as WorkflowStartType]?.failurePatch?.(message, error)
     if (patch) callbacks.onNodeStateChange(nodeId, patch)
     callbacks.onError(nodeId, message)
     return

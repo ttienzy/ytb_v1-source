@@ -233,29 +233,32 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                 Thử lại ngay
               </button>
 
-              <button
-                type="button"
-                className="wf-btn"
-                onClick={() => data.onRefreshCookie?.()}
-                disabled={data.isRefreshingCookie}
-                style={{
-                  fontSize: 9.5,
-                  padding: '3px 8px',
-                  background: '#f1f5f9',
-                  color: '#334155',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 4,
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  cursor: 'pointer',
-                }}
-                title="Mở Chrome ngầm 3s để cập nhật cookie mới nhất"
-              >
-                <Key size={10} color="#0284c7" />
-                Làm mới Cookie (Fast)
-              </button>
+              {/* Chỉ lỗi đăng nhập/cookie (HTTP 401) mới gợi ý làm mới cookie — lỗi khác làm mới cũng không hết. */}
+              {data.analysisNeedsLogin && (
+                <button
+                  type="button"
+                  className="wf-btn"
+                  onClick={() => data.onRefreshCookie?.()}
+                  disabled={data.isRefreshingCookie}
+                  style={{
+                    fontSize: 9.5,
+                    padding: '3px 8px',
+                    background: '#f1f5f9',
+                    color: '#334155',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 4,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    cursor: 'pointer',
+                  }}
+                  title="Mở Chrome ngầm 3s để cập nhật cookie mới nhất"
+                >
+                  <Key size={10} color="#0284c7" />
+                  Làm mới Cookie (Fast)
+                </button>
+              )}
 
               {data.onAnalyzeChatGpt && (
                 <button

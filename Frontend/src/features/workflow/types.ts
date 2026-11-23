@@ -91,6 +91,8 @@ export interface GeminiAnalysisNodeData {
   isConnectedToImages?: boolean
   isAnalyzing?: boolean
   analysisError?: string | null
+  /** Lỗi phân tích là lỗi đăng nhập/cookie Gemini (HTTP 401) → node gợi ý "Làm mới Cookie". */
+  analysisNeedsLogin?: boolean
   isStartNode?: boolean
   isOrphan?: boolean
   analysisResult?: GeminiAnalysisResult | null

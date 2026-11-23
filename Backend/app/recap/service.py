@@ -115,7 +115,7 @@ def _ensure_gemini_cookie(job_id: str) -> bool:
     try:
         cookie_state = check_cookie_state()
     except Exception as exc:
-        # Chưa có cookie / inner_template → báo rõ thay vì khởng chết
+        # Chưa đăng nhập Gemini → báo rõ (kèm hướng dẫn) thay vì khởng chết
         state.update_job(job_id, recap_status="error", error=str(exc))
         return False
 

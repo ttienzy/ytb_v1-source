@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 import httpx
 
+from app.ai.gemini.template import load_bundled_inner_template
 from app.core.config import TOOLS_DIR
 from app.core.storage import read_config
 from app.recap.chunker import build_dynamic_chunks, extract_transcript_entries
@@ -47,7 +48,12 @@ DEFAULT_UA = (
 
 
 class RecapConfigError(RuntimeError):
-    """Thiếu config (cookies/inner_template) — user cần login + capture trước."""
+    """Thiếu cấu hình Gemini để gọi được (lớp cha; hiện chỉ còn trường hợp chưa đăng nhập)."""
+
+
+class GeminiNotLoggedInError(RecapConfigError):
+    """Chưa có cookie Gemini: người dùng phải đăng nhập một lần (Cài đặt → Gemini & YouTube). Là lỗi đăng nhập
+    như ``GeminiAuthError`` (giao diện gợi ý "Làm mới Cookie"), khác với lỗi mạng/Google."""
 
 
 class GeminiAuthError(RuntimeError):
@@ -99,17 +105,20 @@ def _http_error_for(status: int, msg: str) -> RuntimeError:
 
 
 def _gemini_config() -> dict:
-    """Đọc phần persist từ config.json; raise RecapConfigError nếu thiếu."""
+    """Cookie + template + user agent để gọi Gemini web.
+
+    Template: bản capture trong config.json (Cài đặt → "Cập nhật template Gemini") nếu có, không thì bản đóng gói sẵn
+    (`app.ai.gemini.template`) — máy cài mới không cần chạy script nào. Thiếu cookie → ``GeminiNotLoggedInError``."""
     g = read_config().get("gemini", {})
     cookies = g.get("cookies", "")
-    inner = g.get("inner_template")
     if not cookies:
-        raise RecapConfigError("Chưa có cookies Gemini — chạy /api/settings/gemini/login trước.")
-    if not inner:
-        raise RecapConfigError("Chưa có inner_template — chạy app.ai.gemini.capture trước.")
+        raise GeminiNotLoggedInError(
+            "Chưa đăng nhập Gemini: vào Cài đặt → Gemini & YouTube → “Đăng nhập Gemini (Chrome)” (chỉ cần một lần).")
+    captured = g.get("inner_template")
     return {
         "cookies": cookies,
-        "inner_template": inner,
+        "inner_template": captured or load_bundled_inner_template(),
+        "template_source": "captured" if captured else "bundled",
         "user_agent": g.get("user_agent") or DEFAULT_UA,
     }
 

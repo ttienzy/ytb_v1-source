@@ -53,7 +53,7 @@ from app.workflow.schemas import (
 )
 from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_cut, muse_gpt_image, muse_merge, muse_projects
 from app.ai.gemini.service import login_and_save_cookie
-from app.ai.gemini.recap import _fresh_tokens, _gemini_config
+from app.ai.gemini.recap import GeminiAuthError, GeminiNotLoggedInError, _fresh_tokens, _gemini_config
 from app.workflow.service import (
     concat_workflow_scenes,
     create_prompt_preset,
@@ -264,6 +264,9 @@ async def analyze_product(req: GeminiAnalysisRequest) -> GeminiAnalysisResponse:
                 fallback_to_chatgpt=False,
             )
             return parse_analysis_to_structured(raw_text, provider_used=provider_used)
+    except (GeminiNotLoggedInError, GeminiAuthError) as exc:
+        # 401 = lỗi đăng nhập/cookie Gemini: giao diện chỉ gợi ý "Làm mới Cookie" cho mã này (lỗi khác đăng nhập lại vô ích).
+        raise HTTPException(status_code=401, detail=f"Lỗi phân tích ({provider}): {exc}") from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,

@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+from app.core.chrome import close_chrome_gracefully
 from app.core.config import settings
 
 PANEL_URL_FRAG = "youtubei/v1/get_panel"
@@ -285,11 +286,17 @@ def _fetch_with_playwright(url: str, *, headless: bool, timeout_ms: int) -> dict
         captured.append(resp)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=headless,
-            ignore_default_args=["--no-sandbox"],
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        launch_kwargs: dict = {
+            "headless": headless,
+            "ignore_default_args": ["--no-sandbox"],
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
+        # Ưu tiên Google Chrome thật đã cài trên máy nếu có (tránh phụ thuộc Chromium riêng,
+        # không lo lỗi thiếu browser khi đóng gói PyInstaller / _MEIPASS)
+        if settings.chrome_executable.exists():
+            launch_kwargs["executable_path"] = str(settings.chrome_executable)
+
+        browser = p.chromium.launch(**launch_kwargs)
         ctx = browser.new_context(
             user_agent=DEFAULT_UA,
             locale="en-US",
@@ -502,19 +509,10 @@ def _fetch_via_real_chrome(url: str, *, timeout_ms: int) -> dict:
                     kind="no_transcript",
                 )
             finally:
-                try:
-                    browser.close()
-                except Exception:
-                    pass
+                # Đóng ÊM: cookie/attestation YouTube vừa xoay vòng được ghi lại vào profile cho lần sau.
+                close_chrome_gracefully(browser, proc)
     finally:
-        try:
-            proc.terminate()
-            proc.wait(timeout=8)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        close_chrome_gracefully(None, proc, wait_seconds=0)
 
 
 def _scrape_transcript_dom(page) -> str:

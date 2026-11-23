@@ -4,6 +4,9 @@ export type GeminiState = {
   saved_at?: string
   client_context_token: string
   app_url: string
+  /** Khung request Gemini: "bundled" = bản đóng gói theo app, "captured" = bản bắt trên máy này. */
+  template_source?: 'bundled' | 'captured'
+  template_saved_at?: string | null
 }
 
 export type YtState = {

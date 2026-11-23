@@ -105,7 +105,7 @@ Xem [campaign-engine.md](campaign-engine.md).
 - Trang có 4 tab: lịch đăng (`PublishingCalendarTab`, dữ liệu từ `/api/publisher-monitor/calendar-events`), Studio (lịch sử Recap qua `/api/recap/jobs`, nghe lại giọng từng đoạn, đăng; có nhánh `recap`/`media`), Pippit, YouTube. Không có API riêng cho "Lịch sử".
 
 ### Cài đặt (`settings`) — *Sâu* (cấu trúc tab)
-- 9 tab (xem [README gốc](../README.md) mục 6). Gemini: cookie dán tay hoặc đăng nhập Chrome (Playwright persistent context dùng `settings.chrome_executable`, profile `ChromeProfile`). ChatGPT: `app/ai/image_gen/` (`/api/settings/image-gen`): nhiều tài khoản, tự xoay khi hết hạn mức ảnh, làm mới cookie bằng profile Chrome. Cập nhật app: `electron-updater` qua `window.desktop.*` (`preload.ts`).
+- 9 tab (xem [README gốc](../README.md) mục 6). Gemini: cookie dán tay hoặc “Đăng nhập Gemini (Chrome)” (Chrome thật `settings.chrome_executable` + CDP, profile `ChromeProfile`, đóng êm bằng `app/core/chrome.py` để profile giữ phiên). Khung request Gemini (`inner_template`, 97 trường) đi kèm app ở `Backend/resources/gemini/inner_template.json` (`app/ai/gemini/template.py`); bản bắt trên máy (nút “Cập nhật template Gemini”, `POST /api/settings/gemini/capture-template`, `ai/gemini/capture.py`) được ưu tiên. Lỗi đăng nhập/cookie ở `/api/workflow/gemini/analyze` trả 401 (node Phân tích chỉ gợi ý “Làm mới Cookie” cho mã này). ChatGPT: `app/ai/image_gen/` (`/api/settings/image-gen`): nhiều tài khoản, tự xoay khi hết hạn mức ảnh, làm mới cookie bằng profile Chrome. Cập nhật app: `electron-updater` qua `window.desktop.*` (`preload.ts`).
 - Cấu hình lưu `config.json` qua `read_config`/`write_config` (`app/core/storage.py`).
 
 ### Cẩm nang trong app (`help`)

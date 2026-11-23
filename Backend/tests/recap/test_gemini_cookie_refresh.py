@@ -36,9 +36,20 @@ class FakeContext:
         return list(self._cookies)
 
 
+CDP_CALLS: list[str] = []
+
+
+class FakeCdpSession:
+    def send(self, method):
+        CDP_CALLS.append(method)
+
+
 class FakeBrowser:
     def __init__(self, ctx):
         self.contexts = [ctx]
+
+    def new_browser_cdp_session(self):
+        return FakeCdpSession()
 
     def close(self):
         pass
@@ -69,8 +80,10 @@ class FakeProc:
 
     def terminate(self):
         self.terminated = True
+        self._exited = True
 
     def wait(self, timeout=None):
+        self._exited = True  # Chrome thoát êm sau Browser.close
         return 0
 
     def kill(self):
@@ -107,6 +120,7 @@ def chrome(monkeypatch, tmp_path):
 
     c = C()
     c.proc = None
+    CDP_CALLS.clear()
 
     def popen(*a, **k):
         c.proc = FakeProc(c.proc_exited)
@@ -141,7 +155,10 @@ def test_happy_path_saves_verified_cookie_and_reports_steps(chrome):
     assert err is None and res["ok"] and res["cookie_count"] == 1
     assert chrome.saved["cookies"] == "SID=abc" and chrome.saved["user_agent"] == "Mozilla/5.0 FakeUA"
     assert steps == ["Mở Chrome (profile Gemini)", "Kết nối Chrome", "Đọc phiên đăng nhập", "Lưu cookie"]
-    assert chrome.proc.terminated  # luôn đóng Chrome do mình mở
+    # Đóng Chrome do mình mở bằng CDP Browser.close (Chrome ghi cookie đăng nhập xuống profile), KHÔNG TerminateProcess:
+    # trước 2026-11-24 giết cứng → máy mới đăng nhập xong, lần sau profile vẫn chưa đăng nhập.
+    assert CDP_CALLS == ["Browser.close"]
+    assert not chrome.proc.terminated
 
 
 def test_chrome_exits_immediately_fails_fast_with_clear_reason(chrome):
@@ -156,6 +173,7 @@ def test_existing_chrome_instance_is_reused_when_new_process_exits(chrome):
     chrome.proc_exited, chrome.cdp_up = True, True
     res, _, err = run()
     assert err is None and res["ok"]
+    assert CDP_CALLS == []  # Chrome không do app mở → chỉ ngắt kết nối, không tắt cửa sổ của người dùng
 
 
 def test_cdp_never_opens_times_out_with_clear_message(chrome):

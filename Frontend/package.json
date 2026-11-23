@@ -20,6 +20,7 @@
     "e2e:status": "node scripts/e2e/isolated.mjs status",
     "e2e:muse-cut": "node scripts/e2e/muse-cut.e2e.mjs",
     "e2e:path-dialogs": "node scripts/e2e/path-dialogs.e2e.mjs",
+    "e2e:gemini-fresh-install": "node scripts/e2e/gemini-fresh-install.e2e.mjs",
     "test": "node --experimental-strip-types --test src/features/workflow/__tests__/*.test.ts src/features/workflow/__tests__/*.test.mjs",
     "test:campaign": "node --experimental-strip-types --test src/features/campaign/__tests__/*.test.ts",
     "test:studio": "node --experimental-strip-types --test src/features/studio/*.test.ts",

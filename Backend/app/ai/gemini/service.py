@@ -9,6 +9,7 @@ import httpx
 from fastapi import HTTPException
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 
+from app.core.chrome import close_chrome_gracefully
 from app.core.config import settings
 from app.core.storage import read_config, write_config
 
@@ -144,102 +145,109 @@ def login_and_save_cookie(
             if browser is None:
                 raise HTTPException(status_code=504, detail="Không kết nối được Chrome qua CDP.")
 
-            context = browser.contexts[0] if browser.contexts else browser.new_context()
-            _mark("playwright_connected")
+            try:
+                context = browser.contexts[0] if browser.contexts else browser.new_context()
+                _mark("playwright_connected")
 
-            _step("Đọc phiên đăng nhập")
-            login_deadline = time.monotonic() + login_timeout
-            while True:
-                if own_chrome and proc.poll() is not None:
-                    raise HTTPException(
-                        status_code=408,
-                        detail="Trình duyệt Chrome đã bị đóng trước khi hoàn tất lấy cookie.",
-                    )
+                _step("Đọc phiên đăng nhập")
+                login_deadline = time.monotonic() + login_timeout
+                while True:
+                    if own_chrome and proc.poll() is not None:
+                        raise HTTPException(
+                            status_code=408,
+                            detail="Trình duyệt Chrome đã bị đóng trước khi hoàn tất lấy cookie.",
+                        )
 
-                # Quét đa tab: tìm tab gemini hoặc accounts; chưa có thì đưa tab đầu tới Gemini.
-                pages = context.pages
-                gemini_page = None
-                accounts_page = None
-                for p in pages:
-                    try:
-                        u = p.url
-                        if "gemini.google.com" in u:
-                            gemini_page = p
-                            break
-                        elif "accounts.google.com" in u:
-                            accounts_page = p
-                    except Exception:
-                        pass
-                if not gemini_page and not accounts_page and pages:
-                    try:
-                        pages[0].goto("https://gemini.google.com/app")
-                    except Exception:
-                        pass
-
-                # Cookie chuẩn riêng cho https://gemini.google.com (tránh CookieMismatch)
-                try:
-                    current_cookies = context.cookies(["https://gemini.google.com"])
-                except Exception:
-                    current_cookies = []
-
-                needs_login = True
-                if any(c["name"] in AUTH_COOKIE_NAMES for c in current_cookies):
-                    target_page = gemini_page or (pages[0] if pages else None)
-                    ua = ""
-                    if target_page:
+                    # Quét đa tab: tìm tab gemini hoặc accounts; chưa có thì đưa tab đầu tới Gemini.
+                    pages = context.pages
+                    gemini_page = None
+                    accounts_page = None
+                    for p in pages:
                         try:
-                            ua = target_page.evaluate("() => navigator.userAgent")
+                            u = p.url
+                            if "gemini.google.com" in u:
+                                gemini_page = p
+                                break
+                            elif "accounts.google.com" in u:
+                                accounts_page = p
                         except Exception:
-                            ua = ""
-                    header = "; ".join(f"{c['name']}={c['value']}" for c in current_cookies)
-                    valid = _session_valid(header, ua)
-                    # False = có cookie nhưng Google không nhận (hết hạn/đã đăng xuất). None = không xác định được
-                    # (mạng) → không chặn, lưu luôn; việc gọi Gemini sau đó sẽ báo lỗi mạng rõ ràng nếu có.
-                    if valid is not False:
-                        cookies, user_agent = current_cookies, ua
-                        break
-                    needs_login = accounts_page is not None
+                            pass
+                    if not gemini_page and not accounts_page and pages:
+                        try:
+                            pages[0].goto("https://gemini.google.com/app")
+                        except Exception:
+                            pass
 
-                remaining = max(0, int(login_deadline - time.monotonic()))
-                if needs_login:
-                    _step(f"Chưa đăng nhập: hãy đăng nhập Google trong cửa sổ Chrome (còn {remaining}s)")
+                    # Cookie chuẩn riêng cho https://gemini.google.com (tránh CookieMismatch)
+                    try:
+                        current_cookies = context.cookies(["https://gemini.google.com"])
+                    except Exception:
+                        current_cookies = []
+
+                    needs_login = True
+                    if any(c["name"] in AUTH_COOKIE_NAMES for c in current_cookies):
+                        target_page = gemini_page or (pages[0] if pages else None)
+                        ua = ""
+                        if target_page:
+                            try:
+                                ua = target_page.evaluate("() => navigator.userAgent")
+                            except Exception:
+                                ua = ""
+                        header = "; ".join(f"{c['name']}={c['value']}" for c in current_cookies)
+                        valid = _session_valid(header, ua)
+                        # False = có cookie nhưng Google không nhận (hết hạn/đã đăng xuất). None = không xác định được
+                        # (mạng) → không chặn, lưu luôn; việc gọi Gemini sau đó sẽ báo lỗi mạng rõ ràng nếu có.
+                        if valid is not False:
+                            cookies, user_agent = current_cookies, ua
+                            break
+                        needs_login = accounts_page is not None
+
+                    remaining = max(0, int(login_deadline - time.monotonic()))
+                    if needs_login:
+                        _step(f"Chưa đăng nhập: hãy đăng nhập Google trong cửa sổ Chrome (còn {remaining}s)")
+                    else:
+                        _step(f"Chờ Gemini xác nhận phiên đăng nhập (còn {remaining}s)")
+                    if time.monotonic() >= login_deadline:
+                        raise HTTPException(
+                            status_code=408,
+                            detail=f"Chưa đăng nhập được Gemini sau {login_timeout} giây. "
+                            f"Vào Cài đặt → Đăng nhập Gemini (Chrome) rồi thử lại.",
+                        )
+                    time.sleep(2.0 if not needs_login else POLL_INTERVAL_SECONDS)
+
+                _mark("session_verified")
+                _step("Lưu cookie")
+                # Cookie vừa được kiểm tra hợp lệ nên không cần chờ thêm; đọc lại 1 lần để lấy giá trị mới nhất.
+                try:
+                    refreshed = context.cookies(["https://gemini.google.com"])
+                    if any(c["name"] in AUTH_COOKIE_NAMES for c in refreshed):
+                        cookies = refreshed
+                except Exception:
+                    pass
+
+                config = read_config()
+                gemini_update = {
+                    "cookies": "; ".join(f"{cookie['name']}={cookie['value']}" for cookie in cookies),
+                    "cookie_count": len(cookies),
+                    "saved_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if user_agent:
+                    gemini_update["user_agent"] = user_agent
+
+                config["gemini"].update(gemini_update)
+                write_config(config)
+                _mark("config_written")
+                return {"ok": True, "has_cookie": True, "cookie_count": len(cookies)}
+            finally:
+                # Đóng ÊM để profile ghi cookie đăng nhập/xoay vòng xuống đĩa (app.core.chrome). Chrome có sẵn (không do
+                # app mở) thì chỉ ngắt kết nối, không tắt.
+                if own_chrome:
+                    close_chrome_gracefully(browser, proc)
                 else:
-                    _step(f"Chờ Gemini xác nhận phiên đăng nhập (còn {remaining}s)")
-                if time.monotonic() >= login_deadline:
-                    raise HTTPException(
-                        status_code=408,
-                        detail=f"Chưa đăng nhập được Gemini sau {login_timeout} giây. "
-                        f"Vào Cài đặt → Đăng nhập Gemini (Chrome) rồi thử lại.",
-                    )
-                time.sleep(2.0 if not needs_login else POLL_INTERVAL_SECONDS)
-
-            _mark("session_verified")
-            _step("Lưu cookie")
-            # Cookie vừa được kiểm tra hợp lệ nên không cần chờ thêm; đọc lại 1 lần để lấy giá trị mới nhất.
-            try:
-                refreshed = context.cookies(["https://gemini.google.com"])
-                if any(c["name"] in AUTH_COOKIE_NAMES for c in refreshed):
-                    cookies = refreshed
-            except Exception:
-                pass
-
-            config = read_config()
-            gemini_update = {
-                "cookies": "; ".join(f"{cookie['name']}={cookie['value']}" for cookie in cookies),
-                "cookie_count": len(cookies),
-                "saved_at": datetime.now(timezone.utc).isoformat(),
-            }
-            if user_agent:
-                gemini_update["user_agent"] = user_agent
-
-            config["gemini"].update(gemini_update)
-            write_config(config)
-            _mark("config_written")
-            try:
-                browser.close()
-            except Exception:
-                pass
-            return {"ok": True, "has_cookie": True, "cookie_count": len(cookies)}
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
     except HTTPException:
         raise
     except PlaywrightTimeoutError as error:
@@ -247,13 +255,8 @@ def login_and_save_cookie(
     except Exception as error:
         raise HTTPException(status_code=409, detail=f"Lỗi khi đọc cookie Gemini: {error}") from error
     finally:
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        # Lỗi trước khi nối được CDP (Chrome chưa mở xong / profile bị giữ): chưa có cookie nào để mất → tắt luôn.
+        # Đường bình thường đã đóng êm ở trên nên tới đây proc đã thoát.
+        close_chrome_gracefully(None, proc, wait_seconds=0)
         _mark("chrome_closed")
         print(f"[Gemini cookie] thoi gian cac buoc (s): {steps}", flush=True)

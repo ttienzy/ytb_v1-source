@@ -23,6 +23,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.core.chrome import close_chrome_gracefully
 from app.core.config import settings
 
 # video-only 1080p avc1 (H.264). Fallback qua 1080p mp4 khác → 1080p bất kỳ → bestvideo
@@ -196,13 +197,10 @@ def login_youtube() -> dict:
                     detail=f"Chưa phát hiện đăng nhập YouTube sau {LOGIN_TIMEOUT_SECONDS} giây. "
                     "Có thể Google vẫn chặn — thử lại, hoặc login account khác.",
                 )
-            time.sleep(5)  # chờ Chrome ghi ổn cookie phiên
             _write_netscape_cookies(cookies, settings.yt_cookies_file)
             count = len(cookies)
-            try:
-                browser.close()
-            except Exception:
-                pass
+            # Đóng ÊM (không sleep chờ): Chrome ghi cookie đăng nhập xuống profile YouTube khi tắt bình thường.
+            close_chrome_gracefully(browser, proc)
             return {"ok": True, "logged_in": True, "cookie_count": count}
     except HTTPException:
         raise
@@ -217,15 +215,9 @@ def login_youtube() -> dict:
             detail=f"Lỗi khi đọc cookie YouTube: {error}",
         ) from error
     finally:
-        # Đóng Chrome ta đã launch (subprocess) — giải phóng profile + port.
-        try:
-            proc.terminate()
-            proc.wait(timeout=8)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        # Đóng Chrome ta đã launch (subprocess) — giải phóng profile + port. Đường thành công đã đóng êm ở trên;
+        # tới đây còn sống là lỗi giữa chừng → vẫn đóng êm nếu có CDP, hết hạn chờ mới giết.
+        close_chrome_gracefully(None, proc, wait_seconds=0)
 
 
 def _write_netscape_cookies(cookies: list, path: Path) -> None:
