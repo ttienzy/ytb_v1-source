@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 import asyncio
 import logging
 import subprocess
@@ -52,12 +52,14 @@ from app.workflow.schemas import (
     MotionCharacterSheetResponse,
 )
 from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_cut, muse_gpt_image, muse_merge, muse_projects
-from app.ai.gemini.service import login_and_save_cookie
-from app.ai.gemini.recap import GeminiAuthError, GeminiNotLoggedInError, _fresh_tokens, _gemini_config
+from app.ai.gemini import pool as gemini_pool
+from app.ai.gemini.recap import GeminiAuthError, GeminiNotLoggedInError, check_cookie_state
+from app.ai.gemini.service import refresh_account as refresh_gemini_account
 from app.workflow.service import (
     concat_workflow_scenes,
     create_prompt_preset,
     delete_exported_video,
+    list_exported_videos_page,
     delete_prompt_preset,
     execute_gemini_analysis,
     execute_chatgpt_vision_analysis,
@@ -211,26 +213,35 @@ def reset_gemini_prompt() -> GeminiPromptResponse:
 
 @router.post("/gemini/refresh-cookie")
 async def refresh_gemini_cookie():
-    """Tự động mở Chrome profile ngầm trong 3-5 giây để làm mới cookies xác thực Gemini."""
-    try:
-        res = await run_in_threadpool(login_and_save_cookie)
-        return {"ok": True, "cookie_count": res.get("cookie_count", 0), "has_cookie": res.get("has_cookie", False)}
-    except Exception as exc:
+    """Làm mới ngầm (Chrome profile ấm) cookie của các tài khoản Gemini chưa sẵn sàng; chưa có tài khoản nào thì báo thêm."""
+    store = gemini_pool.get_store()
+    accounts = store.list_raw()
+    if not accounts:
+        raise HTTPException(status_code=401, detail=gemini_pool.NO_ACCOUNT_MSG)
+    targets = [a for a in accounts if a.get("status") != "active" and a.get("partition")] or [
+        a for a in accounts if a.get("partition")]
+    refreshed, errors = 0, []
+    for acc in targets:
+        try:
+            await run_in_threadpool(refresh_gemini_account, acc["id"])
+            refreshed += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{acc.get('email') or acc['id']}: {getattr(exc, 'detail', None) or exc}")
+    if not refreshed:
         raise HTTPException(
-            status_code=500,
-            detail=f"Lỗi khi làm mới cookie: {exc}",
-        ) from exc
+            status_code=401,
+            detail="Không làm mới được tài khoản Gemini nào (" + "; ".join(errors) + "). "
+                   "Vào Cài đặt → Gemini & YouTube bấm “Đăng nhập lại” hoặc “(+) Thêm account Gemini”.")
+    return {"ok": True, "refreshed": refreshed, "cookie_count": refreshed, "has_cookie": True, "errors": errors}
 
 
 @router.get("/gemini/cookie-status")
 async def get_gemini_cookie_status():
-    """Kiểm tra xem cookie Gemini hiện tại trong config.json còn hạn không."""
+    """Có ít nhất một tài khoản Gemini vào được Gemini không (không mở Chrome)."""
     try:
-        cfg = _gemini_config()
-        with httpx.Client(http2=False, timeout=10) as client:
-            at, bl, fsid = _fresh_tokens(client, cfg["cookies"], cfg["user_agent"])
-            return {"valid": True, "at_prefix": at[:8] if at else ""}
-    except Exception as exc:
+        state = await run_in_threadpool(check_cookie_state)
+        return {"valid": state == "ok", "state": state}
+    except Exception as exc:  # noqa: BLE001
         return {"valid": False, "error": str(exc)}
 
 
@@ -400,10 +411,17 @@ class ImageLibraryPatch(BaseModel):
 
 
 @router.get("/images")
-def list_library_images(q: str = "", source: str = "", favorite: bool = False) -> dict:
+def list_library_images(q: str = "", source: str = "", favorite: bool = False, page: int | None = Query(default=None, ge=1)) -> dict:
     """Ảnh trong thư viện (mới nhất trước). source: muse | upload | chatgpt."""
+    if page is not None:
+        return image_library.list_images_page(page, q=q, source=source, favorite=favorite)
     items = image_library.list_images(q=q, source=source, favorite=favorite)
     return {"items": items, "total": len(items)}
+
+
+@router.get("/images/count")
+def get_library_image_count() -> dict:
+    return {"total": image_library.count_images()}
 
 
 @router.post("/images/upload")
@@ -788,10 +806,21 @@ async def export_workflow_video(req: WorkflowExportRequest) -> WorkflowExportRes
 
 
 @router.get("/exports")
-async def get_all_exported_videos():
+async def get_all_exported_videos(
+    page: int | None = Query(default=None, ge=1), q: str = "",
+    source: Literal["all", "export", "veo_scene", "motion_control", "muse_clip"] = "all",
+):
     """Lấy danh sách tất cả các video đã xuất trong thư viện."""
+    if page is not None:
+        return await run_in_threadpool(list_exported_videos_page, page, q=q, source=source)
     items = await run_in_threadpool(list_exported_videos)
     return {"items": items, "total": len(items)}
+
+
+@router.get("/exports/count")
+async def get_exported_video_count() -> dict:
+    items = await run_in_threadpool(list_exported_videos, probe_missing_duration=False)
+    return {"total": len(items)}
 
 
 @router.delete("/exports/{filename}")

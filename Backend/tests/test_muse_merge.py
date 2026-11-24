@@ -210,14 +210,15 @@ def test_cut_video_skips_watermark_removal_but_flow_clip_does_not(env, monkeypat
     assert muse_merge.MergeClip(path="x.mp4").remove_watermark is None
 
 
-def test_cut_folder_is_an_allowed_merge_source(tmp_path, monkeypatch):
-    """Thư mục video của node Cắt video (Data/media/muse_cuts) nằm trong các thư mục ghép được."""
+def test_cut_and_reference_upload_folders_are_allowed_merge_sources(tmp_path, monkeypatch):
     from app.workflow import muse_cut
 
     cuts = tmp_path / "muse_cuts"
+    uploads = tmp_path / "muse_uploads"
     cuts.mkdir()
+    uploads.mkdir()
     monkeypatch.setattr(muse_cut, "CUT_DIR", cuts)
-    assert cuts.resolve() in muse_merge._roots()
-    f = cuts / "cut_123456789abc.mp4"
-    f.write_bytes(b"x" * 64)
-    assert muse_merge.resolve_video(str(f)) == f.resolve()
+    monkeypatch.setattr(muse_cut, "_upload_dir", lambda: uploads)
+    for clip in [cuts / "cut_123456789abc.mp4", uploads / "ref.webm"]:
+        clip.write_bytes(b"x" * 64)
+        assert muse_merge.resolve_video(str(clip)) == clip.resolve()

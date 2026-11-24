@@ -1,0 +1,6 @@
+.library-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; color: #475569; font-size: 12px; font-variant-numeric: tabular-nums; }
+.library-pagination-range { margin-right: auto; }
+.library-pagination button { display: inline-grid; place-items: center; width: 28px; height: 29px; padding: 0; border: 1px solid #dbe2ec; border-radius: 6px; background: #fff; color: #475569; cursor: pointer; }
+.library-pagination button:hover:not(:disabled) { background: #edf1f5; color: #1e293b; }
+.library-pagination button:disabled { opacity: .38; cursor: default; }
+.library-pagination button:focus-visible { outline: 2px solid #475569; outline-offset: -2px; }

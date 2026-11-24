@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Clapperboard, Video, Sparkles, Film, Activity, Download, X, Send, ImageDown, Loader2 } from 'lucide-react'
 import type {
   StudioTask,
@@ -7,26 +7,23 @@ import type {
   VeoHistoryItem,
   VeoImageItem,
   VeoJobOut,
-  VeoJobRequest,
   VeoProject,
 } from './types'
 import * as api from './services/veoApi'
 import { ProjectSelector } from './components/ProjectSelector'
-import { TextToVideoTab } from './components/TextToVideoTab'
 import { TextToImageTab } from './components/TextToImageTab'
-import { ImageToVideoTab } from './components/ImageToVideoTab'
+import { VideoBatchTab, type ForwardedBatchImage } from './components/VideoBatchTab'
 import { StatusTab } from './components/StatusTab'
 import { VideoPlayer } from './components/VideoPlayer'
 import { VideoGallery } from './components/VideoGallery'
 import { StudioTaskToastDock } from './components/StudioTaskToastDock'
 import { StudioErrorBoundary } from './components/StudioErrorBoundary'
 
-type TabKey = 'text' | 'image-gen' | 'image' | 'status'
-const TABS: { key: TabKey; label: string; icon: typeof Video; enabled: boolean }[] = [
-  { key: 'text', label: 'Tạo Video', icon: Video, enabled: true },
-  { key: 'image-gen', label: 'Tạo Ảnh (Studio)', icon: Sparkles, enabled: true },
-  { key: 'image', label: 'Ảnh sang Video', icon: Film, enabled: true },
-  { key: 'status', label: 'Hệ Thống & Bridge', icon: Activity, enabled: true },
+type TabKey = 'video-batch' | 'image-gen' | 'status'
+const TABS: { key: TabKey; label: string; icon: typeof Video }[] = [
+  { key: 'video-batch', label: 'Tạo video hàng loạt', icon: Video },
+  { key: 'image-gen', label: 'Tạo Ảnh (Studio)', icon: Sparkles },
+  { key: 'status', label: 'Hệ Thống & Bridge', icon: Activity },
 ]
 
 interface Props {
@@ -34,24 +31,21 @@ interface Props {
 }
 
 export function VeoStudioPage({ setActivePage }: Props) {
-  const [activeTab, setActiveTab] = useState<TabKey>('text')
+  const [activeTab, setActiveTab] = useState<TabKey>('video-batch')
   const [capabilities, setCapabilities] = useState<VeoCapabilities | null>(null)
   const [bridgeStatus, setBridgeStatus] = useState<VeoBridgeStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(false)
   const [projects, setProjects] = useState<VeoProject[]>([])
   const [activeProject, setActiveProject] = useState<VeoProject | null>(null)
   const [projectCreating, setProjectCreating] = useState(false)
-  const [jobs, setJobs] = useState<VeoJobOut[]>([])
   const [activeJob, setActiveJob] = useState<VeoJobOut | null>(null)
-  const [history, setHistory] = useState<VeoHistoryItem[]>([])
-  const [busy, setBusy] = useState(false)
+  const [historyRevision, setHistoryRevision] = useState(0)
   const [message, setMessage] = useState('')
-  const [forwardedImage, setForwardedImage] = useState<{ path: string; preview: string; prompt: string } | null>(null)
+  const [forwardedImage, setForwardedImage] = useState<ForwardedBatchImage | null>(null)
   const [studioTasks, setStudioTasks] = useState<StudioTask[]>([])
   const [previewImage, setPreviewImage] = useState<VeoImageItem | null>(null)
   const [previewVideo, setPreviewVideo] = useState<VeoJobOut | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Download clean image (watermark removed) via fetch + blob
   const handleDownloadClean = async (imageId: string) => {
@@ -96,12 +90,12 @@ export function VeoStudioPage({ setActivePage }: Props) {
 
   const handleSendImageToVideo = (imageItem: VeoImageItem) => {
     setForwardedImage({
-      path: imageItem.local_path || imageItem.image_url,
-      preview: api.getImageFileUrl(imageItem.id),
+      image: { source: 'library', id: imageItem.id, name: imageItem.local_path?.split(/[\\/]/).pop() || 'Ảnh thư viện' },
       prompt: imageItem.prompt,
     })
-    setActiveTab('image')
+    setActiveTab('video-batch')
   }
+  const consumeForwardedImage = useCallback(() => setForwardedImage(null), [])
 
   // Load capabilities
   useEffect(() => {
@@ -119,11 +113,10 @@ export function VeoStudioPage({ setActivePage }: Props) {
   }, [])
   useEffect(() => { loadProjects() }, [loadProjects])
 
-  // Load history
-  const loadHistory = useCallback(() => {
-    api.getHistory().then(setHistory).catch(() => {})
-  }, [])
-  useEffect(() => { loadHistory() }, [loadHistory])
+  const refreshVideoResults = useCallback(() => {
+    setHistoryRevision((revision) => revision + 1)
+    void loadProjects()
+  }, [loadProjects])
 
   // Load status
   const loadStatus = useCallback(async () => {
@@ -135,70 +128,6 @@ export function VeoStudioPage({ setActivePage }: Props) {
     setStatusLoading(false)
   }, [])
   useEffect(() => { loadStatus() }, [loadStatus])
-
-  // Poll active job
-  useEffect(() => {
-    if (!activeJob || activeJob.status === 'done' || activeJob.status === 'error') {
-      if (pollRef.current) clearInterval(pollRef.current)
-      return
-    }
-    pollRef.current = setInterval(async () => {
-      const updated = await api.getJobStatus(activeJob.job_id)
-      if (updated) {
-        setActiveJob(updated)
-        setJobs((prev) => prev.map((j) => (j.job_id === updated.job_id ? updated : j)))
-        if (updated.status === 'done' || updated.status === 'error') {
-          loadHistory()
-          loadProjects()
-        }
-      }
-    }, 2000)
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [activeJob?.job_id, activeJob?.status, loadHistory, loadProjects])
-
-  // Persistent video tasks polling across tab switches
-  useEffect(() => {
-    const activeVideoTasks = studioTasks.filter(
-      (t) => t.type === 'video' && t.jobId && t.status !== 'completed' && t.status !== 'error',
-    )
-    if (activeVideoTasks.length === 0) return
-
-    const interval = setInterval(async () => {
-      for (const t of activeVideoTasks) {
-        try {
-          const job = await api.getJobStatus(t.jobId!)
-          if (!job) continue
-
-          if (job.status === 'done') {
-            updateStudioTask(t.id, {
-              status: 'completed',
-              statusText: 'Đã hoàn tất video!',
-              jobOut: job,
-            })
-            loadHistory()
-            loadProjects()
-          } else if (job.status === 'error') {
-            updateStudioTask(t.id, {
-              status: 'error',
-              statusText: 'Lỗi tạo video',
-              error: job.error_message || 'Google Flow từ chối tạo video',
-              jobOut: job,
-            })
-          } else {
-            updateStudioTask(t.id, {
-              status: job.status as any,
-              statusText: job.current_step || 'Đang tạo video trên Cloud...',
-              jobOut: job,
-            })
-          }
-        } catch {
-          // ignore error
-        }
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [studioTasks, loadHistory, loadProjects, updateStudioTask])
 
   // Project handlers
   const handleSelectProject = async (projectId: string) => {
@@ -235,36 +164,20 @@ export function VeoStudioPage({ setActivePage }: Props) {
     }
   }
 
-  // Submit job (enforces active project)
-  const handleSubmit = async (request: VeoJobRequest): Promise<VeoJobOut | null> => {
-    if (!activeProject) {
-      setMessage('⚠️ Vui lòng tạo hoặc chọn một Project trước khi tạo video')
-      return null
-    }
-
-    setBusy(true)
-    setMessage('')
-    try {
-      const job = await api.submitJob({
-        ...request,
-        project_id: activeProject.id,
-      })
-      setActiveJob(job)
-      setJobs((prev) => [job, ...prev])
-      setMessage(`Job ${job.job_id} đã tạo trong project "${activeProject.name}"`)
-      return job
-    } catch (e: any) {
-      setMessage(e.message || 'Tạo job thất bại')
-      throw e
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const handleDeleteVideo = async (videoId: string) => {
-    await api.deleteVideo(videoId)
-    loadHistory()
-    loadProjects()
+    try {
+      if (!await api.deleteVideo(videoId)) throw new Error('Không xóa được video đã chọn.')
+      const deletedUrl = api.getVideoStreamUrl(videoId)
+      const clearDeleted = (job: VeoJobOut | null) => {
+        const selectedUrl = api.getVideoStreamUrl(job?.output_files?.[0] || job?.job_id || '')
+        return selectedUrl === deletedUrl ? null : job
+      }
+      setActiveJob(clearDeleted)
+      setPreviewVideo(clearDeleted)
+      refreshVideoResults()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Không xóa được video đã chọn.')
+    }
   }
 
   const [extractingVideoId, setExtractingVideoId] = useState<string | null>(null)
@@ -358,8 +271,6 @@ export function VeoStudioPage({ setActivePage }: Props) {
                 key={tab.key}
                 className={`veo-tab ${activeTab === tab.key ? 'active' : ''}`}
                 onClick={() => setActiveTab(tab.key)}
-                disabled={!tab.enabled}
-                title={tab.enabled ? undefined : 'Chưa có profile runtime được xác minh'}
               >
                 <tab.icon size={14} />
                 <span>{tab.label}</span>
@@ -382,28 +293,6 @@ export function VeoStudioPage({ setActivePage }: Props) {
               </div>
             ) : (
               <StudioErrorBoundary key={activeTab}>
-                {activeTab === 'text' && (
-                  <TextToVideoTab
-                    capabilities={capabilities}
-                    onSubmit={handleSubmit}
-                    busy={busy}
-                    activeProject={activeProject}
-                    studioTasks={studioTasks.filter((t) => t.type === 'video')}
-                    onRegisterTask={addStudioTask}
-                    onUpdateTask={updateStudioTask}
-                    onRemoveTask={removeStudioTask}
-                    onBatchVideoDone={(job) => {
-                      loadHistory()
-                      loadProjects()
-                      if (job) setActiveJob(job)
-                    }}
-                    onVideoDone={() => {
-                      loadHistory()
-                      loadProjects()
-                    }}
-                    onPreviewJob={handlePreviewJob}
-                  />
-                )}
                 {activeTab === 'image-gen' && (
                   <TextToImageTab
                     activeProject={activeProject}
@@ -415,26 +304,6 @@ export function VeoStudioPage({ setActivePage }: Props) {
                     imageRefreshTrigger={imageRefreshTrigger}
                   />
                 )}
-                {activeTab === 'image' && (
-                  <ImageToVideoTab
-                    capabilities={capabilities}
-                    onSubmit={handleSubmit}
-                    busy={busy}
-                    activeProject={activeProject}
-                    initialImagePath={forwardedImage?.path}
-                    initialImagePreview={forwardedImage?.preview}
-                    initialPrompt={forwardedImage?.prompt}
-                    studioTasks={studioTasks.filter((t) => t.type === 'video')}
-                    onRegisterTask={addStudioTask}
-                    onUpdateTask={updateStudioTask}
-                    onRemoveTask={removeStudioTask}
-                    onVideoDone={() => {
-                      loadHistory()
-                      loadProjects()
-                    }}
-                    onPreviewJob={handlePreviewJob}
-                  />
-                )}
                 {activeTab === 'status' && (
                   <StatusTab
                     status={bridgeStatus}
@@ -443,6 +312,20 @@ export function VeoStudioPage({ setActivePage }: Props) {
                   />
                 )}
               </StudioErrorBoundary>
+            )}
+            {activeProject && (
+              <div hidden={activeTab !== 'video-batch'}>
+                <StudioErrorBoundary key={activeProject.id}>
+                  <VideoBatchTab
+                    projectId={activeProject.id}
+                    capabilities={capabilities}
+                    forwarded={forwardedImage}
+                    onConsumeForwarded={consumeForwardedImage}
+                    onVideoDone={refreshVideoResults}
+                    onPreviewJob={handlePreviewJob}
+                  />
+                </StudioErrorBoundary>
+              </div>
             )}
           </div>
         </section>
@@ -466,7 +349,8 @@ export function VeoStudioPage({ setActivePage }: Props) {
 
           {/* Gallery */}
           <VideoGallery
-            items={history}
+            refreshKey={historyRevision}
+            selectedVideoId={activeJob?.output_files?.[0] || activeJob?.job_id}
             onSelect={handleSelectHistory}
             onDelete={handleDeleteVideo}
             onSendToEditor={() => setActivePage('Video')}
@@ -535,7 +419,7 @@ export function VeoStudioPage({ setActivePage }: Props) {
                   }}
                 >
                   <Film size={14} />
-                  <span>Tạo Video Từ Ảnh Này</span>
+                  <span>Thêm vào lô video</span>
                 </button>
               </div>
             </div>

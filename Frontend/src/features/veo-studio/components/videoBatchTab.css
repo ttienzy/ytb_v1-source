@@ -1,0 +1,47 @@
+.veo-video-batch { display: grid; gap: 24px; color: #172033; }
+.veo-video-batch h3 { margin: 0; font-size: 14px; font-weight: 700; }
+.veo-batch-settings { display: grid; gap: 14px; padding: 14px; border: 1px solid #dce4ee; border-radius: 12px; background: #f8faff; }
+.veo-batch-settings-head, .veo-batch-toolbar, .veo-batch-row-head, .veo-batch-submit { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.veo-batch-settings-head > span { color: #4338ca; font-size: 12px; font-weight: 650; }
+.veo-batch-settings-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr); gap: 14px; }
+.veo-batch-settings-fields label { display: grid; align-content: space-between; gap: 6px; color: #334155; font-size: 12px; font-weight: 600; }
+.veo-video-batch select, .veo-batch-row-content textarea, .veo-batch-paste textarea { width: 100%; min-width: 0; border: 1px solid #d4deea; border-radius: 8px; background: #fff; color: #172033; font-size: 13px; }
+.veo-video-batch select { width: auto; max-width: 100%; padding: 7px 9px; }
+.veo-batch-duration span { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; }
+.veo-batch-duration output { color: #4338ca; font-variant-numeric: tabular-nums; }
+.veo-batch-duration input { width: 100%; min-height: 29px; accent-color: #4f46e5; }
+.veo-batch-actions, .veo-batch-references { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.veo-batch-secondary, .veo-batch-primary, .veo-batch-icon { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #d7dfeb; border-radius: 7px; background: #fff; color: #334155; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.veo-batch-secondary, .veo-batch-primary { padding: 6px 9px; }
+.veo-batch-primary { padding: 8px 13px; border-color: #4f46e5; background: #4f46e5; color: #fff; }
+.veo-batch-icon { padding: 4px; }
+.veo-batch-secondary:hover:not(:disabled), .veo-batch-icon:hover:not(:disabled) { background: #eef2ff; color: #3730a3; }
+.veo-batch-primary:hover:not(:disabled) { background: #4338ca; }
+.veo-video-batch button:disabled { opacity: .5; cursor: not-allowed; }
+.veo-video-batch :is(button, select, textarea, input):focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+.veo-batch-empty { margin: 9px 0; color: #64748b; font-size: 13px; }
+.veo-batch-paste { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border: 1px solid #dce4ee; border-radius: 10px; background: #f8faff; }
+.veo-batch-paste label { display: flex; align-items: center; gap: 5px; color: #334155; font-size: 12px; }
+.veo-batch-paste-replace input { accent-color: #4f46e5; }
+.veo-batch-paste textarea { resize: vertical; padding: 8px; }
+.veo-batch-paste-count { margin: 0; color: #475569; font-size: 12px; }
+.veo-batch-draft-list, .veo-batch-run-list { display: grid; gap: 8px; margin: 10px 0; padding: 0; list-style: none; }
+.veo-batch-draft-row { display: grid; gap: 9px; padding: 10px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }
+.veo-batch-row-head strong { font-size: 12px; }
+.veo-batch-row-content { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 9px; }
+.veo-batch-row-content textarea { resize: vertical; min-height: 86px; padding: 8px; }
+.veo-batch-main-image { display: grid; place-content: start stretch; gap: 4px; }
+.veo-batch-main-image img { width: 100%; height: 65px; border-radius: 6px; object-fit: contain; background: #eef2f7; }
+.veo-batch-references { color: #475569; font-size: 12px; }
+.veo-batch-reference { display: flex; align-items: center; gap: 2px; }
+.veo-batch-reference img { width: 30px; height: 30px; border-radius: 4px; object-fit: cover; }
+.veo-batch-submit { margin-top: 10px; color: #475569; font-size: 12px; }
+.veo-batch-queue { border-top: 1px solid #e0e7ef; padding-top: 14px; }
+.veo-batch-progress { margin-top: 9px; color: #475569; font-size: 12px; }
+.veo-batch-run-list li { display: flex; align-items: center; gap: 8px; padding: 7px; border: 1px solid #e0e7ef; border-radius: 8px; }
+.veo-batch-run-list img { width: 40px; height: 40px; border-radius: 5px; object-fit: cover; background: #eef2f7; }
+.veo-batch-run-info { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.veo-batch-run-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.veo-batch-run-info small { color: #475569; font-size: 11px; }
+.veo-batch-error { margin: 6px 0; overflow-wrap: anywhere; color: #b91c1c; font-size: 12px; }
+@media (max-width: 850px) { .veo-batch-settings-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .veo-batch-duration { grid-column: 1 / -1; } }

@@ -109,7 +109,8 @@ Một chi tiết giúp phân biệt: nếu extension trả `result.submitted == 
 - Job nằm **trong bộ nhớ** (`_jobs`), được ghi ra `Data/veo_jobs.json` mỗi lần đổi trạng thái (ghi nguyên tử).
 - Khởi động lại: job đang `captcha/submitting/generating/downloading` bị đánh dấu `error` ("Job interrupted by server restart"). Video đã tạo trên Flow vẫn có thể khôi phục bằng `recover-current`. Đây là lý do `npm start` (tự restart backend khi sửa `.py`) có thể cắt job dài: dùng `npm run start:stable`.
 - SQLite: `veo_projects` (project Flow + đếm video), `veo_images` (ảnh đã tạo/upload).
-- File: `veo_outputs/`, `veo_images/`, `veo_uploads/` dưới `media/`. **Lưu ý đường dẫn**: các thư mục này tính từ `__file__` (`Backend/Data/...`), không dùng `DATA_DIR`; xem [data-and-paths.md](data-and-paths.md).
+- File: `media/veo_outputs/`, `media/veo_images/`, `media/veo_uploads/` và `veo_jobs.json` dùng `DATA_DIR` ở cả dev và bản đóng gói. Xem [data-and-paths.md](data-and-paths.md).
+- Hàng đợi Veo Studio lưu trong `DATA_DIR/veo_studio_batches.json`. Client gửi `POST /api/veo/studio-batches` với `batch_id` (UUID), `project_id` và `items` theo thứ tự. Mỗi mục có `image` (`source: upload` với `file_id` từ `/upload-image`, hoặc `source: library` với ID ảnh Veo, đặt trong trường `id`), `prompt`, `references` và `settings` (`aspect_ratio`, `resolution`, `duration_seconds`). Backend dùng Omni 1.2 Ingredients, ảnh chính đứng đầu danh sách ảnh. Gửi lại cùng `batch_id` và nội dung trả về lô cũ. `GET /api/veo/studio-batches?project_id=…` đọc tiến độ. `POST /api/veo/studio-batches/{batch_id}/pause` hoặc `/resume` điều khiển các mục đang chờ. Khi một mục lỗi hoặc backend khởi động lại, các mục còn chờ cần được tiếp tục chủ động.
 
 ## 8. Debug nhanh
 

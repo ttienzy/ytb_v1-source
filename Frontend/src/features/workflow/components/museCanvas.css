@@ -374,6 +374,17 @@
 .mc-vingr-var-empty { font-size: 11px; color: #94a3b8; }
 .mc-vingr-var-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .mc-vingr-var .mc-clipvideo-player { width: 100%; max-height: 300px; }
+.mc-vingr-compare.on { background: #eef2ff; border-color: #6366f1; color: #3730a3; }
+
+/* ---- Ingredients: đối chiếu video kết quả với đoạn video mẫu ---- */
+.mc-vcompare { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.mc-vcompare-panes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.mc-vcompare figure { margin: 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mc-vcompare figcaption { font-size: 10px; font-weight: 700; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-vcompare video { width: 100%; max-height: 230px; border-radius: 8px; background: #0f172a; object-fit: contain; }
+.mc-vcompare-bar { display: flex; align-items: center; gap: 6px; }
+.mc-vcompare-seek { flex: 1; min-width: 0; }
+.mc-vcompare-time { font-size: 10px; color: #64748b; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---- Cấu hình Flow: thời lượng ---- */
 .mc-seconds-select { flex: 1; min-width: 0; }
@@ -514,6 +525,10 @@
 .mc-node-videoref { width: 280px; }
 .mc-icon-videoref { background: #fef2f2; color: #b91c1c; }
 .mc-handle-videoref { background: #b91c1c !important; }
+.mc-videoref-label { display: flex; gap: 6px; }
+.mc-videoref-label .mc-node-input { flex: 1; min-width: 0; }
+.mc-videoref-label .mc-mini-btn { flex: 0 0 30px; justify-content: center; padding: 0; }
+.mc-videoref-label .mc-mini-btn:hover:not(:disabled) { background: #e2e8f0; }
 .mc-videoref-preview {
   position: relative;
   border: 1px solid #e2e8f0;

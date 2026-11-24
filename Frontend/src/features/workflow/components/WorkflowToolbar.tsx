@@ -5,7 +5,6 @@ import {
   RotateCcw,
   Zap,
   Trash2,
-  Video,
   Star,
   ImageIcon,
 } from 'lucide-react'
@@ -43,7 +42,7 @@ export function WorkflowToolbar({
 }: WorkflowToolbarProps) {
   return (
     <header className="workflow-toolbar">
-      {/* Left: Workflow Mode Tabs & Video Library */}
+      {/* Left: Workflow Mode Tabs & Asset Libraries */}
       <div className="workflow-toolbar-left">
         {/* Navigation Tabs */}
         <WorkflowTabs activeTab={activeTab} onTabChange={onTabChange} />
@@ -57,7 +56,7 @@ export function WorkflowToolbar({
           onClick={onOpenLibrary}
           title="Mở Thư Viện quản lý video đã xuất"
         >
-          <Film size={14} color="#64748b" />
+          <Film size={14} className="wf-icon-library-video" />
           <span>Thư Viện Video</span>
           {typeof exportedCount === 'number' && exportedCount > 0 && (
             <span className="wf-library-count-pill">
@@ -74,7 +73,7 @@ export function WorkflowToolbar({
             onClick={onOpenImageLibrary}
             title="Mở Thư Viện Ảnh (ảnh Muse tạo, ảnh bạn tải lên)"
           >
-            <ImageIcon size={14} color="#64748b" />
+            <ImageIcon size={14} className="wf-icon-library-image" />
             <span>Thư Viện Ảnh</span>
             {imageCount > 0 && <span className="wf-library-count-pill">{imageCount}</span>}
           </button>
@@ -90,7 +89,7 @@ export function WorkflowToolbar({
               className="wf-start-node-badge"
               title="Node chính là điểm bắt đầu khi bấm chạy toàn bộ quy trình"
             >
-              <Star size={12} color="#64748b" />
+              <Star size={12} className="wf-star-icon" />
               <span>Node chính: <strong>{startNodeTitle}</strong></span>
             </div>
 
@@ -109,7 +108,7 @@ export function WorkflowToolbar({
 
             <button
               type="button"
-              className="wf-btn"
+              className="wf-btn wf-btn-reset"
               onClick={onResetLayout}
               title="Khôi phục bố cục chuẩn theo bản phác thảo"
             >
@@ -119,15 +118,9 @@ export function WorkflowToolbar({
 
             <button
               type="button"
-              className={`wf-btn ${isRunning ? 'wf-btn-accent' : 'wf-btn-primary'}`}
+              className={`wf-btn ${isRunning ? 'wf-btn-running' : 'wf-btn-run'}`}
               onClick={onSimulateRun}
               title={`Chạy quy trình bắt đầu từ Node chính (${startNodeTitle})`}
-              style={{
-                background: isRunning ? '#e11d48' : '#4f46e5',
-                borderColor: isRunning ? '#be123c' : '#4338ca',
-                color: '#ffffff',
-                boxShadow: '0 1px 3px rgba(79, 70, 229, 0.25)',
-              }}
             >
               {isRunning ? (
                 <>
@@ -136,19 +129,19 @@ export function WorkflowToolbar({
                 </>
               ) : (
                 <>
-                  <Zap size={14} />
+                  <Zap size={14} className="wf-zap-icon" />
                   <span>Chạy Từ Node Chính ({startNodeTitle})</span>
                 </>
               )}
             </button>
           </>
         ) : activeTab === 'muse' ? (
-          <div className="wf-motion-active-indicator">
+          <div className="wf-motion-active-indicator wf-studio-muse">
             <span className="wf-motion-pulse-dot" />
             <span>Studio: <strong>Meta Muse Canvas</strong></span>
           </div>
         ) : (
-          <div className="wf-motion-active-indicator">
+          <div className="wf-motion-active-indicator wf-studio-motion">
             <span className="wf-motion-pulse-dot" />
             <span>Studio: <strong>Video Reference & Motion Transfer</strong></span>
           </div>

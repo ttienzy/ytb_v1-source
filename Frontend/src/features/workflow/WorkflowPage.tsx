@@ -38,7 +38,7 @@ import { MotionControlWorkspace } from './components/MotionControlWorkspace'
 import { VIDEO_LIBRARY_CHANGED } from './services/museCanvasApi.ts'
 import { MuseCanvasWorkspace } from './components/MuseCanvasWorkspace'
 import { ImageLibraryModal } from './components/ImageLibraryModal'
-import { IMAGE_LIBRARY_CHANGED, listLibraryImages } from './services/imageLibraryApi'
+import { IMAGE_LIBRARY_CHANGED, getLibraryImageCount } from './services/imageLibraryApi'
 import { StudioErrorBoundary } from '../veo-studio/components/StudioErrorBoundary'
 import * as veoApi from '../veo-studio/services/veoApi'
 import type { VeoCapabilities, VeoProject } from '../veo-studio/types'
@@ -63,7 +63,7 @@ import {
   saveGeminiDefaultPrompt,
   resetGeminiSystemPrompt,
   fetchGptDefaultPrompt,
-  fetchExportedVideos,
+  getExportedVideoCount,
   fetchPromptPresets,
   createPromptPreset,
   updatePromptPreset,
@@ -153,8 +153,8 @@ function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => v
   // Số ảnh trong Thư Viện Ảnh cho nút trên toolbar (lỗi thì bỏ qua: backend cũ chưa có API)
   useEffect(() => {
     const refresh = () =>
-      listLibraryImages()
-        .then((items) => setImageCount(items.length))
+      getLibraryImageCount()
+        .then(setImageCount)
         .catch(() => {})
     refresh()
     window.addEventListener(IMAGE_LIBRARY_CHANGED, refresh)
@@ -177,17 +177,15 @@ function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => v
   // Muse Canvas xuất video hoàn chỉnh -> cập nhật số đếm Thư Viện Video
   useEffect(() => {
     const refresh = () => {
-      fetchExportedVideos().then((items) => setExportedCount(items.length))
+      getExportedVideoCount().then(setExportedCount).catch(() => {})
     }
+    refresh()
     window.addEventListener(VIDEO_LIBRARY_CHANGED, refresh)
     return () => window.removeEventListener(VIDEO_LIBRARY_CHANGED, refresh)
   }, [])
 
-  // Load exported video count, prompt presets & default BGM tracks on mount
+  // Load prompt presets and default BGM tracks on mount
   useEffect(() => {
-    fetchExportedVideos().then((items) => {
-      setExportedCount(items.length)
-    })
     fetchPromptPresets()
       .then((presets) => {
         if (presets && presets.length > 0) {
@@ -992,7 +990,7 @@ function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => v
       await handleAnalyzeGemini(nodeId, 'gemini')
     } catch (err: any) {
       const errMsg = err?.message || 'Làm mới cookie Gemini thất bại'
-      // Làm mới cookie hỏng: vẫn là chuyện đăng nhập → giữ nút "Làm mới Cookie" để thử lại.
+      // Làm mới cookie hỏng: vẫn là chuyện đăng nhập → giữ nút "Làm mới tài khoản Gemini" để thử lại.
       setNodes((nds) =>
         nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, isRefreshingCookie: false, analysisError: errMsg, analysisNeedsLogin: true } } : n))
       )

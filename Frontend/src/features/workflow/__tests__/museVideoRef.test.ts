@@ -56,7 +56,7 @@ test('chữ thời lượng · dung lượng', () => {
   assert.equal(videoRefMeta({ durationSec: 0, size: 0 }), '')
 })
 
-test('chỉ nối vào node Ingredients: các node khác không nhận, có câu giải thích', () => {
+test('dây Video tham chiếu bị từ chối ở các node kịch bản và node ảnh', () => {
   const nodes = [
     createVideoRefNode({ x: 0, y: 0 }, 'v'),
     createScriptNode({ x: 0, y: 0 }, 'P', 'vs'),

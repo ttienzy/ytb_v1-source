@@ -7,6 +7,7 @@ import {
   buildExtractRequest,
   collectExtractInputs,
   createExtractNode,
+  createInputNode,
   createOutfitNode,
   createOutfitStarter,
   extractOutputs,
@@ -58,6 +59,22 @@ test('muse nodes: bản lưu cũ (mảng images) đổi thành 1 ảnh', () => {
   assert.equal(d.title, 'Trang phục')
   assert.equal(d.image?.path, '1.png')
   assert.equal(normalizeOutfitData(undefined).image, null)
+})
+
+test('Tách áo quần nhận cùng lúc ảnh Trang phục và Nhân vật tham chiếu ở cổng chính', () => {
+  const character = createInputNode(MUSE_NODE.character, { x: 0, y: 0 }, 'character')
+  character.data.image = ref('frame.jpg')
+  character.data.label = 'Linh'
+  const outfit = createOutfitNode({ x: 0, y: 0 }, 'outfit')
+  const extract = createExtractNode({ x: 0, y: 0 }, 'Tách áo quần', 'extract')
+  const nodes = [character, outfit, extract]
+  const edges = [museEdge(outfit.id, extract.id)]
+  const wire = museEdge(character.id, extract.id, MUSE_HANDLE.imagesOut, MUSE_HANDLE.imagesIn)
+  assert.equal(isValidMuseConnection(wire, nodes, edges), true)
+  assert.equal(isValidMuseConnection({ ...wire, targetHandle: MUSE_HANDLE.outfitsIn }, nodes, edges), false)
+  const inputs = collectExtractInputs(extract.id, nodes, [...edges, wire])
+  assert.deepEqual(inputs.map((row) => [row.label, row.image?.path]), [['Trang phục 1', undefined], ['Linh', 'frame.jpg']])
+  assert.deepEqual(buildExtractRequest(DEFAULT_MUSE_CANVAS_CONFIG, 'Tách áo quần', inputs[1]).reference_images, ['frame.jpg'])
 })
 
 test('muse nodes: đầu vào theo thứ tự dây, tên mặc định, trạng thái từng dòng', () => {
@@ -124,7 +141,6 @@ test('muse nodes: kiểm tra file ảnh trang phục', () => {
 
 import {
   JOB_SPECS,
-  createInputNode,
   createJobNode,
   createStarter,
   findOutputNodeFor,
@@ -183,7 +199,7 @@ function createOutputNodeLike(id: string) {
   return { id, type: MUSE_NODE.output, position: { x: 0, y: 0 }, data: { title: 'Ảnh kết quả', label: '', image: null, origin: null } }
 }
 
-test('muse nodes: cặp Nhân vật tham chiếu → Bảng thiết kế nhân vật, không lẫn với họ trang phục', () => {
+test('muse nodes: mẫu Nhân vật tham chiếu → Bảng thiết kế nhân vật', () => {
   const { nodes, edges } = createStarter(MUSE_NODE.characterSheet, { x: 0, y: 0 }, 'BOARD')
   const [ch, sheet] = nodes
   assert.equal(ch.type, MUSE_NODE.character)
@@ -191,11 +207,9 @@ test('muse nodes: cặp Nhân vật tham chiếu → Bảng thiết kế nhân v
   assert.equal(sheet.data.title, 'Bảng thiết kế nhân vật')
   assert.equal(edges[0].source, ch.id)
   const outfit = createOutfitNode({ x: 0, y: 0 }, 'o1')
-  const extract = createExtractNode({ x: 0, y: 0 }, 'p', 'x1')
-  const all = [ch, sheet, outfit, extract]
+  const all = [ch, sheet, outfit]
   const c = (source: string, target: string) => ({ source, target, sourceHandle: 'images', targetHandle: 'images' })
   assert.equal(isValidMuseConnection(c(outfit.id, sheet.id), all), false)
-  assert.equal(isValidMuseConnection(c(ch.id, extract.id), all), false)
   const ch2 = createInputNode(MUSE_NODE.character, { x: 0, y: 0 }, 'c2')
   assert.equal(isValidMuseConnection(c('c2', sheet.id), [...all, ch2], edges), true)
   ;(ch2.data as any).image = ref('linh.png')

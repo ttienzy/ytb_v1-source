@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, ImageDown, Loader2, XCircle } from 'lucide-react'
+import { CheckCircle2, Circle, Clapperboard, ImageDown, Loader2, XCircle } from 'lucide-react'
 import type { VeoJobOut } from '../types'
 import { getVideoStreamUrl } from '../services/veoApi'
 
@@ -26,8 +26,8 @@ export function VideoPlayer({ activeJob, onClose, onSaveLastFrameToLibrary, isEx
     return (
       <div className="veo-player-empty">
         <div className="veo-player-placeholder">
-          <span>🎬</span>
-          <p>Chọn một video từ gallery hoặc tạo video mới để xem trước tại đây</p>
+          <Clapperboard size={36} strokeWidth={1.5} aria-hidden="true" />
+          <p>Chọn video bên dưới để xem trước.</p>
         </div>
       </div>
     )

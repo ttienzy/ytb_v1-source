@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from playwright.sync_api import sync_playwright
 
-from app.core.chrome import close_chrome_gracefully  # noqa: F401 — dùng trong file + test cũ import từ đây
+from app.core.chrome import close_chrome_gracefully, find_free_cdp_port, wait_for_cdp
 from app.core.config import DATA_DIR, settings
 from app.core.storage import mark_saved, read_config, write_config
 from app.ai.image_gen.gptimage.accounts import ChatgptAccountStore
@@ -67,28 +67,6 @@ HEADER_SNIFF_JS = """
   };
 })();
 """
-
-
-def find_free_cdp_port(start_port: int = 9228) -> int:
-    """Tìm một cổng mạng còn trống để làm remote debugging port cho Chrome."""
-    for port in range(start_port, start_port + 40):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", port)) != 0:
-                return port
-    return start_port
-
-
-def wait_for_cdp(port: int, max_wait: float = 15.0) -> bool:
-    """Chờ Chrome khởi động hoàn tất và mở giao diện DevTools Protocol."""
-    deadline = time.time() + max_wait
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.0) as resp:
-                if resp.status == 200:
-                    return True
-        except Exception:
-            time.sleep(0.4)
-    return False
 
 
 _CHROME_EPOCH_OFFSET_US = 11644473600 * 1_000_000  # 1601-01-01 → 1970-01-01, micro giây

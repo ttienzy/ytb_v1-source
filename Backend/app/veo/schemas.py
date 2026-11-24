@@ -261,6 +261,13 @@ class VeoHistoryItem(BaseModel):
 # Capabilities
 # ─────────────────────────────────────────────────────────────────────────────
 
+class VeoHistoryPage(BaseModel):
+    items: list[VeoHistoryItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class VeoCapabilities(BaseModel):
     """Capabilities trả về cho Frontend — cập nhật khi xác minh runtime."""
     models: list[VeoModelInfo] = Field(default_factory=list)
@@ -338,6 +345,13 @@ class VeoImageItem(BaseModel):
     local_path: str = ""
     project_id: str = ""
     created_at: str = ""
+
+
+class VeoImagePage(BaseModel):
+    items: list[VeoImageItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class VeoImageGenerateResponse(BaseModel):

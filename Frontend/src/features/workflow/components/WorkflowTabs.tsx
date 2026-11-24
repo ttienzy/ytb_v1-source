@@ -16,22 +16,27 @@ export function WorkflowTabs({
   onTabChange,
   className = '',
 }: WorkflowTabsProps) {
-  const renderIcon = (iconName: WorkflowTabItem['iconName'], isActive: boolean) => {
-    const size = 13
-    const color = isActive ? '#0f172a' : '#64748b'
+  const renderIcon = (iconName: WorkflowTabItem['iconName'], isActive: boolean, tabId: WorkflowTabId) => {
+    const size = 14
+    let color = isActive ? '#4f46e5' : '#64748b'
+    if (isActive) {
+      if (tabId === 'motion') color = '#0284c7'
+      else if (tabId === 'muse') color = '#7c3aed'
+      else color = '#4f46e5'
+    }
 
     switch (iconName) {
       case 'film':
-        return <Film size={size} color={color} />
+        return <Film size={size} color={color} strokeWidth={isActive ? 2.2 : 1.8} />
       case 'crosshair':
-        return <Crosshair size={size} color={color} />
+        return <Crosshair size={size} color={color} strokeWidth={isActive ? 2.2 : 1.8} />
       case 'layers':
-        return <Layers size={size} color={color} />
+        return <Layers size={size} color={color} strokeWidth={isActive ? 2.2 : 1.8} />
       case 'clapperboard':
-        return <Clapperboard size={size} color={color} />
+        return <Clapperboard size={size} color={color} strokeWidth={isActive ? 2.2 : 1.8} />
       case 'sparkles':
       default:
-        return <Sparkles size={size} color={color} />
+        return <Sparkles size={size} color={color} strokeWidth={isActive ? 2.2 : 1.8} />
     }
   }
 
@@ -43,24 +48,26 @@ export function WorkflowTabs({
     >
       {tabs.map((tab) => {
         const isActive = activeTab === tab.id
+        const isNew = tab.badge === 'Mới' || tab.badgeType === 'new'
         return (
           <button
             key={tab.id}
             type="button"
             role="tab"
             aria-selected={isActive}
-            className={`wf-tab-item ${isActive ? 'active' : ''}`}
+            className={`wf-tab-item ${isActive ? 'active' : ''} wf-tab-${tab.id}`}
             onClick={() => onTabChange(tab.id)}
             title={tab.description}
           >
-            <span className="wf-tab-icon-wrap">{renderIcon(tab.iconName, isActive)}</span>
+            <span className="wf-tab-icon-wrap">{renderIcon(tab.iconName, isActive, tab.id)}</span>
             <span className="wf-tab-title">{tab.title}</span>
 
             {tab.badge && (
               <span
-                className={`wf-tab-badge wf-badge-${tab.badgeType || 'count'}`}
+                className={`wf-tab-badge ${isNew ? 'wf-badge-new' : `wf-badge-${tab.badgeType || 'count'}`}`}
                 aria-label={tab.badge}
               >
+                {isNew && <span className="wf-badge-sparkle-dot" />}
                 {tab.badge}
               </span>
             )}

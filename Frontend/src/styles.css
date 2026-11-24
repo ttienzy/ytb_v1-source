@@ -14941,9 +14941,15 @@ input[type="checkbox"],
 
 .veo-image-gallery-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
 }
+
+.veo-image-gallery-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.veo-image-gallery-status { margin: 0; color: #475569; font-size: 13px; }
+.veo-image-gallery-status[role="alert"] { color: #b91c1c; }
 
 .veo-gallery-title-wrap {
   display: flex;

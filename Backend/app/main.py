@@ -42,8 +42,9 @@ from app.motion_long.router import router as motion_long_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Khởi động Veo Bridge Service & đảm bảo các bảng SQLite sẵn sàng
-    from app.veo import service as veo_service
+    from app.veo import service as veo_service, studio_batch
     veo_service.startup()
+    studio_batch.startup()
 
     try:
         from app.voices.router import ensure_voice_table
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Dọn dẹp khi tắt server
+    studio_batch.shutdown()
     veo_service.shutdown()
 
 

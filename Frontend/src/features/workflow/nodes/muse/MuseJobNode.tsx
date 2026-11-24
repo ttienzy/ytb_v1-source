@@ -93,7 +93,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const sec = spec.secondary
   const [now, setNow] = useState(Date.now())
 
-  // Ảnh chính = node nối vào cổng chính (theo thứ tự dây): node ảnh vào cùng họ, hoặc Ảnh kết quả spec cho phép.
+  // Ảnh chính = các nguồn được spec cho phép ở cổng chính, theo thứ tự dây.
   const connections = useNodeConnections({ handleType: 'target', handleId: MUSE_HANDLE.imagesIn })
   const sourceIds = useMemo(() => connections.map((c) => c.source), [connections])
   const sources = useNodesData(sourceIds)
@@ -326,9 +326,11 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const unitCost = isGpt ? 'lượt tạo ảnh ChatGPT' : 'lượt Muse'
   const hasResults = Object.keys(data.results).length > 0
   const Icon = isCharacter ? LayoutPanelLeft : isScenePlace ? MapPin : Scissors
-  const primaryTitle = spec.primaryFromJobTypes?.length
-    ? `Nối từ node ${INPUT_SPECS[spec.inputType].title} hoặc “Ảnh kết quả” của Bảng thiết kế nhân vật (nhiều dây được)`
-    : `Nối từ node ${INPUT_SPECS[spec.inputType].title} (nhiều dây được)`
+  const primarySources = [
+    ...[spec.inputType, ...(spec.additionalInputTypes ?? [])].map((source) => INPUT_SPECS[source].title),
+    ...(spec.primaryFromJobTypes ?? []).map((source) => `“Ảnh kết quả” của ${JOB_SPECS[source].title}`),
+  ]
+  const primaryTitle = `Nối từ ${primarySources.join(' hoặc ')} (nhiều dây được)`
 
   return (
     <div className={`mc-node mc-node-extract ${isCharacter || isScenePlace ? 'mc-node-charsheet' : ''} ${selected ? 'selected' : ''}`}>

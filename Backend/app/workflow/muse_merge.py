@@ -1,4 +1,4 @@
-"""Muse Canvas → node "Ghép video": ghép các clip Flow đã tạo (Omni 1.2) thành 1 video hoàn chỉnh.
+"""Muse Canvas → node "Ghép video": ghép clip Flow, video đã cắt và video tham chiếu thành 1 video hoàn chỉnh.
 
 Chuỗi (chạy nền, có tiến độ):
   1. (tùy chọn) xóa watermark Flow TỪNG clip bằng gwr — gwr chỉ làm đúng trên clip gốc nên phải chạy TRƯỚC khi ghép;
@@ -36,8 +36,7 @@ class MergeClip(BaseModel):
     path: str = Field(..., min_length=1, max_length=1024)
     trim_start: float = Field(default=0, ge=0, le=60, description="Cắt bỏ N giây đầu clip")
     trim_end: float = Field(default=0, ge=0, le=60, description="Cắt bỏ N giây cuối clip")
-    # None = theo `remove_watermark` chung. False cho video đã cắt ở node Cắt video: đã mã hóa lại (có khi không phải video
-    # Flow), mà công cụ xóa watermark chỉ làm đúng trên clip Flow gốc — chạy vào sẽ làm hỏng cả lần ghép.
+    # None = theo `remove_watermark` chung. False để giữ nguyên video tham chiếu hoặc clip được bỏ qua xóa logo.
     remove_watermark: Optional[bool] = None
 
 
@@ -65,9 +64,9 @@ def _roots() -> list[Path]:
     from app.workflow.muse_finish import muse_video_dir
     from app.workflow.service import WORKFLOW_EXPORTS_DIR
 
-    from app.workflow.muse_cut import CUT_DIR
+    from app.workflow.muse_cut import CUT_DIR, _upload_dir
 
-    roots = [Path(veo._VEO_DATA_DIR), Path(WORKFLOW_EXPORTS_DIR), CLEAN_DIR, CUT_DIR]  # CUT_DIR: video của node Cắt video
+    roots = [Path(veo._VEO_DATA_DIR), Path(WORKFLOW_EXPORTS_DIR), CLEAN_DIR, CUT_DIR, _upload_dir()]
     muse = muse_video_dir()
     if muse:
         roots.append(Path(muse))
@@ -75,7 +74,7 @@ def _roots() -> list[Path]:
 
 
 def resolve_video(raw: str) -> Path:
-    """Chỉ nhận video nằm trong thư mục video của app (Veo / xuất / Muse); sai -> lỗi rõ ràng trước khi chạy gì."""
+    """Chỉ nhận video trong các thư mục do app quản lý, kể cả video tham chiếu tải từ máy."""
     p = Path(raw)
     if p.suffix.lower() not in VIDEO_EXT:
         raise ValueError(f"Không phải file video: {p.name}")

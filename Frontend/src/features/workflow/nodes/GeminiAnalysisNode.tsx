@@ -253,10 +253,10 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                     gap: 4,
                     cursor: 'pointer',
                   }}
-                  title="Mở Chrome ngầm 3s để cập nhật cookie mới nhất"
+                  title="Làm mới ngầm cookie các tài khoản Gemini (Cài đặt → Gemini & YouTube) rồi chạy lại"
                 >
                   <Key size={10} color="#0284c7" />
-                  Làm mới Cookie (Fast)
+                  Làm mới tài khoản Gemini
                 </button>
               )}
 

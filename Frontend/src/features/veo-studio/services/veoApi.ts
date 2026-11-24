@@ -3,10 +3,12 @@
  */
 
 import { API_URL } from '../../../shared/constants'
+import type { LibraryPage } from '../../../shared/useLibraryPage'
 import type {
   VeoBridgeStatus,
   VeoCapabilities,
   VeoHistoryItem,
+  VeoHistoryPage,
   VeoImageGenerateRequest,
   VeoImageGenerateResponse,
   VeoImageItem,
@@ -14,6 +16,7 @@ import type {
   VeoJobRequest,
   VeoProject,
 } from '../types'
+import type { VideoBatch, VideoBatchImage, VideoBatchRequest } from './videoBatchTypes'
 
 const BASE = `${API_URL}/api/veo`
 
@@ -34,6 +37,35 @@ async function responseError(resp: Response, fallback: string): Promise<Error> {
       .join('; ')
   }
   return new Error(message || `${fallback} (HTTP ${resp.status})`)
+}
+
+export async function listVideoBatches(projectId: string, signal?: AbortSignal): Promise<VideoBatch[]> {
+  const response = await fetch(`${BASE}/studio-batches?project_id=${encodeURIComponent(projectId)}`, { signal })
+  if (!response.ok) throw await responseError(response, 'Không tải được hàng đợi video')
+  return response.json()
+}
+
+export async function submitVideoBatch(request: VideoBatchRequest): Promise<VideoBatch> {
+  const response = await fetch(`${BASE}/studio-batches`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!response.ok) {
+    const error = await responseError(response, 'Không gửi được lô video')
+    throw Object.assign(error, { requestRejected: response.status >= 400 && response.status < 500 })
+  }
+  return response.json()
+}
+
+export async function changeVideoBatch(batchId: string, action: 'pause' | 'resume'): Promise<VideoBatch> {
+  const response = await fetch(`${BASE}/studio-batches/${encodeURIComponent(batchId)}/${action}`, { method: 'POST' })
+  if (!response.ok) throw await responseError(response, 'Không cập nhật được lô video')
+  return response.json()
+}
+
+export function videoBatchImageUrl(image: VideoBatchImage): string {
+  return image.source === 'library' ? getImageFileUrl(image.id) : `${BASE}/studio-batches/uploads/${encodeURIComponent(image.id)}`
 }
 
 // ─── Projects ───────────────────────────────────────────────────────────────
@@ -130,6 +162,12 @@ export async function getHistory(): Promise<VeoHistoryItem[]> {
   const resp = await fetch(`${BASE}/history`)
   if (!resp.ok) return []
   return resp.json()
+}
+
+export async function getHistoryPage(page: number, signal?: AbortSignal): Promise<VeoHistoryPage> {
+  const response = await fetch(`${BASE}/history/page?page=${page}`, { signal })
+  if (!response.ok) throw await responseError(response, 'Không tải được video đã tạo')
+  return response.json()
 }
 
 export async function deleteVideo(videoId: string): Promise<boolean> {
@@ -230,6 +268,14 @@ export async function getImages(projectId?: string | null): Promise<VeoImageItem
   const resp = await fetch(`${BASE}/images${query}`)
   if (!resp.ok) return []
   return resp.json()
+}
+
+export async function getImagesPage(page: number, projectId?: string | null, signal?: AbortSignal): Promise<LibraryPage<VeoImageItem>> {
+  const query = new URLSearchParams({ page: String(page) })
+  if (projectId) query.set('project_id', projectId)
+  const response = await fetch(`${BASE}/images/page?${query}`, { signal })
+  if (!response.ok) throw await responseError(response, 'Không tải được ảnh đã tạo')
+  return response.json()
 }
 
 export async function deleteImage(imageId: string): Promise<boolean> {

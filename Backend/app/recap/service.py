@@ -46,6 +46,7 @@ from app.discover.history import (
     record_job_start,
 )
 from app.recap import state, timing
+from app.recap import prompts as prompt_store
 from app.recap.ffmpeg import (
     concat_segments,
     cut_and_mux_segment,
@@ -155,8 +156,8 @@ def _ensure_gemini_cookie(job_id: str) -> bool:
             job_id,
             recap_status="error",
             error=(
-                f"Cookie Gemini hết hạn và tự động làm mới thất bại: {refresh_msg}. "
-                f"Vào Cài đặt → Đăng nhập Gemini (Chrome) rồi thử lại."
+                f"Không tài khoản Gemini nào làm mới được: {refresh_msg}. "
+                f"Vào Cài đặt → Gemini & YouTube: bấm “Đăng nhập lại” cho tài khoản hoặc “(+) Thêm account Gemini” rồi thử lại."
             ),
         )
         return False
@@ -218,6 +219,8 @@ async def generate(youtube_url: str, raw_bytes: bytes, raw_name: str) -> JobStat
         pass
 
     job = state.create_job(youtube_url, raw_bytes=raw_bytes, raw_name=raw_name)
+    job.prompts = prompt_store.snapshot()
+    _persist_job_meta(job)
     state.update_job(job.job_id, recap_status="running")
     await _generate_for_job(job.job_id)
     return state.get_job(job.job_id)
@@ -280,7 +283,8 @@ async def _generate_for_job(job_id: str) -> None:
                 job.youtube_url,
                 job.raw_bytes,
                 job.raw_name or "raw.txt",
-                prompt_template_path=PROMPT_PATH,
+                script_prompt=(job.prompts or prompt_store.originals().model_dump())["script"],
+                caption_prompt=(job.prompts or prompt_store.originals().model_dump())["caption"],
                 progress_callback=on_progress,
                 status_callback=on_status,
             )
@@ -345,6 +349,7 @@ def _persist_job_meta(job: JobState) -> None:
                     "voice_id": job.voice_id,
                     "polish_opts": job.polish_opts,
                     "raw_name": job.raw_name,
+                    "prompts": job.prompts,
                     "created_at": job.created_at.isoformat(),
                 },
                 ensure_ascii=False,
@@ -445,6 +450,7 @@ def rehydrate(job_id: str) -> JobState | None:
         polish_opts=meta.get("polish_opts"),
         raw_bytes=raw_bytes,
         raw_name="raw.txt" if raw_bytes else meta.get("raw_name"),
+        prompts=prompt_store.snapshot(meta["prompts"]) if meta.get("prompts") else prompt_store.originals().model_dump(),
     )
     if created_at:
         job.created_at = created_at
@@ -895,6 +901,7 @@ async def run(
     raw_name: str | None,
     voice_id: str,
     polish_opts: dict | None = None,
+    prompts: dict | None = None,
 ) -> str:
     """Trigger toàn bộ pipeline: [fetch transcript] → generate → gather(cut, voice) → merge → [polish].
 
@@ -909,7 +916,9 @@ async def run(
     if not voice_id:
         raise HTTPException(status_code=400, detail="voice_id rỗng.")
 
+    selected_prompts = prompt_store.snapshot(prompts)
     job = state.create_job(youtube_url, raw_bytes=raw_bytes, raw_name=raw_name)
+    job.prompts = selected_prompts
     # Lưu voice_id ngay để resume sau lỗi recap/transcript vẫn biết giọng đã chọn.
     state.update_job(job.job_id, recap_status="running", polish_opts=polish_opts, voice_id=voice_id)
     _persist_job_meta(state.get_job(job.job_id))
@@ -1275,6 +1284,7 @@ async def _run_one_batch_job(
     polish_opts: dict | None,
     batch_id: str | None = None,
     item_index: int | None = None,
+    prompts: dict | None = None,
 ) -> tuple[str, str]:
     """Tạo job mới và await pipeline đến khi xong (khác run() là không create_task).
 
@@ -1282,6 +1292,7 @@ async def _run_one_batch_job(
     """
     url = url.strip()
     job = state.create_job(url)
+    job.prompts = prompt_store.snapshot(prompts)
     state.update_job(job.job_id, recap_status="running", polish_opts=polish_opts, voice_id=voice_id)
     _persist_job_meta(state.get_job(job.job_id))
     try:
@@ -1336,6 +1347,7 @@ async def _run_batch_worker(batch_id: str) -> None:
             polish_opts=batch.polish_opts,
             batch_id=batch_id,
             item_index=i,
+            prompts=batch.prompts,
         )
 
         if overall in ("merged", "polished"):
@@ -1358,6 +1370,7 @@ async def _run_batch_worker(batch_id: str) -> None:
             polish_opts=batch.polish_opts,
             batch_id=batch_id,
             item_index=i,
+            prompts=batch.prompts,
         )
 
         if overall in ("merged", "polished"):
@@ -1391,6 +1404,7 @@ async def run_batch(
     urls: list[str],
     voice_id: str,
     polish_opts: dict | None = None,
+    prompts: dict | None = None,
 ) -> str:
     """Tạo batch queue và kick off worker. Trả batch_id ngay (HTTP 202).
 
@@ -1417,7 +1431,9 @@ async def run_batch(
     if not clean_urls:
         raise HTTPException(status_code=400, detail="Không có URL hợp lệ nào.")
 
+    selected_prompts = prompt_store.snapshot(prompts)
     batch = state.create_batch(clean_urls, voice_id.strip(), polish_opts)
+    batch.prompts = selected_prompts
     try:
         record_batch_queue(clean_urls)
     except Exception:

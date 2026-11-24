@@ -3,23 +3,17 @@ import {
   AlertCircle,
   ArrowDownCircle,
   CheckCircle2,
-  ExternalLink,
   Film,
-  HelpCircle,
   Info,
-  KeyRound,
   Loader2,
   RefreshCw,
   RotateCcw,
-  Save,
-  Sparkles,
   Trash2,
-  Tv,
-  Wand2,
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 import type { UpdaterStatusEvent } from '../../../vite-env'
-import type { GeminiState, YtState } from '../types'
+import type { YtState } from '../types'
+import { GeminiAccountsCard } from './GeminiAccountsCard'
 
 export function ChromeBrandIcon({ size = 15 }: { size?: number }) {
   return (
@@ -54,17 +48,6 @@ interface GeminiSectionProps {
 }
 
 export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
-  const [state, setState] = useState<GeminiState>({
-    has_cookie: false,
-    cookie_count: 0,
-    client_context_token: '',
-    app_url: 'https://gemini.google.com/app',
-  })
-  const [cookies, setCookies] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState('')
-  const [messageType, setMessageType] = useState<'success' | 'error' | 'info'>('info')
-
   const [yt, setYt] = useState<YtState>({ logged_in: false, cookie_count: 0 })
   const [ytLoading, setYtLoading] = useState(false)
   const [ytMsg, setYtMsg] = useState('')
@@ -90,19 +73,6 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
   }>({ percent: 0, bytesPerSecond: 0, transferred: 0, total: 0 })
   const [updateError, setUpdateError] = useState('')
   const [installing, setInstalling] = useState(false)
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/settings/gemini`)
-      .then(response => response.json())
-      .then(data => {
-        setState(data)
-        onCookieStatusChange?.(!!data.has_cookie)
-      })
-      .catch(() => {
-        setMessage('Không kết nối được với Backend.')
-        setMessageType('error')
-      })
-  }, [onCookieStatusChange])
 
   useEffect(() => {
     fetch(`${API_URL}/api/recap/yt/login`)
@@ -160,109 +130,6 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       return unsub
     }
   }, [])
-
-  async function save() {
-    setLoading(true)
-    setMessage('')
-    try {
-      const response = await fetch(`${API_URL}/api/settings/gemini`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cookies,
-          client_context_token: state.client_context_token,
-          app_url: state.app_url,
-        }),
-      })
-      if (!response.ok) throw new Error()
-      const next = await response.json()
-      setState(prev => ({
-        ...prev,
-        has_cookie: next.has_cookie,
-        cookie_count: next.cookie_count ?? prev.cookie_count,
-      }))
-      onCookieStatusChange?.(!!next.has_cookie)
-      setCookies('')
-      setMessage('Đã lưu cấu hình Gemini thành công.')
-      setMessageType('success')
-    } catch {
-      setMessage('Lưu cấu hình thất bại.')
-      setMessageType('error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  /** Bắt lại khung request Gemini từ profile đã đăng nhập — chỉ cần khi Gemini đổi giao thức. */
-  async function captureTemplate() {
-    setLoading(true)
-    setMessage('Đang mở Chrome (profile Gemini) để bắt khung request — không tạo lịch sử chat...')
-    setMessageType('info')
-    try {
-      const response = await fetch(`${API_URL}/api/settings/gemini/capture-template`, { method: 'POST' })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Không cập nhật được template Gemini')
-      setState(prev => ({ ...prev, template_source: 'captured', template_saved_at: result.template_saved_at }))
-      setMessage('Đã cập nhật template Gemini từ phiên đăng nhập trên máy này.')
-      setMessageType('success')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Không cập nhật được template Gemini.')
-      setMessageType('error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function loginChrome() {
-    setLoading(true)
-    setMessage('Đang khởi động Chrome. Vui lòng đăng nhập Google một lần...')
-    setMessageType('info')
-    try {
-      const response = await fetch(`${API_URL}/api/settings/gemini/login`, {
-        method: 'POST',
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
-      setState(prev => ({
-        ...prev,
-        has_cookie: true,
-        cookie_count: result.cookie_count,
-      }))
-      onCookieStatusChange?.(true)
-      setMessage('Đã đăng nhập và tự động lưu cookie Gemini thành công!')
-      setMessageType('success')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Đăng nhập thất bại.')
-      setMessageType('error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function resetGeminiCookie() {
-    if (!window.confirm('Xóa cookie Gemini đã lưu? Bạn sẽ cần đăng nhập lại trước khi chạy Gemini.')) {
-      return
-    }
-    setLoading(true)
-    setMessage('')
-    try {
-      const response = await fetch(`${API_URL}/api/settings/gemini`, {
-        method: 'DELETE',
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Xóa cookie Gemini thất bại.')
-      setState(prev => ({ ...prev, has_cookie: false, cookie_count: 0, saved_at: undefined }))
-      setCookies('')
-      onCookieStatusChange?.(false)
-      setMessage('Đã xóa cookie Gemini. Profile Chrome và template vẫn được giữ lại.')
-      setMessageType('success')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Xóa cookie Gemini thất bại.')
-      setMessageType('error')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   async function loginYt() {
     setYtLoading(true)
@@ -369,169 +236,8 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
 
   return (
     <div className="gemini-settings-container">
-      {/* ── CARD 1: GEMINI HIGHLIGHT VIDEO ── */}
-      <div className="gemini-card">
-        {/* Header with Title and Connection Badge */}
-        <div className="gemini-card-header">
-          <div className="gemini-card-title-group">
-            <div className="gemini-badge-icon">
-              <Sparkles size={16} />
-            </div>
-            <div>
-              <h3 className="gemini-title">Gemini (Highlight Video)</h3>
-              <p className="gemini-subtitle">
-                Kết nối Gemini Web miễn phí bằng session cookie từ gemini.google.com
-              </p>
-            </div>
-          </div>
-
-          <div className="gemini-header-status">
-            {state.has_cookie ? (
-              <span className="gemini-status-pill connected">
-                <span className="status-dot-pulse" />
-                <CheckCircle2 size={13} />
-                <span>Đã có Cookie</span>
-              </span>
-            ) : (
-              <span className="gemini-status-pill disconnected">
-                <span className="status-dot-idle" />
-                <span>Chưa có Cookie</span>
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Form Body */}
-        <div className="gemini-card-body">
-          {/* Cookie Input Row */}
-          <div className="gemini-form-group">
-            <div className="gemini-label-row">
-              <label className="gemini-field-label">
-                Session Cookies
-                <span className="gemini-field-sub">
-                  {state.has_cookie ? ' (Đã lưu — dán chuỗi mới nếu cần thay đổi)' : ' (Dán cookie từ DevTools)'}
-                </span>
-              </label>
-            </div>
-            <textarea
-              className="gemini-textarea"
-              rows={2}
-              value={cookies}
-              onChange={e => setCookies(e.target.value)}
-              placeholder={
-                state.has_cookie
-                  ? '•••••••••••••••••••••••••••••••• (Cookie đã được lưu an toàn)'
-                  : 'Dán toàn bộ chuỗi cookie của gemini.google.com vào đây...'
-              }
-            />
-          </div>
-
-          {/* Grid inputs for Token and App URL */}
-          <div className="gemini-form-grid">
-            <div className="gemini-form-group">
-              <label className="gemini-field-label">
-                Client Context Token
-                <span className="gemini-field-sub"> (Chỉ cần khi upload file)</span>
-              </label>
-              <input
-                className="gemini-input"
-                value={state.client_context_token}
-                onChange={e =>
-                  setState(prev => ({ ...prev, client_context_token: e.target.value }))
-                }
-                placeholder="Lấy từ DevTools Network (không bắt buộc với link YouTube)"
-              />
-            </div>
-
-            <div className="gemini-form-group">
-              <label className="gemini-field-label">
-                App URL
-                <span className="gemini-field-sub"> (Mặc định)</span>
-              </label>
-              <input
-                className="gemini-input"
-                value={state.app_url}
-                onChange={e =>
-                  setState(prev => ({ ...prev, app_url: e.target.value }))
-                }
-                placeholder="https://gemini.google.com/app"
-              />
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="gemini-action-bar">
-            <button
-              type="button"
-              className="btn-gemini-primary"
-              onClick={save}
-              disabled={loading}
-            >
-              {loading ? <Loader2 size={14} className="spin-icon" /> : <Save size={14} />}
-              <span>Lưu cấu hình</span>
-            </button>
-
-            <button
-              type="button"
-              className="btn-gemini-chrome"
-              onClick={loginChrome}
-              disabled={loading}
-            >
-              <ChromeBrandIcon size={15} />
-              <span>Đăng nhập Gemini (Chrome)</span>
-            </button>
-
-            {state.has_cookie && (
-              <button
-                type="button"
-                className="btn-gemini-chrome"
-                onClick={captureTemplate}
-                disabled={loading}
-                title={state.template_source === 'captured'
-                  ? `Template bắt trên máy này${state.template_saved_at ? ` lúc ${new Date(state.template_saved_at).toLocaleString('vi-VN')}` : ''}. Bấm để bắt lại khi Gemini đổi giao thức.`
-                  : 'Đang dùng template đóng gói theo app. Chỉ cần bấm khi gọi Gemini báo lỗi lạ dù cookie còn tốt (Gemini đổi giao thức).'}
-              >
-                <Wand2 size={14} />
-                <span>Cập nhật template Gemini</span>
-              </button>
-            )}
-
-            {state.has_cookie && (
-              <button
-                type="button"
-                className="btn-gemini-danger"
-                onClick={resetGeminiCookie}
-                disabled={loading}
-              >
-                <Trash2 size={14} />
-                <span>Reset cookie</span>
-              </button>
-            )}
-
-            {message && (
-              <div className={`gemini-inline-message ${messageType}`}>
-                {messageType === 'success' && <CheckCircle2 size={14} />}
-                {messageType === 'error' && <AlertCircle size={14} />}
-                {messageType === 'info' && <Info size={14} />}
-                <span>{message}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Instructions Box */}
-          <div className="gemini-guide-box">
-            <HelpCircle size={15} className="guide-icon" />
-            <div className="guide-content">
-              <div className="guide-step">
-                <strong>Cách 1 (Khuyên dùng):</strong> Nhấn <em>"Đăng nhập Gemini (Chrome)"</em> → Chrome tự mở để đăng nhập 1 lần, tool sẽ tự động thu nạp và duy trì cookie.
-              </div>
-              <div className="guide-step">
-                <strong>Cách 2 (Thủ công):</strong> Mở DevTools trên tab <code>gemini.google.com</code>, copy cookie và dán vào ô trên rồi nhấn <em>"Lưu cấu hình"</em>.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ── CARD 1: TÀI KHOẢN GEMINI (nhiều account như ChatGPT) ── */}
+      <GeminiAccountsCard onStatusChange={onCookieStatusChange} />
 
       {/* ── CARD 2: YOUTUBE RECAP COOKIE FALLBACK ── */}
       <div className="gemini-card">

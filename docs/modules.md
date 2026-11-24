@@ -27,8 +27,8 @@ Mọi trang theo cùng một khuôn: `Frontend/src/features/<trang>/` gọi `htt
 Xem [campaign-engine.md](campaign-engine.md).
 
 ### Veo Studio (`veo-studio`) — *Cấu trúc*
-- **Làm gì:** tạo video/ảnh trực tiếp qua Flow (text-to-video, Frames, Ingredients), thư viện clip đã tạo, project Flow.
-- **Frontend:** `features/veo-studio/` (`VeoStudioPage`, `components/`, `services/veoApi.ts`, `ingredientPrompt`, `waitForFrameJob`). Test: `npm run test:veo`.
+- **Làm gì:** tạo ảnh và tạo video hàng loạt qua Flow. Mỗi video dùng Omni 1.2 Ingredients, gồm một ảnh chính, một prompt, tối đa hai ảnh tham chiếu thêm và cấu hình 3–15 giây.
+- **Frontend:** `features/veo-studio/` (`VeoStudioPage`, `VideoBatchTab`, `TextToImageTab`, `services/veoApi.ts`). Test: `npm run test:veo`.
 - **Backend:** `app/veo/` → [flow-integration.md](flow-integration.md).
 
 ### Muse Studio (`muse-studio`) — *Cấu trúc*
@@ -105,7 +105,7 @@ Xem [campaign-engine.md](campaign-engine.md).
 - Trang có 4 tab: lịch đăng (`PublishingCalendarTab`, dữ liệu từ `/api/publisher-monitor/calendar-events`), Studio (lịch sử Recap qua `/api/recap/jobs`, nghe lại giọng từng đoạn, đăng; có nhánh `recap`/`media`), Pippit, YouTube. Không có API riêng cho "Lịch sử".
 
 ### Cài đặt (`settings`) — *Sâu* (cấu trúc tab)
-- 9 tab (xem [README gốc](../README.md) mục 6). Gemini: cookie dán tay hoặc “Đăng nhập Gemini (Chrome)” (Chrome thật `settings.chrome_executable` + CDP, profile `ChromeProfile`, đóng êm bằng `app/core/chrome.py` để profile giữ phiên). Khung request Gemini (`inner_template`, 97 trường) đi kèm app ở `Backend/resources/gemini/inner_template.json` (`app/ai/gemini/template.py`); bản bắt trên máy (nút “Cập nhật template Gemini”, `POST /api/settings/gemini/capture-template`, `ai/gemini/capture.py`) được ưu tiên. Lỗi đăng nhập/cookie ở `/api/workflow/gemini/analyze` trả 401 (node Phân tích chỉ gợi ý “Làm mới Cookie” cho mã này). ChatGPT: `app/ai/image_gen/` (`/api/settings/image-gen`): nhiều tài khoản, tự xoay khi hết hạn mức ảnh, làm mới cookie bằng profile Chrome. Cập nhật app: `electron-updater` qua `window.desktop.*` (`preload.ts`).
+- 9 tab (xem [README gốc](../README.md) mục 6). Gemini: **nhiều tài khoản như ChatGPT** — kho `gemini_accounts.json` (`app/ai/gemini/accounts.py`, `GeminiAccountStore` kế thừa `RotatingAccountStore`), mỗi tài khoản một profile Chrome riêng `gemini-profiles/gemini-<ms>` (cổng CDP từ 9400); API `/api/settings/gemini` (GET danh sách), `…/accounts/login` (POST thêm account, kèm `{account_id}` = đăng nhập lại), `…/accounts/{id}/refresh` (làm mới ngầm bằng profile ấm), DELETE `…/accounts/{id}`, `…/capture-template`. `pool.failover` (`pool.py`) xoay tài khoản: hết phiên (đã thử làm mới) → `error`, chạm giới hạn tốc độ → `exhausted` (cooldown 30 phút, còn account khác thì chuyển ngay không chờ). Mọi đường gọi Gemini (`recap._call_gemini_stream`, `workflow.execute_gemini_analysis`) đi qua pool. Cookie Gemini cũ trong `config.json` được chuyển một lần thành account đầu tiên (profile `ChromeProfile`). Đóng Chrome êm bằng `app/core/chrome.py` để profile giữ phiên. Khung request Gemini (`inner_template`, 97 trường) đi kèm app ở `Backend/resources/gemini/inner_template.json` (`app/ai/gemini/template.py`); bản bắt trên máy (nút “Cập nhật template Gemini”, `ai/gemini/capture.py`) được ưu tiên. Lỗi đăng nhập/hết account ở `/api/workflow/gemini/analyze` trả 401 (node Phân tích chỉ gợi ý “Làm mới tài khoản Gemini” cho mã này). ChatGPT: `app/ai/image_gen/` (`/api/settings/image-gen`): nhiều tài khoản, tự xoay khi hết hạn mức ảnh, làm mới cookie bằng profile Chrome. Cập nhật app: `electron-updater` qua `window.desktop.*` (`preload.ts`).
 - Cấu hình lưu `config.json` qua `read_config`/`write_config` (`app/core/storage.py`).
 
 ### Cẩm nang trong app (`help`)

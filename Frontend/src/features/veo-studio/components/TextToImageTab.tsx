@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { LibraryPagination } from '../../../shared/LibraryPagination'
+import { useLibraryPage } from '../../../shared/useLibraryPage'
 import {
   Sparkles,
   Download,
@@ -197,8 +199,14 @@ export function TextToImageTab({
   }
 
   // Gallery state
-  const [images, setImages] = useState<VeoImageItem[]>([])
-  const [loadingImages, setLoadingImages] = useState(false)
+  const [imageRevision, setImageRevision] = useState(0)
+  const projectId = activeProject?.id
+  const fetchImagePage = useCallback((page: number, signal: AbortSignal) => api.getImagesPage(page, projectId, signal), [projectId])
+  const { data: imagePage, loading: loadingImages, error: imageListError, load: loadImages } = useLibraryPage(fetchImagePage, {
+    refreshKey: imageRevision + (imageRefreshTrigger ?? 0),
+  })
+  const images = imagePage?.items ?? []
+  const imageHeader = useRef<HTMLDivElement>(null)
   const [previewImage, setPreviewImage] = useState<VeoImageItem | null>(null)
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -232,26 +240,6 @@ export function TextToImageTab({
       setDownloadingId(null)
     }
   }
-
-  // Load images
-  const loadImages = async () => {
-    setLoadingImages(true)
-    try {
-      let list = await api.getImages(activeProject?.id)
-      if ((!list || list.length === 0) && !activeProject?.id) {
-        list = await api.getImages()
-      }
-      setImages(list || [])
-    } catch {
-      // ignore
-    } finally {
-      setLoadingImages(false)
-    }
-  }
-
-  useEffect(() => {
-    loadImages()
-  }, [activeProject?.id, imageRefreshTrigger])
 
   // Handle single generation (Non-blocking async task)
   const handleGenerateSingle = () => {
@@ -302,7 +290,7 @@ export function TextToImageTab({
       try {
         const res = await api.generateImages(req)
         if (res.ok && res.images.length > 0) {
-          setImages((prev) => [...res.images, ...prev])
+          setImageRevision((revision) => revision + 1)
           handleUpdateTask(taskId, {
             status: 'completed',
             completedCount: res.images.length,
@@ -398,7 +386,7 @@ export function TextToImageTab({
           if (res.ok && res.images.length > 0) {
             completedImages += res.images.length
             allBatchImages.push(...res.images)
-            setImages((prev) => [...res.images, ...prev])
+            setImageRevision((revision) => revision + 1)
             handleUpdateTask(taskId, { completedCount: completedImages, imageItems: allBatchImages })
           }
           if (res.error || !res.images.length) {
@@ -432,11 +420,11 @@ export function TextToImageTab({
 
   const handleDelete = async (id: string) => {
     try {
-      await api.deleteImage(id)
-      setImages((prev) => prev.filter((img) => img.id !== id))
+      if (!await api.deleteImage(id)) throw new Error('Không xóa được ảnh đã chọn.')
+      setImageRevision((revision) => revision + 1)
       if (previewImage?.id === id) setPreviewImage(null)
-    } catch {
-      // ignore
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : 'Không xóa được ảnh đã chọn.')
     }
   }
 
@@ -710,19 +698,23 @@ export function TextToImageTab({
 
       {/* ─── Gallery Section ─── */}
       <div className="veo-image-gallery-section">
-        <div className="veo-image-gallery-header">
+        <div ref={imageHeader} className="veo-image-gallery-header">
           <div className="veo-gallery-title-wrap">
             <ImageIcon size={16} className="veo-gallery-icon" />
             <span className="veo-gallery-title">THƯ VIỆN HÌNH ẢNH ĐÃ TẠO</span>
-            <span className="veo-gallery-badge">{images.length}</span>
+            {imagePage && <span className="veo-gallery-badge">{imagePage.total}</span>}
           </div>
-          <button type="button" className="veo-btn-refresh" onClick={loadImages} disabled={loadingImages}>
-            <RefreshCw size={13} className={loadingImages ? 'veo-spin' : ''} />
-            <span>Làm mới</span>
-          </button>
+          <div className="veo-image-gallery-actions">
+            <LibraryPagination data={imagePage} label="Phân trang ảnh đã tạo" loading={loadingImages} onPage={(page) => void loadImages(page)} />
+            <button type="button" className="veo-btn-refresh" onClick={() => void loadImages()} disabled={loadingImages}>
+              <RefreshCw size={13} className={loadingImages ? 'veo-spin' : ''} />
+              <span>Làm mới</span>
+            </button>
+          </div>
         </div>
 
-        {images.length === 0 ? (
+        {imageListError && <p className="veo-image-gallery-status" role="alert">{imageListError}</p>}
+        {!imagePage && loadingImages ? <p className="veo-image-gallery-status" role="status">Đang tải ảnh…</p> : imagePage?.total === 0 ? (
           <div className="veo-image-empty-pro">
             <div className="veo-empty-icon-wrap">
               <Compass size={28} />
@@ -747,7 +739,7 @@ export function TextToImageTab({
               ))}
             </div>
           </div>
-        ) : (
+        ) : images.length > 0 && (
           <div className="veo-image-grid">
             {images.map((item) => (
               <div key={item.id} className="veo-image-card">
@@ -778,7 +770,7 @@ export function TextToImageTab({
                       <button
                         type="button"
                         className="veo-overlay-action-btn highlight"
-                        title="Tạo video từ ảnh này (I2V)"
+                        title="Thêm vào lô video"
                         onClick={(e) => {
                           e.stopPropagation()
                           onSendToVideo(item)
@@ -852,10 +844,10 @@ export function TextToImageTab({
                         type="button"
                         className="veo-card-action-btn video-btn"
                         onClick={() => onSendToVideo(item)}
-                        title="Chuyển sang làm Video (I2V)"
+                        title="Thêm vào lô video"
                       >
                         <Film size={12} />
-                        <span>Tạo Video</span>
+                        <span>Thêm vào lô video</span>
                       </button>
                     )}
                   </div>
@@ -864,6 +856,10 @@ export function TextToImageTab({
             ))}
           </div>
         )}
+        {images.length > 6 && <LibraryPagination data={imagePage} label="Phân trang ở cuối danh sách ảnh đã tạo" loading={loadingImages} onPage={(page) => {
+          void loadImages(page)
+          imageHeader.current?.scrollIntoView({ block: 'start' })
+        }} />}
       </div>
 
       {/* ─── Lightbox Modal ─── */}
@@ -952,7 +948,7 @@ export function TextToImageTab({
                     }}
                   >
                     <Film size={14} />
-                    <span>Tạo Video Từ Ảnh Này</span>
+                    <span>Thêm vào lô video</span>
                   </button>
                 )}
 

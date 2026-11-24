@@ -136,15 +136,13 @@ def chrome(monkeypatch, tmp_path):
     monkeypatch.setattr(G.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(G, "sync_playwright", lambda: FakePlaywright(FakeBrowser(FakeContext(c.cookies, c.pages))))
     monkeypatch.setattr(G, "_session_valid", lambda header, ua: c.valid)
-    monkeypatch.setattr(G, "read_config", lambda: {"gemini": {}})
-    monkeypatch.setattr(G, "write_config", lambda cfg: c.saved.update(cfg["gemini"]))
     return c
 
 
 def run(**kw):
     steps: list[str] = []
     try:
-        res = G.login_and_save_cookie(on_step=steps.append, **kw)
+        res = G.capture_session(G.settings.chrome_profile_dir, on_step=steps.append, **kw)
         return res, steps, None
     except HTTPException as exc:
         return None, steps, exc
@@ -152,9 +150,9 @@ def run(**kw):
 
 def test_happy_path_saves_verified_cookie_and_reports_steps(chrome):
     res, steps, err = run()
-    assert err is None and res["ok"] and res["cookie_count"] == 1
-    assert chrome.saved["cookies"] == "SID=abc" and chrome.saved["user_agent"] == "Mozilla/5.0 FakeUA"
-    assert steps == ["Mở Chrome (profile Gemini)", "Kết nối Chrome", "Đọc phiên đăng nhập", "Lưu cookie"]
+    assert err is None and res["cookie_count"] == 1
+    assert res["cookies"] == "SID=abc" and res["user_agent"] == "Mozilla/5.0 FakeUA"
+    assert steps == ["Mở Chrome (profile Gemini)", "Kết nối Chrome", "Đọc phiên đăng nhập", "Đọc tài khoản"]
     # Đóng Chrome do mình mở bằng CDP Browser.close (Chrome ghi cookie đăng nhập xuống profile), KHÔNG TerminateProcess:
     # trước 2026-11-24 giết cứng → máy mới đăng nhập xong, lần sau profile vẫn chưa đăng nhập.
     assert CDP_CALLS == ["Browser.close"]
@@ -172,7 +170,7 @@ def test_existing_chrome_instance_is_reused_when_new_process_exits(chrome):
     # Tiến trình mới thoát (giao việc cho Chrome đang chạy) nhưng CDP vẫn lên → vẫn dùng được, không báo "bị đóng"
     chrome.proc_exited, chrome.cdp_up = True, True
     res, _, err = run()
-    assert err is None and res["ok"]
+    assert err is None and res["cookies"] == "SID=abc"
     assert CDP_CALLS == []  # Chrome không do app mở → chỉ ngắt kết nối, không tắt cửa sổ của người dùng
 
 
@@ -194,21 +192,21 @@ def test_not_logged_in_waits_for_user_then_reports_login_hint(chrome):
     chrome.cookies = []  # profile chưa đăng nhập
     chrome.pages = [FakePage("https://accounts.google.com/signin")]
     res, steps, err = run(login_timeout=0)
-    assert err.status_code == 408 and "Cài đặt → Đăng nhập Gemini" in err.detail
+    assert err.status_code == 408 and "(+) Thêm account Gemini" in err.detail
     assert any(s.startswith("Chưa đăng nhập: hãy đăng nhập Google trong cửa sổ Chrome (còn 0s)") for s in steps)
 
 
 def test_stale_cookie_is_not_saved(chrome):
     chrome.valid = False  # có cookie nhưng Google không nhận (hết hạn/đã đăng xuất)
     res, steps, err = run(login_timeout=0)
-    assert err.status_code == 408 and chrome.saved == {}  # KHÔNG lưu cookie hỏng (trước đây vẫn lưu rồi pipeline lỗi)
+    assert err.status_code == 408 and res is None  # KHÔNG trả cookie hỏng (trước đây vẫn lưu rồi pipeline lỗi)
     assert any("Chờ Gemini xác nhận phiên đăng nhập" in s for s in steps)
 
 
 def test_unknown_validity_due_to_network_does_not_block(chrome):
     chrome.valid = None  # không kiểm tra được (mạng) → vẫn lưu, để bước gọi Gemini báo lỗi mạng rõ ràng
     res, _, err = run()
-    assert err is None and res["ok"] and chrome.saved["cookies"] == "SID=abc"
+    assert err is None and res["cookies"] == "SID=abc"
 
 
 def test_chrome_closed_by_user_midway_is_reported(chrome):

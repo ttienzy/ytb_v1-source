@@ -4,8 +4,8 @@ export const veoStudioPageDoc: HelpDoc = {
   pageId: 'Veo Studio',
   title: 'Veo Studio (Google Flow)',
   summary:
-    'Xưởng tạo video và ảnh AI trực tiếp qua Google Flow: viết kịch bản nhiều cảnh để tạo video (Văn bản sang Video), tạo ảnh bằng Nano Banana, biến ảnh thành video, và theo dõi tình trạng cầu nối Flow. Mỗi lần tạo video tốn credit Flow thật.',
-  verifiedAt: '2026-11-12',
+    'Tạo video hàng loạt từ các cặp ảnh và prompt bằng Omni 1.2 Flash, tạo ảnh bằng Nano Banana và theo dõi cầu nối Google Flow. Mỗi video tạo ra sử dụng credit Flow.',
+  verifiedAt: '2026-11-24',
   requires: [
     {
       label: 'Extension Flow đã nạp và tab Google Flow đang đăng nhập',
@@ -29,31 +29,26 @@ export const veoStudioPageDoc: HelpDoc = {
     },
     {
       title: 'Tạo video hoặc ảnh',
-      do: 'Tab “Tạo Video”: chọn Model Video, dán kịch bản (mỗi video bắt đầu bằng số thứ tự 1., 2., …) hoặc “Tải mẫu kịch bản”, chọn số biến thể rồi chạy. Tab “Tạo Ảnh (Studio)”: nhập prompt, chọn model Nano Banana và khổ ảnh.',
+      do: 'Tab “Tạo video hàng loạt”: thêm ảnh chính, dùng “Dán nhiều prompt” rồi bấm “Đưa vào hàng đợi”. Tab “Tạo Ảnh (Studio)”: nhập prompt, chọn model Nano Banana và khổ ảnh.',
       result: 'Video/ảnh xuất hiện trong thư viện; tải MP4/ảnh hoặc dùng tiếp.',
     },
   ],
   areas: [
     {
       id: 'tao-video',
-      name: 'Tab Tạo Video (Văn bản sang Video)',
-      what: 'Dán kịch bản nhiều cảnh vào trình soạn kịch bản. Chọn “Chế độ phân tách”: mỗi mục thành một video hoàn chỉnh, hoặc tách từng mốc thời gian (0:00-0:02, 0:02-0:08) thành cảnh riêng. Có tùy chọn gắn tên món/chủ đề vào đầu prompt, lọc bỏ các dòng Text:/Music:, và tự khớp thời lượng 4/6/8/10 giây theo mốc thời gian. Mỗi cảnh có nút xem video, tải về, nhân bản, thử lại, xóa.',
+      name: 'Tab Tạo video hàng loạt',
+      what: 'Mỗi mục dùng một ảnh chính, một prompt và tối đa hai ảnh tham chiếu thêm để tạo một video bằng Omni 1.2 Flash. Ảnh chính được gửi đầu tiên trong danh sách Ingredients.',
       how: [
-        'Chọn Model Video (cấu hình T2V do Backend cung cấp); chưa có thì chạy sẽ báo “Vui lòng chọn cấu hình Model trước khi chạy kịch bản!”.',
-        'Chọn số biến thể (1–4) cho mỗi cảnh và mức chạy song song.',
-        'Trạng thái gửi: “Đang gửi yêu cầu (giải CAPTCHA)…” → “Flow đã nhận token; đang tạo video…” → “Đã hoàn tất video!”.',
+        'Đặt tỷ lệ, độ phân giải và độ dài 3–15 giây ở “Cấu hình chung”. Khi gửi lô, hệ thống lưu cấu hình vào từng mục.',
+        'Có thể chọn nhiều ảnh chính cùng lúc, rồi đổi thứ tự bằng mũi tên ↑ ↓. Đầu vào mỗi mục cần đủ ảnh chính và prompt.',
+        '“Dán nhiều prompt” ghép lần lượt theo thứ tự mục. Chọn mỗi dòng một prompt, mỗi đoạn một prompt (cách nhau bằng dòng trống), hoặc “Danh sách đánh số” (1. …, 2. …). Điền đủ số mục cần điền. Nếu muốn thay prompt đã có, chọn “Thay cả prompt đã có”.',
+        'Backend xử lý từng mục theo thứ tự. “Tạm dừng mục chờ” để mục đang chạy hoàn tất rồi dừng. Khi có mục lỗi hoặc backend khởi động lại, bấm “Tiếp tục mục chờ” để chạy các mục còn lại.',
       ],
     },
     {
       id: 'tao-anh',
       name: 'Tab Tạo Ảnh (Studio)',
-      what: 'Tạo ảnh qua Google Flow bằng các model Nano Banana, Nano Banana 2, Nano Banana 2 Lite và Nano Banana Pro (nhanh/rẻ đến chất lượng cao nhất). Chọn khổ: Ngang 1376×768, Dọc Shorts/TikTok 768×1376, Vuông 1024×1024, Dọc chân dung, Màn ảnh truyền thống. Nhập danh sách kịch bản ảnh, mỗi cảnh một dòng hoặc đánh số 1., 2. Từ ảnh đã tạo có thể “Tạo Video Từ Ảnh Này”, tải ảnh về hoặc xóa watermark.',
-    },
-    {
-      id: 'anh-sang-video',
-      name: 'Tab Ảnh sang Video',
-      what: 'Biến ảnh thành video: chọn Frame 1 (khung hình bắt đầu) và có thể thêm khung hình kết thúc (Start → End), nhập prompt chuyển động và gửi. Cần Frame 1 trước khi chạy.',
-      tip: 'Có thể “Lưu frame cuối vào Thư viện” từ một video để làm khung bắt đầu của đoạn tiếp theo.',
+      what: 'Tạo ảnh qua Google Flow bằng các model Nano Banana. Thư viện ảnh đã tạo hiển thị tối đa 50 ảnh mỗi trang. Có thể “Thêm vào lô video” từ ảnh đã tạo để đưa ảnh và prompt sang mục mới trong danh sách video.',
     },
     {
       id: 'he-thong-bridge',
@@ -63,12 +58,12 @@ export const veoStudioPageDoc: HelpDoc = {
     {
       id: 'ket-qua',
       name: 'Xem và dùng video đã tạo',
-      what: 'Xem trong trình phát, “Tải video MP4”, “Chuyển sang Video Editor” (mở trang Video để chỉnh), hoặc “Lên lịch Youtube” để đăng.',
+      what: 'Khu “Video đã tạo” hiển thị tối đa 50 video mỗi trang. Dùng mũi tên để đổi trang và bấm vào ảnh xem trước để phát. Trên mỗi thẻ có nút tải video, lưu khung hình cuối, chuyển sang Video Editor, lên lịch đăng và xóa video.',
     },
   ],
   concepts: [
     { term: 'Project (Flow)', meaning: 'Không gian làm việc trong Google Flow chứa video/ảnh bạn tạo; mọi tác vụ phải thuộc một project.' },
-    { term: 'Biến thể', meaning: 'Số phiên bản tạo ra cho cùng một prompt; mỗi biến thể tốn credit riêng.' },
+    { term: 'Lô video', meaning: 'Danh sách các mục tạo video được gửi cùng lúc và xử lý theo thứ tự.' },
     { term: 'Bridge', meaning: 'Cầu nối cục bộ giữa app và extension Chrome đang điều khiển tab Google Flow.' },
   ],
   problems: [
@@ -91,8 +86,8 @@ export const veoStudioPageDoc: HelpDoc = {
       fix: 'Bấm “Tạo Project” (góc trên bên phải) hoặc chọn một project có sẵn.',
     },
     {
-      symptom: 'Báo “Kịch bản chưa có phân cảnh nào để chạy”',
-      fix: 'Dán kịch bản (đánh số 1., 2., …) hoặc bấm “Tải mẫu kịch bản”.',
+      symptom: 'Nút “Đưa vào hàng đợi” bị khóa',
+      fix: 'Chờ tải ảnh xong và điền đủ ảnh chính, prompt cho từng mục.',
     },
     {
       symptom: 'Ảnh còn watermark',

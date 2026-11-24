@@ -75,7 +75,7 @@ test('cổng: Nhân vật = bảng thiết kế / nhân vật tham chiếu; Bố
   assert.equal(autoMuseConnection('b1', 'source', MUSE_HANDLE.imageOut, 'sp', nodes, [])?.targetHandle, MUSE_HANDLE.imagesIn)
 })
 
-test('các node cũ giữ nguyên luật nối', () => {
+test('luật nối của các node ảnh vào Bảng thiết kế và Tách áo quần', () => {
   const nodes = [
     input(MUSE_NODE.character, 'ch'),
     input(MUSE_NODE.outfit, 'of'),
@@ -92,7 +92,7 @@ test('các node cũ giữ nguyên luật nối', () => {
   assert.equal(ok('b1', 'sheet', MUSE_HANDLE.imageOut, MUSE_HANDLE.imagesIn), false)
   assert.equal(ok('b1', 'sheet', MUSE_HANDLE.imageOut, MUSE_HANDLE.outfitsIn), false)
   assert.equal(ok('sc', 'sheet', MUSE_HANDLE.imagesOut, MUSE_HANDLE.imagesIn), false)
-  assert.equal(ok('ch', 'ext', MUSE_HANDLE.imagesOut, MUSE_HANDLE.imagesIn), false)
+  assert.equal(ok('ch', 'ext', MUSE_HANDLE.imagesOut, MUSE_HANDLE.imagesIn), true)
   assert.equal(ok('of', 'sheet', MUSE_HANDLE.imagesOut, MUSE_HANDLE.imagesIn), false)
 })
 

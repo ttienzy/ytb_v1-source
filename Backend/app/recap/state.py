@@ -39,6 +39,7 @@ class JobState:
     error: str | None = None
     raw_bytes: bytes | None = None   # transcript gốc (giữ để re-run nếu lỗi)
     raw_name: str | None = None
+    prompts: dict | None = None  # validated snapshot used by this job, including resume
     job_dir: str | None = None       # thư mục media (Data/Downloads/{job_id})
     clips: list[str] | None = None   # ["clip_0.mp4", ...] — tên file (Phase B cut)
     overspeed: list[int] | None = None  # idx VO bị nén mạnh (Phase B voice)
@@ -117,6 +118,7 @@ class BatchState:
     items: list[BatchItem]           # list URL theo thứ tự submit
     voice_id: str
     polish_opts: dict | None = None
+    prompts: dict | None = None
     status: str = "idle"             # idle | running | stopped | done
     current_index: int = 0           # index đang xử lý (0-based)
     stop_requested: bool = False     # True khi user nhấn "Dừng batch"

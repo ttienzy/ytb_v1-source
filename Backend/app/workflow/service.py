@@ -15,14 +15,18 @@ import subprocess
 
 import uuid
 
+from app.ai.gemini import pool
 from app.ai.gemini.recap import (
     _fresh_tokens,
     _gemini_config,
     _upload_file,
     _auto_refresh_cookies,
+    GeminiAuthError,
+    GeminiRateLimitError,
     RecapConfigError,
 )
 from app.core.config import DATA_DIR, PROMPTS_DIR, TOOLS_DIR
+from app.core.pagination import paginate_items
 from app.core.storage import read_config, write_config
 from app.recap.ffmpeg import concat_segments, ffprobe_duration
 from app.workflow.schemas import (
@@ -251,38 +255,12 @@ def execute_chatgpt_vision_analysis(prompt: str, images: list[str]) -> str:
     return text
 
 
-def execute_gemini_analysis(
-    prompt: str,
-    images: list[str],
-    allow_refresh: bool = True,
-    fallback_to_chatgpt: bool = False,
-) -> tuple[str, str]:
-    """Gọi Google Gemini Web để phân tích hình ảnh, hỗ trợ auto-refresh siêu tốc và (tùy chọn) chuyển sang ChatGPT web.
-
-    Trả về tuple: (raw_markdown_text, provider_used)
-    """
-    cfg = _gemini_config()
+def _gemini_analysis_once(cfg: dict, prompt: str, images: list[str]) -> str:
+    """Phân tích bằng MỘT tài khoản Gemini (`cfg`). Lỗi phiên → GeminiAuthError, 429 → GeminiRateLimitError (pool xử lý)."""
     cookies, ua, inner_template = cfg["cookies"], cfg["user_agent"], cfg["inner_template"]
 
     with httpx.Client(http2=False, timeout=120, follow_redirects=True) as client:
-        # Lấy fresh tokens
-        try:
-            at_val, bl_val, fsid_val = _fresh_tokens(client, cookies, ua)
-        except Exception as exc:
-            if allow_refresh:
-                logger.warning(f"[Gemini Workflow] Token hết hạn: {exc}. Đang tự động làm mới ngầm siêu tốc qua Chrome...")
-                try:
-                    _auto_refresh_cookies()
-                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_chatgpt=fallback_to_chatgpt)
-                except GeminiAttachmentError:
-                    raise
-                except Exception as refresh_err:
-                    logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
-            if fallback_to_chatgpt:
-                logger.info("[Gemini Workflow] Chuyển hướng phân tích qua ChatGPT web...")
-                text = execute_chatgpt_vision_analysis(prompt, images)
-                return text, "chatgpt"
-            raise
+        at_val, bl_val, fsid_val = _fresh_tokens(client, cookies, ua)  # GeminiAuthError nếu cookie hết hạn
 
         # Upload ảnh
         attachments = []
@@ -290,6 +268,8 @@ def execute_gemini_analysis(
             img_bytes, filename, mime = _parse_image_data(img_data, i)
             try:
                 gcs_path = _upload_file(client, img_bytes, filename, cookies, ua)
+            except (GeminiAuthError, GeminiRateLimitError):
+                raise  # lỗi phiên/giới hạn: pool làm mới / đổi tài khoản, KHÔNG phải lỗi ảnh
             except Exception as e:
                 raise GeminiAttachmentError(f"attachment {i + 1} upload failed: {e}") from e
             if not gcs_path:
@@ -330,30 +310,68 @@ def execute_gemini_analysis(
         )
 
         if resp.status_code != 200 or '"er"' in resp.text[:200]:
-            if allow_refresh and (resp.status_code in (401, 403) or "unauthenticated" in resp.text.lower()):
-                logger.warning("[Gemini Workflow] Session hết hạn trong lúc gọi StreamGenerate. Tự động làm mới cookie...")
-                try:
-                    _auto_refresh_cookies()
-                    return execute_gemini_analysis(prompt, images, allow_refresh=False, fallback_to_chatgpt=fallback_to_chatgpt)
-                except GeminiAttachmentError:
-                    raise
-                except Exception as refresh_err:
-                    logger.warning(f"[Gemini Workflow] Tự động làm mới cookie thất bại: {refresh_err}")
-            if fallback_to_chatgpt:
-                logger.info("[Gemini Workflow] Gemini StreamGenerate lỗi, chuyển hướng sang ChatGPT web...")
-                text = execute_chatgpt_vision_analysis(prompt, images)
-                return text, "chatgpt"
+            if resp.status_code in (401, 403) or "unauthenticated" in resp.text.lower():
+                raise GeminiAuthError(f"Gemini Web API: phiên không hợp lệ (HTTP {resp.status_code})")
+            if resp.status_code == 429:
+                raise GeminiRateLimitError("Gemini Web API: giới hạn tốc độ (HTTP 429)")
             raise RuntimeError(f"Gemini Web API error: HTTP {resp.status_code} — {resp.text[:300]}")
 
         answer = _extract_answer_text(resp.text)
         if not answer:
-            if fallback_to_chatgpt:
-                logger.info("[Gemini Workflow] Không trích xuất được text Gemini, chuyển sang ChatGPT web...")
-                text = execute_chatgpt_vision_analysis(prompt, images)
-                return text, "chatgpt"
             raise RuntimeError("Không thể trích xuất nội dung trả lời từ luồng phản hồi của Gemini.")
+        return answer
 
-        return answer, "gemini"
+
+def _gemini_analysis_with_account(exclude: frozenset[str], prompt: str, images: list[str], allow_refresh: bool) -> str:
+    """Một tài khoản: phân tích; lỗi phiên → làm mới cookie của CHÍNH tài khoản đó một lần rồi gọi lại."""
+    cfg = _gemini_config(exclude)
+
+    def attempt(c: dict) -> str:
+        try:
+            text = _gemini_analysis_once(c, prompt, images)
+        except (GeminiAuthError, GeminiRateLimitError) as exc:
+            raise pool.tag_account(exc, c["account_id"])
+        pool.mark_ok(c["account_id"])
+        return text
+
+    try:
+        return attempt(cfg)
+    except GeminiAuthError:
+        if not allow_refresh:
+            raise
+    logger.warning("[Gemini Workflow] Phiên hết hạn. Tự động làm mới cookie tài khoản %s qua Chrome...", cfg["label"])
+    try:
+        _auto_refresh_cookies(None, cfg["account_id"])
+    except Exception as refresh_err:  # noqa: BLE001
+        logger.warning("[Gemini Workflow] Tự động làm mới cookie thất bại: %s", refresh_err)
+        raise pool.tag_account(GeminiAuthError(f"Làm mới cookie thất bại: {refresh_err}"), cfg["account_id"])
+    return attempt(pool.config_for(cfg["account_id"], exclude))
+
+
+def execute_gemini_analysis(
+    prompt: str,
+    images: list[str],
+    allow_refresh: bool = True,
+    fallback_to_chatgpt: bool = False,
+) -> tuple[str, str]:
+    """Gọi Google Gemini Web để phân tích hình ảnh qua tài khoản Gemini tốt nhất (đổi tài khoản khi lỗi) và (tùy chọn)
+    chuyển sang ChatGPT web khi mọi tài khoản đều không dùng được.
+
+    Trả về tuple: (raw_markdown_text, provider_used)
+    """
+    try:
+        text = pool.failover(
+            lambda exclude: _gemini_analysis_with_account(exclude, prompt, images, allow_refresh),
+            lambda msg: logger.info(msg),
+        )
+        return text, "gemini"
+    except GeminiAttachmentError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if fallback_to_chatgpt:
+            logger.info("[Gemini Workflow] Gemini không dùng được (%s), chuyển hướng phân tích qua ChatGPT web...", exc)
+            return execute_chatgpt_vision_analysis(prompt, images), "chatgpt"
+        raise
 
 
 def parse_analysis_to_structured(raw_text: str, provider_used: str = "gemini") -> GeminiAnalysisResponse:
@@ -1827,7 +1845,14 @@ def _save_exports_metadata(data: dict[str, dict]):
         logger.warning(f"Không thể ghi {EXPORTS_METADATA_FILE}: {e}")
 
 
-def list_exported_videos() -> list[dict]:
+def _probe_export_duration(path: Path) -> float:
+    try:
+        return ffprobe_duration(path)
+    except Exception:
+        return 0.0
+
+
+def list_exported_videos(*, probe_missing_duration: bool = True) -> list[dict]:
     """Liệt kê toàn bộ video đã xuất trên ổ đĩa, kết hợp metadata lịch sử và các clip Veo đã sinh."""
     WORKFLOW_EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     history = _load_exports_metadata()
@@ -1845,11 +1870,8 @@ def list_exported_videos() -> list[dict]:
         size_bytes = stat.st_size
         created_iso = meta.get("created_at") or datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
         dur = meta.get("duration_sec") or 0.0
-        if dur == 0.0:
-            try:
-                dur = ffprobe_duration(p)
-            except Exception:
-                dur = 0.0
+        if dur == 0.0 and probe_missing_duration:
+            dur = _probe_export_duration(p)
 
         item = {
             "id": meta.get("id") or fname.replace(".mp4", ""),
@@ -1957,12 +1979,44 @@ def list_exported_videos() -> list[dict]:
     try:
         from app.workflow.muse_finish import muse_library_clips
 
-        result.extend(muse_library_clips(seen_filenames))
+        result.extend(muse_library_clips(seen_filenames, probe_missing_duration=probe_missing_duration))
     except Exception as e:
         logger.warning(f"Không liệt kê được clip Muse: {e}")
 
     # Sắp xếp mới nhất lên đầu
-    result.sort(key=lambda x: x["created_at"], reverse=True)
+    result.sort(key=lambda x: (x["created_at"], x["filename"]), reverse=True)
+    return result
+
+
+def list_exported_videos_page(page: int, q: str = "", source: str = "all") -> dict:
+    items = list_exported_videos(probe_missing_duration=False)
+    counts = dict.fromkeys(("all", "export", "veo_scene", "motion_control", "muse_clip"), 0)
+    counts["all"] = len(items)
+    term = q.strip().lower()
+    matching = []
+    for item in items:
+        kind = item.get("source_type") or "export"
+        prompt = item.get("prompt") or ""
+        motion = item.get("is_motion_control") or item.get("input_mode") == "video_edit" or re.search(
+            r"motion reference|motion-reference|choreography|motion video", prompt, re.IGNORECASE,
+        )
+        # A finished export can also be marked as Motion by its prompt, matching the library's original filters.
+        categories = {kind} if kind != "veo_scene" or not motion else set()
+        if motion:
+            categories.add("motion_control")
+        for category in categories & counts.keys():
+            counts[category] += 1
+        if source != "all" and source not in categories:
+            continue
+        if term and not any(term in text.lower() for text in (item["filename"], item.get("title") or "", prompt)):
+            continue
+        matching.append(item)
+
+    result = paginate_items(matching, page)
+    for item in result["items"]:
+        if item["source_type"] in ("export", "muse_clip") and not item["duration_sec"]:
+            item["duration_sec"] = _probe_export_duration(Path(item["file_path"]))
+    result["counts"] = counts
     return result
 
 

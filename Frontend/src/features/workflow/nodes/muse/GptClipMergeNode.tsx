@@ -1,5 +1,5 @@
 /**
- * Node "Ghép video" của Muse Canvas — độc lập: nhận các node Clip đã có video (cổng "Clip"), xếp thứ tự, cắt đầu / cuối từng
+ * Node "Ghép video" của Muse Canvas nhận Clip, Cắt video và Video tham chiếu (cổng "Clip"), xếp thứ tự, cắt đầu / cuối từng
  * clip (mặc định 0), rồi ghép CẮT CỨNG sau khi xóa watermark Flow từng clip. Nhạc nền, tiếng gốc, nhãn / logo kênh như node
  * "Video kết quả". Chạy nền ở backend (POST /api/workflow/muse/merge), kết quả vào Thư Viện Video → Hoàn chỉnh.
  */
@@ -183,7 +183,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
         position={Position.Left}
         id={MUSE_HANDLE.clipVideoIn}
         className="mc-handle mc-handle-video"
-        title="Clip: nối chấm xanh bên phải của các node Clip đã có video, hoặc chấm đỏ của node Cắt video (nhiều dây). Xếp thứ tự trong node."
+        title="Clip: nhận nhiều dây từ node Clip, Cắt video hoặc Video tham chiếu. Xếp thứ tự trong node."
       />
 
       <div className="mc-node-head">
@@ -208,7 +208,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
         {/* Clip, theo thứ tự ghép */}
         {rows.length === 0 ? (
           <div className="mc-inputs-empty">
-            <Link2Off size={12} /> Chưa có clip — nối chấm xanh bên phải của các node Clip, hoặc chấm đỏ của node Cắt video, vào chấm bên trái node này (hoặc bấm “Ghép video” ở node Kịch bản tạo video).
+            <Link2Off size={12} /> Nối các node Clip, Cắt video hoặc Video tham chiếu vào chấm “Clip” bên trái.
           </div>
         ) : (
           <div className="mc-merge-list">
@@ -223,11 +223,14 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
                     <span className="mc-xph mc-merge-thumb" />
                   )}
                   <span className="mc-merge-info">
-                    <b title={r.name}>{r.kind === 'cut' ? <><Scissors size={10} /> {mergeRowTitle(r)}</> : <>Clip {r.k}{r.name ? ` · ${r.name}` : ''}</>}</b>
+                    <b title={r.name}>
+                      {r.kind === 'cut' && <Scissors size={10} />} {mergeRowTitle(r)}
+                      {r.kind === 'clip' && r.name ? ` · ${r.name}` : ''}
+                    </b>
                     <small>
                       {r.seconds != null ? `${r.seconds}s · ` : ''}
                       <span className={`mc-merge-chip mc-merge-chip-${r.status}`}>{r.kind === 'cut' && r.status === 'ready' ? 'Hoàn chỉnh' : r.kind === 'cut' && r.status === 'no_video' ? 'Chưa cắt' : r.kind === 'cut' && r.status === 'running' ? 'Đang cắt' : STATUS_LABEL[r.status]}</span>
-                      {data.removeWatermark && (
+                      {data.removeWatermark && r.kind !== 'reference' && (
                         <label
                           className="mc-merge-wm nodrag"
                           title={
@@ -253,9 +256,9 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
                   </span>
                   <span className="mc-merge-trims nodrag" title="Cắt bỏ N giây ở đầu / cuối clip khi ghép (mặc định 0)">
                     <Scissors size={11} />
-                    <input type="number" min={0} max={MERGE_MAX_TRIM} step={0.1} value={t.start} aria-label={`Cắt đầu clip ${r.k} (giây)`} onChange={(e) => setTrim(r.nodeId, { start: Number(e.target.value) || 0 })} />
+                    <input type="number" min={0} max={MERGE_MAX_TRIM} step={0.1} value={t.start} aria-label={`Cắt đầu ${mergeRowTitle(r)} (giây)`} onChange={(e) => setTrim(r.nodeId, { start: Number(e.target.value) || 0 })} />
                     <span>đầu</span>
-                    <input type="number" min={0} max={MERGE_MAX_TRIM} step={0.1} value={t.end} aria-label={`Cắt cuối clip ${r.k} (giây)`} onChange={(e) => setTrim(r.nodeId, { end: Number(e.target.value) || 0 })} />
+                    <input type="number" min={0} max={MERGE_MAX_TRIM} step={0.1} value={t.end} aria-label={`Cắt cuối ${mergeRowTitle(r)} (giây)`} onChange={(e) => setTrim(r.nodeId, { end: Number(e.target.value) || 0 })} />
                     <span>cuối</span>
                   </span>
                   <span className="mc-script-move">
@@ -285,9 +288,9 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
                   <div key={`${a.nodeId}-${b.nodeId}`} className="mc-splice">
                     <span className="mc-node-meta">{mergeRowTitle(a)} → {mergeRowTitle(b)}</span>
                     <div className="mc-splice-frames">
-                      <img src={mergeFrameUrl(a.file!, 'last', 200)} alt={`Khung cuối clip ${a.k}`} draggable={false} loading="lazy" />
+                      <img src={mergeFrameUrl(a.file!, 'last', 200)} alt={`Khung cuối ${mergeRowTitle(a)}`} draggable={false} loading="lazy" />
                       <span aria-hidden>→</span>
-                      <img src={mergeFrameUrl(b.file!, 'first', 200)} alt={`Khung đầu clip ${b.k}`} draggable={false} loading="lazy" />
+                      <img src={mergeFrameUrl(b.file!, 'first', 200)} alt={`Khung đầu ${mergeRowTitle(b)}`} draggable={false} loading="lazy" />
                     </div>
                   </div>
                 ))}
@@ -306,7 +309,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
           <>
             <label className="mc-check nodrag">
               <input type="checkbox" checked={data.removeWatermark} onChange={(e) => updateNodeData(id, { removeWatermark: e.target.checked })} />
-              Xóa watermark Flow từng clip trước khi ghép (lần đầu vài phút / clip, ghép lại dùng cache)
+              Xóa watermark Flow cho nguồn từ node Clip và Cắt video
             </label>
             <FinishSettingsForm settings={data.finish} onChange={setFinish} onTracksLoaded={setTracks} />
           </>

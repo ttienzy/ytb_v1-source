@@ -271,7 +271,7 @@ def delete_muse_clip(filename: str) -> bool:
     return True
 
 
-def muse_library_clips(skip: set[str]) -> list[dict[str, Any]]:
+def muse_library_clips(skip: set[str], *, probe_missing_duration: bool = True) -> list[dict[str, Any]]:
     """Clip Muse (thư mục tải video của Muse) dưới dạng item của Thư Viện Video (source_type=muse_clip)."""
     d = muse_video_dir()
     if d is None or not d.exists():
@@ -289,7 +289,7 @@ def muse_library_clips(skip: set[str]) -> list[dict[str, Any]]:
                 meta = {}
         stat = f.stat()
         dur = float(meta.get("duration_sec") or 0)
-        if not dur:
+        if not dur and probe_missing_duration:
             try:
                 dur = float(_probe(f)["duration"])
             except Exception:

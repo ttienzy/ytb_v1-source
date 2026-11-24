@@ -1,5 +1,6 @@
 /** Thư Viện Ảnh của Canvas AI — /api/workflow/images (app/workflow/image_library.py). */
 import { API_URL } from '../../../shared/constants'
+import type { LibraryPage } from '../../../shared/useLibraryPage'
 
 export type LibraryImageSource = 'muse' | 'upload' | 'chatgpt'
 
@@ -48,13 +49,36 @@ export function libraryImageUrl(item: Pick<LibraryImage, 'preview_url'>): string
   return item.preview_url.startsWith('http') ? item.preview_url : `${API_URL}${item.preview_url}`
 }
 
-export async function listLibraryImages(params: { q?: string; source?: string; favorite?: boolean } = {}): Promise<LibraryImage[]> {
+interface ImageLibrarySearch {
+  q?: string
+  source?: string
+  favorite?: boolean
+}
+
+function imageLibraryQuery(params: ImageLibrarySearch): URLSearchParams {
   const qs = new URLSearchParams()
   if (params.q) qs.set('q', params.q)
   if (params.source) qs.set('source', params.source)
   if (params.favorite) qs.set('favorite', 'true')
-  const res = await fetch(`${API_URL}/api/workflow/images${qs.toString() ? `?${qs}` : ''}`)
+  return qs
+}
+
+export async function listLibraryImages(params: ImageLibrarySearch = {}): Promise<LibraryImage[]> {
+  const query = imageLibraryQuery(params).toString()
+  const res = await fetch(`${API_URL}/api/workflow/images${query ? `?${query}` : ''}`)
   return (await json<{ items: LibraryImage[] }>(res, 'Không tải được Thư Viện Ảnh — backend đã khởi động lại chưa?')).items
+}
+
+export async function listLibraryImagePage(page: number, params: ImageLibrarySearch, signal?: AbortSignal): Promise<LibraryPage<LibraryImage> & { library_total: number }> {
+  const query = imageLibraryQuery(params)
+  query.set('page', String(page))
+  const res = await fetch(`${API_URL}/api/workflow/images?${query}`, { signal })
+  return json(res, 'Không tải được Thư Viện Ảnh')
+}
+
+export async function getLibraryImageCount(): Promise<number> {
+  const response = await fetch(`${API_URL}/api/workflow/images/count`)
+  return (await json<{ total: number }>(response, 'Không tải được số ảnh trong thư viện')).total
 }
 
 export async function uploadLibraryImage(file: File, label = ''): Promise<LibraryImage> {

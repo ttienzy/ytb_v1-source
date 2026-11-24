@@ -5,6 +5,7 @@
 
 import { analysisErrorFromResponse } from './analysisError.ts'
 import { API_URL } from '../../../shared/constants.ts'
+import type { LibraryPage } from '../../../shared/useLibraryPage'
 import type {
   AssetBundle,
   AssetRef,
@@ -514,38 +515,53 @@ export async function fetchExportedVideos(): Promise<ExportedVideoItem[]> {
     const res = await fetch(`${API_URL}/api/workflow/exports`)
     if (!res.ok) return []
     const data = await res.json()
-    const rawItems = data.items || []
-    return rawItems.map((item: any) => ({
-      id: item.id,
-      filename: item.filename,
-      videoUrl: item.video_url?.startsWith('http') ? item.video_url : `${API_URL}${item.video_url}`,
-      filePath: item.file_path,
-      sizeBytes: item.size_bytes || 0,
-      durationSec: item.duration_sec || 0,
-      createdAt: item.created_at,
-      sceneCount: item.scene_count,
-      aspectRatio: item.aspect_ratio || '9:16',
-      resolution: item.resolution || getWorkflowConfig().defaultResolution,
-      title: item.title || item.filename,
-      sourceType: item.source_type || 'export',
-      prompt: item.prompt || '',
-      modelDisplayName: item.model_display_name || '',
-      isMotionControl: Boolean(
-        item.is_motion_control ||
-        item.input_mode === 'video_edit' ||
-        (item.prompt && /motion reference|motion-reference|choreography|motion video/i.test(item.prompt))
-      ),
-      inputMode: item.input_mode || '',
-      referenceVideoUrl: item.reference_video_url
-        ? (item.reference_video_url.startsWith('http') ? item.reference_video_url : `${API_URL}${item.reference_video_url}`)
-        : undefined,
-      referenceTrimStart: item.reference_trim_start,
-      referenceTrimEnd: item.reference_trim_end,
-    }))
+    return (data.items || []).map(normalizeExportedVideo)
   } catch (err) {
     console.warn('Lỗi khi lấy danh sách video đã xuất:', err)
     return []
   }
+}
+
+function normalizeExportedVideo(item: any): ExportedVideoItem {
+  return {
+    id: item.id,
+    filename: item.filename,
+    videoUrl: item.video_url?.startsWith('http') ? item.video_url : `${API_URL}${item.video_url}`,
+    filePath: item.file_path,
+    sizeBytes: item.size_bytes || 0,
+    durationSec: item.duration_sec || 0,
+    createdAt: item.created_at,
+    sceneCount: item.scene_count,
+    aspectRatio: item.aspect_ratio || '9:16',
+    resolution: item.resolution || getWorkflowConfig().defaultResolution,
+    title: item.title || item.filename,
+    sourceType: item.source_type || 'export',
+    prompt: item.prompt || '',
+    modelDisplayName: item.model_display_name || '',
+    isMotionControl: Boolean(item.is_motion_control || item.input_mode === 'video_edit' || /motion reference|motion-reference|choreography|motion video/i.test(item.prompt || '')),
+    inputMode: item.input_mode || '',
+    referenceVideoUrl: item.reference_video_url
+      ? (item.reference_video_url.startsWith('http') ? item.reference_video_url : `${API_URL}${item.reference_video_url}`)
+      : undefined,
+    referenceTrimStart: item.reference_trim_start,
+    referenceTrimEnd: item.reference_trim_end,
+  }
+}
+
+export type ExportedVideoFilter = 'all' | 'export' | 'veo_scene' | 'motion_control' | 'muse_clip'
+
+export async function fetchExportedVideosPage(page: number, q: string, source: ExportedVideoFilter, signal?: AbortSignal): Promise<LibraryPage<ExportedVideoItem> & { counts: Record<ExportedVideoFilter, number> }> {
+  const query = new URLSearchParams({ page: String(page), q, source })
+  const response = await fetch(`${API_URL}/api/workflow/exports?${query}`, { signal })
+  if (!response.ok) throw await toApiError(response, 'Không tải được Thư Viện Video')
+  const data = await response.json()
+  return { ...data, items: data.items.map(normalizeExportedVideo) }
+}
+
+export async function getExportedVideoCount(): Promise<number> {
+  const response = await fetch(`${API_URL}/api/workflow/exports/count`)
+  if (!response.ok) throw await toApiError(response, 'Không tải được số video trong thư viện')
+  return (await response.json()).total
 }
 
 /**

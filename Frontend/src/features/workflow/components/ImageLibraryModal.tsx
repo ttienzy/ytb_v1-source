@@ -3,7 +3,7 @@
  * - Mở từ toolbar: xem / đặt tên / yêu thích / xóa / tải lên.
  * - Chế độ chọn (pickMode): node gọi để lấy 1 ảnh — "Dùng ảnh này" hoặc nháy đúp.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -24,12 +24,14 @@ import {
   deleteLibraryImage,
   formatBytes,
   libraryImageUrl,
-  listLibraryImages,
+  listLibraryImagePage,
   openLibraryFolder,
   updateLibraryImage,
   uploadLibraryImage,
   type LibraryImage,
 } from '../services/imageLibraryApi'
+import { LibraryPagination } from '../../../shared/LibraryPagination'
+import { useLibraryPage, useLibrarySearch } from '../../../shared/useLibraryPage'
 import './imageLibrary.css'
 
 type Filter = 'all' | 'muse' | 'chatgpt' | 'upload' | 'favorite'
@@ -62,8 +64,6 @@ function formatTime(sec: number): string {
 }
 
 export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pickTitle, onPick, multiPick, onPickMulti }: ImageLibraryModalProps) {
-  const [items, setItems] = useState<LibraryImage[]>([])
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
@@ -74,26 +74,24 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
   const [labelDraft, setLabelDraft] = useState('')
   const [copied, setCopied] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const all = await listLibraryImages()
-      setItems(all)
-      onCountChange?.(all.length)
-      setSelectedId((cur) => (cur && all.some((i) => i.id === cur) ? cur : all[0]?.id ?? null))
-      setSelectedMultiImages(new Map())
-    } catch (e: any) {
-      setError(e?.message || 'Không tải được Thư Viện Ảnh')
-    } finally {
-      setLoading(false)
-    }
-  }, [onCountChange])
+  const gridRef = useRef<HTMLDivElement>(null)
+  const term = useLibrarySearch(query)
+  const fetchPage = useCallback((page: number, signal: AbortSignal) => listLibraryImagePage(page, {
+    q: term, source: filter === 'all' || filter === 'favorite' ? undefined : filter, favorite: filter === 'favorite',
+  }, signal), [filter, term])
+  const { data: imagePage, error: pageError, loading, load } = useLibraryPage(fetchPage, { enabled: isOpen })
+  const items = imagePage?.items ?? []
+  const total = imagePage?.library_total
 
   useEffect(() => {
-    if (isOpen) load()
-  }, [isOpen, load])
+    if (isOpen) {
+      setError('')
+      setSelectedMultiImages(new Map())
+    }
+  }, [isOpen])
+
+  useEffect(() => { if (total !== undefined) onCountChange?.(total) }, [onCountChange, total])
+  useEffect(() => { if (gridRef.current) gridRef.current.scrollTop = 0 }, [imagePage?.page, filter, term])
 
   useEffect(() => {
     if (!isOpen) return
@@ -102,24 +100,13 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
     return () => window.removeEventListener('keydown', onKey)
   }, [isOpen, onClose])
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return items.filter((i) => {
-      if (filter === 'favorite' && !i.favorite) return false
-      if ((filter === 'muse' || filter === 'chatgpt' || filter === 'upload') && i.source !== filter) return false
-      if (!q) return true
-      return [i.label, i.file_name, i.meta?.chat_title, i.meta?.prompt?.slice(0, 400), ...(i.tags || [])]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-        .includes(q)
-    })
-  }, [items, filter, query])
-
-  const selected = items.find((i) => i.id === selectedId) || null
+  const selected = items.find((i) => i.id === selectedId) ?? items[0]
   useEffect(() => setLabelDraft(selected?.label || ''), [selected?.id, selected?.label])
 
-  const replaceItem = (it: LibraryImage) => setItems((xs) => xs.map((x) => (x.id === it.id ? it : x)))
+  function refreshItem(item: LibraryImage) {
+    setSelectedMultiImages((previous) => previous.has(item.id) ? new Map(previous).set(item.id, item) : previous)
+    void load()
+  }
 
   async function upload(files: FileList | File[]) {
     const list = Array.from(files).filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f.name))
@@ -139,14 +126,15 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
         setUploading((n) => n - 1)
       }
     }
-    await load()
+    await load(1)
+    if (gridRef.current) gridRef.current.scrollTop = 0
     if (last) setSelectedId(last.id)
   }
 
   async function saveLabel() {
     if (!selected || labelDraft.trim() === selected.label) return
     try {
-      replaceItem(await updateLibraryImage(selected.id, { label: labelDraft }))
+      refreshItem(await updateLibraryImage(selected.id, { label: labelDraft }))
     } catch (e: any) {
       setError(e?.message || 'Không đổi được tên')
       setLabelDraft(selected.label)
@@ -155,7 +143,7 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
 
   async function toggleFavorite(it: LibraryImage) {
     try {
-      replaceItem(await updateLibraryImage(it.id, { favorite: !it.favorite }))
+      refreshItem(await updateLibraryImage(it.id, { favorite: !it.favorite }))
     } catch (e: any) {
       setError(e?.message || 'Không cập nhật được')
     }
@@ -166,6 +154,12 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
     if (!window.confirm(`Xóa “${it.label}” khỏi Thư Viện Ảnh? ${where} Node đang dùng ảnh này sẽ mất ảnh.`)) return
     try {
       await deleteLibraryImage(it.id)
+      setSelectedMultiImages((previous) => {
+        if (!previous.has(it.id)) return previous
+        const next = new Map(previous)
+        next.delete(it.id)
+        return next
+      })
       await load()
     } catch (e: any) {
       setError(e?.message || 'Không xóa được')
@@ -194,7 +188,7 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
           <div className="il-title">
             <ImageIcon size={17} />
             <strong>{pickMode ? pickTitle || 'Chọn ảnh từ Thư Viện Ảnh' : 'Thư Viện Ảnh'}</strong>
-            <span className="il-pill">{items.length}</span>
+            {total !== undefined && <span className="il-pill">{total}</span>}
           </div>
           <div className="il-search">
             <Search size={13} />
@@ -241,7 +235,7 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
             <button type="button" onClick={() => openLibraryFolder().catch((e) => setError(e.message))} title="Mở thư mục ảnh">
               <FolderOpen size={13} />
             </button>
-            <button type="button" onClick={load} title="Tải lại">
+            <button type="button" onClick={() => { setError(''); void load() }} title="Tải lại">
               <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             </button>
             <button type="button" className="il-close" onClick={onClose} title="Đóng (Esc)">
@@ -260,79 +254,82 @@ export function ImageLibraryModal({ isOpen, onClose, onCountChange, pickMode, pi
             }}
           />
         </header>
-        {error && <div className="il-error">{error}</div>}
+        {(error || pageError) && <div className="il-error" role="alert">{error || pageError}</div>}
 
         <div className="il-body">
           {/* Lưới ảnh */}
-          <div className="il-grid-wrap">
-            {loading && items.length === 0 ? (
-              <div className="il-empty"><Loader2 size={20} className="animate-spin" /> Đang tải…</div>
-            ) : visible.length === 0 ? (
-              <div className="il-empty">
-                <Sparkles size={20} />
-                <strong>{items.length === 0 ? 'Thư viện đang trống' : 'Không có ảnh khớp bộ lọc'}</strong>
-                <span>
-                  Ảnh do Muse tạo (vd. node “Tách áo quần”) tự lưu vào đây. Bạn cũng có thể kéo thả ảnh vào cửa sổ này hoặc bấm “Tải ảnh lên”.
-                </span>
-              </div>
-            ) : (
-              <div className="il-grid">
-                {visible.map((it) => {
-                  const isMulti = multiPick && selectedMultiImages.has(it.id)
-                  return (
-                    <button
-                      key={it.id}
-                      type="button"
-                      className={`il-card ${it.id === selectedId || isMulti ? 'on' : ''}`}
-                      onClick={() => {
-                        setSelectedId(it.id)
-                        if (multiPick) {
-                          setSelectedMultiImages((prev) => {
-                            const next = new Map(prev)
-                            if (next.has(it.id)) next.delete(it.id)
-                            else next.set(it.id, it)
-                            return next
-                          })
-                        }
-                      }}
-                      onDoubleClick={() => pickMode && !multiPick && onPick?.(it)}
-                      title={multiPick ? (isMulti ? 'Bấm để bỏ chọn' : 'Bấm để chọn') : pickMode ? 'Nháy đúp để dùng ảnh này' : it.label}
-                    >
-                      {multiPick && (
-                        <span
-                          style={{
-                            position: 'absolute',
-                            top: 6,
-                            left: 6,
-                            width: 20,
-                            height: 20,
-                            borderRadius: 4,
-                            background: isMulti ? '#2563eb' : 'rgba(0,0,0,0.4)',
-                            border: isMulti ? '2px solid #fff' : '1px solid rgba(255,255,255,0.8)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#fff',
-                            zIndex: 2,
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                          }}
-                        >
-                          {isMulti && <Check size={12} strokeWidth={3} />}
+          <div className="il-list">
+            <div ref={gridRef} className="il-grid-wrap" aria-busy={loading}>
+              {loading && items.length === 0 ? (
+                <div className="il-empty"><Loader2 size={20} className="animate-spin" /> Đang tải…</div>
+              ) : items.length === 0 ? (
+                <div className="il-empty">
+                  <Sparkles size={20} />
+                  <strong>{total === 0 ? 'Thư viện đang trống' : 'Không có ảnh khớp bộ lọc'}</strong>
+                  <span>
+                    Ảnh do Muse tạo (vd. node “Tách áo quần”) tự lưu vào đây. Bạn cũng có thể kéo thả ảnh vào cửa sổ này hoặc bấm “Tải ảnh lên”.
+                  </span>
+                </div>
+              ) : (
+                <div className="il-grid">
+                  {items.map((it) => {
+                    const isMulti = multiPick && selectedMultiImages.has(it.id)
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        className={`il-card ${it.id === selected?.id || isMulti ? 'on' : ''}`}
+                        onClick={() => {
+                          setSelectedId(it.id)
+                          if (multiPick) {
+                            setSelectedMultiImages((prev) => {
+                              const next = new Map(prev)
+                              if (next.has(it.id)) next.delete(it.id)
+                              else next.set(it.id, it)
+                              return next
+                            })
+                          }
+                        }}
+                        onDoubleClick={() => pickMode && !multiPick && onPick?.(it)}
+                        title={multiPick ? (isMulti ? 'Bấm để bỏ chọn' : 'Bấm để chọn') : pickMode ? 'Nháy đúp để dùng ảnh này' : it.label}
+                      >
+                        {multiPick && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: 6,
+                              left: 6,
+                              width: 20,
+                              height: 20,
+                              borderRadius: 4,
+                              background: isMulti ? '#2563eb' : 'rgba(0,0,0,0.4)',
+                              border: isMulti ? '2px solid #fff' : '1px solid rgba(255,255,255,0.8)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#fff',
+                              zIndex: 2,
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                            }}
+                          >
+                            {isMulti && <Check size={12} strokeWidth={3} />}
+                          </span>
+                        )}
+                        <span className="il-thumb">
+                          <img src={libraryImageUrl(it)} alt={it.label} loading="lazy" draggable={false} />
                         </span>
-                      )}
-                      <span className="il-thumb">
-                        <img src={libraryImageUrl(it)} alt={it.label} loading="lazy" draggable={false} />
-                      </span>
-                      <span className="il-card-meta">
-                        <span className="il-card-label">{it.label}</span>
-                        <span className={`il-src il-src-${it.source}`}>{SOURCE_LABEL[it.source] || it.source}</span>
-                      </span>
-                      {it.favorite && <Star size={12} className="il-star" />}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+                        <span className="il-card-meta">
+                          <span className="il-card-label">{it.label}</span>
+                          <span className={`il-src il-src-${it.source}`}>{SOURCE_LABEL[it.source] || it.source}</span>
+                        </span>
+                        {it.favorite && <Star size={12} className="il-star" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+            <LibraryPagination data={imagePage} label="Phân trang Thư Viện Ảnh" loading={loading} showRange onPage={(page) => void load(page)} />
           </div>
 
           {/* Chi tiết */}

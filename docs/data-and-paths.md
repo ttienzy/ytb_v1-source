@@ -23,7 +23,7 @@ Hai mốc gốc, định nghĩa ở [`Backend/app/core/config.py`](../Backend/ap
 | **A** | `DATA_DIR / ...` hoặc `settings.*` (đúng) | `Backend/Data/…` | `userData/Data/…` | DB, `config.json`, profile Chrome, `chatgpt-profiles/`, `campaigns/`, `workflow_*`, `media/videos`, `watermark/`, Muse Canvas: `media/muse_cuts` (video đã cắt của node Cắt video) và `media/muse_strips` (cache dải khung hình timeline) |
 | **B** | `TOOLS_DIR / "Backend" / "Data" / ...` | `Backend/Data/…` | `userData/Backend/Data/…` (**khác A**) | Recap `Downloads/`, kho nhạc `media/bgm`, các file JSON của Discover, `pippit_tasks.json`, `youtube_tasks.json`, `youtube_uploads/` |
 | **C** | `TOOLS_DIR / "Data" / ...` | `Data/…` ở **gốc repo** | `userData/Data/…` (trùng A) | Thư mục audio `media/videos/Viaudio` (`media/audio_workflow.py`) |
-| **D** | Tính từ `__file__` (`Backend/Data/…`) | `Backend/Data/…` | **bên trong thư mục giải nén tạm của PyInstaller** | Veo (`veo_outputs`, `veo_images`, `veo_uploads`, `veo_jobs.json`, `veo_media_registry.json`, `veo_references`, `motion_uploads`, `veo_images_clean`), `motion_long`, `muse_uploads` |
+| **D** | Tính từ `__file__` (`Backend/Data/…`) | `Backend/Data/…` | **bên trong thư mục giải nén tạm của PyInstaller** | `veo_media_registry.json`, `veo_references`, `motion_uploads`, `veo_images_clean`, `motion_long`, `muse_uploads` |
 | **E** | Đường dẫn tương đối theo thư mục làm việc | `Backend/Data/…` (cwd = `Backend/`) | cwd của exe | `externals/gdrive`: `Path("Data")/"temp_gdrive"` |
 
 Hai ngoại lệ nhỏ cũng nên biết: `raw.txt` và `response.txt` (kết quả Gemini ở Recap) được ghi vào `TOOLS_DIR` (gốc repo khi dev); `Backend/app/watermark` dùng `DATA_DIR/watermark` (đúng, nhóm A).
@@ -37,8 +37,7 @@ Dữ liệu **không** nằm ở các chỗ trên: voice service có nơi riêng
 **Nghi vấn, chưa kiểm chứng bằng bản đóng gói hiện tại** (cần chạy bản cài mới để xác nhận trước khi sửa):
 
 1. **Prompt của Recap/Discover/Workflow có thể không tìm thấy.** Chúng đọc từ `TOOLS_DIR/"Backend"/"prompts"/…` (ví dụ `recap/service.py:82`, `ai/gemini/recap.py:27`, `workflow/service.py:63`, `discover/scout.py:10`). Bản cài đặt `TOOLS_DIR = userData`, mà thư mục `userData/Backend/prompts` không có (bản cài cũ trên máy dev không có). `electron-builder` copy `Backend/prompts` vào `resources/prompts` và PyInstaller đóng gói `prompts/` vào bundle, nhưng không thấy mã nào đọc các vị trí đó cho các module này. Kỳ vọng nếu đúng: Recap báo `500 Không tìm thấy system prompt`. **Ngược lại**, Chiến dịch AI dùng `Path(__file__)/prompt_defaults` + `datas` của PyInstaller nên ổn, và `fonts.py`/`assemble.py`/`stories`/`ai/gemini/template.py` có nhánh `sys._MEIPASS` (template Gemini `resources/gemini/inner_template.json`; `Backend/scripts/verify_backend_exe.py` chặn bản exe thiếu nó trong CI release).
-2. **Dữ liệu Veo có thể ghi vào thư mục tạm.** Nhóm D tính từ `__file__`; trong exe PyInstaller `backend.spec` (chế độ **một file**, `runtime_tmpdir=None`) đó là thư mục giải nén tạm, bị xóa khi thoát. Nếu đúng: video Flow tải về và `veo_jobs.json` mất sau khi đóng app.
-3. **Backend `workflow` và `veo` có thể nhìn hai thư mục khác nhau.** `workflow/service.py` đặt `VEO_DATA_DIR = DATA_DIR/"media"/"veo_outputs"` (nhóm A) trong khi `veo/service.py` ghi vào nhóm D. Dev trùng nhau, bản cài thì không.
+2. **Một số cache Veo thuộc nhóm D.** `veo_media_registry.json`, `veo_references`, `motion_uploads` và `veo_images_clean` còn tính từ `__file__`. Dữ liệu video, ảnh, job và hàng đợi của Veo Studio cùng dùng `DATA_DIR`, nên `workflow` và `veo` cùng đọc `DATA_DIR/media/veo_outputs`.
 
 Nếu bạn xác nhận được bằng bản cài mới, hãy cập nhật mục này (đổi "nghi vấn" thành "đã xác nhận" hoặc xóa).
 
@@ -75,7 +74,8 @@ Ví dụ thực tế (một số mục có thể chưa có trên máy bạn):
 | `media/bgm/` | Kho nhạc nền | B |
 | `channels_cache.json`, `discover_seen.json`, `processed_history.json`, `saved_channels.json` | Khám Phá Kênh | B |
 | `pippit_tasks.json`, `youtube_tasks.json`, `youtube_uploads/` | Lịch đăng | B |
-| `media/veo_outputs/`, `veo_images/`, `veo_uploads/`, `veo_jobs.json`, `veo_media_registry.json` | Video/ảnh Flow và sổ job | D |
+| `media/veo_outputs/`, `media/veo_images/`, `media/veo_uploads/`, `veo_jobs.json`, `veo_studio_batches.json` | Video, ảnh và hàng đợi Veo Studio | A |
+| `veo_media_registry.json` | Sổ đăng ký media trên Flow | D |
 | `motion_long/` | Job Motion dài | D |
 | `Data/media/videos/Viaudio/` (ở **gốc repo**) | Audio Workflow: video `*.mp4`, `outputs.json` (manifest, có tiêu đề/mô tả/mốc chương), `audio_history.json` ("đã làm" theo chương), `thumbnails/`, `covers/` (ảnh bìa nguồn đã tải), `.cache/voice/` (giọng đọc từng chương: wav + thời lượng từng dòng; xóa được, chỉ mất cache), `logos/`, `previews/` | C |
 | `temp_gdrive/` | File tạm khi đồng bộ Drive | E |

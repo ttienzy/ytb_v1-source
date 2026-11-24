@@ -27,7 +27,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from sqlalchemy.orm import Query, Session
 
+from app.core.config import DATA_DIR
+from app.core.pagination import LIBRARY_PAGE_SIZE, page_window
 from app.db import Base, SessionLocal, engine
 from app.veo import bridge
 from app.veo.models import VeoProject, VeoImage
@@ -40,9 +43,11 @@ from app.veo.schemas import (
     VeoBridgeStatus,
     VeoCapabilities,
     VeoHistoryItem,
+    VeoHistoryPage,
     VeoImageGenerateRequest,
     VeoImageGenerateResponse,
     VeoImageItem,
+    VeoImagePage,
     VeoJobOut,
     VeoJobRequest,
     VeoModelInfo,
@@ -56,10 +61,10 @@ logger = logging.getLogger("veo.service")
 # ─────────────────────────────────────────────────────────────────────────────
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Backend/
-_VEO_DATA_DIR = _BASE_DIR / "Data" / "media" / "veo_outputs"
-_VEO_IMAGES_DIR = _BASE_DIR / "Data" / "media" / "veo_images"
-_VEO_UPLOADS_DIR = _BASE_DIR / "Data" / "media" / "veo_uploads"
-_VEO_JOBS_FILE = _BASE_DIR / "Data" / "veo_jobs.json"
+_VEO_DATA_DIR = DATA_DIR / "media" / "veo_outputs"
+_VEO_IMAGES_DIR = DATA_DIR / "media" / "veo_images"
+_VEO_UPLOADS_DIR = DATA_DIR / "media" / "veo_uploads"
+_VEO_JOBS_FILE = DATA_DIR / "veo_jobs.json"
 
 # Ensure directories exist
 _VEO_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -988,12 +993,12 @@ def _find_duplicate_job(
             return job
     return None
 
-def submit_job(request: VeoJobRequest) -> VeoJobOut:
+def submit_job(request: VeoJobRequest, *, fallback_to_active: bool = True) -> VeoJobOut:
     """Tạo job mới và bắt đầu xử lý async. Bắt buộc phải có project được chọn."""
     active_proj = None
     if getattr(request, "project_id", None):
         active_proj = get_project(request.project_id)
-    if not active_proj:
+    if not active_proj and fallback_to_active:
         active_proj = get_active_project()
 
     if not active_proj:
@@ -2168,6 +2173,12 @@ def get_job(job_id: str) -> VeoJobOut | None:
     return _job_to_out(job)
 
 
+def get_job_by_idempotency_key(key: str) -> VeoJobOut | None:
+    with _jobs_lock:
+        job = next((job for job in _jobs.values() if job.get("idempotency_key") == key), None)
+        return _job_to_out(job) if job else None
+
+
 def get_all_jobs() -> list[VeoJobOut]:
     """Lấy tất cả jobs, mới nhất trước."""
     sorted_jobs = sorted(_jobs.values(), key=lambda j: j.get("created_at", ""), reverse=True)
@@ -2187,40 +2198,57 @@ def delete_job(job_id: str) -> bool:
 # History — video đã tạo thành công lưu local
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_history() -> list[VeoHistoryItem]:
-    """Quét thư mục veo_outputs và trả metadata."""
-    items: list[VeoHistoryItem] = []
-    if not _VEO_DATA_DIR.exists():
-        return items
-
-    for f in sorted(_VEO_DATA_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-        if f.suffix.lower() in (".mp4", ".webm", ".mkv"):
-            stat = f.stat()
-            # Load metadata JSON sidecar nếu có
-            meta_path = f.with_suffix(".json")
-            meta: dict[str, Any] = {}
-            if meta_path.exists():
+def _history_files() -> list[tuple[Path, os.stat_result]]:
+    files: list[tuple[Path, os.stat_result]] = []
+    try:
+        with os.scandir(_VEO_DATA_DIR) as directory:
+            for entry in directory:
+                path = Path(entry.path)
+                if path.suffix.lower() not in (".mp4", ".webm", ".mkv"):
+                    continue
                 try:
-                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
+                    if entry.is_file():
+                        files.append((path, entry.stat()))
+                except FileNotFoundError:
+                    continue  # Another request removed this video during the scan.
+    except FileNotFoundError:
+        return []
+    return sorted(files, key=lambda item: (item[1].st_mtime_ns, item[0].name), reverse=True)
 
-            items.append(VeoHistoryItem(
-                video_id=f.stem,
-                file_name=f.name,
-                file_path=str(f),
-                file_size_bytes=stat.st_size,
-                duration_seconds=meta.get("duration_seconds", 0),
-                width=meta.get("width", 0),
-                height=meta.get("height", 0),
-                prompt=meta.get("prompt", ""),
-                model_display_name=meta.get("model_display_name", ""),
-                aspect_ratio=meta.get("aspect_ratio", "16:9"),
-                input_mode=meta.get("input_mode", "text_to_video"),
-                created_at=meta.get("created_at", datetime.fromtimestamp(stat.st_mtime).isoformat()),
-            ))
 
-    return items
+def _history_item(path: Path, stat: os.stat_result) -> VeoHistoryItem:
+    try:
+        raw = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+        meta = raw if isinstance(raw, dict) else {}
+    except (OSError, ValueError):
+        meta = {}
+    return VeoHistoryItem(
+        video_id=path.stem,
+        file_name=path.name,
+        file_path=str(path),
+        file_size_bytes=stat.st_size,
+        duration_seconds=meta.get("duration_seconds", 0),
+        width=meta.get("width", 0),
+        height=meta.get("height", 0),
+        prompt=meta.get("prompt", ""),
+        model_display_name=meta.get("model_display_name", ""),
+        aspect_ratio=meta.get("aspect_ratio", "16:9"),
+        input_mode=meta.get("input_mode", "text_to_video"),
+        created_at=meta.get("created_at", datetime.fromtimestamp(stat.st_mtime).isoformat()),
+    )
+
+
+def get_history() -> list[VeoHistoryItem]:
+    return [_history_item(*file) for file in _history_files()]
+
+
+def get_history_page(page: int) -> VeoHistoryPage:
+    files = _history_files()
+    page, start = page_window(page, len(files))
+    size = LIBRARY_PAGE_SIZE
+    return VeoHistoryPage(
+        items=[_history_item(*file) for file in files[start:start + size]], total=len(files), page=page, page_size=size,
+    )
 
 
 def get_video_path(video_id: str) -> Path | None:
@@ -2247,6 +2275,12 @@ def delete_video(video_id: str) -> bool:
         path.with_suffix(".json").unlink(missing_ok=True)
         return True
     return False
+
+
+def _stored_image_path(path: Path) -> str:
+    if path.is_relative_to(_BASE_DIR):
+        return path.relative_to(_BASE_DIR).as_posix()
+    return path.as_posix()
 
 
 def extract_last_frame(video_id: str) -> dict:
@@ -2293,7 +2327,7 @@ def extract_last_frame(video_id: str) -> dict:
     prompt = meta.get("prompt") or ""
     aspect_ratio = meta.get("aspect_ratio") or "9:16"
     model_display_name = meta.get("model_display_name") or "Google Veo"
-    local_rel_path = str(out_file.relative_to(_BASE_DIR)).replace("\\", "/")
+    local_path = _stored_image_path(out_file)
 
     target_project_id = meta.get("project_id") or ""
     if not target_project_id:
@@ -2327,7 +2361,7 @@ def extract_last_frame(video_id: str) -> dict:
                     seed=None,
                     media_id=img_id,
                     image_url=f"/api/veo/images/{img_id}/file",
-                    local_path=local_rel_path,
+                    local_path=local_path,
                     project_id=target_project_id,
                 )
                 db.add(new_img)
@@ -2546,7 +2580,7 @@ def _generate_images_in_slot(req: VeoImageGenerateRequest) -> VeoImageGenerateRe
             img_id = str(uuid.uuid4())[:12]
             cdn_url = item.get("image_url", "")
             local_file = _VEO_IMAGES_DIR / f"{img_id}.jpg"
-            local_rel_path = str(local_file.relative_to(_BASE_DIR)).replace("\\", "/")
+            local_path = _stored_image_path(local_file)
 
             # Tải ảnh về ổ cứng ngầm (không chặn response trả về UI).
             # Helper dùng lock + atomic replace để an toàn khi endpoint download
@@ -2566,7 +2600,7 @@ def _generate_images_in_slot(req: VeoImageGenerateRequest) -> VeoImageGenerateRe
                 seed=item.get("seed", req.seed),
                 media_id=item.get("media_id") or img_id,
                 image_url=cdn_url,
-                local_path=local_rel_path,
+                local_path=local_path,
                 project_id=project_db_id or target_flow_pid,
             )
             db.add(new_img)
@@ -2584,27 +2618,36 @@ def _generate_images_in_slot(req: VeoImageGenerateRequest) -> VeoImageGenerateRe
     return VeoImageGenerateResponse(ok=True, images=created_items, error="; ".join(errors) if errors else None)
 
 
+def _image_query(db: Session, project_id: str | None) -> Query[VeoImage]:
+    query = db.query(VeoImage)
+    if not project_id:
+        return query
+    project = db.query(VeoProject).filter(
+        (VeoProject.id == project_id) | (VeoProject.flow_project_id == project_id)
+    ).first()
+    match_ids = {project_id}
+    if project:
+        match_ids.update(filter(None, (project.id, project.flow_project_id)))
+    return query.filter(
+        VeoImage.project_id.in_(match_ids) | (VeoImage.project_id == "") | VeoImage.project_id.is_(None)
+    )
+
+
 def list_images(project_id: str | None = None) -> list[VeoImageItem]:
-    """Lấy danh sách ảnh đã tạo từ SQLite DB."""
     init_db()
     with SessionLocal() as db:
-        q = db.query(VeoImage)
-        if project_id:
-            # Tìm project tương ứng để match cả DB ID lẫn Flow Project ID
-            p = db.query(VeoProject).filter(
-                (VeoProject.id == project_id) | (VeoProject.flow_project_id == project_id)
-            ).first()
-            match_ids = {project_id}
-            if p:
-                if p.id: match_ids.add(p.id)
-                if p.flow_project_id: match_ids.add(p.flow_project_id)
-            q = q.filter(
-                (VeoImage.project_id.in_(list(match_ids)))
-                | (VeoImage.project_id == "")
-                | (VeoImage.project_id.is_(None))
-            )
-        images = q.order_by(VeoImage.created_at.desc()).limit(100).all()
+        images = _image_query(db, project_id).order_by(VeoImage.created_at.desc(), VeoImage.id.desc()).limit(100).all()
         return [_model_to_image_item(img) for img in images]
+
+
+def list_images_page(page: int, project_id: str | None = None) -> VeoImagePage:
+    init_db()
+    with SessionLocal() as db:
+        query = _image_query(db, project_id)
+        total = query.count()
+        current, start = page_window(page, total)
+        images = query.order_by(VeoImage.created_at.desc(), VeoImage.id.desc()).offset(start).limit(LIBRARY_PAGE_SIZE).all()
+        return VeoImagePage(items=[_model_to_image_item(img) for img in images], total=total, page=current, page_size=LIBRARY_PAGE_SIZE)
 
 
 def get_image_by_id(image_id: str) -> VeoImage | None:

@@ -53,8 +53,9 @@ class FakeGemini:
 
 
 @pytest.fixture()
-def env(monkeypatch):
-    """Cài FakeGemini + chặn sleep thật + đếm số lần mở Chrome refresh."""
+def env(monkeypatch, gemini_accounts):
+    """Cài FakeGemini + chặn sleep thật + đếm số lần mở Chrome refresh. Một tài khoản Gemini thật trong kho tạm."""
+    gemini_accounts(1)
     sleeps: list[float] = []
     refresh_calls: list[int] = []
     client_kwargs: list[dict] = []
@@ -67,7 +68,6 @@ def env(monkeypatch):
 
     monkeypatch.setattr(R.httpx, "Client", make_client)
     monkeypatch.setattr(R.time, "sleep", sleeps.append)
-    monkeypatch.setattr(R, "_gemini_config", lambda: {"cookies": "c", "inner_template": [None], "user_agent": "ua"})
 
     def fake_refresh(*a, **k):
         refresh_calls.append(1)

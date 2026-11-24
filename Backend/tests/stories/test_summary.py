@@ -121,8 +121,8 @@ def test_saved_summary_flags_stale_when_more_chapters_crawled(db_env):
 
 
 @pytest.mark.parametrize("exc_name,expected", [
-    ("RecapConfigError", "Chưa đăng nhập Gemini"),
-    ("GeminiAuthError", "hết hạn"),
+    ("RecapConfigError", "Chưa có tài khoản Gemini"),
+    ("GeminiAuthError", "hết phiên"),
     ("GeminiRateLimitError", "giới hạn tốc độ"),
     ("GeminiTransientError", "Lỗi mạng"),
 ])

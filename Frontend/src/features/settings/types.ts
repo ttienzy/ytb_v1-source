@@ -1,9 +1,23 @@
+/** Tài khoản Gemini trong kho (API không bao giờ trả cookie). */
+export type GeminiAccountView = {
+  id: string
+  email?: string | null
+  hasSession?: boolean
+  partition?: string
+  hasProfile?: boolean
+  status: 'active' | 'exhausted' | 'error' | string
+  message?: string | null
+  addedAt?: number
+  lastUsed?: number
+  exhaustedAt?: number
+}
+
 export type GeminiState = {
+  accounts: GeminiAccountView[]
+  active_accounts_count: number
+  total_accounts_count: number
+  /** Có ít nhất một tài khoản sẵn sàng. */
   has_cookie: boolean
-  cookie_count: number
-  saved_at?: string
-  client_context_token: string
-  app_url: string
   /** Khung request Gemini: "bundled" = bản đóng gói theo app, "captured" = bản bắt trên máy này. */
   template_source?: 'bundled' | 'captured'
   template_saved_at?: string | null

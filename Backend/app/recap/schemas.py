@@ -1,6 +1,7 @@
 """Pydantic schemas cho /api/recap — Phase A redesign."""
 from datetime import datetime
 from pydantic import BaseModel
+from app.recap.prompts import RecapPrompts
 
 
 class JobOut(BaseModel):
@@ -63,6 +64,7 @@ class BatchRunRequest(BaseModel):
     bgm_ids: list[str] | None = None
     bgm_volume: float | None = None
     bgm_fade_out: bool | None = None
+    prompts: RecapPrompts | None = None
 
 
 class BatchItemOut(BaseModel):

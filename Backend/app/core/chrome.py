@@ -8,7 +8,10 @@ trên Windows là TerminateProcess (giết ngay) → cookie vừa đăng nhập 
 from __future__ import annotations
 
 import logging
+import socket
 import subprocess
+import time
+import urllib.request
 
 logger = logging.getLogger("core.chrome")
 
@@ -52,3 +55,25 @@ def close_chrome_gracefully(browser, proc: subprocess.Popen | None, wait_seconds
             except Exception:  # noqa: BLE001
                 pass
     return exited
+
+
+def find_free_cdp_port(start_port: int, span: int = 40) -> int:
+    """Một cổng còn trống để làm remote debugging port cho Chrome (tìm từ `start_port`)."""
+    for port in range(start_port, start_port + span):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+    return start_port
+
+
+def wait_for_cdp(port: int, max_wait: float = 15.0) -> bool:
+    """Chờ Chrome khởi động xong và mở giao diện DevTools Protocol."""
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.0) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:  # noqa: BLE001
+            time.sleep(0.4)
+    return False

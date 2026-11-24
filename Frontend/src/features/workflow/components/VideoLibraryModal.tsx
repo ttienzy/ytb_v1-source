@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useCallback, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Film,
@@ -30,9 +30,12 @@ import {
   Upload,
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
+import { LibraryPagination } from '../../../shared/LibraryPagination'
+import { useLibraryPage, useLibrarySearch } from '../../../shared/useLibraryPage'
 import type { ExportedVideoItem } from '../contracts'
 import {
-  fetchExportedVideos,
+  fetchExportedVideosPage,
+  type ExportedVideoFilter,
   deleteExportedVideo,
   openExportFolder,
   callWorkflowVideoExport,
@@ -54,14 +57,26 @@ export function VideoLibraryModal({
   onClose,
   onVideoCountChange,
 }: VideoLibraryModalProps) {
-  const [videos, setVideos] = useState<ExportedVideoItem[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [selectedIndex, setSelectedIndex] = useState<number>(0)
+  const [selectedFilename, setSelectedFilename] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [copied, setCopied] = useState(false)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [filterType, setFilterType] = useState<'all' | 'export' | 'veo_scene' | 'motion_control' | 'muse_clip'>('all')
+  const [filterType, setFilterType] = useState<ExportedVideoFilter>('all')
+  const search = useLibrarySearch(searchTerm)
+  const fetchPage = useCallback((page: number, signal: AbortSignal) => fetchExportedVideosPage(page, search, filterType, signal), [search, filterType])
+  const { data: videoPage, loading: isLoading, error: videoPageError, load: loadVideos } = useLibraryPage(fetchPage, { enabled: isOpen })
+  const videoList = useRef<HTMLDivElement>(null)
+  const videos = videoPage?.items ?? []
+  const videoCount = videoPage?.counts.all
+  const exportCount = videoPage?.counts.export ?? 0
+  const motionCount = videoPage?.counts.motion_control ?? 0
+  const veoPromptCount = videoPage?.counts.veo_scene ?? 0
+  const museCount = videoPage?.counts.muse_clip ?? 0
+  const currentVideo = videos.find((video) => video.filename === selectedFilename) ?? videos[0]
+
+  useEffect(() => { if (videoCount !== undefined) onVideoCountChange?.(videoCount) }, [onVideoCountChange, videoCount])
+  useEffect(() => { if (videoList.current) videoList.current.scrollTop = 0 }, [videoPage?.page, search, filterType])
   const [isExtractingFrame, setIsExtractingFrame] = useState(false)
   const [frameSaved, setFrameSaved] = useState(false)
 
@@ -141,7 +156,7 @@ export function VideoLibraryModal({
     }
     setIsSyncPlaying(false)
     setSyncCurrentTime(0)
-  }, [selectedIndex])
+  }, [currentVideo?.filename])
 
   // Chế độ Ghép Nhanh (Remix Multi-clip)
   const [isRemixMode, setIsRemixMode] = useState(false)
@@ -237,11 +252,11 @@ export function VideoLibraryModal({
       )
 
       // Tải lại danh sách video
-      await loadVideos()
+      await loadVideos(1)
       setFilterType('export') // Chuyển sang tab video hoàn chỉnh
       setIsRemixMode(false)
       setSelectedRemixClips([])
-      setSelectedIndex(0)
+      setSelectedFilename(null)
       alert(`🎉 Ghép video Remix thành công! Video "${exportRes.outputFilename}" đã được tạo và lưu vào thư viện.`)
     } catch (err: any) {
       console.error('Lỗi khi ghép video Remix:', err)
@@ -250,26 +265,6 @@ export function VideoLibraryModal({
       setIsRemixing(false)
     }
   }
-
-  const loadVideos = async () => {
-    setIsLoading(true)
-    try {
-      const list = await fetchExportedVideos()
-      setVideos(list)
-      onVideoCountChange?.(list.length)
-      if (list.length > 0 && selectedIndex >= list.length) {
-        setSelectedIndex(0)
-      }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (isOpen) {
-      loadVideos()
-    }
-  }, [isOpen])
 
   // ESC to close
   useEffect(() => {
@@ -280,32 +275,6 @@ export function VideoLibraryModal({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, onClose])
-
-  const exportCount = videos.filter((v) => (v.sourceType || 'export') === 'export').length
-  const motionCount = videos.filter((v) => v.isMotionControl).length
-  const veoPromptCount = videos.filter((v) => v.sourceType === 'veo_scene' && !v.isMotionControl).length
-  const museCount = videos.filter((v) => v.sourceType === 'muse_clip').length
-
-  const filtered = videos.filter((v) => {
-    if (filterType === 'export') {
-      if ((v.sourceType || 'export') !== 'export') return false
-    } else if (filterType === 'motion_control') {
-      if (!v.isMotionControl) return false
-    } else if (filterType === 'veo_scene') {
-      if (v.sourceType !== 'veo_scene' || v.isMotionControl) return false
-    } else if (filterType === 'muse_clip') {
-      if (v.sourceType !== 'muse_clip') return false
-    }
-    if (!searchTerm.trim()) return true
-    const term = searchTerm.toLowerCase()
-    return (
-      v.filename.toLowerCase().includes(term) ||
-      (v.title && v.title.toLowerCase().includes(term)) ||
-      (v.prompt && v.prompt.toLowerCase().includes(term))
-    )
-  })
-
-  const currentVideo = filtered[selectedIndex] || filtered[0]
 
   
   const formatSyncTime = (secs: number) => {
@@ -665,7 +634,7 @@ export function VideoLibraryModal({
                     borderRadius: 99,
                   }}
                 >
-                  {videos.length} video
+                  {videoCount ?? 0} video
                 </span>
               </div>
               <div style={{ fontSize: 11, color: '#64748b' }}>
@@ -709,7 +678,7 @@ export function VideoLibraryModal({
 
             <button
               type="button"
-              onClick={loadVideos}
+              onClick={() => void loadVideos()}
               disabled={isLoading}
               style={{
                 height: 30,
@@ -829,7 +798,7 @@ export function VideoLibraryModal({
                   type="button"
                   onClick={() => {
                     setFilterType('all')
-                    setSelectedIndex(0)
+                    setSelectedFilename(null)
                   }}
                   style={{
                     flex: 1,
@@ -847,13 +816,13 @@ export function VideoLibraryModal({
                   }}
                   title="Toàn bộ video và clip"
                 >
-                  Tất cả ({videos.length})
+                  Tất cả ({videoCount ?? 0})
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setFilterType('veo_scene')
-                    setSelectedIndex(0)
+                    setSelectedFilename(null)
                   }}
                   style={{
                     flex: 1,
@@ -877,7 +846,7 @@ export function VideoLibraryModal({
                   type="button"
                   onClick={() => {
                     setFilterType('motion_control')
-                    setSelectedIndex(0)
+                    setSelectedFilename(null)
                   }}
                   style={{
                     flex: 1,
@@ -901,7 +870,7 @@ export function VideoLibraryModal({
                   type="button"
                   onClick={() => {
                     setFilterType('muse_clip')
-                    setSelectedIndex(0)
+                    setSelectedFilename(null)
                   }}
                   style={{
                     flex: 1,
@@ -925,7 +894,7 @@ export function VideoLibraryModal({
                   type="button"
                   onClick={() => {
                     setFilterType('export')
-                    setSelectedIndex(0)
+                    setSelectedFilename(null)
                   }}
                   style={{
                     flex: 1,
@@ -950,6 +919,8 @@ export function VideoLibraryModal({
 
             {/* Video List */}
             <div
+              ref={videoList}
+              aria-busy={isLoading}
               style={{
                 flex: 1,
                 overflowY: 'auto',
@@ -959,7 +930,8 @@ export function VideoLibraryModal({
                 gap: 6,
               }}
             >
-              {filtered.length === 0 ? (
+              {videoPageError && <div role="alert" style={{ padding: 8, color: '#b91c1c', fontSize: 12 }}>{videoPageError}</div>}
+              {isLoading && videos.length === 0 ? <div role="status" style={{ padding: 12, color: '#64748b', fontSize: 12 }}>Đang tải video…</div> : videos.length === 0 ? (
                 <div
                   style={{
                     textAlign: 'center',
@@ -976,14 +948,15 @@ export function VideoLibraryModal({
                   <div>{searchTerm ? 'Không tìm thấy video phù hợp' : 'Chưa có video nào'}</div>
                 </div>
               ) : (
-                filtered.map((item, idx) => {
+                videos.map((item) => {
                   const isSelected = item.filename === currentVideo?.filename
                   const remixIndex = selectedRemixClips.findIndex((c) => c.filename === item.filename)
                   return (
                     <div
                       key={item.filename}
+                      data-video-filename={item.filename}
                       onClick={() => {
-                        setSelectedIndex(idx)
+                        setSelectedFilename(item.filename)
                         if (isRemixMode) {
                           toggleRemixClip(item)
                         }
@@ -1166,6 +1139,9 @@ export function VideoLibraryModal({
                   )
                 })
               )}
+            </div>
+            <div className="video-library-pagination">
+              <LibraryPagination data={videoPage} loading={isLoading} label="Phân trang Thư Viện Video" showRange onPage={(page) => void loadVideos(page)} />
             </div>
           </div>
 

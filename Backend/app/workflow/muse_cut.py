@@ -53,21 +53,7 @@ def _upload_dir() -> Path:
 
 def resolve_source(raw: str) -> Path:
     """Video trong thư mục video của app (Veo / xuất / Muse), video tải lên node Video tham chiếu (muse_uploads) hoặc video đã cắt."""
-    p = Path(raw)
-    if p.suffix.lower() not in muse_merge.VIDEO_EXT:
-        raise ValueError(f"Không phải file video: {p.name}")
-    if p.name == raw and not p.is_file():
-        from app.veo import service as veo
-
-        found = veo.get_video_path(raw)
-        if found is not None:
-            p = Path(found)
-    if not p.is_file() or p.stat().st_size <= 0:
-        raise FileNotFoundError(f"Không tìm thấy video: {p.name}")
-    rp = p.resolve()
-    if not any(rp.is_relative_to(r) for r in [*muse_merge._roots(), _upload_dir().resolve(), CUT_DIR.resolve()]):
-        raise PermissionError(f"Video nằm ngoài thư mục video của app: {p.name}")
-    return rp
+    return muse_merge.resolve_video(raw)
 
 
 # ---------------------------------------------------------------- cắt + ghép

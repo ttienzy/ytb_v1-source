@@ -5,7 +5,7 @@ export const recapAudioDoc: HelpDoc = {
   title: 'Recap & Audio',
   summary:
     'Hai xưởng làm video có giọng đọc AI. Workflow YouTube: link YouTube → Gemini viết kịch bản recap → cắt cảnh + lồng tiếng → ghép thành video. Workflow Audio: truyện đã crawl → đọc từng câu bằng giọng AI → video có ảnh bìa + phụ đề → mỗi truyện một video FULL (hoặc mỗi chương một video).',
-  verifiedAt: '2026-11-15',
+  verifiedAt: '2026-11-24',
   requires: [
     {
       label: 'Có ít nhất một giọng đọc',
@@ -53,6 +53,16 @@ export const recapAudioDoc: HelpDoc = {
     },
   ],
   areas: [
+    {
+      id: 'recap-prompts',
+      name: 'Prompt tạo nội dung',
+      what: 'Mở sẵn bên dưới nguồn video và giọng đọc. Mẫu gốc là Khám phá ẩm thực; hai tab hiển thị đầy đủ prompt Kịch bản & lời bình và Tiêu đề, mô tả & hashtag.',
+      how: [
+        'Sửa nội dung rồi bấm chạy để áp dụng cho lượt tạo tiếp theo, không bắt buộc lưu mặc định. Giữ các biến trong {{…}} và tên trường JSON; app báo lỗi nếu thiếu.',
+        '“Lưu làm mặc định” lưu cả hai prompt cho những lần tạo tiếp theo. “Khôi phục prompt gốc” khôi phục tab đang chọn; lưu mặc định nếu muốn dùng lại bản gốc về sau.',
+        'Chế độ Hàng loạt dùng chung hai prompt cho toàn bộ hàng đợi mới. Mỗi job giữ bản chụp prompt lúc bắt đầu, kể cả khi tiếp tục sau lỗi hoặc khởi động lại.',
+      ],
+    },
     {
       id: 'workflow-youtube',
       name: 'Workflow YouTube — Đơn lẻ (1 video)',
@@ -224,6 +234,7 @@ export const recapAudioDoc: HelpDoc = {
   ],
   related: ['Khám Phá Kênh', 'Crawl truyện', 'Video', 'Voices', 'Thư viện nhạc', 'Lên lịch Youtube'],
   changes: [
+    { date: '2026-11-24', text: 'Workflow YouTube hiển thị hai prompt nội dung: chỉnh sửa cho lượt tạo, lưu mặc định, khôi phục bản gốc; lưu prompt theo job và dùng chung trong hàng loạt.' },
     { date: '2026-11-12', text: 'Đổi tên từ “Workflow” thành “Recap & Audio”.' },
     { date: '2026-11-12', text: 'Workflow Audio thiết kế lại: kho truyện, đọc chương, tóm tắt Gemini, video nền gộp vào, tab Âm thanh/Lớp phủ/Nền.' },
     { date: '2026-11-15', text: 'Workflow Audio v2: video cả truyện (FULL, tự chia tập) hoặc từng chương; bố cục “Ảnh bìa + phụ đề”; phụ đề khớp từng câu; ảnh bìa nguồn tự dùng làm hình + thumbnail (không còn bắt buộc tải thumbnail); tiêu đề/mô tả có mốc chương; giọng đọc được lưu để làm lại nhanh.' },

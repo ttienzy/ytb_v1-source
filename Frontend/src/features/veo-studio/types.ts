@@ -178,6 +178,13 @@ export interface VeoHistoryItem {
   created_at: string
 }
 
+export interface VeoHistoryPage {
+  items: VeoHistoryItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
 // ─── Batch Script & Multi-threading ─────────────────────────────────────────
 
 export type SceneStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'

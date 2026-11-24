@@ -80,13 +80,11 @@ def test_voice_resolution_and_script_goes_through_chatgpt_web(monkeypatch):
 
 
 @pytest.fixture
-def gemini_client(monkeypatch):
+def gemini_client(monkeypatch, gemini_accounts):
+    gemini_accounts(1)  # một tài khoản Gemini thật trong kho tạm
     client = MagicMock()
     client.__enter__.return_value = client
     monkeypatch.setattr(service.httpx, "Client", Mock(return_value=client))
-    monkeypatch.setattr(service, "_gemini_config", lambda: {
-        "cookies": "test", "user_agent": "test", "inner_template": [[]],
-    })
     monkeypatch.setattr(service, "_fresh_tokens", Mock(return_value=("at", "bl", "sid")))
     monkeypatch.setattr(service, "_auto_refresh_cookies", Mock())
     return client
@@ -115,7 +113,7 @@ def test_invalid_gemini_image_never_generates(monkeypatch, gemini_client, image)
 
 
 def test_refreshed_gemini_session_does_not_swallow_attachment_failure(monkeypatch, gemini_client):
-    monkeypatch.setattr(service, "_fresh_tokens", Mock(side_effect=[RuntimeError("expired"), ("at", "bl", "sid")]))
+    monkeypatch.setattr(service, "_fresh_tokens", Mock(side_effect=[service.GeminiAuthError("expired"), ("at", "bl", "sid")]))
     monkeypatch.setattr(service, "_upload_file", Mock(side_effect=RuntimeError("upload failed")))
     fallback = Mock()
     monkeypatch.setattr(service, "execute_chatgpt_vision_analysis", fallback)

@@ -25,6 +25,8 @@ import type { BgmOut } from '../bgm/types'
 import type { Voice } from '../voices/types'
 import { AudioWorkflowPanel } from './audio/AudioWorkflowPanel'
 import { BatchQueuePanel } from './components/BatchQueuePanel'
+import { RecapPromptEditor } from './components/RecapPromptEditor'
+import { useRecapPrompts } from './useRecapPrompts'
 import { PipelineDiagram } from './components/PipelineDiagram'
 import { JOB_LOST_MSG, isJobLost, isOffline } from './pollState'
 import { VideoResultCard } from './components/VideoResultCard'
@@ -79,6 +81,7 @@ export function StudioPage({
   initialUrls?: string[]
 }) {
   const initialCfg = useMemo(() => getSavedAudioConfig(), [])
+  const prompts = useRecapPrompts()
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [rawText, setRawText] = useState('')
   const [rawFile, setRawFile] = useState<File | null>(null)
@@ -283,7 +286,10 @@ export function StudioPage({
     setOffline(false)
     pollFailsRef.current = 0
     try {
+      if (!prompts.ready || !prompts.value) throw new Error(prompts.validation || 'Chờ tải prompt trước khi tạo video.')
       const form = new FormData()
+      form.append('script_prompt', prompts.value.script)
+      form.append('caption_prompt', prompts.value.caption)
       form.append('youtube_url', youtubeUrl.trim())
       form.append('voice_id', voiceId)
       if (rawFile)
@@ -608,6 +614,7 @@ export function StudioPage({
               </div>
             </div>
 
+            <RecapPromptEditor model={prompts} />
             {/* Footer buttons (Đơn lẻ) */}
             <div className="yt-workflow-footer">
               {!jobId ? (
@@ -615,7 +622,7 @@ export function StudioPage({
                   type="button"
                   className="studio-btn-primary"
                   onClick={startPipeline}
-                  disabled={submitting}
+                  disabled={submitting || !prompts.ready}
                 >
                   {submitting ? (
                     <Loader2 size={15} className="spin" />
@@ -761,12 +768,15 @@ export function StudioPage({
             </div>
 
             {/* Batch Panel (Textarea danh sách link + Nút chạy + Status list) */}
+            <RecapPromptEditor model={prompts} batch />
             <BatchQueuePanel
+              prompts={prompts.value}
+              promptsReady={prompts.ready}
               voiceId={voiceId}
               bgmEnabled={bgmEnabled}
               bgmIds={bgmIds}
               bgmVolume={bgmVolume}
-              disabled={false}
+              disabled={!prompts.ready}
               setActivePage={setActivePage}
               initialUrls={initialUrls}
             />

@@ -150,11 +150,11 @@ def _friendly_error(exc: Exception) -> str:
     from app.ai.gemini import recap
 
     if isinstance(exc, recap.RecapConfigError):
-        return "Chưa đăng nhập Gemini. Vào Cài đặt → Gemini để đăng nhập rồi thử lại."
+        return "Chưa có tài khoản Gemini. Vào Cài đặt → Gemini & YouTube → “(+) Thêm account Gemini” rồi thử lại."
     if isinstance(exc, recap.GeminiAuthError):
-        return f"Phiên Gemini không hợp lệ hoặc đã hết hạn: {exc}"
+        return f"Không có tài khoản Gemini nào dùng được (hết phiên): {exc}"
     if isinstance(exc, recap.GeminiRateLimitError):
-        return "Gemini đang giới hạn tốc độ. Hãy thử lại sau vài phút."
+        return "Mọi tài khoản Gemini đang bị giới hạn tốc độ. Hãy thử lại sau vài phút hoặc thêm account khác."
     if isinstance(exc, recap.GeminiTransientError):
         return f"Lỗi mạng khi gọi Gemini: {exc}"
     return str(exc) or exc.__class__.__name__
@@ -162,7 +162,7 @@ def _friendly_error(exc: Exception) -> str:
 
 def _status_message(status: str) -> str:
     if status == "refreshing_cookie":
-        return "Đang làm mới phiên Gemini qua Chrome…"
+        return "Đang làm mới tài khoản Gemini qua Chrome…"
     if status.startswith("rate_limited:"):
         return f"Gemini đang giới hạn tốc độ, chờ {status.split(':', 1)[1]} giây rồi thử lại…"
     if status == "network_retry":

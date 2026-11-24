@@ -2,7 +2,7 @@
  * Lỗi phân tích sản phẩm (Gemini web / ChatGPT web).
  *
  * Backend trả 401 CHỈ khi lỗi đăng nhập/cookie Gemini (chưa đăng nhập, cookie hết hạn và tự làm mới thất bại). Node chỉ
- * gợi ý "Làm mới Cookie" cho đúng loại này: trước 2026-11-24 node gợi ý cho MỌI lỗi, nên lỗi không liên quan cookie
+ * gợi ý "Làm mới tài khoản Gemini" cho đúng loại này: trước 2026-11-24 node gợi ý cho MỌI lỗi, nên lỗi không liên quan cookie
  * (vd. máy cài mới thiếu template Gemini) khiến người dùng làm mới cookie mãi mà không hết.
  */
 export class AnalysisError extends Error {

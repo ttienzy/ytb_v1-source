@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.core.config import DATA_DIR
+from app.core.pagination import paginate_items
 
 INDEX_FILE = DATA_DIR / "image_library.json"
 UPLOAD_DIR = DATA_DIR / "media" / "image_library"
@@ -106,12 +107,15 @@ def _sync(data: dict[str, Any]) -> bool:
     return changed
 
 
-def list_images(q: str = "", source: str = "", favorite: bool = False) -> list[dict[str, Any]]:
+def _ordered_images() -> list[dict[str, Any]]:
     with _lock:
         data = _load()
         if _sync(data):
             _save(data)
-        items = data["items"]
+    return sorted(data["items"], key=lambda it: it.get("created_at", 0), reverse=True)
+
+
+def _filter_images(items: list[dict[str, Any]], q: str, source: str, favorite: bool) -> list[dict[str, Any]]:
     ql = q.strip().lower()
     out = []
     for it in items:
@@ -126,9 +130,24 @@ def list_images(q: str = "", source: str = "", favorite: bool = False) -> list[d
             ).lower()
             if ql not in hay:
                 continue
-        out.append(_public(it))
-    out.sort(key=lambda it: it.get("created_at", 0), reverse=True)
+        out.append(it)
     return out
+
+
+def list_images(q: str = "", source: str = "", favorite: bool = False) -> list[dict[str, Any]]:
+    return [_public(it) for it in _filter_images(_ordered_images(), q, source, favorite)]
+
+
+def count_images() -> int:
+    return len(_ordered_images())
+
+
+def list_images_page(page: int, q: str = "", source: str = "", favorite: bool = False) -> dict:
+    all_images = _ordered_images()
+    result = paginate_items(_filter_images(all_images, q, source, favorite), page)
+    result["items"] = [_public(it) for it in result["items"]]
+    result["library_total"] = len(all_images)
+    return result
 
 
 def get_image(image_id: str) -> Optional[dict[str, Any]]:

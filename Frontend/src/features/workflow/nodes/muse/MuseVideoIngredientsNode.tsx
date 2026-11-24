@@ -16,6 +16,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Clapperboard,
+  Columns2,
   ArrowUpRight,
   ExternalLink,
   ImageOff,
@@ -23,11 +24,14 @@ import {
   Link2Off,
   Loader2,
   Maximize2,
+  Pause,
   Play,
   RotateCcw,
   Save,
   Search,
   Video,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
 import {
   MUSE_HANDLE,
@@ -74,6 +78,15 @@ import {
   type VeoJobLite,
 } from '../../services/museCanvasApi.ts'
 import { uploadVideoReference } from '../../../veo-studio/services/veoApi'
+import {
+  canCompareWithReference,
+  compareFinished,
+  compareLength,
+  compareNeedsResync,
+  compareRefTime,
+  formatCompareTime,
+  type CompareSpan,
+} from '../../services/museVideoCompare.ts'
 import { runKey } from '../../services/museRunRegistry.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
@@ -109,6 +122,121 @@ async function fetchVideoFile(previewUrl: string, name: string): Promise<File> {
   return new File([blob], name || 'reference_video.mp4', { type: blob.type || 'video/mp4' })
 }
 
+/** Đoạn video mẫu đã gửi lên Flow (để đối chiếu với kết quả). */
+type CompareReference = CompareSpan & { url: string; name: string }
+
+/**
+ * Đối chiếu: video mẫu (đúng đoạn đã gửi) cạnh video kết quả, phát đồng bộ. Video kết quả là đồng hồ chính; video mẫu
+ * được kéo theo (giây t của kết quả = start + t của mẫu) và chỉ bị kéo lại khi lệch quá ngưỡng để không giật.
+ */
+function CompareView({ reference, resultUrl }: { reference: CompareReference; resultUrl: string }) {
+  const refEl = useRef<HTMLVideoElement>(null)
+  const resEl = useRef<HTMLVideoElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [t, setT] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [soundOn, setSoundOn] = useState(true)
+  const span: CompareSpan = { start: reference.start, end: reference.end }
+  const length = compareLength(span, duration)
+
+  function seek(next: number) {
+    const result = resEl.current
+    const sample = refEl.current
+    if (!result || !sample) return
+    result.currentTime = next
+    sample.currentTime = compareRefTime(span, next)
+    setT(next)
+  }
+
+  async function toggle() {
+    const result = resEl.current
+    const sample = refEl.current
+    if (!result || !sample) return
+    if (playing) {
+      result.pause()
+      sample.pause()
+      return
+    }
+    if (compareFinished(span, result.currentTime, result.duration)) seek(0)
+    sample.currentTime = compareRefTime(span, result.currentTime)
+    await Promise.allSettled([result.play(), sample.play()])
+  }
+
+  function onResultTime() {
+    const result = resEl.current
+    const sample = refEl.current
+    if (!result || !sample) return
+    setT(result.currentTime)
+    if (compareFinished(span, result.currentTime, result.duration)) {
+      result.pause()
+      sample.pause()
+      seek(0)
+    } else if (compareNeedsResync(span, sample.currentTime, result.currentTime)) {
+      sample.currentTime = compareRefTime(span, result.currentTime)
+    }
+  }
+
+  return (
+    <div className="mc-vcompare nodrag nowheel">
+      <div className="mc-vcompare-panes">
+        <figure>
+          <figcaption title={reference.name}>Video mẫu · {formatCompareTime(reference.start)}–{formatCompareTime(reference.end)}</figcaption>
+          <video
+            ref={refEl}
+            key={`${reference.url}#${reference.start}`}
+            src={reference.url}
+            muted
+            playsInline
+            preload="auto"
+            onLoadedMetadata={(e) => {
+              e.currentTarget.currentTime = compareRefTime(span, t)
+            }}
+          />
+        </figure>
+        <figure>
+          <figcaption>Kết quả</figcaption>
+          <video
+            ref={resEl}
+            key={resultUrl}
+            src={resultUrl}
+            muted={!soundOn}
+            playsInline
+            preload="metadata"
+            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+            onTimeUpdate={onResultTime}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+          />
+        </figure>
+      </div>
+      <div className="mc-vcompare-bar">
+        <button type="button" className="mc-mini-btn nodrag" onClick={toggle} title="Phát / dừng cả hai video cùng lúc">
+          {playing ? <Pause size={11} /> : <Play size={11} />} {playing ? 'Dừng' : 'Phát cùng lúc'}
+        </button>
+        <input
+          type="range"
+          className="mc-vcompare-seek nodrag"
+          min={0}
+          max={Math.max(length, 0.1)}
+          step={0.05}
+          value={Math.min(t, Math.max(length, 0.1))}
+          aria-label="Tua cả hai video"
+          onChange={(e) => seek(Number(e.target.value))}
+        />
+        <span className="mc-vcompare-time">{formatCompareTime(t)} / {formatCompareTime(length)}</span>
+        <button
+          type="button"
+          className="mc-icon-btn nodrag"
+          onClick={() => setSoundOn((v) => !v)}
+          title={soundOn ? 'Tắt tiếng video kết quả (video mẫu luôn tắt tiếng)' : 'Bật tiếng video kết quả'}
+        >
+          {soundOn ? <Volume2 size={12} /> : <VolumeX size={12} />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** Một ô biến thể: trạng thái, video đã tạo và các nút của riêng biến thể đó. */
 function VariantTile(props: {
   index: number
@@ -125,6 +253,8 @@ function VariantTile(props: {
   batchTile: boolean
   /** Đã có node Video tham chiếu tách từ video này (còn trên canvas) */
   hasNode: boolean
+  /** Đoạn video mẫu để đối chiếu — chỉ có khi đang bật "Đối chiếu" (null = hiện video kết quả như thường) */
+  reference: CompareReference | null
   onStop: () => void
   onRecover: () => void
   onRetry: () => void
@@ -136,11 +266,16 @@ function VariantTile(props: {
   const stalled = clipVideoStalled(video, now)
   const safeErr = state === 'error' && (isSafeFlowError(video?.errorCode) || isProjectHomeError(video?.error))
   const label = total > 1 ? `Biến thể ${index + 1}` : 'Video'
+  // chỉ ô "Xong" so được: "Bản cũ" nghĩa là video mẫu / đoạn cắt đã đổi so với lúc tạo
+  const comparing = canCompareWithReference(state, !!file, !!props.reference)
   return (
     <div className={`mc-vingr-var mc-cv-${state}`}>
       <div className="mc-vingr-var-head">
         <strong>{label}</strong>
-        <span className={`mc-vingr-var-chip chip-${state}`}>
+        <span
+          className={`mc-vingr-var-chip chip-${state}`}
+          title={state === 'stale' ? 'Video mẫu / đoạn cắt / ảnh / prompt / cấu hình đã đổi so với lúc tạo video này' : undefined}
+        >
           {state === 'running' ? 'Đang tạo' : state === 'done' ? 'Xong' : state === 'stale' ? 'Bản cũ' : state === 'error' ? 'Lỗi' : 'Chưa tạo'}
         </span>
       </div>
@@ -159,12 +294,9 @@ function VariantTile(props: {
         </>
       )}
       {(state === 'done' || state === 'stale') && file && (
-        <>
-          <video className={`mc-clipvideo-player nodrag ${state === 'stale' ? 'dim' : ''}`} src={veoVideoUrl(file)} controls preload="metadata" />
-          {state === 'stale' && (
-            <div className="mc-clip-warn"><AlertTriangle size={11} /> Video / đoạn cắt / ảnh / prompt / cấu hình đã đổi — bản cũ.</div>
-          )}
-        </>
+        comparing && props.reference
+          ? <CompareView reference={props.reference} resultUrl={veoVideoUrl(file)} />
+          : <video className="mc-clipvideo-player nodrag" src={veoVideoUrl(file)} controls preload="metadata" />
       )}
       {state === 'error' && video?.error && (
         <div className="mc-node-error">
@@ -230,6 +362,8 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
   const [busy, setBusy] = useState<'' | 'reset' | 'save' | 'recover'>('')
   const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showPrompt, setShowPrompt] = useState(false)
+  /** Chế độ đối chiếu video kết quả với đoạn video mẫu (chỉ giao diện, không lưu vào project) */
+  const [compare, setCompare] = useState(false)
   const [now, setNow] = useState(Date.now())
   /** Khung xem video tham chiếu (kéo thanh cắt -> nhảy tới giây đó; "Xem đoạn" phát đúng đoạn gửi) */
   const previewRef = useRef<HTMLVideoElement>(null)
@@ -556,6 +690,8 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
   const fmt = (t: number) => `${(Math.round(t * 10) / 10).toFixed(1)}s`
   const slots = Array.from({ length: VIDEO_INGR_MAX_REFS }, (_, i) => refs[i] ?? null)
   // các ô đã có video mà chưa tách thành node (cho nút "Tất cả ra node")
+  // có ít nhất một video "Xong" + có video mẫu → hiện nút "Đối chiếu video mẫu"
+  const canCompare = !!refVideo && states.some((st, i) => canCompareWithReference(st, !!videos[i]?.files?.length, true))
   const toNodeAll = videos.flatMap((v, i) => (videoIngrTileToRef(v, veoVideoUrl) && !(v.outNodeId && getNode(v.outNodeId)) ? [i] : []))
 
   return (
@@ -791,6 +927,17 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
         <div className={`mc-clipvideo mc-cv-${vstate}`}>
           <div className="mc-clipvideo-head">
             <Clapperboard size={13} /> Video Flow
+            {canCompare && (
+              <button
+                type="button"
+                className={`mc-mini-btn nodrag mc-vingr-compare ${compare ? 'on' : ''}`}
+                aria-pressed={compare}
+                onClick={() => setCompare((v) => !v)}
+                title="Xem video kết quả cạnh đúng đoạn video mẫu đã gửi, phát đồng bộ để so chuyển động"
+              >
+                <Columns2 size={11} /> Đối chiếu video mẫu
+              </button>
+            )}
             {toNodeAll.length > 1 && (
               <button type="button" className="mc-mini-btn nodrag mc-vingr-allnode" onClick={() => toNodes(toNodeAll)} title="Tách mọi video đã tạo (chưa có node) thành node Video tham chiếu">
                 <ArrowUpRight size={11} /> Tất cả ra node
@@ -803,7 +950,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
           </div>
 
           {videos.length > 0 && (
-            <div className={`mc-vingr-variants cols-${slotCount > 1 ? 2 : 1}`}>
+            <div className={`mc-vingr-variants cols-${compare || slotCount < 2 ? 1 : 2}`}>
               {Array.from({ length: slotCount }, (_, i) => (
                 <VariantTile
                   key={i}
@@ -820,6 +967,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
                   onRecover={() => recoverVideo(i)}
                   onRetry={() => createVideos([i])}
                   hasNode={!!(videos[i]?.outNodeId && getNode(videos[i]!.outNodeId!))}
+                  reference={compare && refVideo ? { url: museMediaUrl(refVideo.previewUrl), start: trim.start, end: trim.end, name: refVideoLabel || refVideo.name } : null}
                   onToNode={() => toNodes([i])}
                 />
               ))}

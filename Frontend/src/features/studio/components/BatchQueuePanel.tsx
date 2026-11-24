@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { API_URL } from '../../../shared/constants'
 import type { BatchOut } from '../types'
+import type { RecapPrompts } from '../useRecapPrompts'
 
 const STATUS_ICONS: Record<string, JSX.Element> = {
   pending: <Clock3 size={15} style={{ color: '#94a3b8' }} />,
@@ -36,6 +37,8 @@ function truncateUrl(url: string, max = 55): string {
 }
 
 interface Props {
+  prompts: RecapPrompts | null
+  promptsReady: boolean
   voiceId: string
   bgmEnabled: boolean
   bgmIds: string[]
@@ -46,6 +49,8 @@ interface Props {
 }
 
 export function BatchQueuePanel({
+  prompts,
+  promptsReady,
   voiceId,
   bgmEnabled,
   bgmIds,
@@ -143,6 +148,7 @@ export function BatchQueuePanel({
   }, [batchId, pollBatch])
 
   async function submitBatch() {
+    if (!promptsReady || !prompts) { setSubmitError('Hoàn thiện cả hai prompt trước khi tạo hàng đợi.'); return }
     if (urlCount === 0) {
       setSubmitError('Dán ít nhất 1 link YouTube.')
       return
@@ -176,6 +182,7 @@ export function BatchQueuePanel({
       const body: Record<string, unknown> = {
         urls: uniqueUrls,
         voice_id: voiceId,
+        prompts,
       }
       if (bgmEnabled && bgmIds.length) {
         body.bgm_ids = bgmIds
@@ -276,7 +283,7 @@ export function BatchQueuePanel({
             type="button"
             className="btn-p"
             onClick={submitBatch}
-            disabled={submitting || disabled || urlCount === 0 || Boolean(urlError)}
+            disabled={submitting || disabled || !promptsReady || urlCount === 0 || Boolean(urlError)}
             id="btn-batch-submit"
           >
             {submitting ? (

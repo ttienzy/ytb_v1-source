@@ -92,3 +92,23 @@ def test_routes(isolated):
     assert c.post("/api/workflow/images/upload", files={"file": ("a.txt", b"x", "text/plain")}).status_code == 400
     assert c.delete(f"/api/workflow/images/{iid}").json() == {"ok": True}
     assert c.get(f"/api/workflow/images/{iid}/file").status_code == 404
+
+
+def test_paged_image_search_filters_before_slicing(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    items = [
+        {"id": str(index), "label": f"Ảnh {index}", "source": "muse", "favorite": index == 0}
+        for index in reversed(range(52))
+    ]
+    monkeypatch.setattr(lib, "_ordered_images", lambda: items)
+    client = TestClient(app)
+    first = client.get("/api/workflow/images?page=1").json()
+    assert len(first["items"]) == 50
+    last = client.get("/api/workflow/images?page=2").json()
+    assert [item["id"] for item in last["items"]] == ["1", "0"]
+    filtered = client.get("/api/workflow/images?page=2&q=Ảnh%200&favorite=true").json()
+    assert (filtered["total"], filtered["library_total"], filtered["page"]) == (1, 52, 1)
+    assert filtered["items"][0]["preview_url"] == "/api/workflow/images/0/file"
+    assert client.get("/api/workflow/images/count").json() == {"total": 52}

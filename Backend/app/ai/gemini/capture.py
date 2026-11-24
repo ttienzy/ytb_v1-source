@@ -2,7 +2,7 @@
 
 App đã mang sẵn một template (`app.ai.gemini.template`, resources/gemini/inner_template.json); chỉ cần chạy cái này khi
 Gemini đổi giao thức (gọi Gemini báo lỗi lạ dù cookie còn tốt). Gọi từ Cài đặt → Gemini & YouTube → "Cập nhật template
-Gemini" (POST /api/settings/gemini/capture-template) hoặc chạy tay: `cd Backend; .venv/Scripts/python -m app.ai.gemini.capture`.
+Gemini" (POST /api/settings/gemini/capture-template, dùng profile của một tài khoản) hoặc chạy tay: `cd Backend; .venv/Scripts/python -m app.ai.gemini.capture`.
 
 Cơ chế:
   - Mở Chrome với profile Gemini (đã đăng nhập) → gemini.google.com/app.
@@ -10,8 +10,8 @@ Cơ chế:
   - Chặn request bằng page.route() → lấy post_data (f.req) + user-agent; route.abort() → request KHÔNG tới server →
     KHÔNG tạo lịch sử chat.
   - Parse f.req → inner 97 trường; làm sạch idx 3/4/59 (relate-token, conversation-id, UUID) → template "hội thoại mới".
-  - Lưu inner_template + user_agent + template_saved_at. KHÔNG ghi đè cookie: cookie lấy qua "Đăng nhập Gemini (Chrome)"
-    (Chrome thật, không cờ automation).
+  - Lưu inner_template + user_agent + template_saved_at. KHÔNG ghi đè cookie: cookie nằm trong kho tài khoản
+    (accounts.py), lấy qua "(+) Thêm account Gemini".
 
 bl (cfb2h) / f.sid / at (SNlM0e) KHÔNG lưu — recap.py tự lấy mới qua GET /app mỗi lần (đổi theo phiên/build).
 """
@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.ai.gemini.template import SANITIZE_INDICES, TEMPLATE_LENGTH, sanitize_inner
 from app.core.config import settings
@@ -42,19 +43,21 @@ def parse_f_req(body: str) -> list:
     return json.loads(outer[1])
 
 
-def capture_template() -> dict:
-    """Mở profile Gemini, bắt template, lưu vào config.json. Trả {ok, inner_length, user_agent, template_saved_at}."""
+def capture_template(profile_dir: str | Path) -> dict:
+    """Mở profile Gemini `profile_dir` (của một tài khoản), bắt template, lưu vào config.json.
+    Trả {ok, inner_length, user_agent, template_saved_at}."""
     from playwright.sync_api import sync_playwright
 
     if not settings.chrome_executable.exists():
         raise GeminiTemplateCaptureError(f"Không tìm thấy Chrome: {settings.chrome_executable}")
-    settings.chrome_profile_dir.mkdir(parents=True, exist_ok=True)
+    profile_dir = Path(profile_dir)
+    profile_dir.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
         try:
             # Context persistent do Playwright quản lý: context.close() đóng Chrome êm (profile ghi xong xuống đĩa).
             context = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(settings.chrome_profile_dir),
+                user_data_dir=str(profile_dir),
                 executable_path=str(settings.chrome_executable),
                 headless=False,
                 ignore_default_args=["--no-sandbox"],
@@ -88,7 +91,7 @@ def capture_template() -> dict:
                 editor = page.locator('[contenteditable="true"]').first
             if editor.count() == 0:
                 raise GeminiTemplateCaptureError(
-                    "Không thấy ô nhập Gemini — profile chưa đăng nhập (bấm “Đăng nhập Gemini (Chrome)” trước) "
+                    "Không thấy ô nhập Gemini — profile chưa đăng nhập (bấm “Đăng nhập lại” cho tài khoản trước) "
                     "hoặc giao diện Gemini đã đổi.")
             editor.click()
             page.keyboard.type(PROMPT, delay=10)
@@ -120,9 +123,14 @@ def capture_template() -> dict:
 
 
 def capture() -> None:
-    """Chạy tay từ terminal."""
+    """Chạy tay từ terminal: dùng profile của tài khoản Gemini tốt nhất trong kho."""
+    from app.ai.gemini import pool
+
+    acc, _ = pool.select()
+    if acc is None or not acc.get("partition"):
+        raise SystemExit(pool.NO_ACCOUNT_MSG)
     try:
-        res = capture_template()
+        res = capture_template(acc["partition"])
     except GeminiTemplateCaptureError as error:
         raise SystemExit(str(error)) from error
     print(f"\n✅ Đã capture & lưu vào: {settings.config_file}")

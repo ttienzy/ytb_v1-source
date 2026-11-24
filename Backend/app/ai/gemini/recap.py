@@ -19,7 +19,15 @@ from typing import Any, Callable
 
 import httpx
 
-from app.ai.gemini.template import load_bundled_inner_template
+from app.ai.gemini import pool
+from app.ai.gemini.errors import (  # noqa: F401 — re-export: code cũ import các tên này từ recap
+    GeminiAuthError,
+    GeminiNotLoggedInError,
+    GeminiRateLimitError,
+    GeminiTransientError,
+    RecapConfigError,
+)
+from app.ai.gemini.template import DEFAULT_UA  # noqa: F401
 from app.core.config import PROMPTS_DIR, TOOLS_DIR
 from app.core.storage import read_config
 from app.recap.chunker import build_dynamic_chunks, extract_transcript_entries
@@ -41,34 +49,6 @@ def _log(msg: str) -> None:
 
 PUSH_ID = "feeds/mcudyrk2a4khkz"
 X_CLIENT_PCTX = "CgcSBWjK7pYx"
-DEFAULT_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
-)
-
-
-class RecapConfigError(RuntimeError):
-    """Thiếu cấu hình Gemini để gọi được (lớp cha; hiện chỉ còn trường hợp chưa đăng nhập)."""
-
-
-class GeminiNotLoggedInError(RecapConfigError):
-    """Chưa có cookie Gemini: người dùng phải đăng nhập một lần (Cài đặt → Gemini & YouTube). Là lỗi đăng nhập
-    như ``GeminiAuthError`` (giao diện gợi ý "Làm mới Cookie"), khác với lỗi mạng/Google."""
-
-
-class GeminiAuthError(RuntimeError):
-    """Phiên/cookie Gemini không hợp lệ THẬT SỰ (Google trả trang không có token, 401/403).
-
-    Chỉ lỗi này mới đáng mở Chrome refresh cookie. Đã refresh mà vẫn lỗi → dừng hẳn (không retry vòng ngoài).
-    """
-
-
-class GeminiTransientError(RuntimeError):
-    """Lỗi tạm thời (mạng đứt/timeout, Google 5xx) — thử lại nhanh, TUYỆT ĐỐI không mở Chrome refresh."""
-
-
-class GeminiRateLimitError(RuntimeError):
-    """Bị giới hạn tốc độ (429) quá số lần cho phép — dừng và báo rõ thay vì chờ vô hạn."""
 
 
 # Timeout: GET /app và upload thường < 2s → 10s là đủ rộng; treo hơn thế là lỗi mạng. (Đã từng đo 1 lần GET /app
@@ -104,43 +84,40 @@ def _http_error_for(status: int, msg: str) -> RuntimeError:
     return GeminiAuthError(msg) if status in (401, 403) else GeminiTransientError(msg)
 
 
-def _gemini_config() -> dict:
-    """Cookie + template + user agent để gọi Gemini web.
+def _gemini_config(exclude: frozenset[str] = frozenset()) -> dict:
+    """Cookie + template + user agent của tài khoản Gemini sẽ dùng cho lần gọi kế tiếp (`app.ai.gemini.pool`).
 
-    Template: bản capture trong config.json (Cài đặt → "Cập nhật template Gemini") nếu có, không thì bản đóng gói sẵn
-    (`app.ai.gemini.template`) — máy cài mới không cần chạy script nào. Thiếu cookie → ``GeminiNotLoggedInError``."""
-    g = read_config().get("gemini", {})
-    cookies = g.get("cookies", "")
-    if not cookies:
-        raise GeminiNotLoggedInError(
-            "Chưa đăng nhập Gemini: vào Cài đặt → Gemini & YouTube → “Đăng nhập Gemini (Chrome)” (chỉ cần một lần).")
-    captured = g.get("inner_template")
-    return {
-        "cookies": cookies,
-        "inner_template": captured or load_bundled_inner_template(),
-        "template_source": "captured" if captured else "bundled",
-        "user_agent": g.get("user_agent") or DEFAULT_UA,
-    }
+    Chưa có tài khoản nào → ``GeminiNotLoggedInError`` (kèm hướng dẫn thêm account); còn tài khoản nhưng không cái nào
+    dùng được → ``GeminiAuthError``. Template: bản capture trong config.json nếu có, không thì bản đóng gói sẵn."""
+    return pool.current_config(exclude)
 
 
-def _auto_refresh_cookies(on_step: Callable[[str], None] | None = None) -> dict:
-    """Tự động mở Chrome profile để refresh cookies Gemini và lưu vào config.json.
+def _auto_refresh_cookies(on_step: Callable[[str], None] | None = None, account_id: str | None = None) -> dict:
+    """Làm mới cookie bằng profile Chrome ấm: đúng tài khoản `account_id`, hoặc (None) lần lượt từng tài khoản tới khi
+    một cái làm mới được. ``on_step(text)``: báo bước đang làm ("Mở Chrome…", …) để giao diện hiển thị."""
+    from app.ai.gemini.service import refresh_account
 
-    ``on_step(text)``: báo bước đang làm ("Mở Chrome…", "Chờ đăng nhập (còn 40s)"…) để giao diện hiển thị.
-    """
-    from app.ai.gemini.service import login_and_save_cookie
+    if account_id is not None:
+        _log(f"[Gemini] Đang làm mới cookie tài khoản {account_id} qua Chrome profile...")
+        refresh_account(account_id, on_step=on_step)
+        return _gemini_config()
+    errors: list[str] = []
+    for acc in pool.get_store().usable_accounts():
+        if not acc.get("partition"):
+            continue
+        _log(f"[Gemini] Đang làm mới cookie tài khoản {acc['id']} qua Chrome profile...")
+        try:
+            refresh_account(acc["id"], on_step=on_step)
+            return _gemini_config()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{acc.get('email') or acc['id']}: {getattr(exc, 'detail', None) or exc}")
+    raise RuntimeError("; ".join(errors) or pool.NO_USABLE_MSG)
 
-    _log("[Gemini] Đang tự động làm mới cookie Gemini qua Chrome profile...")
-    res = login_and_save_cookie(on_step=on_step)
-    if not res.get("has_cookie"):
-        raise RuntimeError("Không lấy được cookie Gemini sau khi mở Chrome.")
-    return _gemini_config()
 
-
-def _refresh_or_raise(on_step: Callable[[str], None] | None = None) -> dict:
-    """Refresh cookie qua Chrome; MỌI lỗi (kể cả HTTPException của login) → ``GeminiAuthError`` (dừng hẳn)."""
+def _refresh_or_raise(on_step: Callable[[str], None] | None = None, account_id: str | None = None) -> dict:
+    """Làm mới cookie; MỌI lỗi (kể cả HTTPException của Chrome) → ``GeminiAuthError`` (pool sẽ đổi tài khoản)."""
     try:
-        return _auto_refresh_cookies(on_step) if on_step else _auto_refresh_cookies()
+        return _auto_refresh_cookies(on_step, account_id)
     except Exception as exc:  # noqa: BLE001
         detail = getattr(exc, "detail", None) or exc
         raise GeminiAuthError(f"Cookie Gemini hết hạn và làm mới tự động thất bại: {detail}") from exc
@@ -164,20 +141,28 @@ def _fresh_tokens(client: httpx.Client, cookies: str, ua: str) -> tuple[str, str
 
 
 def check_cookie_state() -> str:
-    """Kiểm tra nhanh phiên Gemini → ``"ok"`` | ``"auth"`` (cookie hỏng thật) | ``"network"`` (không chắc: mạng lỗi).
+    """Kiểm tra nhanh phiên Gemini → ``"ok"`` (có ít nhất một tài khoản vào được) | ``"auth"`` (mọi tài khoản hỏng thật)
+    | ``"network"`` (không chắc: mạng lỗi).
 
-    Lỗi mạng KHÔNG được coi là cookie hỏng (trước đây bị nhầm → mở Chrome refresh vô ích, tốn phút).
-    Raise ``RecapConfigError`` nếu chưa cấu hình.
-    """
-    cfg = _gemini_config()
-    try:
-        with httpx.Client(http2=False, timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
-            _with_net_retry(lambda: _fresh_tokens(client, cfg["cookies"], cfg["user_agent"]), "Kiểm tra cookie Gemini")
-        return "ok"
-    except GeminiAuthError:
-        return "auth"
-    except GeminiTransientError:
-        return "network"
+    Lỗi mạng KHÔNG được coi là cookie hỏng (trước đây bị nhầm → mở Chrome refresh vô ích, tốn phút). Tài khoản hỏng được
+    đánh dấu "error". Raise ``GeminiNotLoggedInError`` nếu chưa có tài khoản nào."""
+    exclude: set[str] = set()
+    network = False
+    while True:
+        try:
+            cfg = _gemini_config(frozenset(exclude))
+        except GeminiAuthError:
+            return "network" if network else "auth"
+        try:
+            with httpx.Client(http2=False, timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+                _with_net_retry(lambda: _fresh_tokens(client, cfg["cookies"], cfg["user_agent"]), "Kiểm tra cookie Gemini")
+            pool.mark_ok(cfg["account_id"])
+            return "ok"
+        except GeminiAuthError:
+            pool.get_store().set_status(cfg["account_id"], "error", pool.AUTH_MESSAGE)
+        except GeminiTransientError:
+            network = True
+        exclude.add(cfg["account_id"])
 
 
 def _upload_file(client: httpx.Client, content: bytes, name: str, cookies: str, ua: str) -> str:
@@ -370,32 +355,77 @@ def _call_gemini_stream(
     backoff_sec: int = 30,
     rate_limit_retries: int = MAX_RATE_LIMIT_RETRIES,
 ) -> str:
-    """Upload prompt text lên Gemini GCS và gọi StreamGenerate lấy response stream thô.
+    """Upload prompt text lên Gemini GCS và gọi StreamGenerate lấy response stream thô, qua tài khoản Gemini tốt nhất.
 
-    Phân loại lỗi (quan trọng — mỗi loại xử lý khác nhau):
-    1. Lỗi mạng / timeout / 5xx: thử lại nhanh (2s, 5s) rồi ``GeminiTransientError``. KHÔNG mở Chrome.
-    2. Phiên không hợp lệ thật (không có token, 401/403): refresh cookie qua Chrome 1 lần rồi gọi lại;
-       refresh hỏng hoặc vẫn lỗi → ``GeminiAuthError`` (vòng ngoài không retry).
-    3. HTTP 429 / rate limit: chờ 30→45→60→60s, tối đa ``MAX_RATE_LIMIT_RETRIES`` lần rồi ``GeminiRateLimitError``.
+    Tài khoản lỗi thì đổi tài khoản (``pool.failover``). Phân loại lỗi (mỗi loại xử lý khác nhau):
+    1. Lỗi mạng / timeout / 5xx: thử lại nhanh (2s, 5s) rồi ``GeminiTransientError``. KHÔNG mở Chrome, KHÔNG đổi tài khoản.
+    2. Phiên không hợp lệ thật (không có token, 401/403): làm mới cookie của tài khoản đó qua Chrome ấm 1 lần
+       (``allow_refresh``) rồi gọi lại; vẫn lỗi → đánh dấu "error" và thử tài khoản khác; hết tài khoản → ``GeminiAuthError``.
+    3. HTTP 429 / rate limit: còn tài khoản khác → đánh dấu "exhausted" và chuyển ngay; hết → chờ 30→45→60→60s tối đa
+       ``MAX_RATE_LIMIT_RETRIES`` lần rồi ``GeminiRateLimitError``.
     """
-    cfg = _gemini_config()
-    cookies, inner_template, ua = cfg["cookies"], cfg["inner_template"], cfg["user_agent"]
+    return pool.failover(
+        lambda exclude: _stream_with_refresh(
+            exclude, prompt_text, filename, query_text, allow_refresh, status_callback, backoff_sec, rate_limit_retries),
+        _log,
+    )
 
-    def _retry_after_refresh() -> str:
-        _log("[Gemini] Phiên không hợp lệ (auth). Làm mới cookie qua Chrome rồi gọi lại...")
-        if status_callback:
-            status_callback("refreshing_cookie")
-        # Báo từng bước refresh ("Mở Chrome…", "Chờ đăng nhập…") qua status_callback → hiện trên giao diện.
+
+def _stream_with_refresh(exclude, prompt_text, filename, query_text, allow_refresh, status_callback, backoff_sec, rate_limit_retries) -> str:
+    """Một tài khoản: gọi; lỗi phiên → làm mới cookie của CHÍNH tài khoản đó một lần rồi gọi lại."""
+    cfg = _gemini_config(exclude)
+    try:
+        return _stream_attempt(cfg, prompt_text, filename, query_text, status_callback, backoff_sec, rate_limit_retries)
+    except GeminiAuthError:
+        if not allow_refresh:
+            raise
+    _log("[Gemini] Phiên không hợp lệ (auth). Làm mới cookie qua Chrome rồi gọi lại...")
+    if status_callback:
+        status_callback("refreshing_cookie")
+    # Báo từng bước refresh ("Mở Chrome…", …) qua status_callback → hiện trên giao diện.
+    try:
         _refresh_or_raise(
-            (lambda text: status_callback(f"cookie_step:{text}")) if status_callback else None
+            (lambda text: status_callback(f"cookie_step:{text}")) if status_callback else None,
+            cfg["account_id"],
         )
-        if status_callback:
-            status_callback("running")
-        return _call_gemini_stream(
-            prompt_text, filename, query_text,
-            allow_refresh=False, status_callback=status_callback,
-            backoff_sec=backoff_sec, rate_limit_retries=rate_limit_retries,
-        )
+    except GeminiAuthError as refresh_exc:
+        raise pool.tag_account(refresh_exc, cfg["account_id"])
+    if status_callback:
+        status_callback("running")
+    cfg = pool.config_for(cfg["account_id"], exclude)  # cookie mới của đúng tài khoản vừa làm mới
+    return _stream_attempt(cfg, prompt_text, filename, query_text, status_callback, backoff_sec, rate_limit_retries)
+
+
+def _stream_attempt(
+    cfg: dict,
+    prompt_text: str,
+    filename: str,
+    query_text: str,
+    status_callback: Callable[[str], None] | None,
+    backoff_sec: int,
+    rate_limit_retries: int,
+) -> str:
+    """Gọi StreamGenerate bằng MỘT tài khoản (`cfg`). Lỗi phiên/giới hạn gắn `account_id` để pool đánh dấu + đổi tài khoản."""
+    try:
+        text = _stream_once(cfg, prompt_text, filename, query_text, status_callback, backoff_sec, rate_limit_retries)
+    except (GeminiAuthError, GeminiRateLimitError) as exc:
+        raise pool.tag_account(exc, cfg["account_id"])
+    pool.mark_ok(cfg["account_id"])
+    return text
+
+
+def _stream_once(
+    cfg: dict,
+    prompt_text: str,
+    filename: str,
+    query_text: str,
+    status_callback: Callable[[str], None] | None,
+    backoff_sec: int,
+    rate_limit_retries: int,
+) -> str:
+    cookies, inner_template, ua = cfg["cookies"], cfg["inner_template"], cfg["user_agent"]
+    if cfg.get("alternatives"):
+        rate_limit_retries = 0  # còn tài khoản khác: chạm giới hạn thì đổi ngay, không chờ
 
     with httpx.Client(http2=False, timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
         try:
@@ -403,8 +433,6 @@ def _call_gemini_stream(
                 lambda: _fresh_tokens(client, cookies, ua), "Lấy token Gemini", status_callback
             )
         except GeminiAuthError:
-            if allow_refresh:
-                return _retry_after_refresh()
             raise
 
         prompt_bytes = prompt_text.encode("utf-8")
@@ -413,8 +441,6 @@ def _call_gemini_stream(
                 lambda: _upload_file(client, prompt_bytes, filename, cookies, ua), "Upload prompt Gemini", status_callback
             )
         except GeminiAuthError:
-            if allow_refresh:
-                return _retry_after_refresh()
             raise
 
         attachments = [
@@ -479,15 +505,8 @@ def _call_gemini_stream(
             time.sleep(backoff_sec)
             if status_callback:
                 status_callback("running")
-            return _call_gemini_stream(
-                prompt_text,
-                filename,
-                query_text,
-                allow_refresh=allow_refresh,
-                status_callback=status_callback,
-                backoff_sec=min(backoff_sec + 15, 60),
-                rate_limit_retries=rate_limit_retries - 1,
-            )
+            return _stream_once(cfg, prompt_text, filename, query_text, status_callback,
+                                min(backoff_sec + 15, 60), rate_limit_retries - 1)
 
         _SILENT_AUTH_MARKERS = (
             "unauthenticated",
@@ -503,8 +522,6 @@ def _call_gemini_stream(
         if resp.status_code != 200 or has_error_frame or is_auth_fail_silent:
             msg = f"Gemini StreamGenerate fail: HTTP {resp.status_code} — {resp.text[:300]}"
             if is_http_auth_fail or is_auth_fail_silent:
-                if allow_refresh:
-                    return _retry_after_refresh()
                 raise GeminiAuthError(msg)
             if resp.status_code >= 500:
                 raise GeminiTransientError(msg)
@@ -537,36 +554,6 @@ def _parse_gemini_response(resp_text: str) -> dict:
     return _normalize_recap_dict(data)
 
 
-def _ensure_intro_and_outro(scenes: list[dict[str, Any]]) -> None:
-    """Đảm bảo phân cảnh đầu tiên luôn có lời chào mở màn và phân cảnh cuối cùng luôn có lời cảm ơn & CTA."""
-    if not scenes:
-        return
-
-    flat_segs = []
-    for s in scenes:
-        for seg in s.get("segments", []):
-            if isinstance(seg, dict) and "vietnamese_vo" in seg:
-                flat_segs.append(seg)
-
-    if not flat_segs:
-        return
-
-    # 1. Kiểm tra Segment đầu tiên (Intro Greeting)
-    first_vo = flat_segs[0].get("vietnamese_vo", "").strip()
-    first_vo_lower = first_vo.lower()
-    intro_keywords = ("chào", "hello", "hé lô", "quay trở lại", "hôm nay cùng mình", "theo chân mình")
-    if not any(kw in first_vo_lower for kw in intro_keywords):
-        flat_segs[0]["vietnamese_vo"] = f"Chào cả nhà đã quay trở lại với kênh ẩm thực độc lạ! {first_vo}"
-
-    # 2. Kiểm tra Segment cuối cùng (Outro Thank You & CTA)
-    last_vo = flat_segs[-1].get("vietnamese_vo", "").strip()
-    last_vo_lower = last_vo.lower()
-    outro_keywords = ("cảm ơn", "theo dõi", "follow", "thả tim", "hẹn gặp lại", "tạm biệt", "like", "chia sẻ")
-    if not any(kw in last_vo_lower for kw in outro_keywords):
-        outro_tail = " Cảm ơn các bạn đã theo dõi hành trình ẩm thực hôm nay, nhớ bấm like và follow kênh để không bỏ lỡ những món ngon tiếp theo nhé! Hẹn gặp lại mọi người!"
-        flat_segs[-1]["vietnamese_vo"] = (last_vo.rstrip(".!?") + "." + outro_tail).strip()
-
-
 def generate_recap(
     youtube_url: str,
     raw_bytes: bytes | str | dict,
@@ -575,6 +562,8 @@ def generate_recap(
     prompt_name: str | None = None,
     prompt_template_path: Path | None = None,
     caption_template_path: Path | None = None,
+    script_prompt: str | None = None,
+    caption_prompt: str | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
     status_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
@@ -582,15 +571,15 @@ def generate_recap(
     chunk_tpl_path = prompt_template_path or DEFAULT_CHUNK_PROMPT_PATH
     caption_tpl_path = caption_template_path or DEFAULT_CAPTION_PROMPT_PATH
 
-    if not chunk_tpl_path.exists():
+    if script_prompt is None and not chunk_tpl_path.exists():
         old_prompt = PROMPTS_DIR / "System Prompt Food Review Recap.txt"
         if old_prompt.exists():
             chunk_tpl_path = old_prompt
         else:
             raise FileNotFoundError(f"Không tìm thấy chunk prompt template: {chunk_tpl_path}")
 
-    chunk_tpl = chunk_tpl_path.read_text(encoding="utf-8")
-    caption_tpl = caption_tpl_path.read_text(encoding="utf-8") if caption_tpl_path.exists() else ""
+    chunk_tpl = script_prompt if script_prompt is not None else chunk_tpl_path.read_text(encoding="utf-8")
+    caption_tpl = caption_prompt if caption_prompt is not None else (caption_tpl_path.read_text(encoding="utf-8") if caption_tpl_path.exists() else "")
 
     # 1. Step 0: Preprocessing & Dynamic Chunking
     _log(f"[Recap Engine] Bắt đầu Step 0: Tiền xử lý transcript cho {youtube_url}...")
@@ -628,16 +617,6 @@ def generate_recap(
         filled_prompt = filled_prompt.replace("{{target_segments_max}}", str(c["target_segments_max"]))
         filled_prompt = filled_prompt.replace("{{raw_text}}", c["raw_text"])
 
-        # Chỉ dẫn chi tiết cho từng vị trí chunk
-        if c["is_first_chunk"] and c["is_last_chunk"]:
-            chunk_task_note = "LƯU Ý: Phân cảnh đầu tiên BẮT BUỘC có lời chào Intro, phân cảnh cuối cùng BẮT BUỘC có lời cảm ơn và kêu gọi follow kênh (Outro CTA)."
-        elif c["is_first_chunk"]:
-            chunk_task_note = "LƯU Ý: Đây là chunk ĐẦU TIÊN (is_first_chunk=true), phân cảnh đầu tiên BẮT BUỘC phải mở màn bằng lời chào Intro cuốn hút."
-        elif c["is_last_chunk"]:
-            chunk_task_note = "LƯU Ý: Đây là chunk CUỐI CÙNG (is_last_chunk=true), phân cảnh cuối cùng BẮT BUỘC phải có lời cảm ơn người xem và kêu gọi like/follow kênh (Outro CTA)."
-        else:
-            chunk_task_note = "Nối tiếp mượt mà từ chunk trước."
-
         chunk_json = None
         last_err: Exception | None = None
         for attempt in range(1, len(OUTER_RETRY_DELAYS) + 1):
@@ -645,7 +624,7 @@ def generate_recap(
                 resp_text = _call_gemini_stream(
                     prompt_text=filled_prompt,
                     filename=f"chunk_{c_idx}_prompt.txt",
-                    query_text=f"Tạo kịch bản recap ẩm thực JSON cho chunk {c_idx + 1}/{total_chunks} theo dữ liệu trong file đính kèm. {chunk_task_note}",
+                    query_text=f"Tạo kịch bản recap JSON cho chunk {c_idx + 1}/{total_chunks}. Tuân thủ prompt và dữ liệu trong file đính kèm.",
                     status_callback=status_callback,
                 )
                 chunk_json = _parse_gemini_response(resp_text)
@@ -687,17 +666,16 @@ def generate_recap(
     merged_recap = merge_chunk_outputs(chunk_outputs, youtube_url)
     all_scenes = merged_recap.get("scenes", [])
 
-    # Đảm bảo 100% video luôn có lời chào mở màn và lời cảm ơn kết bài
-    _ensure_intro_and_outro(all_scenes)
+    # Intro, outro and editorial style come from the selected prompt.
 
     total_segments = sum(len(s.get("segments", [])) for s in all_scenes)
     _log(f"[Recap Engine] Hợp nhất thành công: {len(all_scenes)} scenes, {total_segments} segments.")
 
     # 4. Step 2b: Generate Social Caption & Hashtags
     caption_dict = {
-        "title": f"Review Ẩm Thực {youtube_url}",
-        "description": "Video recap ẩm thực đặc sắc.",
-        "hashtags": ["#reviewamthuc", "#foodreview", "#monngon"],
+        "title": f"Recap {youtube_url}",
+        "description": "Video recap.",
+        "hashtags": [],
     }
     if caption_tpl and all_scenes:
         _log("[Recap Engine] Bắt đầu Step 2b: Sinh Caption SEO & Hashtags...")

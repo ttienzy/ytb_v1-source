@@ -9,6 +9,7 @@ import {
   createClipMergeNode,
   createClipPromptNode,
   createClipScriptNode,
+  createVideoRefNode,
   explainMuseConnection,
   isValidMuseConnection,
   mergeBlockers,
@@ -129,7 +130,7 @@ test('merge: "Ghép video" từ node Kịch bản tạo video nối sẵn mọi 
   assert.equal(planMergeNode({ ...script, width: 520 }, [script]), null) // chưa có node Clip nào
 })
 
-test('merge: dây chỉ từ node Clip → cổng clipvideos của Ghép video; nối nhiều dây được, kéo thả trượt cổng tự chọn đúng', () => {
+test('merge: node Clip nối vào cổng clipvideos; nối nhiều dây được, kéo thả trượt cổng tự chọn đúng', () => {
   const m = createClipMergeNode({ x: 0, y: 0 }, null, 'm1')
   const c1 = clip(1)
   const c2 = clip(2)
@@ -141,7 +142,7 @@ test('merge: dây chỉ từ node Clip → cổng clipvideos của Ghép video; 
   assert.equal(isValidMuseConnection(wire('cs', 'm1', 'clips'), nodes), false) // chỉ node Clip có video để ghép
   assert.equal(isValidMuseConnection(wire('clip1', 'm1', 'clips'), nodes), false) // sai cổng ra (cổng clips là Kịch bản → Clip)
   assert.equal(isValidMuseConnection(wire('m1', 'clip1'), nodes), false) // Ghép video là node cuối
-  assert.match(explainMuseConnection('cs', 'source', 'm1', nodes, []), /nhận dây từ node Clip \(chấm xanh\) hoặc node Cắt video/)
+  assert.match(explainMuseConnection('cs', 'source', 'm1', nodes, []), /nhận dây từ node Clip, Cắt video hoặc Video tham chiếu/)
   assert.match(explainMuseConnection('m1', 'source', 'clip1', nodes, []), /Node Clip chỉ nhận dây từ Kịch bản tạo video/)
   const auto = autoMuseConnection('clip1', 'source', 'sai', 'm1', nodes, [])
   assert.deepEqual([auto?.sourceHandle, auto?.targetHandle], ['clipvideo', 'clipvideos'])
@@ -197,4 +198,26 @@ test('Ghép video nhận node Cắt video: chỉ video HOÀN CHỈNH (đã cắt
   assert.equal(isValidMuseConnection({ source: 'c1', target: 'm1', sourceHandle: MUSE_HANDLE.refVideoOut, targetHandle: MUSE_HANDLE.clipIn }, nodes), false)
   const auto = autoMuseConnection('c1', 'source', MUSE_HANDLE.refVideoOut, 'm1', nodes, [])
   assert.deepEqual([auto?.sourceHandle, auto?.targetHandle], [MUSE_HANDLE.refVideoOut, MUSE_HANDLE.clipVideoIn])
+})
+
+test('Ghép video nhận Video tham chiếu trực tiếp và giữ nguyên watermark của nguồn này', () => {
+  const ref = createVideoRefNode({ x: 0, y: 0 }, 'ref')
+  const empty = createVideoRefNode({ x: 0, y: 0 }, 'empty')
+  const path = 'D:/Data/media/muse_uploads/sample.mp4'
+  ref.data.video = { path, name: 'sample.mp4', durationSec: 6 }
+  const merge = createClipMergeNode({ x: 0, y: 0 }, null, 'merge')
+  const nodes = [ref, empty, merge]
+  const wire = { source: ref.id, target: merge.id, sourceHandle: MUSE_HANDLE.refVideoOut, targetHandle: MUSE_HANDLE.clipVideoIn }
+  assert.equal(isValidMuseConnection(wire, nodes), true)
+  assert.equal(isValidMuseConnection({ ...wire, targetHandle: MUSE_HANDLE.refVideoIn }, nodes), false)
+  assert.equal(isValidMuseConnection(wire, nodes, [wire]), false)
+  assert.deepEqual(autoMuseConnection(ref.id, 'source', MUSE_HANDLE.refVideoOut, merge.id, nodes, []), wire)
+
+  const rows = mergeRowsFromSources([withVideo(1, 'flow.mp4'), ref], [ref.id])
+  assert.deepEqual(rows.map((r) => [mergeRowTitle(r), r.seconds, r.status]), [['sample.mp4', 6, 'ready'], ['Clip 1', 8, 'ready']])
+  assert.deepEqual(buildMergeRequest(rows, { ref: { start: 1, end: 0 } }, true, DEFAULT_MERGE_FINISH).clips, [
+    { path, trim_start: 1, trim_end: 0, remove_watermark: false },
+    { path: 'flow.mp4', trim_start: 0, trim_end: 0 },
+  ])
+  assert.match(mergeBlockers(mergeRowsFromSources([empty]), {})[0], /chọn video trong node Video tham chiếu/)
 })

@@ -10,8 +10,8 @@ export const settingsPageDoc: HelpDoc = {
   start: [
     {
       title: 'Bắt đầu với Gemini',
-      do: 'Tab “Gemini & YouTube” → “Đăng nhập Gemini (Chrome)” (Cách 1, khuyên dùng). Đăng nhập Google một lần trong cửa sổ Chrome vừa mở, cookie được tự lưu.',
-      result: 'Huy hiệu “Đã có Cookie”. Recap, Khám Phá Kênh và Chiến dịch AI dùng được Gemini.',
+      do: 'Tab “Gemini & YouTube” → “(+) Thêm account Gemini”. Đăng nhập Google một lần trong cửa sổ Chrome vừa mở; app tự lưu phiên và đọc email tài khoản. Thêm nhiều account được (giống tài khoản ChatGPT).',
+      result: 'Dòng tài khoản hiện email + “Sẵn sàng”, huy hiệu “N/M Sẵn sàng”. Recap, Khám Phá Kênh, Tóm tắt truyện, Phân tích sản phẩm và Chiến dịch AI dùng được Gemini.',
     },
     {
       title: 'Thêm tài khoản ChatGPT Plus',
@@ -31,7 +31,7 @@ export const settingsPageDoc: HelpDoc = {
     {
       id: 'gemini-youtube',
       name: 'Tab Gemini & YouTube',
-      what: 'Cookie Gemini cho viết kịch bản recap và quét kênh. “Cách 1 (Khuyên dùng)”: đăng nhập qua Chrome, cookie tự lưu. “Cách 2 (Thủ công)”: dán chuỗi cookie của gemini.google.com. “Reset cookie” xóa cookie đã lưu (profile Chrome vẫn giữ). Khi đã có cookie, nút “Cập nhật template Gemini” mở Chrome profile Gemini, gõ thử một câu rồi chặn lại (không tạo lịch sử chat) để bắt khung request mới — chỉ cần khi gọi Gemini báo lỗi lạ dù cookie còn tốt (Gemini đổi giao thức); app đã mang sẵn một khung request nên máy cài mới không cần bấm. Phần “YouTube (Tải video Recap dự phòng)” đăng nhập YouTube qua Chrome để yt-dlp có cookie dự phòng khi gặp Bot-Wall. Tab còn có phần “Cập nhật Ứng dụng” (“Kiểm tra cập nhật ngay”, “Khởi động lại để cập nhật”).',
+      what: 'Tài khoản Gemini (nhiều account như ChatGPT) cho viết kịch bản recap, quét kênh, tóm tắt truyện, phân tích sản phẩm và Chiến dịch AI. Mỗi tài khoản có một profile Chrome riêng và trạng thái: “Sẵn sàng”, “Đang bị giới hạn tốc độ” (tự thử lại sau ít phút) hoặc “Hết phiên”. Nút trên từng dòng: làm mới ngầm cookie bằng profile Chrome ấm, “Đăng nhập lại” (mở cửa sổ Chrome) và xóa (xóa luôn profile). App tự xoay sang tài khoản khác khi một tài khoản hết phiên hoặc bị giới hạn tốc độ. Khi đã có tài khoản, nút “Cập nhật template Gemini” mở Chrome profile Gemini, gõ thử một câu rồi chặn lại (không tạo lịch sử chat) để bắt khung request mới — chỉ cần khi gọi Gemini báo lỗi lạ dù cookie còn tốt (Gemini đổi giao thức); app đã mang sẵn một khung request nên máy cài mới không cần bấm. Cookie Gemini cũ (dán tay / đăng nhập một tài khoản) được chuyển thành account đầu tiên, tên “Tài khoản Gemini cũ”. Phần “YouTube (Tải video Recap dự phòng)” đăng nhập YouTube qua Chrome để yt-dlp có cookie dự phòng khi gặp Bot-Wall. Tab còn có phần “Cập nhật Ứng dụng” (“Kiểm tra cập nhật ngay”, “Khởi động lại để cập nhật”).',
     },
     {
       id: 'chatgpt',
@@ -84,13 +84,13 @@ export const settingsPageDoc: HelpDoc = {
   ],
   problems: [
     {
-      symptom: 'Recap hoặc Khám Phá Kênh báo lỗi Gemini / cookie hết hạn, hoặc “Chưa đăng nhập Gemini”',
-      fix: 'Vào tab “Gemini & YouTube”, đăng nhập lại bằng “Đăng nhập Gemini (Chrome)”.',
+      symptom: 'Recap hoặc Khám Phá Kênh báo lỗi Gemini / hết phiên, hoặc “Chưa có tài khoản Gemini”',
+      fix: 'Vào tab “Gemini & YouTube”: chưa có account thì bấm “(+) Thêm account Gemini”; account báo “Hết phiên” thì bấm làm mới (ngầm) rồi “Đăng nhập lại” nếu vẫn hỏng. Có nhiều account thì app tự dùng account còn sẵn sàng.',
     },
     {
       symptom: 'Gọi Gemini báo lỗi lạ (không phải cookie) dù vừa đăng nhập lại',
       cause: 'Gemini có thể đã đổi giao thức nên khung request app đang dùng không còn khớp.',
-      fix: 'Tab “Gemini & YouTube” → “Cập nhật template Gemini” (cần đã đăng nhập; đóng cửa sổ Chrome của app đang mở profile Gemini trước).',
+      fix: 'Tab “Gemini & YouTube” → “Cập nhật template Gemini” (cần có tài khoản đã đăng nhập; đóng cửa sổ Chrome của app đang mở profile Gemini trước).',
     },
     {
       symptom: 'Tải YouTube bị chặn (Bot-Wall)',
@@ -123,6 +123,7 @@ export const settingsPageDoc: HelpDoc = {
   ],
   related: ['Recap & Audio', 'Chiến dịch AI', 'Veo Studio', 'Muse Studio', 'Lên lịch Youtube', 'Lên lịch Pippit'],
   changes: [
+    { date: '2026-11-24', text: 'Gemini cài đặt giống ChatGPT: nhiều tài khoản, “(+) Thêm account Gemini”, trạng thái + làm mới / đăng nhập lại / xóa từng tài khoản, app tự xoay account khi hết phiên hoặc bị giới hạn tốc độ (bỏ ô dán cookie, App URL, “Reset cookie”). Cookie cũ được chuyển thành account đầu tiên.' },
     { date: '2026-11-24', text: 'Gemini chạy được ngay trên máy cài mới (app mang sẵn khung request, trước đây báo “Chưa có inner_template”); thêm nút “Cập nhật template Gemini”; đăng nhập Gemini / YouTube giữ được phiên cho lần sau (Chrome được đóng êm để lưu cookie).' },
     { date: '2026-11-15', text: 'Tab Muse AI (Meta) gọn lại: bỏ Muse App URL, cổng CDP, profile Chrome mặc định và công tắc tự tải MP4 (video luôn được tải về).' },
     { date: '2026-11-15', text: 'Tab Muse AI (Meta) quản lý được nhiều tài khoản Muse như tài khoản ChatGPT: thêm, đăng nhập lại, kiểm tra, đổi tên, xóa.' },

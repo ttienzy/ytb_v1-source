@@ -2,28 +2,29 @@ import re
 import subprocess
 import time
 import urllib.request
-from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 import httpx
 from fastapi import HTTPException
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 
-from app.core.chrome import close_chrome_gracefully
+from app.ai.gemini.accounts import get_store, profiles_dir
+from app.ai.gemini.template import DEFAULT_UA
+from app.core.chrome import close_chrome_gracefully, find_free_cdp_port
 from app.core.config import settings
-from app.core.storage import read_config, write_config
 
 
 AUTH_COOKIE_NAMES = {"SID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID"}
-# Thời gian tối đa chờ NGƯỜI DÙNG đăng nhập trong cửa sổ Chrome (chỉ dùng khi profile chưa/hết đăng nhập).
-LOGIN_TIMEOUT_SECONDS = 60
+# Thời gian tối đa chờ NGƯỜI DÙNG đăng nhập trong cửa sổ Chrome (thêm account / đăng nhập lại).
+LOGIN_TIMEOUT_SECONDS = 300
+# Làm mới ngầm bằng profile ấm: chưa đăng nhập thì thất bại nhanh, không chờ người dùng.
+REFRESH_LOGIN_TIMEOUT_SECONDS = 12
+GEMINI_CDP_START_PORT = 9400       # Muse dùng 9300–9399, ChatGPT từ 9228: dải riêng cho Gemini
 CDP_START_TIMEOUT_SECONDS = 20     # Chrome mở cổng debug (thường < 1s; khởi động nguội vài giây)
 CDP_CONNECT_TIMEOUT_SECONDS = 10   # Playwright nối vào Chrome
 POLL_INTERVAL_SECONDS = 0.5
-_FALLBACK_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
-)
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
 def _session_valid(cookie_header: str, user_agent: str) -> bool | None:
@@ -32,7 +33,7 @@ def _session_valid(cookie_header: str, user_agent: str) -> bool | None:
         with httpx.Client(timeout=httpx.Timeout(10.0, connect=5.0), follow_redirects=True) as client:
             r = client.get(
                 "https://gemini.google.com/app",
-                headers={"User-Agent": user_agent or _FALLBACK_UA, "Cookie": cookie_header},
+                headers={"User-Agent": user_agent or DEFAULT_UA, "Cookie": cookie_header},
             )
     except httpx.HTTPError:
         return None
@@ -41,23 +42,39 @@ def _session_valid(cookie_header: str, user_agent: str) -> bool | None:
     return bool(re.search(r'"SNlM0e":"(.*?)"', r.text))
 
 
-def login_and_save_cookie(
+def _page_email(page) -> str:
+    """Email tài khoản Google đang đăng nhập (nút avatar có aria-label "Google Account: Tên (email)"); rỗng nếu không thấy."""
+    try:
+        label = page.evaluate(
+            "() => { const a = document.querySelector('a[aria-label*=\"@\"], button[aria-label*=\"@\"]');"
+            " return a ? (a.getAttribute('aria-label') || '') : '' }")
+    except Exception:  # noqa: BLE001
+        return ""
+    m = _EMAIL_RE.search(label or "") if isinstance(label, str) else None
+    return m.group(0) if m else ""
+
+
+def capture_session(
+    profile_dir: Path | str,
     on_step: Callable[[str], None] | None = None,
     login_timeout: int = LOGIN_TIMEOUT_SECONDS,
+    visible: bool = True,
+    cdp_port: int | None = None,
 ) -> dict:
-    """Mở Chrome thật (profile riêng) để lấy cookie Gemini còn hiệu lực rồi lưu vào config.
+    """Mở Chrome thật với profile `profile_dir`, lấy phiên Gemini còn hiệu lực: {cookies, user_agent, email}.
 
-    - Profile đã đăng nhập sẵn: lấy cookie và KIỂM TRA nó vào được Gemini rồi mới lưu (~2s).
-    - Chưa/hết đăng nhập: chờ người dùng đăng nhập trong cửa sổ Chrome tối đa ``login_timeout`` giây,
-      đếm ngược qua ``on_step``.
+    - Profile đã đăng nhập sẵn: lấy cookie và KIỂM TRA nó vào được Gemini (~2s).
+    - Chưa/hết đăng nhập: chờ người dùng đăng nhập trong cửa sổ Chrome tối đa ``login_timeout`` giây (đếm ngược qua
+      ``on_step``). ``visible=False`` đặt cửa sổ ngoài màn hình (làm mới ngầm).
     - Thất bại sớm, đúng lý do: Chrome tắt ngay (profile bị Chrome khác giữ), không nối được CDP, Chrome bị đóng.
-    - ``on_step(text)``: báo bước đang làm (giao diện hiển thị để người dùng biết không bị treo).
+    - Chrome được đóng ÊM (app.core.chrome) để profile ghi cookie xuống đĩa. Không ghi gì vào kho tài khoản.
     """
     if not settings.chrome_executable.exists():
         raise HTTPException(status_code=503, detail=f"Không tìm thấy Chrome: {settings.chrome_executable}")
 
-    settings.chrome_profile_dir.mkdir(parents=True, exist_ok=True)
-    cdp_port = 9224
+    profile_dir = Path(profile_dir)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    cdp_port = cdp_port or find_free_cdp_port(GEMINI_CDP_START_PORT)
     cdp_url = f"http://127.0.0.1:{cdp_port}"
 
     # Đo từng bước (giây từ lúc bắt đầu); in 1 dòng ở cuối để biết thời gian refresh đi đâu.
@@ -85,12 +102,13 @@ def login_and_save_cookie(
         proc = subprocess.Popen(
             [
                 str(settings.chrome_executable),
-                f"--user-data-dir={settings.chrome_profile_dir}",
+                f"--user-data-dir={profile_dir}",
                 f"--remote-debugging-port={cdp_port}",
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--disable-extensions",
                 "--disable-default-apps",
+                *([] if visible else ["--window-position=-2400,-2400", "--window-size=560,820"]),
                 "https://gemini.google.com/app",
             ],
             stdout=subprocess.DEVNULL,
@@ -211,12 +229,12 @@ def login_and_save_cookie(
                         raise HTTPException(
                             status_code=408,
                             detail=f"Chưa đăng nhập được Gemini sau {login_timeout} giây. "
-                            f"Vào Cài đặt → Đăng nhập Gemini (Chrome) rồi thử lại.",
+                            f"Bấm “(+) Thêm account Gemini” hoặc “Đăng nhập lại” trong Cài đặt rồi thử lại.",
                         )
                     time.sleep(2.0 if not needs_login else POLL_INTERVAL_SECONDS)
 
                 _mark("session_verified")
-                _step("Lưu cookie")
+                _step("Đọc tài khoản")
                 # Cookie vừa được kiểm tra hợp lệ nên không cần chờ thêm; đọc lại 1 lần để lấy giá trị mới nhất.
                 try:
                     refreshed = context.cookies(["https://gemini.google.com"])
@@ -225,19 +243,15 @@ def login_and_save_cookie(
                 except Exception:
                     pass
 
-                config = read_config()
-                gemini_update = {
-                    "cookies": "; ".join(f"{cookie['name']}={cookie['value']}" for cookie in cookies),
+                email_page = gemini_page or (context.pages[0] if context.pages else None)
+                email = _page_email(email_page) if email_page else ""
+                _mark("session_captured")
+                return {
+                    "cookies": "; ".join(f"{c['name']}={c['value']}" for c in cookies),
                     "cookie_count": len(cookies),
-                    "saved_at": datetime.now(timezone.utc).isoformat(),
+                    "user_agent": user_agent or DEFAULT_UA,
+                    "email": email,
                 }
-                if user_agent:
-                    gemini_update["user_agent"] = user_agent
-
-                config["gemini"].update(gemini_update)
-                write_config(config)
-                _mark("config_written")
-                return {"ok": True, "has_cookie": True, "cookie_count": len(cookies)}
             finally:
                 # Đóng ÊM để profile ghi cookie đăng nhập/xoay vòng xuống đĩa (app.core.chrome). Chrome có sẵn (không do
                 # app mở) thì chỉ ngắt kết nối, không tắt.
@@ -260,3 +274,38 @@ def login_and_save_cookie(
         close_chrome_gracefully(None, proc, wait_seconds=0)
         _mark("chrome_closed")
         print(f"[Gemini cookie] thoi gian cac buoc (s): {steps}", flush=True)
+
+
+def add_account(on_step: Callable[[str], None] | None = None, login_timeout: int = LOGIN_TIMEOUT_SECONDS) -> dict:
+    """“(+) Thêm account Gemini”: profile Chrome mới → người dùng đăng nhập Google → lưu account (trùng email = cập nhật)."""
+    profile = profiles_dir() / f"gemini-{int(time.time() * 1000)}"
+    session = capture_session(profile, on_step=on_step, login_timeout=login_timeout, visible=True)
+    return get_store().add_account(email=session["email"], cookies=session["cookies"], ua=session["user_agent"],
+                                   partition=str(profile))
+
+
+def refresh_account(
+    account_id: str,
+    on_step: Callable[[str], None] | None = None,
+    interactive: bool = False,
+) -> dict:
+    """Làm mới cookie của một account bằng profile Chrome ấm của nó.
+
+    Mặc định ngầm (cửa sổ ngoài màn hình, chưa đăng nhập thì thất bại nhanh); ``interactive=True`` = “Đăng nhập lại”
+    (cửa sổ hiện, chờ người dùng đăng nhập)."""
+    store = get_store()
+    acc = store.get_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Gemini.")
+    if not acc.get("partition"):
+        raise HTTPException(status_code=400, detail="Tài khoản không có profile Chrome lưu sẵn — hãy thêm lại tài khoản.")
+    try:
+        session = capture_session(
+            acc["partition"], on_step=on_step, visible=interactive,
+            login_timeout=LOGIN_TIMEOUT_SECONDS if interactive else REFRESH_LOGIN_TIMEOUT_SECONDS)
+    except HTTPException as exc:
+        if exc.status_code == 408:
+            store.set_status(account_id, "error", "Hết phiên đăng nhập — bấm “Đăng nhập lại”")
+        raise
+    updated = store.update_account(account_id, cookies=session["cookies"], ua=session["user_agent"], status="active", message="")
+    return updated or {}

@@ -21,23 +21,26 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from uuid import UUID
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, RedirectResponse
 
 from app.watermark import service as watermark_service
 
-from app.veo import service
+from app.veo import service, studio_batch
 from app.veo.schemas import (
     ManualCreditsRequest,
     ManualCredentialRequest,
     VeoBridgeStatus,
     VeoCapabilities,
     VeoHistoryItem,
+    VeoHistoryPage,
     VeoImageGenerateRequest,
     VeoImageGenerateResponse,
     VeoImageItem,
+    VeoImagePage,
     VeoJobOut,
     VeoJobRequest,
     VeoProjectCreate,
@@ -96,6 +99,47 @@ def delete_project(project_id: str):
 # ─────────────────────────────────────────────────────────────────────────────
 # Jobs
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/studio-batches", response_model=list[studio_batch.BatchView])
+def list_studio_batches(project_id: str):
+    try:
+        return studio_batch.list_batches(project_id)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Không đọc được hàng đợi Veo Studio.") from exc
+
+
+@router.post("/studio-batches", response_model=studio_batch.BatchView, status_code=202)
+def submit_studio_batch(request: studio_batch.BatchRequest):
+    try:
+        return studio_batch.submit(request)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Không lưu được hàng đợi Veo Studio.") from exc
+
+
+@router.post("/studio-batches/{batch_id}/{action}", response_model=studio_batch.BatchView)
+def change_studio_batch(batch_id: UUID, action: str):
+    if action not in ("pause", "resume"):
+        raise HTTPException(status_code=404, detail="Thao tác lô không tồn tại.")
+    try:
+        return studio_batch.set_paused(batch_id, paused=action == "pause")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Không tìm thấy lô video.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Không lưu được hàng đợi Veo Studio.") from exc
+
+
+@router.get("/studio-batches/uploads/{asset_id}")
+def open_studio_batch_upload(asset_id: str):
+    try:
+        path = studio_batch.uploaded_image(asset_id)
+        return FileResponse(path, headers={"X-Content-Type-Options": "nosniff"})
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/jobs", response_model=VeoJobOut)
@@ -227,6 +271,11 @@ def get_history():
     return service.get_history()
 
 
+@router.get("/history/page", response_model=VeoHistoryPage)
+def get_history_page(page: int = Query(default=1, ge=1)):
+    return service.get_history_page(page)
+
+
 @router.get("/history/{video_id}/file")
 def stream_video(video_id: str):
     """Stream file video để preview."""
@@ -264,7 +313,7 @@ def extract_last_frame(video_id: str):
 # Upload (cho mode frames/ingredients)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "Data" / "media" / "veo_uploads"
+_UPLOAD_DIR = service._VEO_UPLOADS_DIR
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -315,6 +364,11 @@ def generate_images(req: VeoImageGenerateRequest):
 def list_images(project_id: str | None = None):
     """Lấy danh sách ảnh đã tạo."""
     return service.list_images(project_id=project_id)
+
+
+@router.get("/images/page", response_model=VeoImagePage)
+def list_images_page(page: int = Query(default=1, ge=1), project_id: str | None = None):
+    return service.list_images_page(page, project_id=project_id)
 
 
 @router.get("/images/{image_id}/file")

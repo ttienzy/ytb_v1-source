@@ -63,7 +63,7 @@ def test_gemini_detail_chunks_ratelimit_and_cookie(job, tmp_path, monkeypatch):
     monkeypatch.setattr(service, "recap_path", lambda _id: tmp_path / "recap.json")
     monkeypatch.setattr(service, "record_job_metadata", lambda *a, **k: None)
 
-    def fake_generate(url, raw, name, prompt_template_path=None, progress_callback=None, status_callback=None):
+    def fake_generate(url, raw, name, script_prompt=None, caption_prompt=None, progress_callback=None, status_callback=None):
         status_callback("rate_limited:30")
         status_callback("running")
         status_callback("refreshing_cookie")

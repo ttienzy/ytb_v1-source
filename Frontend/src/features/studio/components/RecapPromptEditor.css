@@ -1,0 +1,17 @@
+.recap-prompts { border: 1px solid #dfe6f1; border-radius: 12px; padding: 20px; margin-top: 20px; min-width: 0; background: #f8fafc; }
+.recap-prompts-head, .recap-prompts-footer, .recap-prompts-meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.recap-prompts h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 0; color: #0f172a; }
+.recap-prompts-head p { margin: 5px 0 0; font-size: 12px; color: #64748b; }
+.recap-prompts-badge { border-radius: 6px; background: #eeecff; color: #5145cd; padding: 5px 9px; font-size: 12px; }
+.recap-prompts-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 12px; }
+.recap-prompts-tabs button { border: 1px solid #dbe2ee; border-radius: 8px; padding: 9px 12px; background: #fff; color: #475569; cursor: pointer; font: inherit; font-size: 13px; }
+.recap-prompts-tabs button[aria-selected="true"] { background: #eeecff; border-color: #8579ec; color: #4f46e5; }
+.recap-prompts label { display: block; font-size: 12px; color: #475569; margin-bottom: 8px; }
+.recap-prompts textarea { display: block; box-sizing: border-box; width: 100%; min-width: 0; min-height: 300px; resize: vertical; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; background: #fff; color: #1e293b; font: 13px/1.7 ui-monospace, Consolas, monospace; }
+.recap-prompts textarea:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+.recap-prompts-meta { font-size: 11px; color: #64748b; margin: 8px 0 16px; }
+.recap-prompts-footer { border-top: 1px solid #e2e8f0; padding-top: 14px; font-size: 12px; color: #64748b; }
+.recap-prompts-footer > span { flex: 1 1 240px; }
+.recap-prompts-footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.recap-prompts-error { color: #b91c1c; overflow-wrap: anywhere; font-size: 13px; margin: 12px 0 0; }
+@media (max-width: 600px) { .recap-prompts { padding: 14px; } .recap-prompts textarea { font-size: 16px; } }

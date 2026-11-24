@@ -19,6 +19,10 @@ from app.core.config import RESOURCES_DIR
 # Prompt 1 lần không cần thừa kế hội thoại → null cho template "hội thoại mới", không gắn tài khoản.
 SANITIZE_INDICES = (3, 4, 59)
 TEMPLATE_LENGTH = 97
+DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+)
 _RELATIVE = Path("resources") / "gemini" / "inner_template.json"
 
 

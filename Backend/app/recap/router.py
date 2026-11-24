@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.media.service import resolve_for_polish
 from app.recap import service, state
+from app.recap import prompts as prompt_store
+from app.recap.prompts import RecapPrompts
 from app.recap.paths import final_path, final_studio_path, voice_path
 from app.recap.schemas import (
     BatchOut,
@@ -30,6 +32,17 @@ from app.recap.schemas import (
 from app.recap.ytdlp import login_youtube, reset_youtube_cookies, yt_login_status
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
+
+
+@router.get("/prompts")
+def get_prompts():
+    return {"originals": prompt_store.originals(), "current": prompt_store.current()}
+
+
+@router.put("/prompts", response_model=RecapPrompts)
+def save_prompts(req: RecapPrompts):
+    prompt_store.save_defaults(req)
+    return req
 
 
 def _overall(job: state.JobState) -> str:
@@ -164,6 +177,8 @@ async def run_pipeline(
     bgm_volume: float = Form(0.10),
     raw_file: UploadFile | None = File(None),
     raw_text: str = Form(""),
+    script_prompt: str | None = Form(None),
+    caption_prompt: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     """1-click: [fetch transcript] → generate → gather(cut, voice) → merge → [polish BGM].
@@ -208,7 +223,14 @@ async def run_pipeline(
         raw_bytes = raw_text.strip().encode("utf-8")
         raw_name = "raw.txt"
 
-    job_id = await service.run(youtube_url, raw_bytes, raw_name, voice_id, polish_opts)
+    selected_prompts = None
+    if script_prompt is not None or caption_prompt is not None:
+        from pydantic import ValidationError
+        try:
+            selected_prompts = RecapPrompts(script=script_prompt or "", caption=caption_prompt or "").model_dump()
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="; ".join(e["msg"] for e in exc.errors())) from exc
+    job_id = await service.run(youtube_url, raw_bytes, raw_name, voice_id, polish_opts, prompts=selected_prompts)
     return JSONResponse({"job_id": job_id}, status_code=202)
 
 
@@ -438,6 +460,7 @@ async def create_batch(
         urls=body.urls,
         voice_id=body.voice_id,
         polish_opts=polish_opts,
+        prompts=body.prompts.model_dump() if body.prompts else None,
     )
     return {"batch_id": batch_id, "total": len(body.urls)}
 

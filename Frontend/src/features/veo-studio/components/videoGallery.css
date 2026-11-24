@@ -1,0 +1,52 @@
+.veo-history {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  color: #1e293b;
+}
+
+.veo-history-header, .veo-history-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.veo-history-header { justify-content: space-between; scroll-margin-top: 16px; }
+.veo-history-heading h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.veo-history-count { padding: 2px 7px; border-radius: 6px; background: #f1f5f9; color: #475569; font-size: 12px; font-variant-numeric: tabular-nums; }
+.veo-history-range { margin: 7px 0 10px; color: #64748b; font-size: 12px; }
+.veo-history-message, .veo-history-empty { margin: 10px 0 0; color: #475569; font-size: 13px; }
+.veo-history-message[role="alert"] { display: flex; align-items: baseline; gap: 10px; }
+.veo-history-message button { color: #334155; text-decoration: underline; cursor: pointer; white-space: nowrap; }
+.veo-history-empty { display: grid; justify-items: center; gap: 8px; padding: 22px 6px; }
+
+.veo-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.veo-history-grid + .library-pagination { margin-top: 12px; }
+.veo-history-card { min-width: 0; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.veo-history-card[data-selected="true"] { border-color: #94a3b8; box-shadow: 0 0 0 1px #94a3b8; }
+.veo-history-thumbnail { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; padding: 0; overflow: hidden; border: 0; background: #edf1f5; color: #64748b; cursor: pointer; }
+.veo-history-thumb-media { position: absolute; inset: 0; display: grid; place-items: center; }
+.veo-history-thumb-media video { position: absolute; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.veo-history-play, .veo-history-duration { position: absolute; bottom: 7px; border-radius: 5px; background: rgb(15 23 42 / 80%); color: #fff; }
+.veo-history-play { left: 7px; display: grid; place-items: center; width: 24px; height: 24px; }
+.veo-history-duration { right: 7px; padding: 3px 6px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.veo-history-details { display: grid; gap: 3px; min-width: 0; padding: 8px 9px; }
+.veo-history-details strong, .veo-history-details small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.veo-history-details strong { font-size: 13px; font-weight: 650; }
+.veo-history-details small { color: #64748b; font-size: 11px; }
+.veo-history-actions { display: flex; align-items: center; justify-content: space-between; gap: 1px; padding: 3px 5px; border-top: 1px solid #e9edf3; }
+.veo-history-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 29px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #475569; text-decoration: none; cursor: pointer; }
+.veo-history-icon:hover:not(:disabled) { background: #edf1f5; color: #1e293b; }
+.veo-history-icon:disabled { opacity: .38; cursor: default; }
+.veo-history-icon:focus-visible, .veo-history-thumbnail:focus-visible { outline: 2px solid #475569; outline-offset: -2px; }
+
+.veo-player-placeholder > svg { margin-bottom: 9px; color: #64748b; }

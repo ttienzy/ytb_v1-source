@@ -1,11 +1,11 @@
 /**
  * Node ảnh vào của Muse Canvas — đúng 1 ảnh/node: "Trang phục" (nối vào "Tách áo quần"),
- * "Nhân vật tham chiếu" (nối vào "Bảng thiết kế nhân vật") và "Tham chiếu bối cảnh" (độc lập: đưa ảnh địa điểm vào
+ * "Nhân vật tham chiếu" (nối vào "Bảng thiết kế nhân vật" hoặc "Tách áo quần") và "Tham chiếu bối cảnh" (đưa ảnh địa điểm vào
  * cổng "Tham chiếu" của các node kịch bản). Loại node quyết định tiêu đề / chữ (INPUT_SPECS).
  */
 import { memo, useRef, useState } from 'react'
 import { Handle, Position, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
-import { ImagePlus, Library, Loader2, MapPin, RefreshCw, Shirt, UserRound, X } from 'lucide-react'
+import { Download, ImagePlus, Library, Loader2, MapPin, RefreshCw, Shirt, UserRound, X } from 'lucide-react'
 import {
   INPUT_SPECS,
   MUSE_HANDLE,
@@ -30,6 +30,7 @@ function MuseInputNodeImpl({ id, type, data: raw, selected }: NodeProps<InputNod
   const data = normalizeInputData(raw, spec.type)
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState('')
   const [dragOver, setDragOver] = useState(false)
 
@@ -60,6 +61,29 @@ function MuseInputNodeImpl({ id, type, data: raw, selected }: NodeProps<InputNod
     setError('')
     const image: MuseImageRef = { id: it.id, name: it.file_name, path: it.path, previewUrl: it.preview_url, size: it.size }
     updateNodeData(id, { image, images: undefined, ...(data.label.trim() ? {} : { label: it.label }) })
+  }
+
+  async function downloadImage() {
+    const image = data.image
+    if (!image || downloading) return
+    setDownloading(true)
+    setError('')
+    try {
+      const response = await fetch(museMediaUrl(image.previewUrl))
+      if (!response.ok) throw new Error(`Tải ảnh về máy thất bại (HTTP ${response.status}).`)
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = image.name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Tải ảnh về máy thất bại.')
+    } finally {
+      setDownloading(false)
+    }
   }
 
   const dropProps = {
@@ -112,6 +136,11 @@ function MuseInputNodeImpl({ id, type, data: raw, selected }: NodeProps<InputNod
               <button type="button" onClick={pickFromLibrary} disabled={uploading} title="Lấy ảnh từ Thư Viện Ảnh">
                 <Library size={12} />
               </button>
+              {isCharacter && (
+                <button type="button" onClick={downloadImage} disabled={uploading || downloading} title="Tải ảnh về máy" aria-label="Tải ảnh về máy">
+                  {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                </button>
+              )}
               <button type="button" onClick={() => updateNodeData(id, { image: null, images: undefined })} disabled={uploading} title="Bỏ ảnh">
                 <X size={12} />
               </button>
@@ -156,7 +185,7 @@ function MuseInputNodeImpl({ id, type, data: raw, selected }: NodeProps<InputNod
         className={`mc-handle ${isCharacter ? 'mc-handle-character' : isScene ? 'mc-handle-scene' : 'mc-handle-image'}`}
         title={
           isCharacter
-            ? 'Nối vào node Bảng thiết kế nhân vật'
+            ? 'Nối vào node Bảng thiết kế nhân vật hoặc Tách áo quần'
             : isScene
               ? 'Nối vào cổng “Tham chiếu” của Kịch bản video / Kịch bản / Kịch bản tạo video'
               : 'Nối vào node Tách áo quần'
