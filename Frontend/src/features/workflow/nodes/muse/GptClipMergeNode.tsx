@@ -4,7 +4,8 @@
  * "Video kết quả". Chạy nền ở backend (POST /api/workflow/muse/merge), kết quả vào Thư Viện Video → Hoàn chỉnh.
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   ArrowDown,
@@ -12,7 +13,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Film,
   FolderOpen,
   Link2Off,
   Loader2,
@@ -178,16 +178,17 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
 
   return (
     <div className={`mc-node mc-node-clipmerge ${selected ? 'selected' : ''}`}>
-      <Handle
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.clipVideoIn}
-        className="mc-handle mc-handle-video"
+        kind="Video"
+        label="Clip cần ghép"
         title="Clip: nhận nhiều dây từ node Clip, Cắt video hoặc Video tham chiếu. Xếp thứ tự trong node."
       />
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-clipscript"><Film size={14} /></span>
+        <MuseMediaIcon kind="Video" />
         <div className="mc-node-titles">
           <strong>{data.label.trim() || data.title}</strong>
           <small>{CLIP_MERGE_SPEC.subtitle}</small>
@@ -208,7 +209,7 @@ function GptClipMergeNodeImpl({ id, data: raw, selected }: NodeProps<MergeNode>)
         {/* Clip, theo thứ tự ghép */}
         {rows.length === 0 ? (
           <div className="mc-inputs-empty">
-            <Link2Off size={12} /> Nối các node Clip, Cắt video hoặc Video tham chiếu vào chấm “Clip” bên trái.
+            <Link2Off size={12} /> Nối các node Clip, Cắt video hoặc Video tham chiếu vào cổng “Clip” bên trái.
           </div>
         ) : (
           <div className="mc-merge-list">

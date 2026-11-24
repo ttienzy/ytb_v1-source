@@ -10,7 +10,7 @@
  *   [Tham chiếu bối cảnh] ──scenes──┘   (bắt buộc: mỗi cặp nhân vật × bối cảnh = 1 ảnh, ảnh 1 = nhân vật, ảnh 2 = bối cảnh)
  *   [Video tham chiếu] ──refvideo──> [Ingredients (video + ảnh)] <──boards── [Ảnh kết quả | Nhân vật | Trang phục | Bối cảnh] × 1–3
  *       (Omni 1.2 video_edit trên Flow: video mẫu cắt ≤ 10 s + ảnh tham chiếu theo thứ tự → 1 video)
- *   [Ô prompt] × N       (độc lập: nhập / giữ prompt; cổng ra "prompt" chưa nối vào node nào)
+ *   [Ô prompt] × N       → cổng Prompt / Kịch bản thay thế của các node tạo nội dung
  *   [Ảnh kết quả | Nhân vật tham chiếu | Trang phục | Tham chiếu bối cảnh] × N ──boards──> [Kịch bản video]
  *       (mọi ảnh tham chiếu gửi chung 1 lần Muse → 1 kịch bản chữ; Muse tự gom ảnh cùng bộ)
  *   [Kịch bản video] ──script──> [Kịch bản]   (nút "Ra node": tách bản kịch bản ra node riêng, sửa được)
@@ -43,7 +43,7 @@ export const MUSE_NODE = {
   videoRef: 'museVideoRef',
   /** "Cắt video": độc lập, nhận 1 video, cắt nhiều khúc như CapCut (xem trước rồi "Cắt & lưu") -> video mới */
   videoCut: 'museVideoCut',
-  /** "Ô prompt": độc lập, nhập / giữ 1 prompt chữ (thêm bao nhiêu ô cũng được) */
+  /** "Ô prompt": lưu prompt chữ để dùng chung giữa nhiều node. */
   promptBox: 'musePromptBox',
   /** "Ingredients (video + ảnh)": video tham chiếu + 1–5 ảnh → video Omni 1.2 (video_edit) trên Flow */
   videoIngredients: 'museVideoIngredients',
@@ -79,8 +79,9 @@ export const MUSE_HANDLE = {
   /** Video tham chiếu → cổng "Video" của node Ingredients (video + ảnh) */
   refVideoOut: 'refvideo',
   refVideoIn: 'refvideo',
-  /** Cổng ra của Ô prompt (chưa node nào nhận) */
+  /** Cổng nguồn của Ô prompt và cổng đích dành riêng cho văn bản. */
   promptOut: 'prompt',
+  promptIn: 'prompt-in',
   /** Mọi ảnh tham chiếu → cổng "Tham chiếu" của node Kịch bản video (nhiều dây, theo thứ tự). Id giữ 'boards'. */
   refsIn: 'boards',
   boardsIn: 'boards',
@@ -103,6 +104,42 @@ export const MUSE_HANDLE = {
   extractIn: 'images',
   extractOut: 'extracted',
 } as const
+
+// ---------------------------------------------------------------- loại nội dung của cổng
+
+/** Loại nội dung chạy qua một cổng / dây. Thứ tự mảng = thứ tự cổng vào xếp từ trên xuống ở cạnh trái node. */
+export const MUSE_MEDIA_ORDER = ['Text', 'Image', 'Video'] as const
+export type MuseMediaKind = (typeof MUSE_MEDIA_ORDER)[number]
+
+const TEXT_HANDLES: ReadonlySet<string> = new Set([
+  MUSE_HANDLE.promptOut, MUSE_HANDLE.promptIn, MUSE_HANDLE.scriptOut, MUSE_HANDLE.scriptIn, MUSE_HANDLE.clipOut, MUSE_HANDLE.clipIn,
+])
+const VIDEO_HANDLES: ReadonlySet<string> = new Set([
+  MUSE_HANDLE.refVideoOut, MUSE_HANDLE.refVideoIn, MUSE_HANDLE.videoOut, MUSE_HANDLE.videoIn, MUSE_HANDLE.clipVideoOut, MUSE_HANDLE.clipVideoIn,
+])
+
+/** Cổng này mang chữ, ảnh hay video. Cổng không phải chữ / video là ảnh (images, outfits, scenes, boards, image, extracted). */
+export function museHandleKind(handleId?: string | null): MuseMediaKind {
+  if (handleId && TEXT_HANDLES.has(handleId)) return 'Text'
+  if (handleId && VIDEO_HANDLES.has(handleId)) return 'Video'
+  return 'Image'
+}
+
+/** Cổng vào đầu tiên cách đỉnh node (đủ chỗ dưới tiêu đề) và bước giữa hai cổng, px. */
+export const MUSE_PORT_FIRST_TOP = 40
+export const MUSE_PORT_STEP = 36
+
+/**
+ * Vị trí `top` (px) của các cổng vào ở cạnh trái, theo đúng thứ tự Text → Image → Video, bất kể thứ tự khai báo trong node.
+ * Cùng loại thì giữ thứ tự khai báo. Trả về mảng cùng thứ tự đầu vào.
+ */
+export function museInputPortTops(kinds: readonly MuseMediaKind[]): number[] {
+  const rank = (k: MuseMediaKind) => MUSE_MEDIA_ORDER.indexOf(k)
+  const order = kinds.map((k, i) => ({ k, i })).sort((a, b) => rank(a.k) - rank(b.k) || a.i - b.i)
+  const tops: number[] = new Array(kinds.length)
+  order.forEach(({ i }, slot) => { tops[i] = MUSE_PORT_FIRST_TOP + slot * MUSE_PORT_STEP })
+  return tops
+}
 
 // ---------------------------------------------------------------- mô tả loại node
 
@@ -207,7 +244,7 @@ export const JOB_SPECS: Record<string, JobNodeSpec> = {
     additionalInputTypes: [MUSE_NODE.character],
     chatLabel: 'Tách áo quần',
     fileSuffix: 'outfit',
-    emptyText: 'Chưa có ảnh — nối node “Trang phục” hoặc “Nhân vật tham chiếu” vào chấm bên trái.',
+    emptyText: 'Chưa có ảnh — nối node “Trang phục” hoặc “Nhân vật tham chiếu” vào cổng bên trái.',
     runVerb: 'Tách',
     unitNoun: 'trang phục',
     doneText: 'Đã tách',
@@ -221,7 +258,7 @@ export const JOB_SPECS: Record<string, JobNodeSpec> = {
     inputType: MUSE_NODE.character,
     chatLabel: 'Bảng nhân vật',
     fileSuffix: 'character',
-    emptyText: 'Chưa có nhân vật — nối dây từ một hoặc nhiều node “Nhân vật tham chiếu” vào chấm bên trái.',
+    emptyText: 'Chưa có nhân vật — nối dây từ một hoặc nhiều node “Nhân vật tham chiếu” vào cổng bên trái.',
     runVerb: 'Tạo',
     unitNoun: 'bảng',
     doneText: 'Đã tạo',
@@ -330,6 +367,7 @@ export interface MuseExtractResult {
   sourceNodeId: string
   /** Ảnh đầu vào lúc chạy — khác ảnh hiện tại của node nguồn thì kết quả là "cũ". */
   inputPath: string
+  promptKey?: string
   status: ExtractStatus
   output?: MuseImageRef
   error?: string
@@ -523,6 +561,12 @@ export function isValidMuseConnection(
   if (edges.some((e) => e.source === c.source && e.target === c.target)) return false
   const sh = c.sourceHandle ?? null
   const th = c.targetHandle ?? null
+  if (src.type === MUSE_NODE.promptBox || sh === MUSE_HANDLE.promptOut || th === MUSE_HANDLE.promptIn) {
+    return src.type === MUSE_NODE.promptBox &&
+      sh === MUSE_HANDLE.promptOut && th === MUSE_HANDLE.promptIn &&
+      acceptsLinkedPrompt(dst.type) &&
+      !edges.some((e) => e.target === c.target && e.targetHandle === MUSE_HANDLE.promptIn)
+  }
   // Node Kịch bản video: mọi node có ảnh (Ảnh kết quả / Nhân vật tham chiếu / Trang phục) → cổng Tham chiếu, nhiều dây
   // Kịch bản video (cổng script) → node Kịch bản (mỗi node Kịch bản 1 nguồn)
   if (dst.type === MUSE_NODE.scriptText && (th ?? MUSE_HANDLE.scriptIn) === MUSE_HANDLE.scriptIn) {
@@ -567,7 +611,7 @@ export function isValidMuseConnection(
       src.type === MUSE_NODE.clipScript &&
       (sh ?? MUSE_HANDLE.clipOut) === MUSE_HANDLE.clipOut &&
       (th ?? MUSE_HANDLE.clipIn) === MUSE_HANDLE.clipIn &&
-      !edges.some((e) => e.target === c.target)
+      !edges.some((e) => e.target === c.target && (e.targetHandle ?? MUSE_HANDLE.clipIn) === MUSE_HANDLE.clipIn)
     )
   }
   if (dst.type === MUSE_NODE.clipMerge) {
@@ -680,7 +724,19 @@ export function videoRefMeta(v: Pick<MuseVideoRef, 'durationSec' | 'size'>): str
   return parts.join(' · ')
 }
 
-// ---------------------------------------------------------------- node "Ô prompt" (độc lập)
+// ---------------------------------------------------------------- node "Ô prompt"
+
+function acceptsLinkedPrompt(type: string): boolean {
+  return isJobType(type) || type === MUSE_NODE.script || type === MUSE_NODE.scriptText ||
+    type === MUSE_NODE.clipScript || type === MUSE_NODE.clipPrompt || type === MUSE_NODE.videoIngredients
+}
+
+export const EMPTY_LINKED_PROMPT = 'Ô prompt đang trống.'
+
+/** Theo dõi thay đổi của prompt nối dây, giữ nguyên định danh ảnh đã dùng ở các project cũ. */
+export function linkedPromptKey(text?: string): string | undefined {
+  return text === undefined ? undefined : hashText(text.trim())
+}
 
 export interface MusePromptBoxData {
   title: string
@@ -893,12 +949,13 @@ export function collectExtractInputs(jobId: string, nodes: MuseNodeLike[], edges
 
 export type ExtractRowState = 'no_image' | 'pending' | 'running' | 'done' | 'error' | 'interrupted' | 'stale'
 
-export function extractRowState(input: ExtractInput, results: Record<string, MuseExtractResult>): ExtractRowState {
+export function extractRowState(input: ExtractInput, results: Record<string, MuseExtractResult>, promptKey?: string): ExtractRowState {
   if (!input.image || (input.extra ?? []).some((x) => !x.image)) return 'no_image'
   const r = results[input.sourceNodeId]
   if (!r) return 'pending'
   if (r.status === 'running') return 'running'
   if (r.inputPath !== rowFingerprint(input)) return 'stale'
+  if (r.status === 'done' && r.promptKey !== promptKey) return 'stale'
   return r.status
 }
 
@@ -906,9 +963,9 @@ export function extractRowState(input: ExtractInput, results: Record<string, Mus
  * Các dòng "chạy tất cả" sẽ chạy: chưa có kết quả, hoặc ảnh vào đã đổi.
  * Dòng lỗi / bị gián đoạn KHÔNG tự chạy lại (prompt có thể đã gửi, tốn lượt) — phải bấm "Chạy lại" từng dòng.
  */
-export function inputsToRun(inputs: ExtractInput[], results: Record<string, MuseExtractResult>): ExtractInput[] {
+export function inputsToRun(inputs: ExtractInput[], results: Record<string, MuseExtractResult>, promptKey?: string): ExtractInput[] {
   return inputs.filter((i) => {
-    const s = extractRowState(i, results)
+    const s = extractRowState(i, results, promptKey)
     return s === 'pending' || s === 'stale'
   })
 }
@@ -940,9 +997,9 @@ export function pruneResults(results: Record<string, MuseExtractResult>, connect
 }
 
 /** Ảnh đầu ra hợp lệ của node chạy (theo thứ tự đầu vào). */
-export function extractOutputs(inputs: ExtractInput[], results: Record<string, MuseExtractResult>): MuseImageRef[] {
+export function extractOutputs(inputs: ExtractInput[], results: Record<string, MuseExtractResult>, promptKey?: string): MuseImageRef[] {
   return inputs
-    .filter((i) => extractRowState(i, results) === 'done')
+    .filter((i) => extractRowState(i, results, promptKey) === 'done')
     .map((i) => results[i.sourceNodeId].output)
     .filter((o): o is MuseImageRef => Boolean(o))
 }
@@ -1052,11 +1109,12 @@ export function planOutputNodes(
   results: Record<string, MuseExtractResult>,
   nodes: MuseNodeLike[],
   only?: string,
+  promptKey?: string,
 ): { nodes: MuseNodeLike[]; edges: MuseEdgeLike[] } {
   const out: { nodes: MuseNodeLike[]; edges: MuseEdgeLike[] } = { nodes: [], edges: [] }
   inputs.forEach((input, idx) => {
     if (only && input.sourceNodeId !== only) return
-    if (extractRowState(input, results) !== 'done') return
+    if (extractRowState(input, results, promptKey) !== 'done') return
     if (findOutputNodeFor(nodes, job.id, input.sourceNodeId)) return
     const output = results[input.sourceNodeId].output
     if (!output) return
@@ -1083,8 +1141,9 @@ export function newerOutputFor(output: MuseOutputData, jobData: (Partial<MuseJob
 // ---------------------------------------------------------------- nối dây "thông minh"
 
 /** Cổng có thể có của mỗi loại node (để tự chọn cổng khi thả dây vào thân node). */
-const SOURCE_HANDLES = [MUSE_HANDLE.imagesOut, MUSE_HANDLE.jobOut, MUSE_HANDLE.imageOut, MUSE_HANDLE.scriptOut, MUSE_HANDLE.videoOut, MUSE_HANDLE.clipOut, MUSE_HANDLE.clipVideoOut, MUSE_HANDLE.refVideoOut]
+const SOURCE_HANDLES = [MUSE_HANDLE.imagesOut, MUSE_HANDLE.jobOut, MUSE_HANDLE.imageOut, MUSE_HANDLE.scriptOut, MUSE_HANDLE.videoOut, MUSE_HANDLE.clipOut, MUSE_HANDLE.clipVideoOut, MUSE_HANDLE.refVideoOut, MUSE_HANDLE.promptOut]
 const TARGET_HANDLES = [
+  MUSE_HANDLE.promptIn,
   MUSE_HANDLE.imagesIn,
   MUSE_HANDLE.outfitsIn,
   MUSE_HANDLE.scenesIn,
@@ -1114,6 +1173,11 @@ export function autoMuseConnection(
     handles.flatMap((sh) => TARGET_HANDLES.map((th) => ({ source: fromNodeId, target: otherId, sourceHandle: sh, targetHandle: th })))
   const asTarget = (handles: string[]) =>
     handles.flatMap((th) => SOURCE_HANDLES.map((sh) => ({ source: otherId, target: fromNodeId, sourceHandle: sh, targetHandle: th })))
+  if (fromHandleId === MUSE_HANDLE.promptOut || fromHandleId === MUSE_HANDLE.promptIn) {
+    const [source, target] = fromHandleType === 'source' ? [fromNodeId, otherId] : [otherId, fromNodeId]
+    const connection = { source, target, sourceHandle: MUSE_HANDLE.promptOut, targetHandle: MUSE_HANDLE.promptIn }
+    return isValidMuseConnection(connection, nodes, edges) ? connection : null
+  }
   // Ưu tiên: 1) đúng cổng đã kéo; 2) cổng khác của node đó, GIỮ chiều (vd. thả nhầm cổng Nhân vật / Trang phục);
   // 3) cuối cùng mới đổi chiều (kéo nhầm chấm, vd. chấm vào của Ảnh kết quả).
   const candidates =
@@ -1158,6 +1222,11 @@ export function explainMuseConnection(
   const sName = NODE_NAME[src.type ?? ''] ?? 'node'
   const dName = NODE_NAME[dst.type ?? ''] ?? 'node'
   if (edges.some((e) => e.source === srcId && e.target === dstId)) return `Hai node này đã được nối.`
+  if (src.type === MUSE_NODE.promptBox) {
+    if (!acceptsLinkedPrompt(dst.type ?? '')) return `Node ${dName} không có cổng nhận Ô prompt.`
+    return 'Cổng này chỉ nhận một Ô prompt. Gỡ dây prompt hiện tại rồi nối ô mới.'
+  }
+  if (dst.type === MUSE_NODE.promptBox) return 'Ô prompt chỉ có cổng ra.'
   if (dst.type === MUSE_NODE.videoIngredients) {
     if (src.type === MUSE_NODE.videoRef || src.type === MUSE_NODE.videoCut) return 'Node Ingredients chỉ nhận 1 video — gỡ dây video cũ trước.'
     if (SCRIPT_REF_SOURCE_TYPES.includes(src.type ?? ''))
@@ -1175,8 +1244,6 @@ export function explainMuseConnection(
     return 'Node Cắt video nối vào cổng “Video” của node Ingredients (video + ảnh), một node Cắt video khác, hoặc cổng “Clip” của node Ghép video.'
   if (src.type === MUSE_NODE.videoRef || dst.type === MUSE_NODE.videoRef)
     return 'Node Video tham chiếu nối vào cổng “Video” của node Ingredients (video + ảnh) hoặc node Cắt video, hoặc cổng “Clip” của node Ghép video.'
-  if (src.type === MUSE_NODE.promptBox || dst.type === MUSE_NODE.promptBox)
-    return 'Ô prompt đang độc lập — chưa có node nào nhận prompt từ ô, nên chưa nối được (bấm “Chép” để dán prompt vào node khác).'
   if (dst.type === MUSE_NODE.output && edges.some((e) => e.target === dstId))
     return 'Node Ảnh kết quả chỉ có 1 nguồn — gỡ dây cũ trước.'
   if (dst.type === MUSE_NODE.videoOutput)
@@ -1245,6 +1312,7 @@ export interface MuseScriptResult {
   status: ExtractStatus
   /** Dấu vân tay ảnh vào lúc chạy — khác hiện tại thì kịch bản là "cũ". */
   inputPath: string
+  promptKey?: string
   text?: string
   /** File .md backend đã lưu */
   path?: string
@@ -1382,13 +1450,13 @@ export function scriptFingerprint(refs: ScriptRef[]): string {
 
 export type ScriptState = 'no_refs' | 'too_many' | 'no_image' | 'pending' | 'running' | 'done' | 'error' | 'interrupted' | 'stale'
 
-export function scriptState(refs: ScriptRef[], result: MuseScriptResult | null, maxRefs: number = SCRIPT_MAX_REFS): ScriptState {
+export function scriptState(refs: ScriptRef[], result: MuseScriptResult | null, maxRefs: number = SCRIPT_MAX_REFS, promptKey?: string): ScriptState {
   if (result?.status === 'running') return 'running'
   if (!refs.length) return 'no_refs'
   if (refs.length > maxRefs) return 'too_many'
   if (refs.some((r) => !r.image)) return 'no_image'
   if (!result) return 'pending'
-  if (result.status === 'done' && result.inputPath !== scriptFingerprint(refs)) return 'stale'
+  if (result.status === 'done' && (result.inputPath !== scriptFingerprint(refs) || result.promptKey !== promptKey)) return 'stale'
   return result.status
 }
 
@@ -1536,13 +1604,13 @@ export function clipSentPaths(inputPath: string | null | undefined): string[] {
 }
 
 /** Trạng thái node Kịch bản tạo video: cần ít nhất 1 ảnh clip; giới hạn ảnh tính cả ảnh bối cảnh. */
-export function clipScriptState(refs: ScriptRef[], result: MuseScriptResult | null): ScriptState {
+export function clipScriptState(refs: ScriptRef[], result: MuseScriptResult | null, promptKey?: string): ScriptState {
   if (result?.status === 'running') return 'running'
   if (!splitClipRefs(refs).clips.length) return 'no_refs'
   if (refs.length > CLIP_SCRIPT_MAX_REFS) return 'too_many'
   if (refs.some((r) => !r.image)) return 'no_image'
   if (!result) return 'pending'
-  if (result.status === 'done' && result.inputPath !== clipScriptFingerprint(refs)) return 'stale'
+  if (result.status === 'done' && (result.inputPath !== clipScriptFingerprint(refs) || result.promptKey !== promptKey)) return 'stale'
   return result.status
 }
 
@@ -1560,6 +1628,8 @@ export function buildClipScriptContext(refs: ScriptRef[], notes = '', fixedSecon
   lines.push(
     '',
     `N = ${n}. Write exactly ${n} script${n === 1 ? '' : 's'} (=== SCRIPT 1/${n} … === SCRIPT ${n}/${n}), one per reference image #1–#${n}, in this order.`,
+    'For each clip, begin with "=== SCRIPT k/N — REF #k — Title — Ds ===", using the actual duration in seconds.',
+    'Include a VIDEO PROMPT heading followed by a fenced prompt with timestamped [0–Xs] blocks. Finish each clip with "=== END SCRIPT k/N ===".',
   )
   if (scenes.length) {
     lines.push(
@@ -1921,6 +1991,7 @@ export function newerClipFor(
 
 /** Model Omni 1.2 (tên hiển thị backend map sang macaron_cookie_r2v_<D>s[_360p]). */
 export const CLIP_FLOW_MODEL = 'Omni 1.2 Flash'
+const FLOW_PROMPT_MAX_CHARS = 8000
 /** Lỗi chắc chắn xảy ra TRƯỚC khi Flow nhận lệnh (không mất credit) — khớp SAFE_ERROR_CODES của Chiến dịch AI. */
 export const FLOW_SAFE_ERROR_CODES = ['BRIDGE_OFFLINE', 'EXTENSION_DISCONNECTED', 'FLOW_AUTH_REQUIRED', 'CAPTCHA_QUEUE_BUSY', 'CAPTCHA_FAILED', 'REFERENCE_INVALID', 'NOT_SUBMITTED']
 
@@ -2005,7 +2076,9 @@ export function clipVideoBlockers(d: Pick<MuseClipPromptData, 'prompt' | 'second
   const s = d.seconds
   if (s == null || !Number.isInteger(s) || s < CLIP_MIN_SECONDS || s > CLIP_MAX_SECONDS)
     b.push(`Độ dài phải là số giây nguyên ${CLIP_MIN_SECONDS}–${CLIP_MAX_SECONDS}.`)
-  if (!d.prompt.trim()) b.push('Prompt video đang trống.')
+  const prompt = d.prompt.trim()
+  if (!prompt) b.push('Prompt video đang trống.')
+  else if (Array.from(prompt).length > FLOW_PROMPT_MAX_CHARS) b.push('Prompt Flow tối đa 8.000 ký tự.')
   return b
 }
 
@@ -2198,7 +2271,9 @@ export function videoIngrBlockers(
     else if (t.length < VIDEO_INGR_MIN_SECONDS) b.push(`Đoạn cắt quá ngắn (${t.length}s) — tối thiểu ${VIDEO_INGR_MIN_SECONDS} giây.`)
     else if (video.durationSec > 0 && t.end > video.durationSec + 0.05) b.push(`Giây kết thúc vượt quá độ dài video (${video.durationSec}s).`)
   }
-  if (!d.prompt.trim()) b.push('Prompt đang trống.')
+  const prompt = d.prompt.trim()
+  if (!prompt) b.push('Prompt đang trống.')
+  else if (Array.from(prompt).length > FLOW_PROMPT_MAX_CHARS) b.push('Prompt Flow tối đa 8.000 ký tự.')
   return b
 }
 
@@ -2561,7 +2636,7 @@ const trimOf = (trims: Record<string, MergeTrim>, id: string): MergeTrim => trim
 
 /** Lỗi chặn "Ghép" (kiểm tra TRƯỚC khi chạy). Rỗng = ghép được. Backend vẫn kiểm tra lại theo độ dài thật của file. */
 export function mergeBlockers(rows: MergeClipRow[], trims: Record<string, MergeTrim>): string[] {
-  if (!rows.length) return ['Chưa nối clip nào — nối nguồn video vào chấm “Clip” bên trái.']
+  if (!rows.length) return ['Chưa nối clip nào — nối nguồn video vào cổng “Clip” bên trái.']
   const b: string[] = []
   if (rows.length > MERGE_MAX_CLIPS) b.push(`Tối đa ${MERGE_MAX_CLIPS} clip mỗi bản ghép.`)
   for (const r of rows) {

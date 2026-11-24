@@ -1,10 +1,11 @@
 /**
  * Node "Clip" của Muse Canvas: 1 kịch bản clip tách từ node "Kịch bản tạo video" (nút "Ra node").
- * Giữ ảnh tham chiếu #k, số giây và prompt video — sửa được, kiểm tra lại mốc thời gian / số giây / độ dài
- * prompt (số ký tự chỉ để xem, không cảnh báo / không chặn) mỗi lần sửa. Nguồn viết lại thì báo và có "Dùng bản mới".
+ * Giữ ảnh tham chiếu #k, số giây và prompt video. Kiểm tra lại mốc thời gian và giới hạn của Flow.
+ * Nguồn viết lại thì báo và có "Dùng bản mới".
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   Check,
@@ -15,7 +16,6 @@ import {
   Clapperboard,
   Copy,
   ExternalLink,
-  Film,
   ImageOff,
   Loader2,
   RefreshCw,
@@ -50,6 +50,8 @@ import {
 import { getVeoJob, museMediaUrl, notifyVideoLibraryChanged, recoverVeoJob, submitVeoJob, veoVideoUrl, type VeoJobLite } from '../../services/museCanvasApi.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { MusePromptPort, useLinkedPrompt } from './MusePromptPort'
+import { museInputPortTops } from '../../services/museCanvasNodes.ts'
 
 type ClipNode = Node<Record<string, unknown>, string>
 
@@ -89,6 +91,10 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
   const { updateNodeData, getNode, getNodes } = useReactFlow()
   const { config, flowProject } = useMuseCanvas()
   const data = normalizeClipPromptData(raw)
+  const linked = useLinkedPrompt()
+  const portTops = museInputPortTops(['Text', 'Text'])
+  const prompt = linked?.text ?? data.prompt
+  const runData = { ...data, prompt }
   const flow = clipFlowSettings(config)
   const [videoBusy, setVideoBusy] = useState<'' | 'submit' | 'recover'>('')
   const [now, setNow] = useState(Date.now())
@@ -106,15 +112,15 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
     [src, data.origin?.updatedAt, data.k],
   )
 
-  const beats = useMemo(() => promptBeats(data.prompt), [data.prompt])
-  const warnings = useMemo(() => checkClipPrompt(data.prompt, data.seconds), [data.prompt, data.seconds])
+  const beats = useMemo(() => promptBeats(prompt), [prompt])
+  const warnings = useMemo(() => checkClipPrompt(prompt, data.seconds), [prompt, data.seconds])
   const promptEdited = data.prompt !== data.originalPrompt
   const secondsEdited = data.seconds !== data.originalSeconds
   const collapsed = data.collapsed
 
   async function copyPrompt() {
     try {
-      await navigator.clipboard.writeText(data.prompt)
+      await navigator.clipboard.writeText(prompt)
       setCopied(true)
       setCopyErr('')
       setTimeout(() => setCopied(false), 1500)
@@ -153,14 +159,14 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
   }
 
   // ---------------------------------------------------------------- Tạo video (Omni 1.2 trên Flow)
-  const vstate = clipVideoState(data, flow)
+  const vstate = clipVideoState(runData, flow)
   const video = data.video
   const vBlockers = useMemo(() => {
-    const b = clipVideoBlockers(data, flow)
+    const b = clipVideoBlockers(runData, flow)
     if (flow.projectId && !flowProject) b.unshift('Project Flow đã chọn không còn trong app — chọn hoặc tạo project ở Cấu hình → Google Flow.')
     return b
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.prompt, data.seconds, data.image, flow.projectId, flow.aspect, flow.resolution, flowProject])
+  }, [prompt, data.seconds, data.image, flow.projectId, flow.aspect, flow.resolution, flowProject])
 
   /** Hỏi trạng thái job tới khi xong / lỗi (job Flow chạy ở backend, đóng / mở lại canvas vẫn theo dõi tiếp được). */
   const poll = useCallback(
@@ -219,12 +225,12 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
     const attempt = (video?.attempt ?? 0) + 1
     let body: Record<string, unknown>
     try {
-      body = buildClipVideoRequest(id, data, flow, attempt)
+      body = buildClipVideoRequest(id, runData, flow, attempt)
     } catch (e: any) {
       updateNodeData(id, { video: { status: 'error', fingerprint: '', attempt, error: e?.message, errorCode: 'NOT_SUBMITTED', startedAt: Date.now(), updatedAt: Date.now() } })
       return
     }
-    const base: MuseClipVideo = { status: 'running', fingerprint: clipVideoFingerprint(data, flow), attempt, step: 'pending', startedAt: Date.now(), updatedAt: Date.now() }
+    const base: MuseClipVideo = { status: 'running', fingerprint: clipVideoFingerprint(runData, flow), attempt, step: 'pending', startedAt: Date.now(), updatedAt: Date.now() }
     updateNodeData(id, { video: base })
     setVideoBusy('submit')
     try {
@@ -275,22 +281,26 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
 
   return (
     <div className={`mc-node mc-node-clipprompt ${collapsed ? 'mc-collapsed' : ''} ${selected ? 'selected' : ''}`}>
-      <Handle
+      <MusePromptPort linked={linked} label="Prompt thay thế" top={portTops[0]} />
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.clipIn}
-        className="mc-handle mc-handle-clip"
+        kind="Text"
+        label="Kịch bản clip"
+        style={{ top: portTops[1] }}
         title="Clip — nối từ node Kịch bản tạo video (hoặc bấm “Ra node” ở từng clip)"
       />
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.clipVideoOut}
-        className="mc-handle mc-handle-video"
+        kind="Video"
+        label="Clip đã tạo"
         title="Video đã tạo — nối tới node “Ghép video”"
       />
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-clipscript"><Film size={14} /></span>
+        <MuseMediaIcon kind="Video" />
         <div className="mc-node-titles">
           <strong>{data.title}{data.name ? ` · ${data.name}` : ''}</strong>
           <small>Prompt video Omni 1.2 (Flow) · ảnh tham chiếu #{data.k}</small>
@@ -309,7 +319,7 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
           <div className="mc-collapsed-row">
             <span className="mc-thumbs">{thumb}</span>
             <span className="mc-collapsed-meta">
-              {data.prompt.length.toLocaleString('vi-VN')} ký tự
+              {prompt.length.toLocaleString('vi-VN')} ký tự
               <small className={warnings.length ? 'mc-vstat mc-vstat-error' : 'mc-vstat mc-vstat-done'}>
                 {warnings.length ? `${warnings.length} cảnh báo` : 'Hợp lệ'}
               </small>
@@ -368,15 +378,16 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
           <textarea
             className="mc-prompt nodrag nowheel"
             rows={10}
-            value={data.prompt}
+            value={prompt}
+            readOnly={!!linked}
             spellCheck={false}
             onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
             placeholder="Prompt video tiếng Anh cho Flow (Omni 1.2)…"
           />
           <div className="mc-node-actions">
-            <span className="mc-node-meta">{data.prompt.length.toLocaleString('vi-VN')} ký tự</span>
-            {promptEdited && <span className="mc-node-badge custom">Đã sửa</span>}
-            {(promptEdited || secondsEdited) && (
+            <span className="mc-node-meta">{prompt.length.toLocaleString('vi-VN')} ký tự</span>
+            {!linked && promptEdited && <span className="mc-node-badge custom">Đã sửa</span>}
+            {!linked && (promptEdited || secondsEdited) && (
               <button
                 type="button"
                 className="mc-mini-btn nodrag"
@@ -386,7 +397,7 @@ function GptClipPromptNodeImpl({ id, data: raw, selected }: NodeProps<ClipNode>)
                 <RotateCcw size={11} /> Bản gốc
               </button>
             )}
-            <button type="button" className="mc-mini-btn mc-mini-accent nodrag" onClick={copyPrompt} disabled={!data.prompt.trim()} title="Chép prompt (dán vào Flow kèm ảnh tham chiếu này)">
+            <button type="button" className="mc-mini-btn mc-mini-accent nodrag" onClick={copyPrompt} disabled={!prompt.trim()} title="Chép prompt (dán vào Flow kèm ảnh tham chiếu này)">
               {copied ? <Check size={11} /> : <Copy size={11} />} Chép prompt
             </button>
           </div>

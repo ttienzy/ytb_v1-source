@@ -6,7 +6,8 @@
  * Gửi: prompt của node + đoạn tự sinh (danh sách ảnh kèm vai trò, ghi chú). Kết quả: kịch bản (backend lưu .md).
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -36,6 +37,7 @@ import {
   SCRIPT_SPEC,
   buildScriptContext,
   buildScriptRequest,
+  linkedPromptKey,
   findScriptTextNodeFor,
   interruptScript,
   planScriptTextNode,
@@ -50,6 +52,8 @@ import {
 import { fetchMusePrompt, generateMuseText, museMediaUrl, saveMusePromptDefault } from '../../services/museCanvasApi.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { MusePromptPort, useLinkedPrompt } from './MusePromptPort'
+import { museInputPortTops } from '../../services/museCanvasNodes.ts'
 import { useMuseRuns } from './useMuseRuns'
 import { runKey } from '../../services/museRunRegistry.ts'
 
@@ -61,6 +65,10 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
   const { updateNodeData, getNode, getNodes, addNodes, addEdges, setCenter } = useReactFlow()
   const { config, blockers } = useMuseCanvas()
   const data = normalizeScriptData(raw)
+  const linked = useLinkedPrompt()
+  const portTops = museInputPortTops(['Text', 'Image'])
+  const prompt = linked?.text ?? data.prompt
+  const promptKey = linkedPromptKey(linked?.text)
   const [showPrompt, setShowPrompt] = useState(false)
   const [showContext, setShowContext] = useState(false)
   const [showRefs, setShowRefs] = useState(true)
@@ -86,7 +94,7 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
   )
 
   const result = data.result
-  const state = scriptState(refs, result)
+  const state = scriptState(refs, result, SCRIPT_MAX_REFS, promptKey)
 
   // Node "Kịch bản" đã tách từ lần viết hiện tại (nối ở cổng ra script)?
   const outConns = useNodeConnections({ handleType: 'source', handleId: MUSE_HANDLE.scriptOut })
@@ -161,15 +169,16 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
     const inputPath = scriptFingerprint(refs)
     let body: Record<string, unknown>
     try {
-      body = buildScriptRequest(config, data.prompt, refs, data.notes)
+      body = buildScriptRequest(config, prompt, refs, data.notes)
     } catch (e: any) {
       setResult({ inputPath, status: 'error', error: e?.message, updatedAt: Date.now() })
       return
     }
-    setResult({ inputPath, status: 'running', updatedAt: Date.now() })
+    setResult({ inputPath, promptKey, status: 'running', updatedAt: Date.now() })
     const job: Promise<MuseScriptResult> = generateMuseText(body)
       .then((r) => ({
         inputPath,
+        promptKey,
         status: 'done' as const,
         text: r.text,
         path: r.path,
@@ -179,7 +188,7 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
       }))
       .catch((e: any) => ({ inputPath, status: 'error' as const, error: e?.message || 'Muse lỗi', updatedAt: Date.now() }))
     await runs.start(flight, job)
-  }, [config, data.notes, data.prompt, flight, refs, result, runs, setResult, state])
+  }, [config, data.notes, flight, prompt, promptKey, refs, result, runs, setResult, state])
 
   async function resetToDefault() {
     setBusy('reset')
@@ -231,7 +240,7 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  const promptEmpty = !data.prompt.trim()
+  const promptEmpty = !prompt.trim()
   const blocked = blockers.length > 0 || promptEmpty
   const canRun = !blocked && ['pending', 'done', 'stale', 'error', 'interrupted'].includes(state)
   const context = useMemo(() => buildScriptContext(refs, data.notes), [refs, data.notes])
@@ -269,7 +278,7 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
     state === 'done'
       ? `Đã viết · ${new Date(result!.updatedAt).toLocaleTimeString('vi-VN')}`
       : state === 'stale'
-        ? 'Kịch bản cũ (ảnh / thứ tự đã đổi)'
+        ? 'Kịch bản cũ (prompt hoặc ảnh đã đổi)'
         : state === 'error' || state === 'interrupted'
           ? 'Lỗi — mở node để xem'
           : running
@@ -278,18 +287,19 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
 
   return (
     <div className={`mc-node mc-node-script ${collapsed ? 'mc-collapsed' : ''} ${selected ? 'selected' : ''}`}>
-      <Handle
+      <MusePromptPort linked={linked} top={portTops[0]} />
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.refsIn}
-        className="mc-handle mc-handle-output"
-        style={{ top: 40 }}
+        kind="Image"
+        label="Tham chiếu"
+        style={{ top: portTops[1] }}
         title="Tham chiếu: nối mọi node có ảnh — Ảnh kết quả, Nhân vật tham chiếu, Trang phục (nhiều dây, gửi chung 1 lần)"
       />
-      <span className="mc-port-label mc-port-secondary" style={{ top: 30 }}>Tham chiếu</span>
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-script"><FileText size={14} /></span>
+        <MuseMediaIcon kind="Text" />
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small>{SCRIPT_SPEC.subtitle}</small>
@@ -349,7 +359,7 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
         <div className="mc-script-list">
           {refs.length === 0 ? (
             <div className="mc-inputs-empty">
-              <Link2Off size={12} /> Chưa có ảnh — nối dây từ node “Ảnh kết quả”, “Nhân vật tham chiếu” hoặc “Trang phục” vào chấm “Tham chiếu”.
+              <Link2Off size={12} /> Chưa có ảnh — nối dây từ node “Ảnh kết quả”, “Nhân vật tham chiếu” hoặc “Trang phục” vào cổng “Tham chiếu”.
             </div>
           ) : (
             refs.map((r, i) => (
@@ -412,15 +422,16 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
         <button type="button" className="mc-xtoggle nodrag" onClick={() => setShowPrompt((v) => !v)}>
           {showPrompt ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Prompt
           <span className={`mc-node-badge ${data.promptSource === 'custom' ? 'custom' : ''}`}>
-            {data.promptSource === 'custom' ? 'Đã sửa' : 'Mặc định'}
+            {linked ? 'Từ Ô prompt' : data.promptSource === 'custom' ? 'Đã sửa' : 'Mặc định'}
           </span>
-          <small className="mc-xtoggle-hint">{data.prompt.length.toLocaleString('vi-VN')} ký tự</small>
+          <small className="mc-xtoggle-hint">{prompt.length.toLocaleString('vi-VN')} ký tự</small>
         </button>
         {showPrompt && (
           <>
             <textarea
               className="mc-prompt nodrag nowheel"
-              value={data.prompt}
+              value={prompt}
+              readOnly={!!linked}
               rows={12}
               spellCheck={false}
               onChange={(e) => updateNodeData(id, { prompt: e.target.value, promptSource: 'custom' })}
@@ -428,10 +439,10 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
             />
             <div className="mc-node-actions">
               <span className="mc-node-meta">File gốc: muse_video_script_prompt.txt</span>
-              <button type="button" className="mc-mini-btn nodrag" onClick={resetToDefault} disabled={!!busy}>
+              <button type="button" className="mc-mini-btn nodrag" onClick={resetToDefault} disabled={!!linked || !!busy}>
                 {busy === 'reset' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Mặc định
               </button>
-              <button type="button" className="mc-mini-btn nodrag" onClick={saveAsDefault} disabled={!!busy || promptEmpty}>
+              <button type="button" className="mc-mini-btn nodrag" onClick={saveAsDefault} disabled={!!linked || !!busy || promptEmpty}>
                 {busy === 'save' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Lưu làm mặc định
               </button>
             </div>
@@ -457,7 +468,7 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
           <div className={`mc-script-result mc-x-${state}`}>
             <div className="mc-script-status">
               {state === 'done' && <><Check size={12} /> Đã viết · {new Date(result.updatedAt).toLocaleTimeString('vi-VN')}</>}
-              {state === 'stale' && <><AlertTriangle size={12} /> Ảnh / thứ tự tham chiếu đã đổi — kịch bản dưới đây là bản cũ</>}
+              {state === 'stale' && <><AlertTriangle size={12} /> Prompt hoặc ảnh tham chiếu đã đổi. Hãy viết lại kịch bản.</>}
               {(state === 'error' || state === 'interrupted') && <><AlertTriangle size={12} /> {result.error || 'Lỗi'}</>}
               {result.text && (
                 <span className="mc-script-tools">
@@ -491,11 +502,12 @@ function MuseScriptNodeImpl({ id, data: raw, selected }: NodeProps<ScriptNode>) 
       </div>
       )}
 
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.scriptOut}
-        className="mc-handle mc-handle-script"
+        kind="Text"
+        label="Kịch bản"
         title="Kịch bản — nối tới node “Kịch bản” (hoặc bấm “Ra node”)"
       />
     </div>

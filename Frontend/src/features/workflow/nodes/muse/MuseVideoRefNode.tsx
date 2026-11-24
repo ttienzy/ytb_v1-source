@@ -4,8 +4,9 @@
  * Cổng ra "refvideo" nối vào Ingredients, Cắt video hoặc Ghép video.
  */
 import { memo, useRef, useState } from 'react'
-import { Handle, Position, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
-import { Camera, Clapperboard, Film, Library, Loader2, RefreshCw, Video, X } from 'lucide-react'
+import { Position, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
+import { Camera, Film, Library, Loader2, RefreshCw, Video, X } from 'lucide-react'
 import {
   MUSE_HANDLE,
   MUSE_NODE,
@@ -153,9 +154,7 @@ function MuseVideoRefNodeImpl({ id, data: raw, selected }: NodeProps<VideoRefNod
   return (
     <div className={`mc-node mc-node-outfit mc-node-videoref ${selected ? 'selected' : ''}`}>
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-videoref">
-          <Clapperboard size={14} />
-        </span>
+        <MuseMediaIcon kind="Video" />
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small>1 video mẫu · Ingredients, Cắt, Ghép</small>
@@ -252,11 +251,12 @@ function MuseVideoRefNodeImpl({ id, data: raw, selected }: NodeProps<VideoRefNod
         {error && <div className="mc-node-error">{error}</div>}
       </div>
 
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.refVideoOut}
-        className="mc-handle mc-handle-videoref"
+        kind="Video"
+        label="Video tham chiếu"
         title="Nối vào cổng “Video” của Ingredients hoặc Cắt video, hoặc cổng “Clip” của Ghép video"
       />
     </div>

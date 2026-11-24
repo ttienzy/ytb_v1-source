@@ -6,7 +6,8 @@
  * - Thu gọn được (chỉ còn đầu + 1 dòng tóm tắt).
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   ArrowDown,
@@ -20,7 +21,6 @@ import {
   Clapperboard,
   Copy,
   Download,
-  FileText,
   FolderOpen,
   ImageOff,
   Link2,
@@ -57,6 +57,8 @@ import {
 import { generateMuseVideo, museMediaUrl, openMuseVideoFolder } from '../../services/museCanvasApi.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { MusePromptPort, useLinkedPrompt } from './MusePromptPort'
+import { museInputPortTops } from '../../services/museCanvasNodes.ts'
 import { useMuseRuns } from './useMuseRuns'
 import { runKey } from '../../services/museRunRegistry.ts'
 
@@ -70,7 +72,10 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
   const { updateNodeData, getEdges, getNodes, getNode, addEdges, addNodes, setCenter } = useReactFlow()
   const { config, blockers } = useMuseCanvas()
   const data = normalizeScriptTextData(raw)
-  const edited = scriptTextEdited(data)
+  const linked = useLinkedPrompt()
+  const portTops = museInputPortTops(['Text', 'Text', 'Image'])
+  const text = linked?.text ?? data.text
+  const edited = !linked && scriptTextEdited(data)
   const [copied, setCopied] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [showText, setShowText] = useState(true)
@@ -102,7 +107,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
   )
 
   const video = data.video
-  const vState = scriptVideoState(data.text, refs, video)
+  const vState = scriptVideoState(text, refs, video)
   const vRunning = vState === 'running'
   const setVideo = useCallback((v: MuseScriptVideo) => updateNodeData(id, { video: v }), [id, updateNodeData])
   const runs = useMuseRuns<MuseScriptVideo>((_key, v) => setVideo(v))
@@ -175,10 +180,10 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
       )
       if (!ok) return
     }
-    const inputPath = scriptVideoFingerprint(data.text, refs)
+    const inputPath = scriptVideoFingerprint(text, refs)
     let body: Record<string, unknown>
     try {
-      body = buildScriptVideoRequest(config, data.text, refs, data.label)
+      body = buildScriptVideoRequest(config, text, refs, data.label)
     } catch (e: any) {
       setVideo({ inputPath, status: 'error', error: e?.message, updatedAt: Date.now() })
       return
@@ -195,7 +200,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
       }))
       .catch((e: any) => ({ inputPath, status: 'error' as const, error: e?.message || 'Muse lỗi', updatedAt: Date.now() }))
     await runs.start(flight, job)
-  }, [config, data.label, data.text, flight, refs, runs, setVideo, vState, video])
+  }, [config, data.label, text, flight, refs, runs, setVideo, vState, video])
 
   /** Nối lại các ảnh tham chiếu đang nối vào node Kịch bản video nguồn (giữ thứ tự của nó). */
   const copyParentRefs = useCallback(() => {
@@ -234,7 +239,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
 
   async function copyText() {
     try {
-      await navigator.clipboard.writeText(data.text)
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
@@ -244,7 +249,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
 
   function downloadText() {
     const base = (data.label.trim() || data.path.split(/[\\/]/).pop()?.replace(/\.md$/i, '') || 'kich_ban').replace(/[\\/:*?"<>|]/g, '_')
-    const url = URL.createObjectURL(new Blob([data.text], { type: 'text/markdown;charset=utf-8' }))
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }))
     const a = document.createElement('a')
     a.href = url
     a.download = `${base}${edited ? '_da_sua' : ''}.md`
@@ -300,20 +305,20 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
 
   return (
     <div className={`mc-node mc-node-scripttext ${collapsed ? 'mc-collapsed' : ''} ${selected ? 'selected' : ''}`}>
-      <Handle type="target" position={Position.Left} id={MUSE_HANDLE.scriptIn} className="mc-handle mc-handle-script" style={{ top: 40 }} title="Từ node Kịch bản video" />
-      <span className="mc-port-label" style={{ top: 30 }}>Kịch bản</span>
-      <Handle
+      <MusePromptPort linked={linked} label="Kịch bản thay thế" top={portTops[0]} />
+      <MuseMediaPort type="target" position={Position.Left} id={MUSE_HANDLE.scriptIn} kind="Text" label="Kịch bản" style={{ top: portTops[1] }} title="Từ node Kịch bản video" />
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.refsIn}
-        className="mc-handle mc-handle-output"
-        style={{ top: 100 }}
+        kind="Image"
+        label="Tham chiếu"
+        style={{ top: portTops[2] }}
         title="Tham chiếu cho video: nối Ảnh kết quả, Nhân vật tham chiếu, Trang phục (nhiều dây)"
       />
-      <span className="mc-port-label mc-port-secondary" style={{ top: 90 }}>Tham chiếu</span>
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-script"><FileText size={14} /></span>
+        <MuseMediaIcon kind="Video" />
         <div className="mc-node-titles">
           <strong>{data.label.trim() || data.title}</strong>
           <small title={when}>{parentId ? `Từ Kịch bản video · ${when}` : `Kịch bản video · ${when} (đã gỡ dây nguồn)`}</small>
@@ -346,7 +351,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
               {refs.length > 6 && <small>+{refs.length - 6}</small>}
             </span>
             <span className="mc-collapsed-meta">
-              {data.text.length.toLocaleString('vi-VN')} ký tự{edited ? ' · đã sửa' : ''} · {refs.length} ảnh
+              {text.length.toLocaleString('vi-VN')} ký tự{edited ? ' · đã sửa' : ''} · {refs.length} ảnh
               <small className={`mc-vstat mc-vstat-${vState}`}>{videoStatus}</small>
             </span>
             {videoNodeButton && <span className="mc-script-tools">{videoNodeButton}</span>}
@@ -375,8 +380,8 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
           {/* Kịch bản */}
           <button type="button" className="mc-xtoggle nodrag" onClick={() => setShowText((v) => !v)}>
             {showText ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Kịch bản
-            <span className={`mc-node-badge ${edited ? 'custom' : ''}`}>{edited ? 'Đã sửa' : 'Bản Muse'}</span>
-            <small className="mc-xtoggle-hint">{data.text.length.toLocaleString('vi-VN')} ký tự</small>
+            <span className={`mc-node-badge ${edited ? 'custom' : ''}`}>{linked ? 'Từ Ô prompt' : edited ? 'Đã sửa' : 'Bản Muse'}</span>
+            <small className="mc-xtoggle-hint">{text.length.toLocaleString('vi-VN')} ký tự</small>
           </button>
           {showText && (
             <>
@@ -392,10 +397,10 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
                       <RotateCcw size={11} /> Bản gốc
                     </button>
                   )}
-                  <button type="button" className="mc-mini-btn nodrag" onClick={copyText} disabled={!data.text} title="Chép toàn bộ kịch bản">
+                  <button type="button" className="mc-mini-btn nodrag" onClick={copyText} disabled={!text} title="Chép toàn bộ kịch bản">
                     {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? 'Đã chép' : 'Chép'}
                   </button>
-                  <button type="button" className="mc-mini-btn nodrag" onClick={downloadText} disabled={!data.text} title="Tải về (.md)">
+                  <button type="button" className="mc-mini-btn nodrag" onClick={downloadText} disabled={!text} title="Tải về (.md)">
                     <Download size={11} /> .md
                   </button>
                   <button type="button" className="mc-mini-btn nodrag" onClick={() => setExpanded((v) => !v)} title={expanded ? 'Thu gọn ô chữ' : 'Mở rộng ô chữ'}>
@@ -405,13 +410,14 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
               </div>
               <textarea
                 className={`mc-prompt mc-script-edit nodrag nowheel ${expanded ? 'expanded' : ''}`}
-                value={data.text}
+                value={text}
+                readOnly={!!linked}
                 spellCheck={false}
                 disabled={vRunning}
                 onChange={(e) => updateNodeData(id, { text: e.target.value })}
                 placeholder="Kịch bản trống."
               />
-              {data.path && <div className="mc-node-meta mc-script-path" title={data.path}>{data.path}</div>}
+              {!linked && data.path && <div className="mc-node-meta mc-script-path" title={data.path}>{data.path}</div>}
             </>
           )}
 
@@ -425,7 +431,7 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
             <div className="mc-script-list">
               {refs.length === 0 ? (
                 <div className="mc-script-none">
-                  Chưa nối ảnh — kéo dây từ “Ảnh kết quả”, “Nhân vật tham chiếu” hoặc “Trang phục” vào chấm “Tham chiếu”.
+                  Chưa nối ảnh — kéo dây từ “Ảnh kết quả”, “Nhân vật tham chiếu” hoặc “Trang phục” vào cổng “Tham chiếu”.
                   {parentRefCount > 0 && (
                     <button type="button" className="mc-mini-btn mc-mini-accent nodrag mc-copy-refs" onClick={copyParentRefs}>
                       <Link2 size={11} /> Nối {parentRefCount} ảnh như Kịch bản video
@@ -524,11 +530,12 @@ function MuseScriptTextNodeImpl({ id, data: raw, selected }: NodeProps<ScriptTex
         </div>
       )}
 
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.videoOut}
-        className="mc-handle mc-handle-video"
+        kind="Video"
+        label="Video kết quả"
         title="Video — nối tới node “Video kết quả” (hoặc bấm “Ra node” ở phần video)"
       />
     </div>

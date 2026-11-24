@@ -8,9 +8,14 @@ export const NAV_STRUCTURE = [
     items: [
       { label: 'Canvas AI', badge: 'PRO', badgeVariant: 'pro' },
       { label: 'Chiến dịch AI', badge: 'NEW', badgeVariant: 'new' },
+      { label: 'Recap & Audio' },
+    ],
+  },
+  {
+    title: 'Studio',
+    items: [
       { label: 'Veo Studio' },
       { label: 'Muse Studio', badge: 'NEW', badgeVariant: 'new' },
-      { label: 'Recap & Audio' },
     ],
   },
   {

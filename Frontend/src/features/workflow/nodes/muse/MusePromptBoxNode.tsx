@@ -1,10 +1,9 @@
 /**
- * Node "Ô prompt" của Muse Canvas — độc lập: nhập / giữ 1 prompt chữ (thêm bao nhiêu ô cũng được), có tên, đếm ký tự,
- * chép, thu gọn. Chữ lưu cùng đồ thị của project. Cổng ra "prompt" để dành cho node dùng prompt sau này
- * (hiện chưa node nào nhận — dùng nút "Chép" để dán sang node khác).
+ * Node "Ô prompt" lưu một prompt cùng đồ thị project để dùng chung giữa các node.
  */
 import { memo, useState } from 'react'
-import { Handle, Position, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Eraser, NotebookPen } from 'lucide-react'
 import {
   MUSE_HANDLE,
@@ -44,9 +43,7 @@ function MusePromptBoxNodeImpl({ id, data: raw, selected }: NodeProps<PromptBoxN
   return (
     <div className={`mc-node mc-node-promptbox ${selected ? 'selected' : ''}`}>
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-promptbox">
-          <NotebookPen size={14} />
-        </span>
+        <MuseMediaIcon kind="Text" />
         <div className="mc-node-titles">
           <strong>{data.label.trim() || data.title}</strong>
           <small>{promptBoxStats(data.text)}</small>
@@ -101,12 +98,13 @@ function MusePromptBoxNodeImpl({ id, data: raw, selected }: NodeProps<PromptBoxN
         </div>
       )}
 
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.promptOut}
-        className="mc-handle mc-handle-promptbox"
-        title="Ô prompt — chưa có node nào nhận prompt từ ô"
+        kind="Text"
+        label="Prompt"
+        title="Nối tới cổng Prompt hoặc Kịch bản thay thế"
       />
     </div>
   )

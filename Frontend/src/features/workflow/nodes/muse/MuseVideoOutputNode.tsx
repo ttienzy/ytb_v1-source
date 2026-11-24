@@ -5,7 +5,8 @@
  *   → POST /api/workflow/muse/finish (ffmpeg, không tốn lượt Muse) → video hoàn chỉnh trong Thư Viện Video.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   Check,
@@ -13,7 +14,6 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
-  Film,
   FolderOpen,
   ImagePlus,
   Loader2,
@@ -210,10 +210,10 @@ function MuseVideoOutputNodeImpl({ id, data: raw, selected }: NodeProps<VideoNod
 
   return (
     <div className={`mc-node mc-node-video ${selected ? 'selected' : ''}`}>
-      <Handle type="target" position={Position.Left} id={MUSE_HANDLE.videoIn} className="mc-handle mc-handle-video" title="Từ node Kịch bản (Tạo video)" />
+      <MuseMediaPort type="target" position={Position.Left} id={MUSE_HANDLE.videoIn} kind="Video" label="Video từ Kịch bản" title="Từ node Kịch bản (Tạo video)" />
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-video"><Film size={14} /></span>
+        <MuseMediaIcon kind="Video" />
         <div className="mc-node-titles">
           <strong>{data.label.trim() || data.title}</strong>
           <small title={when}>{parentId ? `Từ Kịch bản · ${when}` : `Kịch bản · ${when} (đã gỡ dây nguồn)`}</small>

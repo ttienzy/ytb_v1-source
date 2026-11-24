@@ -7,7 +7,8 @@
  * lệnh thì "Tìm lại video" (recover-current).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   ChevronDown,
@@ -90,6 +91,8 @@ import {
 import { runKey } from '../../services/museRunRegistry.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { MusePromptPort, useLinkedPrompt } from './MusePromptPort'
+import { museInputPortTops } from '../../services/museCanvasNodes.ts'
 import { useMuseRuns } from './useMuseRuns'
 
 type VIngrNode = Node<Record<string, unknown>, string>
@@ -359,6 +362,10 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
   const { config, flowProject } = useMuseCanvas()
   // thời lượng trong cấu hình Flow (0 = Tự động) quyết định đoạn cắt mặc định
   const data = { ...normalizeVideoIngrData(raw), targetSeconds: config.flowSeconds }
+  const linked = useLinkedPrompt()
+  const portTops = museInputPortTops(['Text', 'Video', 'Image'])
+  const prompt = linked?.text ?? data.prompt
+  const runData = { ...data, prompt }
   const [busy, setBusy] = useState<'' | 'reset' | 'save' | 'recover'>('')
   const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showPrompt, setShowPrompt] = useState(false)
@@ -394,18 +401,18 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
   const trim = videoIngrTrim(data, refVideo?.durationSec ?? 0)
   const blockers = useMemo(
     () => {
-      const b = videoIngrBlockers(data, refVideo, refs, flow)
+      const b = videoIngrBlockers(runData, refVideo, refs, flow)
       if (config.flowProjectId && !flowProject) b.unshift('Project Flow đã chọn không còn trong app — chọn hoặc tạo project ở Cấu hình → Google Flow.')
       return b
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.prompt, data.trimStart, data.trimEnd, data.targetSeconds, refVideo, refs, flowProject, config.flowProjectId, config.flowAspect, config.flowResolution],
+    [prompt, data.trimStart, data.trimEnd, data.targetSeconds, refVideo, refs, flowProject, config.flowProjectId, config.flowAspect, config.flowResolution],
   )
   const videos = data.videos
   const variants = config.flowVariants
   const slotCount = videoIngrSlotCount(variants, videos.length)
-  const fingerprint = videoIngrFingerprint(data, refVideo, refs, flow)
-  const stateAt = (i: number) => videoIngrState(videos[i], data, refVideo, refs, flow)
+  const fingerprint = videoIngrFingerprint(runData, refVideo, refs, flow)
+  const stateAt = (i: number) => videoIngrState(videos[i], runData, refVideo, refs, flow)
   const states = Array.from({ length: slotCount }, (_, i) => stateAt(i))
   const vstate = videoIngrOverallState(states)
   const running = states.includes('running')
@@ -537,7 +544,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
     const next = [...videos]
     indices.forEach((i, k) => { next[i] = fresh(k) })
     updateNodeData(id, { videos: next })
-    const snapshot = { prompt: data.prompt, trimStart: data.trimStart, trimEnd: data.trimEnd, targetSeconds: data.targetSeconds }
+    const snapshot = { prompt, trimStart: data.trimStart, trimEnd: data.trimEnd, targetSeconds: data.targetSeconds }
     const batch: Promise<BatchOutcome> = (async () => {
       let mediaId: string
       try {
@@ -696,27 +703,28 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
 
   return (
     <div className={`mc-node mc-node-vingr ${selected ? 'selected' : ''}`}>
-      <Handle
+      <MusePromptPort linked={linked} top={portTops[0]} />
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.refVideoIn}
-        className="mc-handle mc-handle-videoref"
-        style={{ top: 92 }}
+        kind="Video"
+        label="Video mẫu"
+        style={{ top: portTops[1] }}
         title="Video: nối từ node “Video tham chiếu” (1 video)"
       />
-      <span className="mc-port-label" style={{ top: 82 }}>Video</span>
-      <Handle
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.refsIn}
-        className="mc-handle mc-handle-prompt"
-        style={{ top: collapsed ? 120 : 400 }}
+        kind="Image"
+        label="Tham chiếu"
+        style={{ top: portTops[2] }}
         title={`Ảnh: nối từ Ảnh kết quả / Nhân vật / Trang phục / Bối cảnh — tối đa ${VIDEO_INGR_MAX_REFS} ảnh, theo thứ tự`}
       />
-      <span className="mc-port-label mc-port-secondary" style={{ top: collapsed ? 110 : 390 }}>Ảnh</span>
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-videoref"><Clapperboard size={14} /></span>
+        <MuseMediaIcon kind="Video" />
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small>Omni 1.2 · chỉnh video theo video mẫu · {config.flowResolution}</small>
@@ -885,7 +893,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
                     <div key={`empty-${i}`} className="mc-vingr-ref empty">
                       <span className="mc-vingr-no">#{i + 1}</span>
                       <span className="mc-vingr-noimg"><Link2Off size={14} /></span>
-                      <span className="mc-vingr-ref-label">Nối ảnh vào chấm “Ảnh”</span>
+                      <span className="mc-vingr-ref-label">Nối ảnh vào cổng “Ảnh”</span>
                     </div>
                   ),
                 )}
@@ -896,24 +904,25 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
             <button type="button" className="mc-xtoggle nodrag" onClick={() => setShowPrompt((v) => !v)}>
               {showPrompt ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Prompt
               <span className={`mc-node-badge ${data.promptSource === 'custom' ? 'custom' : ''}`}>
-                {data.promptSource === 'custom' ? 'Đã sửa' : 'Mặc định'}
+                {linked ? 'Từ Ô prompt' : data.promptSource === 'custom' ? 'Đã sửa' : 'Mặc định'}
               </span>
-              <small className="mc-xtoggle-hint">{data.prompt.length.toLocaleString('vi-VN')} ký tự</small>
+              <small className="mc-xtoggle-hint">{prompt.length.toLocaleString('vi-VN')} ký tự</small>
             </button>
             {showPrompt && (
               <>
                 <textarea
                   className="mc-prompt nodrag nowheel"
-                  value={data.prompt}
+                  value={prompt}
+                  readOnly={!!linked}
                   rows={12}
                   spellCheck={false}
                   onChange={(e) => updateNodeData(id, { prompt: e.target.value, promptSource: 'custom' })}
                 />
                 <div className="mc-node-actions">
-                  <button type="button" className="mc-mini-btn nodrag" onClick={resetPrompt} disabled={!!busy}>
+                  <button type="button" className="mc-mini-btn nodrag" onClick={resetPrompt} disabled={!!linked || !!busy}>
                     <RotateCcw size={12} /> Mặc định
                   </button>
-                  <button type="button" className="mc-mini-btn nodrag" onClick={savePrompt} disabled={!!busy || !data.prompt.trim()}>
+                  <button type="button" className="mc-mini-btn nodrag" onClick={savePrompt} disabled={!!linked || !!busy || !prompt.trim()}>
                     <Save size={12} /> Lưu làm mặc định
                   </button>
                 </div>

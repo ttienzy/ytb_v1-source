@@ -5,8 +5,9 @@
  * Cổng ra "image" để nối tiếp sang node sau.
  */
 import { memo, useEffect, useMemo, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
-import { Check, Copy, ExternalLink, ImageIcon, RefreshCw } from 'lucide-react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
+import { Check, Copy, ExternalLink, RefreshCw } from 'lucide-react'
 import {
   JOB_SPECS,
   MUSE_HANDLE,
@@ -42,10 +43,10 @@ function MuseOutputNodeImpl({ id, data: raw, selected }: NodeProps<OutputNode>) 
 
   return (
     <div className={`mc-node mc-node-output ${selected ? 'selected' : ''}`}>
-      <Handle type="target" position={Position.Left} id={MUSE_HANDLE.imageIn} className="mc-handle mc-handle-prompt" title="Từ node chạy Muse" />
+      <MuseMediaPort type="target" position={Position.Left} id={MUSE_HANDLE.imageIn} kind="Image" label="Ảnh kết quả" title="Từ node chạy Muse" />
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-output"><ImageIcon size={14} /></span>
+        <MuseMediaIcon kind="Image" />
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small title={fromText}>{parentId ? fromText : `${fromText} (đã gỡ dây nguồn)`}</small>
@@ -100,7 +101,7 @@ function MuseOutputNodeImpl({ id, data: raw, selected }: NodeProps<OutputNode>) 
         )}
       </div>
 
-      <Handle type="source" position={Position.Right} id={MUSE_HANDLE.imageOut} className="mc-handle mc-handle-output" title="Ảnh này — nối sang node sau" />
+      <MuseMediaPort type="source" position={Position.Right} id={MUSE_HANDLE.imageOut} kind="Image" label="Ảnh tham chiếu" title="Ảnh này — nối sang node sau" />
     </div>
   )
 }

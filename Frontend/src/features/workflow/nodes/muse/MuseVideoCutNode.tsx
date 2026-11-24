@@ -8,7 +8,8 @@
  * ← → lùi / tiến 1 khung (Shift: 1 giây) · Home / End · Ctrl+Z hoàn tác · Ctrl+Shift+Z / Ctrl+Y làm lại.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   Check,
@@ -412,18 +413,18 @@ function MuseVideoCutNodeImpl({ id, data: raw, selected }: NodeProps<CutNode>) {
 
   return (
     <div className={`mc-node mc-node-vcut ${resultFresh ? 'complete' : ''} ${selected ? 'selected' : ''}`}>
-      <Handle
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.refVideoIn}
-        className="mc-handle mc-handle-videoref"
+        kind="Video"
+        label="Video nguồn"
         style={{ top: 82 }}
         title="Video: nối từ node “Video tham chiếu” hoặc một node “Cắt video” khác"
       />
-      <span className="mc-port-label" style={{ top: 72 }}>Video</span>
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-videoref"><Scissors size={14} /></span>
+        <MuseMediaIcon kind="Video" />
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small>cắt nhiều khúc · xem trước · lưu video mới</small>
@@ -645,11 +646,12 @@ function MuseVideoCutNodeImpl({ id, data: raw, selected }: NodeProps<CutNode>) {
         )}
       </div>
 
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.refVideoOut}
-        className="mc-handle mc-handle-videoref"
+        kind="Video"
+        label="Video đã cắt"
         title={resultFresh
           ? 'Video hoàn chỉnh: nối vào cổng “Clip” của node Ghép video, cổng “Video” của node Ingredients hoặc một node Cắt video khác'
           : 'Chưa có video hoàn chỉnh — bấm “Cắt & lưu video”. Nối được trước vào Ghép video / Ingredients / Cắt video khác'}

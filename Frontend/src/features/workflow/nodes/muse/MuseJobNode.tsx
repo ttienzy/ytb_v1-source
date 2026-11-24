@@ -6,7 +6,6 @@
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Handle,
   Position,
   useNodeConnections,
   useNodesData,
@@ -15,6 +14,7 @@ import {
   type Node,
   type NodeProps,
 } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   ArrowRight,
@@ -24,9 +24,9 @@ import {
   ImageOff,
   LayoutPanelLeft,
   Link2Off,
-  MapPin,
   Loader2,
   LocateFixed,
+  MapPin,
   Play,
   RotateCcw,
   Save,
@@ -47,6 +47,7 @@ import {
   extractRowState,
   findOutputNodeFor,
   inputsToRun,
+  linkedPromptKey,
   markInterrupted,
   normalizeJobData,
   planOutputNodes,
@@ -62,6 +63,8 @@ import { fetchMusePrompt, generateGptImage, generateMuseImage, museMediaUrl, sav
 import { notifyImageLibraryChanged } from '../../services/imageLibraryApi'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { MusePromptPort, useLinkedPrompt } from './MusePromptPort'
+import { museInputPortTops } from '../../services/museCanvasNodes.ts'
 import { useMuseRuns } from './useMuseRuns'
 import { runKey } from '../../services/museRunRegistry.ts'
 
@@ -85,7 +88,12 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const rowLabel = INPUT_SPECS[spec.inputType].rowLabel
   const isCharacter = type === MUSE_NODE.characterSheet
   const isScenePlace = type === MUSE_NODE.scenePlace
+  const RunIcon = isCharacter ? LayoutPanelLeft : isScenePlace ? MapPin : Scissors
   const data = normalizeJobData(raw, spec.type)
+  const linked = useLinkedPrompt()
+  const ap = activePrompt(spec, data)
+  const prompt = linked?.text ?? ap.text
+  const promptKey = linkedPromptKey(linked?.text)
   const [busy, setBusy] = useState<'' | 'reset' | 'save'>('')
   const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showPrompt, setShowPrompt] = useState(true)
@@ -186,25 +194,25 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const runOne = useCallback(
     async (input: ExtractInput) => {
       const key = flightKey(id, input.sourceNodeId)
-      if (runs.isRunning(key) || !input.image) return
+      if (runs.isRunning(key) || !input.image || !prompt.trim()) return
       const provider: MuseImageProvider = data.provider
-      const ap = activePrompt(spec, data)
       const extraPrompt = ap.useSecondary ? data.secondaryPrompt : ''
       let body: Record<string, unknown>
       try {
         body = provider === 'gpt'
-          ? buildGptJobRequest(spec, config, ap.text, input, extraPrompt)
-          : buildJobRequest(spec, config, ap.text, input, extraPrompt)
+          ? buildGptJobRequest(spec, config, prompt, input, extraPrompt)
+          : buildJobRequest(spec, config, prompt, input, extraPrompt)
       } catch (e: any) {
         setResult({ sourceNodeId: input.sourceNodeId, inputPath: rowFingerprint(input), status: 'error', error: e?.message, provider, updatedAt: Date.now() })
         return
       }
       const inputPath = rowFingerprint(input)
-      setResult({ sourceNodeId: input.sourceNodeId, inputPath, status: 'running', provider, updatedAt: Date.now() })
+      setResult({ sourceNodeId: input.sourceNodeId, inputPath, promptKey, status: 'running', provider, updatedAt: Date.now() })
       const job: Promise<MuseExtractResult> = (provider === 'gpt' ? generateGptImage(body) : generateMuseImage(body))
         .then((r) => ({
           sourceNodeId: input.sourceNodeId,
           inputPath,
+          promptKey,
           status: 'done' as const,
           output: { id: `${Date.now().toString(36)}`, name: basename(r.path), path: r.path, previewUrl: r.previewUrl, size: r.size },
           sessionId: r.sessionId,
@@ -223,7 +231,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
       const done = await runs.start(key, job)
       if (done.status === 'done') notifyImageLibraryChanged()
     },
-    [config, data.prompt, data.gptPrompt, data.provider, data.secondaryPrompt, id, runs, setResult, spec],
+    [ap.useSecondary, config, data.provider, data.secondaryPrompt, id, prompt, promptKey, runs, setResult, spec],
   )
 
   /** Chạy nhiều ảnh vào, tối đa `maxParallel` lượt cùng lúc (mỗi tài khoản Muse/ChatGPT chạy 1 lượt một lúc). */
@@ -250,12 +258,12 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         data: self.data as Record<string, unknown>,
         width: self.measured?.width ?? self.width,
       }
-      const plan = planOutputNodes(job, inputs, data.results, getNodes() as unknown as MuseNodeLike[], only)
+      const plan = planOutputNodes(job, inputs, data.results, getNodes() as unknown as MuseNodeLike[], only, promptKey)
       if (!plan.nodes.length) return
       addNodes(plan.nodes as Node[])
       addEdges(plan.edges as Edge[])
     },
-    [addEdges, addNodes, data.results, getNode, getNodes, id, inputs, type],
+    [addEdges, addNodes, data.results, getNode, getNodes, id, inputs, promptKey, type],
   )
 
   const focusNode = useCallback(
@@ -312,11 +320,10 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
     }
   }
 
-  const toRun = inputsToRun(inputs, data.results)
-  const outputs = extractOutputs(inputs, data.results)
-  const notSpawned = inputs.filter((i) => extractRowState(i, data.results) === 'done' && !outputNodeOf(i.sourceNodeId))
-  const ap = activePrompt(spec, data)
-  const promptEmpty = !ap.text.trim()
+  const toRun = inputsToRun(inputs, data.results, promptKey)
+  const outputs = extractOutputs(inputs, data.results, promptKey)
+  const notSpawned = inputs.filter((i) => extractRowState(i, data.results, promptKey) === 'done' && !outputNodeOf(i.sourceNodeId))
+  const promptEmpty = !prompt.trim()
   const isGpt = data.provider === 'gpt'
   // Prompt GPT riêng gọi tên "Image 2" = trang phục: dòng không có trang phục thì thiếu ảnh 2
   const gptNeedsOutfit = ap.gptOwn && !!sec && inputs.length > 0 && secondary.length === 0
@@ -325,40 +332,41 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
   const blocked = runBlockers.length > 0 || promptEmpty
   const unitCost = isGpt ? 'lượt tạo ảnh ChatGPT' : 'lượt Muse'
   const hasResults = Object.keys(data.results).length > 0
-  const Icon = isCharacter ? LayoutPanelLeft : isScenePlace ? MapPin : Scissors
   const primarySources = [
     ...[spec.inputType, ...(spec.additionalInputTypes ?? [])].map((source) => INPUT_SPECS[source].title),
     ...(spec.primaryFromJobTypes ?? []).map((source) => `“Ảnh kết quả” của ${JOB_SPECS[source].title}`),
   ]
   const primaryTitle = `Nối từ ${primarySources.join(' hoặc ')} (nhiều dây được)`
+  const portTops = museInputPortTops(sec ? ['Text', 'Image', 'Image'] : ['Text', 'Image'])
 
   return (
     <div className={`mc-node mc-node-extract ${isCharacter || isScenePlace ? 'mc-node-charsheet' : ''} ${selected ? 'selected' : ''}`}>
-      <Handle
+      <MusePromptPort linked={linked} top={portTops[0]} />
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.imagesIn}
-        className={`mc-handle ${isCharacter ? 'mc-handle-character' : 'mc-handle-image'}`}
-        style={sec ? { top: 40 } : undefined}
+        kind="Image"
+        label={isCharacter || isScenePlace ? 'Nhân vật' : 'Trang phục hoặc nhân vật'}
+        style={{ top: portTops[1] }}
         title={primaryTitle}
       />
       {sec && (
         <>
-          <span className="mc-port-label" style={{ top: 30 }}>{INPUT_SPECS[spec.inputType].rowLabel}</span>
-          <Handle
+          <MuseMediaPort
             type="target"
             position={Position.Left}
             id={sec.handle}
-            className={`mc-handle ${sec.fromNodeType === MUSE_NODE.scene ? 'mc-handle-scene' : 'mc-handle-prompt'}`}
-            style={{ top: 120 }}
+            kind="Image"
+            label={sec.rowLabel}
+            style={{ top: portTops[2] }}
             title={sec.handleTitle}
           />
-          <span className="mc-port-label mc-port-secondary" style={{ top: 110 }}>{sec.rowLabel}</span>
         </>
       )}
 
       <div className="mc-node-head">
-        <span className={`mc-node-icon ${isCharacter ? 'mc-icon-charsheet' : isScenePlace ? 'mc-icon-scene' : 'mc-icon-prompt'}`}><Icon size={14} /></span>
+        <MuseMediaIcon kind="Image" />
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small>{spec.subtitle}</small>
@@ -416,7 +424,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         ) : (
           <div className="mc-xrows">
             {inputs.map((input) => {
-              const state = extractRowState(input, data.results)
+              const state = extractRowState(input, data.results, promptKey)
               const r = data.results[input.sourceNodeId]
               const canRun = !blocked && state !== 'no_image' && state !== 'running'
               // dòng thiếu ảnh phụ bắt buộc (chưa nối, vd. bối cảnh) — khác với node nguồn chưa có ảnh
@@ -466,7 +474,7 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
                                 ? `Chưa nối ${sec?.rowLabel.toLowerCase() ?? 'ảnh phụ'}`
                                 : 'Node nguồn chưa có ảnh'
                               : state === 'stale'
-                                ? 'Ảnh vào đã đổi — cần chạy lại'
+                                ? 'Prompt hoặc ảnh vào đã đổi — cần chạy lại'
                                 : 'Chưa chạy'}
                     </span>
                   </div>
@@ -507,20 +515,21 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
             </span>
           )}
           <span className={`mc-node-badge ${ap.source === 'custom' ? 'custom' : ''}`}>
-            {ap.source === 'custom' ? 'Đã sửa' : 'Mặc định'}
+            {linked ? 'Từ Ô prompt' : ap.source === 'custom' ? 'Đã sửa' : 'Mặc định'}
           </span>
         </button>
         {showPrompt && (
           <>
             <textarea
               className="mc-prompt nodrag nowheel"
-              value={ap.text}
+              value={prompt}
+              readOnly={!!linked}
               rows={10}
               spellCheck={false}
               onChange={(e) => updateNodeData(id, { [ap.field]: e.target.value, [ap.sourceField]: 'custom' })}
               placeholder={ap.gptOwn ? 'Đang nạp prompt GPT mặc định… (hoặc gõ prompt cho ChatGPT)' : `Prompt gửi kèm từng ảnh cho ${PROVIDER_LABEL[data.provider]}…`}
             />
-            {ap.gptOwn && (
+            {ap.gptOwn && !linked && (
               <div className={gptNeedsOutfit ? 'mc-node-error' : 'mc-node-meta'}>
                 {gptNeedsOutfit
                   ? 'Prompt GPT dùng ảnh 1 = nhân vật, ảnh 2 = trang phục — hãy nối trang phục vào cổng “Trang phục”.'
@@ -528,13 +537,17 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
               </div>
             )}
             <div className="mc-node-actions">
-              <span className="mc-node-meta">{ap.text.length.toLocaleString('vi-VN')} ký tự</span>
-              <button type="button" className="mc-mini-btn nodrag" onClick={() => resetToDefault()} disabled={!!busy} title="Thay nội dung bằng prompt mặc định">
-                {busy === 'reset' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Mặc định
-              </button>
-              <button type="button" className="mc-mini-btn nodrag" onClick={() => saveAsDefault()} disabled={!!busy || promptEmpty} title="Dùng nội dung này làm prompt mặc định cho node mới">
-                {busy === 'save' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Lưu làm mặc định
-              </button>
+              <span className="mc-node-meta">{prompt.length.toLocaleString('vi-VN')} ký tự</span>
+              {!linked && (
+                <>
+                  <button type="button" className="mc-mini-btn nodrag" onClick={() => resetToDefault()} disabled={!!busy} title="Thay nội dung bằng prompt mặc định">
+                    {busy === 'reset' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Mặc định
+                  </button>
+                  <button type="button" className="mc-mini-btn nodrag" onClick={() => saveAsDefault()} disabled={!!busy || promptEmpty} title="Dùng nội dung này làm prompt mặc định cho node mới">
+                    {busy === 'save' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Lưu làm mặc định
+                  </button>
+                </>
+              )}
             </div>
           </>
         )}
@@ -581,9 +594,9 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
           className={`mc-run-btn nodrag ${isCharacter ? 'mc-run-character' : isScenePlace ? 'mc-run-scene' : ''}`}
           disabled={blocked || toRun.length === 0}
           onClick={() => runMany(toRun)}
-          title="Chỉ chạy dòng chưa chạy hoặc đã đổi ảnh. Dòng lỗi bấm “Chạy lại” riêng."
+          title="Chạy dòng mới hoặc dòng có prompt nối dây hay ảnh đã đổi. Dòng lỗi bấm “Chạy lại” riêng."
         >
-          {anyRunning ? <Loader2 size={13} className="animate-spin" /> : <Icon size={13} />}
+          {anyRunning ? <Loader2 size={13} className="animate-spin" /> : <RunIcon size={13} />}
           {toRun.length > 0
             ? `${spec.runVerb} ${toRun.length} ${spec.unitNoun}`
             : anyRunning
@@ -596,11 +609,12 @@ function MuseJobNodeImpl({ id, type, data: raw, selected }: NodeProps<JobNode>) 
         </p>
       </div>
 
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.jobOut}
-        className="mc-handle mc-handle-prompt"
+        kind="Image"
+        label="Ảnh kết quả"
         title={`Ảnh kết quả (${outputs.length}) — nối tới node “Ảnh kết quả”`}
       />
     </div>

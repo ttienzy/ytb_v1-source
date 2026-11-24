@@ -1160,7 +1160,7 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
           <div className="mc-addmenu" role="menu">
             <div className="mc-addmenu-group">Prompt</div>
             <button type="button" role="menuitem" onClick={() => addNode('promptBox', MUSE_NODE.promptBox)}>
-              <NotebookPen size={13} /> Ô prompt <small title="nhập / giữ prompt (độc lập)">nhập / giữ prompt (độc lập)</small>
+              <NotebookPen size={13} /> Ô prompt <small>soạn và dùng chung prompt</small>
             </button>
             <div className="mc-addmenu-group">Trang phục</div>
             <button type="button" role="menuitem" onClick={() => addNode('input', MUSE_NODE.outfit)}>

@@ -6,7 +6,8 @@
  * số clip, số giây, mốc thời gian; mỗi clip có prompt video để chép sang Flow.
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { MuseMediaIcon, MuseMediaPort } from './MuseMediaPort'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -37,6 +38,7 @@ import {
   SCRIPT_REF_KINDS,
   buildClipScriptContext,
   buildClipScriptRequest,
+  linkedPromptKey,
   clipCredits720p,
   clipsCredits,
   fixedClipSeconds,
@@ -59,6 +61,8 @@ import {
 import { fetchMusePrompt, generateGptClipScript, museMediaUrl, saveMusePromptDefault } from '../../services/museCanvasApi.ts'
 import { useMuseCanvas } from '../../components/museCanvasContext'
 import { NodeDeleteButton } from './NodeDeleteButton'
+import { MusePromptPort, useLinkedPrompt } from './MusePromptPort'
+import { museInputPortTops } from '../../services/museCanvasNodes.ts'
 import { useMuseRuns } from './useMuseRuns'
 import { runKey } from '../../services/museRunRegistry.ts'
 
@@ -79,6 +83,10 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
   const { updateNodeData, getNode, getNodes, addNodes, addEdges, setCenter } = useReactFlow()
   const { config } = useMuseCanvas()
   const data = normalizeClipScriptData(raw)
+  const linked = useLinkedPrompt()
+  const portTops = museInputPortTops(['Text', 'Image'])
+  const prompt = linked?.text ?? data.prompt
+  const promptKey = linkedPromptKey(linked?.text)
   const [showPrompt, setShowPrompt] = useState(false)
   const [showContext, setShowContext] = useState(false)
   const [showRefs, setShowRefs] = useState(true)
@@ -107,7 +115,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
   const { clips: refs, scenes } = useMemo(() => splitClipRefs(allRefs), [allRefs])
 
   const result = data.result
-  const state = clipScriptState(allRefs, result)
+  const state = clipScriptState(allRefs, result, promptKey)
   const parsed = useMemo(
     () => (result?.text ? parseClipScript(result.text, clipSentPaths(result.inputPath).length || refs.length) : null),
     [result?.text, result?.inputPath, refs.length],
@@ -210,18 +218,18 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
     const inputPath = clipScriptFingerprint(allRefs)
     let body: Record<string, unknown>
     try {
-      body = buildClipScriptRequest(config, data.prompt, allRefs, data.notes, config.flowSeconds)
+      body = buildClipScriptRequest(config, prompt, allRefs, data.notes, config.flowSeconds)
     } catch (e: any) {
       setResult({ inputPath, status: 'error', error: e?.message, updatedAt: Date.now() })
       return
     }
-    setResult({ inputPath, status: 'running', updatedAt: Date.now() })
+    setResult({ inputPath, promptKey, status: 'running', updatedAt: Date.now() })
     const job: Promise<MuseScriptResult> = generateGptClipScript(body)
-      .then((r) => ({ inputPath, status: 'done' as const, text: r.text, path: r.path, accountLabel: r.accountLabel, updatedAt: Date.now() }))
+      .then((r) => ({ inputPath, promptKey, status: 'done' as const, text: r.text, path: r.path, accountLabel: r.accountLabel, updatedAt: Date.now() }))
       .catch((e: any) => ({ inputPath, status: 'error' as const, error: e?.message || 'ChatGPT lỗi', updatedAt: Date.now() }))
     setOpenClip({})
     await runs.start(flight, job)
-  }, [allRefs, config, data.notes, data.prompt, flight, result, runs, setResult, state])
+  }, [allRefs, config, data.notes, flight, prompt, promptKey, result, runs, setResult, state])
 
   async function resetToDefault() {
     setBusy('reset')
@@ -269,7 +277,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  const promptEmpty = !data.prompt.trim()
+  const promptEmpty = !prompt.trim()
   const canRun = !promptEmpty && ['pending', 'done', 'stale', 'error', 'interrupted'].includes(state)
   const context = useMemo(() => buildClipScriptContext(allRefs, data.notes, config.flowSeconds), [allRefs, data.notes, config.flowSeconds])
   const fixedSec = fixedClipSeconds(config.flowSeconds)
@@ -300,7 +308,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
     state === 'done'
       ? `${parsed?.clips.length ?? 0} clip · ${parsed?.totalSeconds ?? 0}s`
       : state === 'stale'
-        ? 'Kịch bản cũ (ảnh / thứ tự đã đổi)'
+        ? 'Kịch bản cũ (prompt hoặc ảnh đã đổi)'
         : state === 'error' || state === 'interrupted'
           ? 'Lỗi — mở node để xem'
           : running
@@ -309,18 +317,19 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
 
   return (
     <div className={`mc-node mc-node-script mc-node-clipscript ${collapsed ? 'mc-collapsed' : ''} ${selected ? 'selected' : ''}`}>
-      <Handle
+      <MusePromptPort linked={linked} top={portTops[0]} />
+      <MuseMediaPort
         type="target"
         position={Position.Left}
         id={MUSE_HANDLE.refsIn}
-        className="mc-handle mc-handle-output"
-        style={{ top: 40 }}
+        kind="Image"
+        label="Tham chiếu"
+        style={{ top: portTops[1] }}
         title="Tham chiếu: mỗi ảnh nối vào = 1 clip (thường là Ảnh kết quả của Bảng thiết kế nhân vật). Xếp thứ tự trong node."
       />
-      <span className="mc-port-label mc-port-secondary" style={{ top: 30 }}>Tham chiếu</span>
 
       <div className="mc-node-head">
-        <span className="mc-node-icon mc-icon-clipscript"><Clapperboard size={14} /></span>
+        <MuseMediaIcon kind="Text" />
         <div className="mc-node-titles">
           <strong>{data.title}</strong>
           <small>{CLIP_SCRIPT_SPEC.subtitle}</small>
@@ -382,7 +391,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
             <div className="mc-script-list">
               {refs.length === 0 ? (
                 <div className="mc-inputs-empty">
-                  <Link2Off size={12} /> Chưa có ảnh — nối dây từ node “Ảnh kết quả” (bảng thiết kế) vào chấm “Tham chiếu”. Mỗi ảnh là 1 clip; ảnh từ node “Tham chiếu bối cảnh” dùng chung cho mọi clip.
+                  <Link2Off size={12} /> Chưa có ảnh — nối dây từ node “Ảnh kết quả” (bảng thiết kế) vào cổng “Tham chiếu”. Mỗi ảnh là 1 clip; ảnh từ node “Tham chiếu bối cảnh” dùng chung cho mọi clip.
                 </div>
               ) : (
                 refs.map((r, i) => (
@@ -463,15 +472,16 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
           <button type="button" className="mc-xtoggle nodrag" onClick={() => setShowPrompt((v) => !v)}>
             {showPrompt ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Prompt
             <span className={`mc-node-badge ${data.promptSource === 'custom' ? 'custom' : ''}`}>
-              {data.promptSource === 'custom' ? 'Đã sửa' : 'Mặc định'}
+              {linked ? 'Từ Ô prompt' : data.promptSource === 'custom' ? 'Đã sửa' : 'Mặc định'}
             </span>
-            <small className="mc-xtoggle-hint">{data.prompt.length.toLocaleString('vi-VN')} ký tự</small>
+            <small className="mc-xtoggle-hint">{prompt.length.toLocaleString('vi-VN')} ký tự</small>
           </button>
           {showPrompt && (
             <>
               <textarea
                 className="mc-prompt nodrag nowheel"
-                value={data.prompt}
+                value={prompt}
+                readOnly={!!linked}
                 rows={12}
                 spellCheck={false}
                 onChange={(e) => updateNodeData(id, { prompt: e.target.value, promptSource: 'custom' })}
@@ -479,10 +489,10 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
               />
               <div className="mc-node-actions">
                 <span className="mc-node-meta">File gốc: gpt_clip_script_prompt.txt</span>
-                <button type="button" className="mc-mini-btn nodrag" onClick={resetToDefault} disabled={!!busy}>
+                <button type="button" className="mc-mini-btn nodrag" onClick={resetToDefault} disabled={!!linked || !!busy}>
                   {busy === 'reset' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Mặc định
                 </button>
-                <button type="button" className="mc-mini-btn nodrag" onClick={saveAsDefault} disabled={!!busy || promptEmpty}>
+                  <button type="button" className="mc-mini-btn nodrag" onClick={saveAsDefault} disabled={!!linked || !!busy || promptEmpty}>
                   {busy === 'save' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Lưu làm mặc định
                 </button>
               </div>
@@ -518,7 +528,7 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
                     {result.accountLabel ? ` · ${result.accountLabel}` : ''}
                   </>
                 )}
-                {state === 'stale' && <><AlertTriangle size={12} /> Ảnh / thứ tự tham chiếu đã đổi — kịch bản dưới đây là bản cũ</>}
+                {state === 'stale' && <><AlertTriangle size={12} /> Prompt hoặc ảnh tham chiếu đã đổi. Hãy viết lại kịch bản.</>}
                 {(state === 'error' || state === 'interrupted') && <><AlertTriangle size={12} /> {result.error || 'Lỗi'}</>}
                 {result.text && (
                   <span className="mc-script-tools">
@@ -651,11 +661,12 @@ function GptClipScriptNodeImpl({ id, data: raw, selected }: NodeProps<ClipScript
         </div>
       )}
 
-      <Handle
+      <MuseMediaPort
         type="source"
         position={Position.Right}
         id={MUSE_HANDLE.clipOut}
-        className="mc-handle mc-handle-clip"
+        kind="Text"
+        label="Kịch bản từng clip"
         title="Clip — nối tới node “Clip” (hoặc bấm “Ra node” ở từng clip)"
       />
     </div>

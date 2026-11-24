@@ -306,8 +306,6 @@
   justify-content: center;
   flex-shrink: 0;
 }
-.mc-icon-image { background: #fdf2f8; color: #be185d; }
-.mc-icon-prompt { background: #eef2ff; color: #4338ca; }
 .mc-node-titles { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .mc-node-titles strong { font-size: 13px; }
 .mc-node-titles small { font-size: 11px; color: #64748b; }
@@ -514,17 +512,33 @@
 .mc-vingr-move { display: flex; justify-content: center; gap: 4px; }
 .mc-vingr-move .mc-mini-btn { padding: 2px 8px; }
 
-/* ---- Ô prompt (độc lập) ---- */
+/* ---- Ô prompt ---- */
 .mc-node-promptbox { width: 360px; }
-.mc-icon-promptbox { background: #fefce8; color: #a16207; }
-.mc-handle-promptbox { background: #a16207 !important; }
+.mc-prompt-port {
+  position: absolute;
+  z-index: 1;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 20px);
+  padding: 1px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #fff;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mc-prompt-port.is-linked { border-color: #fde68a; background: #fffbeb; color: #854d0e; }
+.mc-prompt-port.is-empty { border-color: #fecaca; color: #991b1b; }
 .mc-promptbox-text { min-height: 180px; resize: vertical; }
 .mc-promptbox-preview { display: block; font-size: 11.5px; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- Video tham chiếu (độc lập) ---- */
 .mc-node-videoref { width: 280px; }
-.mc-icon-videoref { background: #fef2f2; color: #b91c1c; }
-.mc-handle-videoref { background: #b91c1c !important; }
 .mc-videoref-label { display: flex; gap: 6px; }
 .mc-videoref-label .mc-node-input { flex: 1; min-width: 0; }
 .mc-videoref-label .mc-mini-btn { flex: 0 0 30px; justify-content: center; padding: 0; }
@@ -714,9 +728,6 @@
 .mc-node-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .mc-node-ok { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
 
-.mc-handle { width: 12px !important; height: 12px !important; border: 2px solid #ffffff !important; }
-.mc-handle-image { background: #be185d !important; }
-.mc-handle-prompt { background: #4338ca !important; }
 
 /* dây: dày hơn để dễ thấy và dễ bấm chọn / xóa */
 #rf-muse-flow .react-flow__edge-path { stroke: #be185d; stroke-width: 2; }
@@ -885,23 +896,16 @@
 .mc-mini-accent { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
 
 /* ---- họ Nhân vật ---- */
-.mc-icon-character { background: #ecfeff; color: #0e7490; }
-.mc-icon-charsheet { background: #f0fdfa; color: #0f766e; }
-.mc-handle-character { background: #0e7490 !important; }
 .mc-node-charsheet { width: 440px; }
 .mc-run-btn.mc-run-character { background: #0f766e; }
 .mc-run-btn.mc-run-character:disabled { background: #99f6e4; }
 
 /* ---- Tham chiếu bối cảnh (độc lập) ---- */
-.mc-icon-scene { background: #f0fdf4; color: #15803d; }
-.mc-handle-scene { background: #15803d !important; }
 .mc-run-btn.mc-run-scene { background: #15803d; }
 .mc-run-btn.mc-run-scene:disabled { background: #bbf7d0; }
 
 /* ---- node Ảnh kết quả ---- */
 .mc-node-output { width: 260px; }
-.mc-icon-output { background: #f5f3ff; color: #6d28d9; }
-.mc-handle-output { background: #6d28d9 !important; }
 .mc-output-preview {
   display: block;
   border: 1px solid #e2e8f0;
@@ -924,18 +928,6 @@
 .mc-output-newer span { flex: 1; }
 a.mc-mini-btn { text-decoration: none; }
 
-/* ---- cổng phụ (trang phục) của Bảng thiết kế nhân vật ---- */
-.mc-port-label {
-  position: absolute;
-  left: 12px;
-  font-size: 9.5px;
-  font-weight: 700;
-  color: #0e7490;
-  pointer-events: none;
-  line-height: 1;
-}
-.mc-port-secondary { color: #4338ca; }
-.mc-node-charsheet .mc-node-head { padding-left: 64px; }
 .mc-xstack { display: inline-flex; position: relative; flex-shrink: 0; }
 .mc-xstack .mc-xextra {
   width: 30px !important;
@@ -971,26 +963,77 @@ a.mc-mini-btn { text-decoration: none; }
 .mc-node-badge.mc-badge-gpt { background: #ecfdf5; color: #047857; }
 .mc-prompt-sm { min-height: 90px; }
 
-/* ---- nối dây: cổng to hơn, đổi màu khi đang kéo, báo lý do khi không nối được ---- */
-.mc-handle { width: 16px !important; height: 16px !important; }
-.mc-node-charsheet .mc-handle.react-flow__handle-left { width: 18px !important; height: 18px !important; }
-#rf-muse-flow .react-flow__handle.connectingto.valid,
-#rf-muse-flow .react-flow__handle.valid { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.45); }
-#rf-muse-flow .react-flow__handle.connectingto:not(.valid) { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.45); }
-#rf-muse-flow .react-flow__node.selectable:has(.mc-node) { cursor: grab; }
-.mc-port-label {
-  /* nhãn cổng nằm ngoài, ngay bên trái chấm cổng (định vị theo khung node của React Flow) */
-  left: auto !important;
-  right: calc(100% + 14px);
-  white-space: nowrap;
-  padding: 3px 7px;
-  border-radius: 6px;
-  border: 1px solid #a5f3fc;
-  background: #ecfeff;
-  font-size: 10.5px !important;
+/* ---- Ký hiệu loại nội dung và cổng nối ---- */
+.mc-media-kind[data-media="Text"] { --mc-media-color: #6d28d9; --mc-media-bg: #f5f3ff; --mc-media-border: #ddd6fe; }
+.mc-media-kind[data-media="Image"] { --mc-media-color: #0f766e; --mc-media-bg: #f0fdfa; --mc-media-border: #99f6e4; }
+.mc-media-kind[data-media="Video"] { --mc-media-color: #c2413b; --mc-media-bg: #fff1f0; --mc-media-border: #fecaca; }
+.mc-node-icon.mc-media-kind { color: var(--mc-media-color); background: var(--mc-media-bg); }
+.mc-handle.mc-media-port {
+  width: 16px !important;
+  height: 16px !important;
+  border: 2px solid #fff !important;
+  background: var(--mc-media-color) !important;
 }
-.mc-port-secondary { border-color: #c7d2fe; background: #eef2ff; }
-.mc-node-charsheet .mc-node-head { padding-left: 12px; }
+.mc-handle.mc-media-port.target {
+  --mc-port-valid-ring: var(--mc-media-border);
+  display: grid;
+  place-items: center;
+  width: 20px !important;
+  height: 20px !important;
+  border: 1px solid var(--mc-media-border) !important;
+  background: var(--mc-media-bg) !important;
+  color: var(--mc-media-color);
+}
+.mc-media-port-icon { pointer-events: none; }
+/* Icon loại nội dung (Text / Image / Video) trên dây, sát cổng vào */
+.mc-edge-kind {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--mc-media-border);
+  background: var(--mc-media-bg);
+  color: var(--mc-media-color);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+  pointer-events: none;
+}
+.mc-media-port[data-port-state="unavailable"] { opacity: 0.35; }
+.mc-media-port[data-port-state="active"],
+.mc-media-port[data-port-state="compatible"],
+.mc-media-port[data-port-state="idle"]:hover {
+  z-index: 5;
+  box-shadow: 0 0 0 3px var(--mc-media-border);
+}
+.mc-media-port-label {
+  position: absolute;
+  top: 50%;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  white-space: nowrap;
+  padding: 3px 6px;
+  border: 1px solid var(--mc-media-border);
+  border-radius: 5px;
+  background: var(--mc-media-bg);
+  color: var(--mc-media-color);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.mc-media-port[data-port-state="idle"]:hover .mc-media-port-label,
+.mc-media-port[data-port-state="active"] .mc-media-port-label,
+.mc-media-port[data-port-state="compatible"] .mc-media-port-label { display: inline-flex; }
+.mc-media-port.react-flow__handle-left .mc-media-port-label { right: calc(100% + 8px); }
+.mc-media-port.react-flow__handle-right .mc-media-port-label,
+.mc-media-port.react-flow__handle-top .mc-media-port-label { left: calc(100% + 8px); }
+
+#rf-muse-flow .react-flow__handle.connectingto.valid,
+#rf-muse-flow .react-flow__handle.valid { box-shadow: 0 0 0 4px var(--mc-port-valid-ring, rgba(34, 197, 94, 0.45)); }
+#rf-muse-flow .react-flow__node.selectable:has(.mc-node) { cursor: grab; }
 .mc-connect-hint {
   position: absolute;
   left: 50%;
@@ -1009,8 +1052,6 @@ a.mc-mini-btn { text-decoration: none; }
 
 /* ---- node Kịch bản video (Muse trả chữ) ---- */
 .mc-node-script { width: 460px; }
-.mc-node-script .mc-handle.react-flow__handle-left { width: 18px !important; height: 18px !important; }
-.mc-icon-script { background: #fff7ed; color: #c2410c; }
 .mc-run-btn.mc-run-script { background: #c2410c; }
 .mc-run-btn.mc-run-script:disabled { background: #fed7aa; }
 .mc-script-sec { font-size: 10.5px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -1100,7 +1141,6 @@ a.mc-mini-btn { text-decoration: none; }
 
 /* ---- node Kịch bản (bản kịch bản tách riêng) ---- */
 .mc-node-scripttext { width: 440px; }
-.mc-handle-script { background: #c2410c !important; }
 .mc-script-edit {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 11px;
@@ -1148,8 +1188,6 @@ a.mc-mini-btn { text-decoration: none; }
 
 /* ---- node Video kết quả ---- */
 .mc-node-video { width: 340px; }
-.mc-icon-video { background: #eff6ff; color: #1d4ed8; }
-.mc-handle-video { background: #1d4ed8 !important; }
 .mc-video-out { max-height: 520px; }
 
 /* ---- Hoàn thiện video (node Video kết quả) ---- */
@@ -1301,7 +1339,6 @@ a.mc-mini-btn { text-decoration: none; }
 
 /* Node "Kịch bản tạo video" (ChatGPT): mỗi tham chiếu 1 clip */
 .mc-node-clipscript { width: 520px; }
-.mc-icon-clipscript { background: #ecfdf5; color: #047857; }
 .mc-run-btn.mc-run-clipscript { background: #047857; }
 .mc-run-btn.mc-run-clipscript:disabled { background: #a7f3d0; }
 .mc-clip-summary { font-size: 12px; color: #334155; padding: 6px 2px; }
@@ -1352,7 +1389,6 @@ a.mc-mini-btn { text-decoration: none; }
 
 /* Node "Clip" (1 clip tách từ Kịch bản tạo video) */
 .mc-node-clipprompt { width: 440px; }
-.mc-handle-clip { background: #047857 !important; }
 .mc-clipnode-top { display: flex; align-items: center; gap: 12px; }
 .mc-clipnode-top img { width: 132px; height: 74px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; display: block; }
 .mc-clipnode-top .mc-xph { width: 132px; height: 74px; }
