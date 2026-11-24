@@ -66,7 +66,7 @@ try {
   const openSettings = async () => {
     await page.getByText('Dashboard', { exact: true }).first().click()
     await page.getByText('Cài đặt', { exact: true }).first().click()
-    await page.getByText('Gemini & YouTube', { exact: true }).first().click()
+    await page.getByText('Gemini', { exact: true }).first().click()
     await page.getByTestId('gemini-accounts-card').waitFor({ timeout: 15000 })
   }
   await openSettings()

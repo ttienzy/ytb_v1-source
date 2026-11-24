@@ -13,7 +13,6 @@ export const HINTS = {
   'audio.queue': { pageId: 'Recap & Audio', anchor: 'hang-doi', label: 'Kiểu video, bố cục và hàng đợi' },
   'audio.style': { pageId: 'Recap & Audio', anchor: 'am-thanh-hieu-ung', label: 'Âm thanh & hiệu ứng' },
   'recap.raw': { pageId: 'Recap & Audio', anchor: 'raw-transcript', label: 'Raw transcript' },
-  'recap.botwall': { pageId: 'Recap & Audio', anchor: 'youtube-botwall', label: 'YouTube Bot-Wall' },
   'campaign.credit': { pageId: 'Chiến dịch AI', anchor: 'khoi-5-clip', label: 'Credit Flow và trần credit' },
   'campaign.cast': { pageId: 'Chiến dịch AI', anchor: 'khoi-2-nhan-vat-canh', label: 'Cast sheet và các cảnh' },
   'campaign.clip': { pageId: 'Chiến dịch AI', anchor: 'khoi-5-clip', label: 'Tạo clip' },

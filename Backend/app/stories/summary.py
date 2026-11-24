@@ -150,7 +150,7 @@ def _friendly_error(exc: Exception) -> str:
     from app.ai.gemini import recap
 
     if isinstance(exc, recap.RecapConfigError):
-        return "Chưa có tài khoản Gemini. Vào Cài đặt → Gemini & YouTube → “(+) Thêm account Gemini” rồi thử lại."
+        return "Chưa có tài khoản Gemini. Vào Cài đặt → Gemini → “(+) Thêm account Gemini” rồi thử lại."
     if isinstance(exc, recap.GeminiAuthError):
         return f"Không có tài khoản Gemini nào dùng được (hết phiên): {exc}"
     if isinstance(exc, recap.GeminiRateLimitError):

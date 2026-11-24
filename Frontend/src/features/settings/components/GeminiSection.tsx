@@ -3,16 +3,11 @@ import {
   AlertCircle,
   ArrowDownCircle,
   CheckCircle2,
-  Film,
-  Info,
   Loader2,
   RefreshCw,
   RotateCcw,
-  Trash2,
 } from 'lucide-react'
-import { API_URL } from '../../../shared/constants'
 import type { UpdaterStatusEvent } from '../../../vite-env'
-import type { YtState } from '../types'
 import { GeminiAccountsCard } from './GeminiAccountsCard'
 
 export function ChromeBrandIcon({ size = 15 }: { size?: number }) {
@@ -48,11 +43,6 @@ interface GeminiSectionProps {
 }
 
 export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
-  const [yt, setYt] = useState<YtState>({ logged_in: false, cookie_count: 0 })
-  const [ytLoading, setYtLoading] = useState(false)
-  const [ytMsg, setYtMsg] = useState('')
-  const [ytMsgType, setYtMsgType] = useState<'success' | 'error' | 'info'>('info')
-
   // Update check states
   const [appVersion, setAppVersion] = useState(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v1.0.0')
   const [updateChecking, setUpdateChecking] = useState(false)
@@ -73,13 +63,6 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
   }>({ percent: 0, bytesPerSecond: 0, transferred: 0, total: 0 })
   const [updateError, setUpdateError] = useState('')
   const [installing, setInstalling] = useState(false)
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/recap/yt/login`)
-      .then(r => r.json())
-      .then(setYt)
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (window.desktop?.getAppVersion) {
@@ -130,50 +113,6 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       return unsub
     }
   }, [])
-
-  async function loginYt() {
-    setYtLoading(true)
-    setYtMsg('Đang mở Chrome tới YouTube. Vui lòng đăng nhập Google...')
-    setYtMsgType('info')
-    try {
-      const response = await fetch(`${API_URL}/api/recap/yt/login`, {
-        method: 'POST',
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
-      setYt({ logged_in: true, cookie_count: result.cookie_count })
-      setYtMsg('Đã đăng nhập YouTube — cookies đã lưu để yt-dlp fallback khi bị bot-wall.')
-      setYtMsgType('success')
-    } catch (error) {
-      setYtMsg(error instanceof Error ? error.message : 'Đăng nhập thất bại.')
-      setYtMsgType('error')
-    } finally {
-      setYtLoading(false)
-    }
-  }
-
-  async function resetYtCookie() {
-    if (!window.confirm('Xóa cookie YouTube dự phòng đã lưu cho yt-dlp?')) {
-      return
-    }
-    setYtLoading(true)
-    setYtMsg('')
-    try {
-      const response = await fetch(`${API_URL}/api/recap/yt/login`, {
-        method: 'DELETE',
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Xóa cookie YouTube thất bại.')
-      setYt({ logged_in: false, cookie_count: 0, saved_at: null })
-      setYtMsg('Đã xóa cookie YouTube dự phòng. yt-dlp sẽ tiếp tục chạy không cookie.')
-      setYtMsgType('success')
-    } catch (error) {
-      setYtMsg(error instanceof Error ? error.message : 'Xóa cookie YouTube thất bại.')
-      setYtMsgType('error')
-    } finally {
-      setYtLoading(false)
-    }
-  }
 
   async function checkUpdates() {
     setUpdateChecking(true)
@@ -239,90 +178,7 @@ export function GeminiSection({ onCookieStatusChange }: GeminiSectionProps) {
       {/* ── CARD 1: TÀI KHOẢN GEMINI (nhiều account như ChatGPT) ── */}
       <GeminiAccountsCard onStatusChange={onCookieStatusChange} />
 
-      {/* ── CARD 2: YOUTUBE RECAP COOKIE FALLBACK ── */}
-      <div className="gemini-card">
-        <div className="gemini-card-header">
-          <div className="gemini-card-title-group">
-            <div className="gemini-badge-icon youtube">
-              <Film size={16} />
-            </div>
-            <div>
-              <h3 className="gemini-title">YouTube (Tải video Recap dự phòng)</h3>
-              <p className="gemini-subtitle">
-                Cookie tài khoản YouTube phụ để yt-dlp tự động fallback khi IP bị YouTube yêu cầu xác minh ("Sign in to confirm").
-              </p>
-            </div>
-          </div>
-
-          <div className="gemini-header-status">
-            {yt.logged_in ? (
-              <span className="gemini-status-pill connected">
-                <span className="status-dot-pulse" />
-                <CheckCircle2 size={13} />
-                <span>
-                  Đã có cookie {yt.cookie_count ? `(${yt.cookie_count})` : ''}
-                </span>
-              </span>
-            ) : (
-              <span className="gemini-status-pill disconnected">
-                <span className="status-dot-idle" />
-                <span>Chưa có cookie</span>
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="gemini-card-body">
-          <div className="gemini-action-bar">
-            <button
-              type="button"
-              className="btn-gemini-chrome"
-              onClick={loginYt}
-              disabled={ytLoading}
-            >
-              {ytLoading ? (
-                <Loader2 size={14} className="spin-icon" />
-              ) : (
-                <ChromeBrandIcon size={15} />
-              )}
-              <span>
-                {ytLoading ? 'Đang chờ đăng nhập...' : 'Đăng nhập YouTube (Chrome)'}
-              </span>
-            </button>
-
-            {yt.logged_in && (
-              <button
-                type="button"
-                className="btn-gemini-danger"
-                onClick={resetYtCookie}
-                disabled={ytLoading}
-              >
-                <Trash2 size={14} />
-                <span>Reset cookie</span>
-              </button>
-            )}
-
-            {ytMsg && (
-              <div className={`gemini-inline-message ${ytMsgType}`}>
-                {ytMsgType === 'success' && <CheckCircle2 size={14} />}
-                {ytMsgType === 'error' && <AlertCircle size={14} />}
-                {ytMsgType === 'info' && <Info size={14} />}
-                <span>{ytMsg}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="gemini-guide-box">
-            <Info size={15} className="guide-icon" />
-            <div className="guide-content">
-              Mặc định quá trình tải <strong>không dùng cookies</strong> để đạt chất lượng 1080p. Chỉ khi bot bị chặn mới tự động fallback sang cookies.{' '}
-              <em>Lưu ý: Nên dùng tài khoản Google khác với Gemini và không bị thử nghiệm SABR để đảm bảo giữ nguyên độ phân giải 1080p.</em>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── CARD 3: CHECK FOR UPDATES ── */}
+      {/* ── CARD 2: CHECK FOR UPDATES ── */}
       <div className="gemini-card">
         <div className="gemini-card-header">
           <div className="gemini-card-title-group">

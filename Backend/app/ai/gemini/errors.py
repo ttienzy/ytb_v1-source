@@ -9,7 +9,7 @@ class RecapConfigError(RuntimeError):
 
 
 class GeminiNotLoggedInError(RecapConfigError):
-    """Chưa có tài khoản Gemini nào: người dùng phải thêm một tài khoản (Cài đặt → Gemini & YouTube → “(+) Thêm account
+    """Chưa có tài khoản Gemini nào: người dùng phải thêm một tài khoản (Cài đặt → Gemini → “(+) Thêm account
     Gemini”). Là lỗi đăng nhập như ``GeminiAuthError`` (giao diện gợi ý làm mới), khác với lỗi mạng/Google."""
 
 

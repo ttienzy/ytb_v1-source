@@ -29,7 +29,6 @@ from app.recap.schemas import (
     JobPublishFacebookRequest,
     JobPublishYouTubeRequest,
 )
-from app.recap.ytdlp import login_youtube, reset_youtube_cookies, yt_login_status
 
 router = APIRouter(prefix="/api/recap", tags=["Recap"])
 
@@ -184,8 +183,7 @@ async def run_pipeline(
     """1-click: [fetch transcript] → generate → gather(cut, voice) → merge → [polish BGM].
 
     ``raw_file`` (file) hoặc ``raw_text`` (text dán) tùy chọn — để trống cả hai → backend tự
-    fetch transcript từ YouTube. Có ``raw_text`` ưu tiên cho UI dán transcript thủ công (dành
-    video bị attestation-wall không auto-fetch được). Backend tự chuẩn hoá JSON→text sạch.
+    lấy phụ đề từ YouTube qua HTTP. Transcript do người dùng cung cấp được giữ nguyên.
     ``bgm_ids`` = JSON string mảng track_id. Để trống → bỏ qua polish (output = final_recap.mp4).
     Trả 202 {job_id}.
     """
@@ -286,15 +284,16 @@ async def polish_job(req: PolishRequest, job_id: str, db: Session = Depends(get_
 
 class ResumeRequest(BaseModel):
     voice_id: str | None = None  # chỉ cần khi job không còn nhớ giọng (vd. restart server)
+    raw_text: str | None = None  # bổ sung cho job chưa có transcript
 
 
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)
 async def resume_job(job_id: str, req: ResumeRequest | None = None) -> JobOut:
     """Tiếp tục/Thử lại pipeline từ bước bị lỗi (Recap, Cut, Voice, Merge hoặc Polish).
 
-    Chỉ chạy lại phase chưa xong. 404 không có job, 409 job đang chạy, 400 thiếu voice_id.
+    Chỉ chạy lại phase chưa xong. Truyền ``raw_text`` để bổ sung cho job chưa có transcript.
     """
-    job = await service.resume_pipeline(job_id, req.voice_id if req else None)
+    job = await service.resume_pipeline(job_id, req.voice_id if req else None, raw_text=req.raw_text if req else None)
     return _to_out(job)
 
 
@@ -381,26 +380,6 @@ def publish_youtube_endpoint(job_id: str, payload: JobPublishYouTubeRequest):
     return service.publish_job_to_youtube(job_id, payload)
 
 
-
-
-# ── YouTube login (fallback cookies khi bị IP bot-wall) ───────────────────────
-
-@router.get("/yt/login")
-def yt_login_status_endpoint() -> dict:
-    """Trạng thái login YouTube — có cookies file (cho yt-dlp fallback) không."""
-    return yt_login_status()
-
-
-@router.post("/yt/login")
-def yt_login_endpoint() -> dict:
-    """Mở Chrome tới youtube.com để user login Google → xuất cookies cho yt-dlp."""
-    return login_youtube()
-
-
-@router.delete("/yt/login")
-def yt_reset_login_endpoint() -> dict:
-    """Xóa cookie YouTube đang dùng làm fallback cho yt-dlp."""
-    return reset_youtube_cookies()
 
 
 # ── Batch Queue ───────────────────────────────────────────────────────────────

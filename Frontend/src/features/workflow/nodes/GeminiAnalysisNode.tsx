@@ -253,7 +253,7 @@ export function GeminiAnalysisNode({ data, selected }: GeminiAnalysisNodeProps) 
                     gap: 4,
                     cursor: 'pointer',
                   }}
-                  title="Làm mới ngầm cookie các tài khoản Gemini (Cài đặt → Gemini & YouTube) rồi chạy lại"
+                  title="Làm mới ngầm cookie các tài khoản Gemini (Cài đặt → Gemini) rồi chạy lại"
                 >
                   <Key size={10} color="#0284c7" />
                   Làm mới tài khoản Gemini

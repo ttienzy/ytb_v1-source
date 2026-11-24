@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
-  AlertTriangle,
   Clock3,
   ExternalLink,
   Headphones,
-  KeyRound,
   Layers,
   Loader2,
   Music,
   Play,
   RotateCcw,
-  Settings,
   Sparkles,
   Trash2,
   Upload,
@@ -112,58 +109,33 @@ export function StudioPage({
     }
   }, [initialUrls])
 
-  // YouTube Bot-Wall Login State
-  const [ytLoggingIn, setYtLoggingIn] = useState(false)
-  const [ytLoginMsg, setYtLoginMsg] = useState('')
   const [resumingJob, setResumingJob] = useState(false)
-
-  function isYouTubeBotWallError(errorStr?: string): boolean {
-    if (!errorStr) return false
-    const low = errorStr.toLowerCase()
-    return (
-      low.includes('sign in to confirm') ||
-      low.includes('not a bot') ||
-      low.includes('exporting-youtube-cookies') ||
-      low.includes('--cookies') ||
-      low.includes('cookies-from-browser') ||
-      low.includes('bot-wall')
-    )
-  }
-
-  async function handleLoginYouTube() {
-    setYtLoggingIn(true)
-    setYtLoginMsg('Đang mở Chrome để bạn đăng nhập YouTube... Vui lòng đăng nhập trên cửa sổ Chrome vừa mở.')
-    try {
-      const response = await fetch(`${API_URL}/api/recap/yt/login`, {
-        method: 'POST',
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.detail || 'Đăng nhập thất bại')
-      setYtLoginMsg('Đã đăng nhập và lưu Cookie YouTube thành công! Đang tự động tiếp tục tiến trình...')
-      if (job?.job_id) {
-        setTimeout(() => handleResumeJob(), 1200)
-      }
-    } catch (error: any) {
-      setYtLoginMsg(error instanceof Error ? error.message : 'Đăng nhập thất bại.')
-    } finally {
-      setYtLoggingIn(false)
-    }
-  }
+  const [recoveryTranscript, setRecoveryTranscript] = useState('')
+  const [recoveryFile, setRecoveryFile] = useState<File | null>(null)
+  const transcriptFailed = job?.overall === 'error' && job.error?.startsWith('transcript:')
 
   async function handleResumeJob() {
-    if (!job?.job_id) return
+    if (!job?.job_id || resumingJob) return
     setResumingJob(true)
     try {
+      const raw = transcriptFailed
+        ? recoveryFile ? await recoveryFile.text() : recoveryTranscript
+        : ''
+      if (recoveryFile && transcriptFailed && !raw.trim()) {
+        throw new Error('File transcript đang trống.')
+      }
       // Gửi giọng đang chọn làm dự phòng (job cũ không lưu giọng); backend ưu tiên giọng đã lưu của job.
       const response = await fetch(`${API_URL}/api/recap/jobs/${job.job_id}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id: voiceId || null }),
+        body: JSON.stringify({ voice_id: voiceId || null, raw_text: raw.trim() ? raw : undefined }),
       })
       if (!response.ok) {
         const err = await response.json()
         throw new Error(err.detail || 'Lỗi khi tiếp tục tiến trình')
       }
+      setRecoveryTranscript('')
+      setRecoveryFile(null)
       if (pollRef.current) clearInterval(pollRef.current)
       pollRef.current = setInterval(() => pollJob(job.job_id), 1500)
       pollJob(job.job_id)
@@ -330,6 +302,8 @@ export function StudioPage({
     setSubmitError('')
     setRawText('')
     setRawFile(null)
+    setRecoveryTranscript('')
+    setRecoveryFile(null)
     setYoutubeUrl('')
     // Giữ nguyên cấu hình Giọng đọc (voiceId) và Nhạc nền (bgmEnabled, bgmIds, bgmVolume) đã chọn
   }
@@ -800,108 +774,69 @@ export function StudioPage({
             </div>
           )}
 
-          {/* Error detail */}
           {job.overall === 'error' && job.error && (
-            isYouTubeBotWallError(job.error) ? (
-              <div
-                style={{
-                  marginTop: 16,
-                  padding: 16,
-                  background: '#fff1f2',
-                  border: '1.5px solid #fecdd3',
-                  borderRadius: 12,
-                  color: '#9f1239',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14 }}>
-                  <AlertTriangle size={18} color="#e11d48" />
-                  <span>YouTube yêu cầu xác thực tài khoản (Bot-Wall)</span>
-                  <HelpHint hint="recap.botwall" />
-                </div>
-                <div style={{ marginTop: 6, fontSize: 12.5, color: '#475569', lineHeight: 1.5 }}>
-                  YouTube phát hiện lưu lượng tải video tự động và chặn bằng yêu cầu <em>"Sign in to confirm you're not a bot"</em>. Bạn cần đăng nhập tài khoản YouTube để cập nhật Cookie.
-                </div>
-
-                {ytLoginMsg && (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      padding: '8px 12px',
-                      borderRadius: 8,
-                      background: ytLoginMsg.startsWith('Đã đăng nhập') ? '#f0fdf4' : '#fff',
-                      border: '1px solid',
-                      borderColor: ytLoginMsg.startsWith('Đã đăng nhập') ? '#bbf7d0' : '#fecdd3',
-                      fontSize: 12,
-                      color: ytLoginMsg.startsWith('Đã đăng nhập') ? '#166534' : '#be123c',
-                    }}
-                  >
-                    {ytLoginMsg}
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn-p"
-                    onClick={handleLoginYouTube}
-                    disabled={ytLoggingIn}
-                    style={{
-                      background: '#e11d48',
-                      height: 36,
-                      padding: '0 14px',
-                      fontSize: 12.5,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                    }}
-                  >
-                    {ytLoggingIn ? <Loader2 size={14} className="spin" /> : <KeyRound size={14} />}
-                    {ytLoggingIn ? 'Đang mở Chrome…' : 'Đăng nhập YouTube qua Chrome'}
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn-cancel"
-                    onClick={() => setActivePage('Cài đặt')}
-                    style={{ height: 36, padding: '0 12px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                  >
-                    <Settings size={14} /> Chuyển đến trang Cài đặt
-                  </button>
-
+            <>
+              <div className="err-block">
+                <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                <span>{transcriptFailed ? job.error.replace(/^transcript:\s*/, '') : job.error}</span>
+              </div>
+              {!jobLost && (
+                <>
+                  {transcriptFailed && (
+                    <div className="recap-transcript-recovery">
+                      <div className="recap-transcript-recovery-label">
+                        <label htmlFor="recap-recovery-transcript">Bổ sung transcript</label>
+                        <HelpHint hint="recap.raw" />
+                      </div>
+                      <textarea
+                        id="recap-recovery-transcript"
+                        className="raw-input"
+                        rows={3}
+                        value={recoveryTranscript}
+                        placeholder="Dán transcript, mỗi dòng dạng [MM:SS] nội dung"
+                        disabled={resumingJob || Boolean(recoveryFile)}
+                        onChange={e => setRecoveryTranscript(e.target.value)}
+                      />
+                      <div className="recap-transcript-recovery-file">
+                        <label className="btn-cancel">
+                          <Upload size={14} /> {recoveryFile ? recoveryFile.name : 'Chọn file .txt hoặc .json'}
+                          <input
+                            type="file"
+                            accept=".txt,.json,text/plain,application/json"
+                            aria-label="Chọn file transcript bổ sung"
+                            disabled={resumingJob}
+                            onChange={e => {
+                              setRecoveryFile(e.target.files?.[0] ?? null)
+                              e.target.value = ''
+                            }}
+                          />
+                        </label>
+                        {recoveryFile && (
+                          <button
+                            type="button"
+                            className="btn-cancel"
+                            disabled={resumingJob}
+                            onClick={() => setRecoveryFile(null)}
+                          >
+                            Bỏ file
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <button
                     type="button"
                     className="btn-cancel"
                     onClick={handleResumeJob}
-                    disabled={resumingJob || ytLoggingIn}
-                    style={{ height: 36, padding: '0 12px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    disabled={resumingJob}
+                    style={{ marginTop: 10, height: 36, padding: '0 12px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
                   >
                     {resumingJob ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}
-                    Thử lại tiến trình
+                    {transcriptFailed && (recoveryFile || recoveryTranscript.trim()) ? 'Tiếp tục với transcript' : 'Thử lại từ bước lỗi'}
                   </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="err-block">
-                  <AlertCircle size={15} style={{ flexShrink: 0 }} />
-                  <span>{job.error}</span>
-                </div>
-                {/* Chạy tiếp từ bước lỗi (transcript/recap, cut, voice, merge, polish) — bước đã xong giữ nguyên.
-                    Job đã mất khỏi backend thì không có gì để chạy tiếp → chỉ còn "Bắt đầu lại". */}
-                {!jobLost && (
-                <button
-                  type="button"
-                  className="btn-cancel"
-                  onClick={handleResumeJob}
-                  disabled={resumingJob}
-                  style={{ marginTop: 10, height: 36, padding: '0 12px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                >
-                  {resumingJob ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}
-                  Thử lại từ bước lỗi
-                </button>
-                )}
-              </>
-            )
+                </>
+              )}
+            </>
           )}
 
           {/* Final block — polished (BGM) */}

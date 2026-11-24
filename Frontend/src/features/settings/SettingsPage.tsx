@@ -40,8 +40,8 @@ export function SettingsPage() {
   const tabs: SettingsTabConfig[] = [
     {
       id: 'gemini_yt',
-      label: 'Gemini & YouTube',
-      desc: 'Cookie & tải video dự phòng',
+      label: 'Gemini',
+      desc: 'Tài khoản Gemini & cập nhật ứng dụng',
       icon: <Sparkles size={16} />,
       hasStatus: hasGeminiCookie,
     },
@@ -142,7 +142,7 @@ export function SettingsPage() {
 
       {/* ── Right Content Area ── */}
       <main className="settings-v-main">
-        {/* Tab 1: Gemini & YouTube */}
+        {/* Tab 1: Gemini */}
         {activeTab === 'gemini_yt' && (
           <GeminiSection onCookieStatusChange={setHasGeminiCookie} />
         )}

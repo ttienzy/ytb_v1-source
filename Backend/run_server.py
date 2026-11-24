@@ -11,6 +11,11 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+if __name__ == "__main__" and sys.argv[1:2] == ["--yt-dlp"]:
+    from yt_dlp import main
+
+    sys.exit(main(sys.argv[2:]))
+
 
 def _start_parent_watchdog() -> None:
     """Tự thoát nếu tiến trình cha (Electron) đã chết — ngăn backend_server.exe mồ côi chiếm cổng."""

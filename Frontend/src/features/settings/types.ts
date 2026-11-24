@@ -23,12 +23,6 @@ export type GeminiState = {
   template_saved_at?: string | null
 }
 
-export type YtState = {
-  logged_in: boolean
-  cookie_count: number
-  saved_at?: string | null
-}
-
 export type MailDomain = {
   id: string
   domain: string

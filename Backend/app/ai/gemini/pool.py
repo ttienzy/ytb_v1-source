@@ -17,9 +17,9 @@ from app.core.storage import read_config
 
 T = TypeVar("T")
 
-NO_ACCOUNT_MSG = ("Chưa có tài khoản Gemini: vào Cài đặt → Gemini & YouTube → “(+) Thêm account Gemini” "
+NO_ACCOUNT_MSG = ("Chưa có tài khoản Gemini: vào Cài đặt → Gemini → “(+) Thêm account Gemini” "
                   "(đăng nhập Google một lần trong cửa sổ Chrome).")
-NO_USABLE_MSG = ("Không có tài khoản Gemini nào dùng được (hết phiên hoặc đang bị giới hạn). Vào Cài đặt → Gemini & YouTube "
+NO_USABLE_MSG = ("Không có tài khoản Gemini nào dùng được (hết phiên hoặc đang bị giới hạn). Vào Cài đặt → Gemini "
                  "để làm mới / đăng nhập lại hoặc thêm account khác.")
 AUTH_MESSAGE = "Cookie hết hạn — đăng nhập lại"
 

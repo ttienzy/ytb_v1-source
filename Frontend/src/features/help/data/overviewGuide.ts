@@ -11,7 +11,7 @@ export const overviewGuide: HelpGuide = {
       name: 'Recap từ video YouTube',
       goal: 'Biến video YouTube thành video recap có giọng đọc AI và nhạc nền.',
       steps: [
-        { page: 'Cài đặt', note: 'Đăng nhập Gemini (cookie). Nên đăng nhập YouTube dự phòng để tránh Bot-Wall khi tải video.' },
+        { page: 'Cài đặt', note: 'Đăng nhập Gemini (cookie).' },
         { page: 'Voices', note: 'Có ít nhất một giọng đọc (preset hoặc giọng clone).' },
         { page: 'Thư viện nhạc', note: 'Thêm nhạc nền nếu muốn.' },
         { page: 'Khám Phá Kênh', note: 'Tìm kênh, lọc “Chưa làm”, tích chọn video (tối đa 10 mỗi lô).' },

@@ -108,9 +108,6 @@ class Settings(BaseSettings):
     config_file: Path = DATA_DIR / "config.json"
     chrome_executable: Path = _detect_chrome_executable()
     voice_service_url: str = "http://127.0.0.1:8001"  # voice-service (VieNeu-TTS) nội bộ
-    # Profile riêng cho YouTube login
-    yt_profile_dir: Path = DATA_DIR / "YtProfile"
-    yt_cookies_file: Path = DATA_DIR / "yt_cookies.txt"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

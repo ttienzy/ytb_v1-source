@@ -246,21 +246,11 @@ export function PipelineDiagram({
       ? `Chunk ${p.recap.done}/${p.recap.total}`
       : undefined
 
-  const isBotWall =
-    !!job.error &&
-    (job.error.toLowerCase().includes('sign in to confirm') ||
-      job.error.toLowerCase().includes('not a bot') ||
-      job.error.toLowerCase().includes('exporting-youtube-cookies') ||
-      job.error.toLowerCase().includes('--cookies') ||
-      job.error.toLowerCase().includes('bot-wall'))
-
   const subCut =
     cutState === 'running'
-      ? 'Đang tải 1080p…'
+      ? 'Đang tải video nguồn…'
       : cutState === 'done'
-      ? '1080p sẵn sàng'
-      : cutState === 'error' && isBotWall
-      ? 'Cần đăng nhập YouTube'
+      ? 'Video nguồn sẵn sàng'
       : undefined
   const subVoice =
     voiceState === 'running'

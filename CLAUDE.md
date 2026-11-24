@@ -103,7 +103,18 @@ npm run verify                         # full: build, tests normal+minified, rel
 Standalone process so the heavy model isn't loaded in Backend; Backend reaches it through `app/voices/voice_client.py` (`voice_service_url` setting) and the browser only ever calls Backend's `/api/voices`. One inference session at a time.
 
 ## Conventions & gotchas
-- Project skills (index, order and draft/stable status: `.claude/skills/README.md`): `verify-change` (which checks to run, isolated e2e, report format), `fix-root-cause` (turn a fixed bug into a test/typecheck/CI guardrail instead of a new note here); drafts for big ideas: `restate-intent` → `feature-map` → `show-me` → `assess-idea`. A workflow repeated twice becomes a script or harness helper, not more prose.
+- Project skills (index, order and draft/stable status: `.claude/skills/README.md`): `verify-change` (which checks to run, isolated e2e, report format), `fix-root-cause` (turn a fixed bug into a test/typecheck/CI guardrail instead of a new note here); drafts for big ideas: `restate-intent` → `feature-map` → `show-me` → `assess-idea`. A workflow repeated twice becomes a script or harness helper, not more prose. **Auto-trigger rules — invoke the skill (via the Skill tool) BEFORE answering when the prompt matches:**
+
+  | Trigger (từ / mẫu trong prompt) | Skill | Ghi chú |
+  |---|---|---|
+  | Brain dump dài (≥ 5 dòng ý tưởng lộn xộn), "tích hợp", "nhúng … vào …", "làm tính năng mới", mô tả tính năng có thể hiểu nhiều cách | `restate-intent` | Nhắc lại rồi dừng chờ xác nhận; chưa viết code |
+  | "nằm ở đâu", "luồng chạy thế nào", "cấu trúc của …", ảnh chụp màn hình kèm câu hỏi về khu UI, "bản đồ", ý tưởng gắn vào trang có sẵn mà chưa có bản đồ trong cuộc trò chuyện | `feature-map` | Dựng bản đồ 6 lớp từ code trước khi trả lời |
+  | "vẽ", "cho xem", "sơ đồ", "luồng", "so sánh A B", giải thích luồng ≥ 3 bước / ≥ 2 tiến trình, đề xuất thiết kế | `show-me` | Chọn hình phù hợp; trong chat dùng ASCII |
+  | "ý tưởng này thế nào", "nên làm A hay B", "có rủi ro gì", "đánh giá", trước thay đổi lớn / tốn tiền / khó hoàn tác | `assess-idea` | Yêu cầu `restate-intent` + `feature-map` trước nếu chưa có |
+  | Sửa xong code, "xong chưa", "kiểm tra đi", "test", trước khi báo "đã xong" hoặc commit | `verify-change` | Chạy đúng lệnh theo phần đã sửa |
+  | Sửa bug, lỗi lặp lại, "lỗi này xảy ra lần nữa", định thêm dòng nhắc vào CLAUDE.md / memory | `fix-root-cause` | Tìm nguyên nhân gốc → guardrail bằng code |
+
+  Nếu prompt khớp nhiều skill: theo thứ tự `restate-intent` → `feature-map` → `show-me` → `assess-idea`. Việc nhỏ đã rõ (sửa một lỗi có log, đổi một nhãn, câu hỏi chỉ đọc code có đáp án ngắn) thì KHÔNG gọi skill, trả lời thẳng.
 - Windows paths and PowerShell are the norm. ffmpeg `drawtext` with `fontfile=`/`textfile=` breaks on drive-letter colons/spaces: use relative paths with `cwd` set to the temp dir. `drawtext` WITHOUT `fontfile=` crashes the Windows ffmpeg build (0xC0000005, Fontconfig) — always pass one (`app/media/fonts.py`: `find_font` / `stage_font`).
 - yt-dlp must be kept current (YouTube blocks); working flags use nightly + node + `ejs:github`, not cookies.
 - Recap video encoding: R2 cuts with `libx264 -preset veryfast` (frame-accurate; `-c copy` caused fast-forward/cut-off artefacts); the merge muxes with `-c:v copy` and concatenates with the concat demuxer (stream copy). There is no `_pick_video_encoder` any more. See `docs/recap.md`.

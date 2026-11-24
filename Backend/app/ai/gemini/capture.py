@@ -1,7 +1,7 @@
 """Capture khung request StreamGenerate ("inner template") từ profile Gemini đã đăng nhập → lưu config.json.
 
 App đã mang sẵn một template (`app.ai.gemini.template`, resources/gemini/inner_template.json); chỉ cần chạy cái này khi
-Gemini đổi giao thức (gọi Gemini báo lỗi lạ dù cookie còn tốt). Gọi từ Cài đặt → Gemini & YouTube → "Cập nhật template
+Gemini đổi giao thức (gọi Gemini báo lỗi lạ dù cookie còn tốt). Gọi từ Cài đặt → Gemini → "Cập nhật template
 Gemini" (POST /api/settings/gemini/capture-template, dùng profile của một tài khoản) hoặc chạy tay: `cd Backend; .venv/Scripts/python -m app.ai.gemini.capture`.
 
 Cơ chế:

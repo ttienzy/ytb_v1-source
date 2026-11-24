@@ -74,7 +74,7 @@ from app.recap.paths import (
     voice_path,
 )
 from app.recap.state import JobState
-from app.recap.transcript import fetch_transcript_raw, transcript_to_text
+from app.recap.transcript import get_transcript
 from app.recap.ytdlp import download_video
 from app.voices import voice_client
 
@@ -157,7 +157,7 @@ def _ensure_gemini_cookie(job_id: str) -> bool:
             recap_status="error",
             error=(
                 f"Không tài khoản Gemini nào làm mới được: {refresh_msg}. "
-                f"Vào Cài đặt → Gemini & YouTube: bấm “Đăng nhập lại” cho tài khoản hoặc “(+) Thêm account Gemini” rồi thử lại."
+                f"Vào Cài đặt → Gemini: bấm “Đăng nhập lại” cho tài khoản hoặc “(+) Thêm account Gemini” rồi thử lại."
             ),
         )
         return False
@@ -906,7 +906,7 @@ async def run(
     """Trigger toàn bộ pipeline: [fetch transcript] → generate → gather(cut, voice) → merge → [polish].
 
     Tạo job ngay + trả job_id (HTTP 202); pipeline chạy background asyncio task.
-    ``raw_bytes`` None → tự fetch transcript từ YouTube qua Playwright (get_panel).
+    ``raw_bytes`` None → tự lấy phụ đề từ YouTube qua HTTP.
     ``polish_opts`` không None → chạy R5 polish (BGM) sau khi merge xong.
     """
     youtube_url = youtube_url.strip()
@@ -975,7 +975,7 @@ async def _stage_recap(job_id: str) -> bool:
     if not job.raw_bytes:
         try:
             with timing.timed(job_id, "transcript"):
-                transcript = await run_in_threadpool(fetch_transcript_raw, job.youtube_url)
+                raw_bytes = (await run_in_threadpool(get_transcript, job.youtube_url)).encode("utf-8")
         except Exception as exc:  # noqa: BLE001
             state.update_job(job_id, recap_status="error", error=f"transcript: {exc}")
             try:
@@ -983,13 +983,6 @@ async def _stage_recap(job_id: str) -> bool:
             except Exception:
                 pass
             return False
-        # Nếu transcript là _dom_transcript (từ yt-dlp VTT / DOM scrape) → text "[MM:SS] ..." sạch,
-        # lưu thẳng text (chunker parse text format tốt hơn JSON wrap).
-        if isinstance(transcript, dict) and "_dom_transcript" in transcript:
-            raw_bytes = transcript["_dom_transcript"].encode("utf-8")
-        else:
-            # Giữ nguyên 100% JSON thô gốc từ YouTube get_panel
-            raw_bytes = json.dumps(transcript, ensure_ascii=False, indent=2).encode("utf-8")
         state.update_job(job_id, raw_bytes=raw_bytes, raw_name="raw.txt")
     else:
         # Raw do user đính kèm/dán thủ công → GIỮ NGUYÊN (user controls content, không
@@ -1006,7 +999,7 @@ async def _stage_recap(job_id: str) -> bool:
     try:
         rp = raw_path(job_id)
         rp.parent.mkdir(parents=True, exist_ok=True)
-        rp.write_bytes(raw_bytes)
+        _write_atomic(rp, raw_bytes)
     except OSError:
         pass  # ghi file fail không fatal — vẫn upload raw_bytes
 
@@ -1129,7 +1122,7 @@ async def _run_pipeline_stages(job_id: str, voice_id: str, polish_opts: dict | N
             pass
 
 
-async def resume_pipeline(job_id: str, voice_id: str | None = None) -> JobState:
+async def resume_pipeline(job_id: str, voice_id: str | None = None, *, raw_text: str | None = None) -> JobState:
     """Chạy tiếp pipeline từ phase lỗi/dở dang — Recap(transcript+Gemini), Cut, Voice, Merge hoặc Polish.
 
     Chỉ chạy lại phase CHƯA ``done``; phase đã xong (video đã tải, voice đã sinh...) được giữ nguyên.
@@ -1151,6 +1144,20 @@ async def resume_pipeline(job_id: str, voice_id: str | None = None) -> JobState:
             status_code=400,
             detail="Job không lưu voice_id (đã restart server?) — chọn giọng đọc rồi thử lại.",
         )
+
+    if raw_text is not None:
+        if not raw_text.strip():
+            raise HTTPException(status_code=400, detail="Transcript bổ sung đang trống.")
+        if not recap_pending or job.raw_bytes:
+            raise HTTPException(status_code=409, detail="Job đã có transcript.")
+        raw_bytes = raw_text.encode("utf-8")
+        path = raw_path(job_id)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _write_atomic(path, raw_bytes)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="Không lưu được transcript bổ sung cho job.") from exc
+        state.update_job(job_id, raw_bytes=raw_bytes, raw_name="raw.txt")
 
     # Phase kẹt error/running (task đã chết) → idle; phase done giữ nguyên.
     reset = {
@@ -1183,7 +1190,7 @@ async def resume_pipeline(job_id: str, voice_id: str | None = None) -> JobState:
     else:
         state.update_job(job_id, polish_status="running")
 
-    asyncio.create_task(_run_pipeline(job_id, voice_id, job.polish_opts))
+    _ACTIVE[job_id] = asyncio.create_task(_run_pipeline(job_id, voice_id, job.polish_opts))
     return state.get_job(job_id)
 
 

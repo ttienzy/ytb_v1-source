@@ -215,7 +215,8 @@
   flex: 1;
 }
 
-.yt-raw-body .raw-input {
+.yt-raw-body .raw-input,
+.recap-transcript-recovery .raw-input {
   min-height: 56px;
   font-size: 11.5px;
   padding: 8px 10px;
@@ -323,4 +324,35 @@
   font-size: 12px;
   border-radius: 8px;
   height: 38px;
+}
+
+.recap-transcript-recovery {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.recap-transcript-recovery-label,
+.recap-transcript-recovery-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recap-transcript-recovery-label { font-weight: 600; }
+.recap-transcript-recovery-file { flex-wrap: wrap; }
+.recap-transcript-recovery-file label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+.recap-transcript-recovery-file label:focus-within { outline: 2px solid #6366f1; }
+.recap-transcript-recovery-file input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
 }

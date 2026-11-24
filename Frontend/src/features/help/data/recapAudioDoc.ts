@@ -87,7 +87,7 @@ export const recapAudioDoc: HelpDoc = {
     {
       id: 'raw-transcript',
       name: 'Raw transcript (khi YouTube chặn tự lấy phụ đề)',
-      what: 'Mở “Đính kèm raw transcript”: đính file .txt/.json hoặc dán văn bản, mỗi dòng dạng [MM:SS] caption. Bỏ trống cả hai thì app tự lấy từ YouTube. Nội dung được gửi nguyên văn cho Gemini, không chuẩn hóa; app lưu raw.txt để bạn kiểm tra lại.',
+      what: 'Mở “Đính kèm raw transcript”: đính file .txt/.json hoặc dán văn bản, mỗi dòng dạng [MM:SS] caption. Bỏ trống cả hai thì app lấy phụ đề YouTube qua HTTP. Nếu job dừng ở bước phụ đề, dùng “Bổ sung transcript” rồi bấm “Tiếp tục với transcript”. App lưu nội dung đã gửi trong raw.txt.',
       tip: 'Có file đính kèm thì phần văn bản dán bị bỏ qua.',
     },
     {
@@ -98,11 +98,6 @@ export const recapAudioDoc: HelpDoc = {
         'Báo lỗi “Một số link không phải YouTube URL” nếu có dòng không hợp lệ; phải chọn giọng, và bật nhạc nền thì chọn ít nhất 1 bài.',
         'Bảng trạng thái hiển thị từng video: Chưa bắt đầu / Đang xử lý / Hoàn tất / Đã dừng.',
       ],
-    },
-    {
-      id: 'youtube-botwall',
-      name: 'YouTube yêu cầu xác thực (Bot-Wall)',
-      what: 'Khi YouTube chặn tải, hiện khung “YouTube yêu cầu xác thực tài khoản (Bot-Wall)”. Bấm “Đăng nhập YouTube qua Chrome”: app mở Chrome để bạn đăng nhập, lưu cookie rồi tự chạy tiếp job. Có thể mở Cài đặt để xử lý cookie.',
     },
     {
       id: 'youtube-ket-qua',
@@ -174,7 +169,6 @@ export const recapAudioDoc: HelpDoc = {
   ],
   concepts: [
     { term: 'Raw transcript', meaning: 'Phụ đề/transcript bạn tự đưa vào thay vì để app lấy từ YouTube.' },
-    { term: 'Bot-Wall', meaning: 'YouTube bắt xác thực tài khoản để chống tải tự động; cần đăng nhập qua Chrome để lưu cookie.' },
     { term: 'Hạ nhạc (ducking)', meaning: 'Nhạc nền tự nhỏ xuống khi giọng đang đọc, to lại khi giọng nghỉ.' },
     { term: 'Lấp đầy / Nền mờ', meaning: 'Hai cách đặt video nền vào khung: cắt giữa cho đầy, hoặc giữ trọn hình và lấp phần thừa bằng nền mờ.' },
     { term: 'Video FULL / Tập', meaning: 'Cả truyện trong một video; truyện dài hơn 120 phút được chia thành nhiều tập, mỗi tập gồm trọn vẹn các chương.' },
@@ -215,7 +209,7 @@ export const recapAudioDoc: HelpDoc = {
     },
     {
       symptom: 'YouTube yêu cầu xác thực (Bot-Wall) hoặc tải thất bại',
-      fix: 'Bấm “Đăng nhập YouTube qua Chrome” ở khung cảnh báo, đăng nhập xong job tự chạy tiếp. Video riêng tư hoặc giới hạn độ tuổi vẫn có thể không tải được.',
+      fix: 'Recap tải nguồn ở chế độ khách. Bấm “Thử lại từ bước lỗi” nếu lỗi tạm thời, hoặc dùng link công khai khác nếu video cần xác thực.',
     },
     {
       symptom: 'Job dừng ở bước Gemini / kiểm tra cookie',

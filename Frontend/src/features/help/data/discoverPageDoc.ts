@@ -89,7 +89,7 @@ export const discoverPageDoc: HelpDoc = {
     },
     {
       symptom: 'Báo “Lỗi quét video” hoặc “Không tải được video kênh”',
-      fix: 'YouTube có thể đang chặn hoặc link kênh sai. Kiểm tra lại @handle/link; nếu YouTube yêu cầu xác thực, đăng nhập YouTube qua Chrome ở Cài đặt → Gemini & YouTube.',
+      fix: 'YouTube có thể đang chặn hoặc link kênh sai. Kiểm tra lại @handle/link rồi thử lại sau.',
       link: 'Cài đặt',
     },
     {
