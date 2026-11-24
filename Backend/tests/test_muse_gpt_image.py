@@ -177,3 +177,83 @@ def test_chat_text_without_failover_stops_after_first_account(monkeypatch):
     with pytest.raises(adapter.GptImageError):
         client.chat_text("hello", timeout=5)  # mặc định vẫn chuyển tài khoản như cũ
     assert len(sent) == 2
+
+
+# ── Thanh chat ChatGPT trực tiếp trong Muse Canvas ──────────────────────────────
+class FakeCanvasChatClient:
+    def __init__(self, reply="Đây là kịch bản mẫu", fail=None, pool=None):
+        self.calls = []
+        self.reply = reply
+        self.fail = fail
+        self.pool = pool or {"total": 2, "free": 2, "busy": 0, "cooldown": 0, "retry_after_seconds": 0, "accounts": []}
+
+    def text_pool_status(self):
+        return self.pool
+
+    def chat_text(self, prompt, system="", ref_paths=None, model="auto", timeout=300.0, failover=True,
+                  *, wait_timeout=None, respect_cooldown=False):
+        self.calls.append({
+            "prompt": prompt, "system": system, "refs": ref_paths,
+            "failover": failover, "wait_timeout": wait_timeout, "respect_cooldown": respect_cooldown,
+        })
+        if self.fail:
+            raise self.fail
+        return self.reply, "b@x"
+
+
+def test_build_chat_prompt_sliding_window_and_char_limit():
+    turns = [
+        muse_gpt_image.GptChatTurn(role="user", content="Lượt 1 " + "a" * 30),
+        muse_gpt_image.GptChatTurn(role="assistant", content="Đáp 1 " + "b" * 30),
+        muse_gpt_image.GptChatTurn(role="user", content="Lượt 2"),
+        muse_gpt_image.GptChatTurn(role="assistant", content="Đáp 2"),
+    ]
+    assert muse_gpt_image.build_chat_prompt("  Xin chào  ", []) == "Xin chào"
+    out = muse_gpt_image.build_chat_prompt("Sửa hook", turns, max_turns=2, max_chars=200)
+    assert "Lượt 1" not in out
+    assert "Lượt 2" in out and "Đáp 2" in out and "[YÊU CẦU HIỆN TẠI]\nSửa hook" in out
+
+    tight = muse_gpt_image.build_chat_prompt("Ngắn", turns, max_turns=10, max_chars=60)
+    assert "Lượt 1" not in tight and "Đáp 2" in tight
+
+
+def test_muse_gpt_chat_status_and_turns(env):
+    from app.ai.image_gen.gptimage.adapter import GptTextPoolError
+
+    fake = FakeCanvasChatClient()
+    env["monkeypatch"].setattr(muse_gpt_image, "_image_client", lambda: fake)
+
+    st = env["client"].get("/api/workflow/muse/gpt-chat/status")
+    assert st.status_code == 200 and st.json()["free"] == 2
+
+    res = env["client"].post("/api/workflow/muse/gpt-chat", json={
+        "message": "Viết hook 3 giây",
+        "history": [{"role": "user", "content": "Chủ đề váy lụa"}, {"role": "assistant", "content": "Đã rõ"}],
+        "reference_images": [env["refs"][0]],
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["reply"] == "Đây là kịch bản mẫu" and body["account_label"] == "b@x"
+    assert body["pool"]["total"] == 2
+    call = fake.calls[0]
+    assert call["failover"] is True and call["respect_cooldown"] is True and call["wait_timeout"] > 0
+    assert "Chủ đề váy lụa" in call["prompt"] and "[YÊU CẦU HIỆN TẠI]\nViết hook 3 giây" in call["prompt"]
+    assert call["refs"] == [env["refs"][0]]
+
+    # Ảnh thiếu -> 400 ngay trước khi chạm pool
+    bad = env["client"].post("/api/workflow/muse/gpt-chat", json={"message": "hi", "reference_images": ["D:/missing.png"]})
+    assert bad.status_code == 400 and bad.json()["detail"]["code"] == "missing_reference"
+
+    # Toàn bộ bận -> 429 kèm code + pool
+    busy_pool = {"total": 1, "free": 0, "busy": 1, "cooldown": 0, "retry_after_seconds": 0, "accounts": []}
+    busy_fake = FakeCanvasChatClient(fail=GptTextPoolError("Đang bận 1/1", code="all_busy", pool=busy_pool))
+    env["monkeypatch"].setattr(muse_gpt_image, "_image_client", lambda: busy_fake)
+    r429 = env["client"].post("/api/workflow/muse/gpt-chat", json={"message": "hi"})
+    assert r429.status_code == 429 and r429.json()["detail"]["code"] == "all_busy"
+    assert r429.json()["detail"]["pool"]["busy"] == 1
+
+    # Chưa có acc -> 503
+    no_fake = FakeCanvasChatClient(fail=GptTextPoolError("Chưa có acc", code="no_accounts", pool={"total": 0, "free": 0, "busy": 0, "cooldown": 0, "retry_after_seconds": 0, "accounts": []}))
+    env["monkeypatch"].setattr(muse_gpt_image, "_image_client", lambda: no_fake)
+    r503 = env["client"].post("/api/workflow/muse/gpt-chat", json={"message": "hi"})
+    assert r503.status_code == 503 and r503.json()["detail"]["code"] == "no_accounts"

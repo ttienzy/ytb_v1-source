@@ -2134,12 +2134,30 @@ export const VIDEO_INGR_SPEC = {
   promptName: 'video_ingredients',
 } as const
 export const VIDEO_INGR_MAX_REFS = 5
+/** Khi không nối video mẫu, Flow (ingredients r2v) nhận tối đa 3 ảnh tham chiếu. */
+export const VIDEO_INGR_NO_VIDEO_MAX_REFS = 3
+/** Thời lượng mặc định (giây) khi không có video mẫu và cấu hình Thời lượng = Tự động (text_to_video Omni 1.2 cố định 10s). */
+export const VIDEO_INGR_DEFAULT_SECONDS = 10
 /** Biến thể tối đa mỗi lần bấm (khớp FLOW_MAX_VARIANTS ở cấu hình / backend) */
 export const VIDEO_INGR_MAX_VARIANTS = 4
 export const VIDEO_INGR_MIN_SECONDS = 3
 export const VIDEO_INGR_MAX_SECONDS = 15
 /** Chỉnh video Omni 1.2 mới xác minh 720p */
 export const VIDEO_INGR_RESOLUTION = '720p'
+
+export type VideoIngrMode = 'video_edit' | 'ingredients' | 'text_to_video'
+
+/** Chế độ Flow tương ứng với đầu vào đang nối vào node Ingredients (video và ảnh đều tùy chọn). */
+export const videoIngrMode = (video: MuseVideoRef | null, refs: readonly Pick<ScriptRef, 'image'>[]): VideoIngrMode =>
+  video ? 'video_edit' : refs.length > 0 ? 'ingredients' : 'text_to_video'
+
+/** Số ảnh tối đa Flow nhận theo việc có video mẫu hay không (5 với video_edit, 3 với ingredients thuần ảnh). */
+export const videoIngrMaxRefs = (video: MuseVideoRef | null): number =>
+  video ? VIDEO_INGR_MAX_REFS : VIDEO_INGR_NO_VIDEO_MAX_REFS
+
+/** Chỉ video_edit có ảnh mới gửi x2–x4 trong MỘT lệnh HTTP; các chế độ khác gửi mỗi biến thể một job riêng. */
+export const videoIngrSupportsBatch = (video: MuseVideoRef | null, refs: readonly Pick<ScriptRef, 'image'>[]): boolean =>
+  Boolean(video && refs.length > 0)
 
 export interface MuseVideoIngrData {
   title: string
@@ -2249,6 +2267,28 @@ export interface VideoIngrFlow {
   resolution?: '720p' | '360p'
 }
 
+/** Thời lượng (giây) sẽ gửi lên Flow theo chế độ hiện tại. */
+export function videoIngrDuration(
+  d: Pick<VideoIngrInput, 'trimStart' | 'trimEnd' | 'targetSeconds'>,
+  video: MuseVideoRef | null,
+  refs: readonly Pick<ScriptRef, 'image'>[],
+): number {
+  if (video) return videoIngrTrim(d, video.durationSec).length
+  if (refs.length > 0) return fixedClipSeconds(d.targetSeconds) || VIDEO_INGR_DEFAULT_SECONDS
+  return VIDEO_INGR_DEFAULT_SECONDS
+}
+
+/** Credit ước tính cho MỘT video theo chế độ hiện tại của node Ingredients. */
+export function videoIngrModeCredits(
+  d: Pick<VideoIngrInput, 'trimStart' | 'trimEnd' | 'targetSeconds'>,
+  video: MuseVideoRef | null,
+  refs: readonly Pick<ScriptRef, 'image'>[],
+  resolution: '720p' | '360p' = '720p',
+): number {
+  const sec = videoIngrDuration(d, video, refs)
+  return video ? videoIngrCredits(sec, resolution) : flowClipCredits(Math.round(sec), resolution)
+}
+
 /** Lỗi chặn "Tạo video" (kiểm tra TRƯỚC khi tải / gửi gì — không tốn credit). Rỗng = gửi được. */
 export function videoIngrBlockers(
   d: VideoIngrInput,
@@ -2259,9 +2299,14 @@ export function videoIngrBlockers(
   const b: string[] = []
   if (!flow?.projectId) b.push('Chưa chọn project Flow — mở Cấu hình → Google Flow để chọn hoặc tạo project.')
   else if (!flow.flowProjectId) b.push('Project Flow đã chọn chưa có mã project trên Google Flow.')
-  if (!video) b.push('Chưa nối “Video tham chiếu” (có video) vào cổng Video.')
-  if (!refs.length) b.push(`Chưa nối ảnh tham chiếu nào vào cổng Ảnh (1–${VIDEO_INGR_MAX_REFS} ảnh).`)
-  if (refs.length > VIDEO_INGR_MAX_REFS) b.push(`Tối đa ${VIDEO_INGR_MAX_REFS} ảnh tham chiếu (giới hạn của Flow).`)
+  const maxRefs = videoIngrMaxRefs(video)
+  if (refs.length > maxRefs) {
+    b.push(
+      video
+        ? `Tối đa ${VIDEO_INGR_MAX_REFS} ảnh tham chiếu (giới hạn của Flow).`
+        : `Không có video mẫu: Flow nhận tối đa ${VIDEO_INGR_NO_VIDEO_MAX_REFS} ảnh tham chiếu (đang nối ${refs.length} ảnh) — bỏ bớt ảnh hoặc nối thêm video.`,
+    )
+  }
   const noImg = refs.find((r) => !r.image)
   if (noImg) b.push(`${noImg.label}: chưa có ảnh.`)
   if (video) {
@@ -2284,10 +2329,11 @@ export function videoIngrFingerprint(
   refs: ScriptRef[],
   flow: VideoIngrFlow | null,
 ): string {
-  const t = videoIngrTrim(d, video?.durationSec ?? 0)
+  const mode = videoIngrMode(video, refs)
+  const t = video ? videoIngrTrim(d, video.durationSec) : { start: 0, end: videoIngrDuration(d, null, refs) }
   return [
     hashText(d.prompt.trim()),
-    video?.path ?? '',
+    video?.path ?? (mode === 'text_to_video' ? 't2v' : 'r2v'),
     t.start,
     t.end,
     refs.map((r) => r.image?.path ?? '').join(','),
@@ -2299,9 +2345,10 @@ export function videoIngrFingerprint(
 }
 
 /**
- * Body POST /api/veo/jobs (video_edit, Omni 1.2): media id của video tham chiếu đã tải lên project Flow.
- * `outputs` > 1 = MỘT lệnh Flow ra nhiều video (như chọn x2–x4 trên giao diện Flow; HAR 2026-11-23): một lần tải video,
- * một token reCAPTCHA, Flow trả từng video riêng. `variant` = ô thứ mấy khi tạo lại riêng một ô (1 video).
+ * Body POST /api/veo/jobs theo đầu vào của node Ingredients (Omni 1.2):
+ * - Có video (kèm 0–5 ảnh) → `video_edit` (cần `referenceVideoId`; chỉ khi có ảnh mới gửi x2–x4 trong 1 lệnh).
+ * - Không video + 1–3 ảnh → `ingredients` (`num_outputs: 1`, mỗi biến thể 1 job riêng).
+ * - Chỉ prompt → `text_to_video` 10s (`num_outputs: 1`, mỗi biến thể 1 job riêng).
  */
 export function buildVideoIngrRequest(
   nodeId: string,
@@ -2313,31 +2360,50 @@ export function buildVideoIngrRequest(
   attempt: number,
   /** Ô thứ mấy (1–4) khi tạo lại riêng một ô: vào khóa chống trùng + `variant` của backend */
   variant = 1,
-  /** Số video trong MỘT lệnh (1–4) */
+  /** Số video trong MỘT lệnh (1–4, chỉ áp cho video_edit có ảnh) */
   outputs = 1,
 ): Record<string, unknown> {
   const blockers = videoIngrBlockers(d, video, refs, flow)
   if (blockers.length) throw new Error(blockers[0])
-  if (!referenceVideoId) throw new Error('Chưa có mã video tham chiếu trên Flow.')
-  const t = videoIngrTrim(d, video!.durationSec)
-  const n = Math.min(VIDEO_INGR_MAX_VARIANTS, Math.max(1, Math.floor(outputs) || 1))
+  const mode = videoIngrMode(video, refs)
+  const resolution = flow!.resolution ?? VIDEO_INGR_RESOLUTION
+  const fpHash = hashText(videoIngrFingerprint(d, video, refs, flow))
+  if (mode === 'video_edit') {
+    if (!referenceVideoId) throw new Error('Chưa có mã video tham chiếu trên Flow.')
+    const t = videoIngrTrim(d, video!.durationSec)
+    const n = videoIngrSupportsBatch(video, refs) ? Math.min(VIDEO_INGR_MAX_VARIANTS, Math.max(1, Math.floor(outputs) || 1)) : 1
+    return {
+      prompt: d.prompt.trim(),
+      model_display_name: CLIP_FLOW_MODEL,
+      input_mode: 'video_edit',
+      aspect_ratio: flow!.aspect,
+      duration_seconds: Math.min(VIDEO_INGR_MAX_SECONDS, Math.max(1, Math.ceil(t.length))),
+      resolution,
+      num_outputs: n,
+      // backend chống trùng theo NỘI DUNG: tạo lại riêng ô 2 và ô 3 cùng lúc (cùng nội dung) sẽ bị coi là một nếu thiếu
+      // `variant` (nằm trong fingerprint chống trùng, không gửi lên Flow).
+      variant: n > 1 ? 1 : variant,
+      project_id: flow!.projectId,
+      ingredient_image_paths: refs.map((r) => r.image!.path),
+      reference_video_id: referenceVideoId,
+      reference_video_start_seconds: t.start,
+      reference_video_end_seconds: t.end,
+      idempotency_key: `musevingr-${nodeId}-${fpHash}-a${attempt}-${n > 1 ? `x${n}` : `v${variant}`}`.slice(0, 128),
+    }
+  }
+  const durationSeconds = Math.min(VIDEO_INGR_MAX_SECONDS, Math.max(VIDEO_INGR_MIN_SECONDS, Math.round(videoIngrDuration(d, null, refs))))
   return {
     prompt: d.prompt.trim(),
     model_display_name: CLIP_FLOW_MODEL,
-    input_mode: 'video_edit',
+    input_mode: mode,
     aspect_ratio: flow!.aspect,
-    duration_seconds: Math.min(VIDEO_INGR_MAX_SECONDS, Math.max(1, Math.ceil(t.length))),
-    resolution: flow!.resolution ?? VIDEO_INGR_RESOLUTION,
-    num_outputs: n,
-    // backend chống trùng theo NỘI DUNG: tạo lại riêng ô 2 và ô 3 cùng lúc (cùng nội dung) sẽ bị coi là một nếu thiếu
-    // `variant` (nằm trong fingerprint chống trùng, không gửi lên Flow).
-    variant: n > 1 ? 1 : variant,
+    duration_seconds: durationSeconds,
+    resolution,
+    num_outputs: 1,
+    variant,
     project_id: flow!.projectId,
-    ingredient_image_paths: refs.map((r) => r.image!.path),
-    reference_video_id: referenceVideoId,
-    reference_video_start_seconds: t.start,
-    reference_video_end_seconds: t.end,
-    idempotency_key: `musevingr-${nodeId}-${hashText(videoIngrFingerprint(d, video, refs, flow))}-a${attempt}-${n > 1 ? `x${n}` : `v${variant}`}`.slice(0, 128),
+    ...(mode === 'ingredients' ? { ingredient_image_paths: refs.map((r) => r.image!.path) } : {}),
+    idempotency_key: `musevingr-${nodeId}-${fpHash}-a${attempt}-v${variant}`.slice(0, 128),
   }
 }
 

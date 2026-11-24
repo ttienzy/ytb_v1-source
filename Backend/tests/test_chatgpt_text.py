@@ -250,3 +250,80 @@ def test_unusual_activity_403_is_temporary_not_an_account_problem(tmp_path, monk
     assert _ThrottledGPT.calls == 2                                     # vẫn thử tài khoản thứ hai
     assert {x["status"] for x in store.list_raw()} <= {"active", None}  # không đổi trạng thái (không khóa 3 giờ)
     assert adapter_mod.GptImageClient._classify(RuntimeError("HTTP 403: Unusual activity has been detected")) == "throttled"
+
+
+# ── xoay vòng, cooldown chữ & fail-fast cho thanh chat Muse Canvas ─────────────
+def test_chat_text_fail_fast_when_all_accounts_busy(pool):
+    store, client, gpts, a, b = pool
+    store.delete_account(b)
+    with client._pool_cv:
+        client._leased.add(a)
+    with pytest.raises(adapter_mod.GptTextPoolError) as ei:
+        client.chat_text("xin kịch bản", wait_timeout=0.05, respect_cooldown=True)
+    assert ei.value.code == "all_busy"
+    assert ei.value.pool["total"] == 1 and ei.value.pool["busy"] == 1 and ei.value.pool["free"] == 0
+
+
+def test_chat_text_rotates_around_busy_account(pool):
+    store, client, gpts, a, b = pool
+    gpts[a] = FakeGPT("tu a")
+    gpts[b] = FakeGPT("tu b")
+    with client._pool_cv:
+        client._leased.add(a)
+    text, label = client.chat_text("xin kịch bản", wait_timeout=0.05, respect_cooldown=True)
+    assert text == "tu b" and label == "b@x"
+
+
+def test_chat_text_rotates_and_respects_cooldown_on_throttle_and_rate(pool):
+    store, client, gpts, a, b = pool
+    now = [1000.0]
+    client._now = lambda: now[0]
+    store.touch(b)  # cho a cũ hơn b để lần 1 chọn a trước
+    gpts[a] = FakeGPT(RuntimeError("/conversation HTTP 403: Unusual activity has been detected"))
+    gpts[b] = FakeGPT("kịch bản từ B")
+    text, label = client.chat_text("lượt 1", wait_timeout=0.05, respect_cooldown=True)
+    assert (text, label) == ("kịch bản từ B", "b@x")
+    assert a in client._text_cooldown
+    assert client.text_pool_status()["cooldown"] == 1
+
+    # Lượt 2: a đang cooldown -> không gọi a, đi thẳng sang b
+    gpts[a] = FakeGPT("không được gọi")
+    gpts[b] = FakeGPT("lượt 2 từ B")
+    text2, label2 = client.chat_text("lượt 2", wait_timeout=0.05, respect_cooldown=True)
+    assert (text2, label2) == ("lượt 2 từ B", "b@x")
+    assert len(gpts[a].calls) == 0
+
+    # Hết cooldown: a dùng lại được và được xóa khỏi cooldown
+    now[0] += client.TEXT_THROTTLE_COOLDOWN_SECONDS + 5
+    gpts[a] = FakeGPT("a hồi phục")
+    gpts[b] = FakeGPT("b")
+    text3, label3 = client.chat_text("lượt 3", wait_timeout=0.05, respect_cooldown=True)
+    assert (text3, label3) == ("a hồi phục", "a@x")
+    assert a not in client._text_cooldown
+
+
+def test_chat_text_all_cooldown_and_no_accounts(pool, tmp_path):
+    store, client, gpts, a, b = pool
+    now = [2000.0]
+    client._now = lambda: now[0]
+    gpts[a] = FakeGPT("You've hit the free plan limit. Try again later.")
+    gpts[b] = FakeGPT("You've hit the free plan limit. Try again later.")
+    with pytest.raises(adapter_mod.GptTextPoolError) as ei:
+        client.chat_text("hi", wait_timeout=0.05, respect_cooldown=True)
+    assert ei.value.code == "all_cooldown"
+    assert ei.value.pool["cooldown"] == 2 and ei.value.pool["retry_after_seconds"] > 0
+
+    empty_client = adapter_mod.GptImageClient(ChatgptAccountStore(tmp_path / "empty"))
+    with pytest.raises(adapter_mod.GptTextPoolError) as ei2:
+        empty_client.chat_text("hi", wait_timeout=0.05, respect_cooldown=True)
+    assert ei2.value.code == "no_accounts"
+
+
+def test_chat_text_all_failed_reports_accounts(pool):
+    store, client, gpts, a, b = pool
+    gpts[a] = FakeGPT(RuntimeError("network timeout"))
+    gpts[b] = FakeGPT(RuntimeError("network reset"))
+    with pytest.raises(adapter_mod.GptTextPoolError) as ei:
+        client.chat_text("hi", wait_timeout=0.05, respect_cooldown=True)
+    assert ei.value.code == "all_failed"
+    assert "2/2" in str(ei.value)

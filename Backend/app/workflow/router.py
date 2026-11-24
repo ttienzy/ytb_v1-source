@@ -231,7 +231,7 @@ async def refresh_gemini_cookie():
         raise HTTPException(
             status_code=401,
             detail="Không làm mới được tài khoản Gemini nào (" + "; ".join(errors) + "). "
-                   "Vào Cài đặt → Gemini & YouTube bấm “Đăng nhập lại” hoặc “(+) Thêm account Gemini”.")
+                   "Vào Cài đặt → Gemini bấm “Đăng nhập lại” hoặc “(+) Thêm account Gemini”.")
     return {"ok": True, "refreshed": refreshed, "cookie_count": refreshed, "has_cookie": True, "errors": errors}
 
 
@@ -527,6 +527,36 @@ async def create_muse_gpt_script(req: muse_gpt_image.GptScriptRequest) -> dict:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi nhờ ChatGPT viết kịch bản: {e}") from e
+
+
+@router.get("/muse/gpt-chat/status")
+def get_muse_gpt_chat_status() -> dict:
+    """Trạng thái pool tài khoản ChatGPT (tổng / rảnh / bận / cooldown) cho thanh chat Muse Canvas."""
+    return muse_gpt_image.chat_pool_status()
+
+
+@router.post("/muse/gpt-chat")
+async def create_muse_gpt_chat_turn(req: muse_gpt_image.GptChatRequest) -> dict:
+    """Thanh chat ChatGPT trong Muse Canvas: nhớ ngữ cảnh tạm thời, xoay vòng tài khoản, fail-fast khi kẹt."""
+    from app.ai.image_gen.gptimage.adapter import GptImageError, GptTextPoolError
+
+    try:
+        return await run_in_threadpool(muse_gpt_image.chat_turn, req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail={"code": "missing_reference", "message": str(e)}) from e
+    except GptTextPoolError as e:
+        status = 429 if e.code in ("all_busy", "all_cooldown") else 503 if e.code == "no_accounts" else 502
+        raise HTTPException(status_code=status, detail={"code": e.code, "message": str(e), "pool": e.pool}) from e
+    except GptImageError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "all_failed", "message": str(e), "pool": muse_gpt_image.chat_pool_status()},
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "all_failed", "message": f"Lỗi khi chat với ChatGPT: {e}", "pool": muse_gpt_image.chat_pool_status()},
+        ) from e
 
 
 @router.get("/muse/flow/accounts")

@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Optional
+import time
+from typing import Any, Optional
 
 from . import autoheal
 from .accounts import ChatgptAccountStore
@@ -22,7 +23,19 @@ class GptImageError(RuntimeError):
     pass
 
 
+class GptTextPoolError(GptImageError):
+    """Lỗi pool tài khoản ChatGPT khi viết chữ / chat tương tác (có mã cấu trúc và snapshot pool)."""
+
+    def __init__(self, message: str, *, code: str = "all_failed", pool: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.pool = pool or {}
+
+
 class GptImageClient:
+    TEXT_THROTTLE_COOLDOWN_SECONDS = 180.0
+    TEXT_RATE_COOLDOWN_SECONDS = 900.0
+
     def __init__(self, store: ChatgptAccountStore):
         self._store = store
         self._progress = None
@@ -32,6 +45,9 @@ class GptImageClient:
         # lease pool (y GrokRotator)
         self._leased: set[str] = set()
         self._pool_cv = threading.Condition()
+        # cooldown tạm thời trong RAM cho luồng chữ (throttled/rate); tắt app tự reset
+        self._text_cooldown: dict[str, tuple[float, str]] = {}
+        self._now = time.time
 
     # ── progress ────────────────────────────────────────────────────────────────
     def set_progress(self, fn):
@@ -132,23 +148,93 @@ class GptImageClient:
         return "error"
 
     # ── viết chữ (thay 9router) ─────────────────────────────────────────────────
+    def _prune_text_cooldown(self) -> None:
+        """Dọn các tài khoản hết thời gian tạm nghỉ ở luồng chữ (cần giữ `self._pool_cv`)."""
+        now = self._now()
+        expired = [aid for aid, (until, _reason) in self._text_cooldown.items() if until <= now]
+        for aid in expired:
+            self._text_cooldown.pop(aid, None)
+
+    def text_pool_status(self) -> dict[str, Any]:
+        """Trạng thái hiện tại của kho tài khoản ChatGPT cho luồng viết chữ (rảnh / bận / cooldown)."""
+        with self._pool_cv:
+            self._prune_text_cooldown()
+            now = self._now()
+            raw = [a for a in self._store.list_raw() if a.get("cookies") and a.get("ua")]
+            free = busy = cooldown = 0
+            accounts_info: list[dict[str, Any]] = []
+            cooldown_waits: list[int] = []
+            for a in raw:
+                aid = a["id"]
+                email = a.get("email") or aid
+                if aid in self._leased:
+                    busy += 1
+                    accounts_info.append({"id": aid, "email": email, "state": "busy", "retry_after_seconds": 0, "reason": "busy"})
+                elif aid in self._text_cooldown:
+                    until, reason = self._text_cooldown[aid]
+                    rem = max(1, int(until - now))
+                    cooldown += 1
+                    cooldown_waits.append(rem)
+                    accounts_info.append({"id": aid, "email": email, "state": "cooldown", "retry_after_seconds": rem, "reason": reason})
+                else:
+                    free += 1
+                    accounts_info.append({"id": aid, "email": email, "state": "free", "retry_after_seconds": 0, "reason": ""})
+            retry_after = min(cooldown_waits) if (free == 0 and cooldown_waits) else 0
+            return {
+                "total": len(raw),
+                "free": free,
+                "busy": busy,
+                "cooldown": cooldown,
+                "retry_after_seconds": retry_after,
+                "accounts": accounts_info,
+            }
+
+    def _acquire_text_account(
+        self,
+        exclude: frozenset,
+        *,
+        wait_timeout: float | None = None,
+        respect_cooldown: bool = False,
+    ) -> tuple[Optional[dict], str]:
+        """Chọn & khóa 1 tài khoản rảnh cho luồng chữ (xoay vòng LRU, tùy chọn fail-fast & tránh acc đang cooldown)."""
+        with self._pool_cv:
+            deadline = None if wait_timeout is None else self._now() + max(0.0, float(wait_timeout))
+            while True:
+                self._prune_text_cooldown()
+                all_with_creds = [a for a in self._store.list_raw() if a.get("cookies") and a.get("ua")]
+                if not all_with_creds:
+                    return None, "no_accounts"
+                cands = [a for a in all_with_creds if a["id"] not in exclude]
+                if not cands:
+                    return None, "exhausted_tried"
+                if respect_cooldown:
+                    eligible = [a for a in cands if a["id"] not in self._text_cooldown]
+                    if not eligible:
+                        return None, "all_cooldown"
+                else:
+                    eligible = cands
+                eligible.sort(key=lambda a: (a.get("status") not in ("active", None), a.get("last_used") or 0))
+                free = [a for a in eligible if a["id"] not in self._leased]
+                if free:
+                    self._leased.add(free[0]["id"])
+                    return free[0], "ok"
+                if deadline is not None:
+                    rem = deadline - self._now()
+                    if rem <= 0:
+                        return None, "all_busy"
+                    self._pool_cv.wait(timeout=min(rem, 0.25))
+                else:
+                    self._pool_cv.wait(timeout=10)
+
     def _lease_text_account(self, exclude: frozenset) -> Optional[dict]:
         """Tài khoản cho việc VIẾT CHỮ: chỉ cần còn session. Hết lượt ẢNH (exhausted) không chặn viết chữ vì ChatGPT tính
         hạn mức chữ và ảnh riêng. Dùng chung tập lease với tạo ảnh để một tài khoản không bị hai luồng dùng cùng lúc."""
-        with self._pool_cv:
-            while True:
-                cands = [a for a in self._store.list_raw() if a.get("cookies") and a.get("ua") and a["id"] not in exclude]
-                cands.sort(key=lambda a: (a.get("status") not in ("active", None), a.get("last_used") or 0))
-                free = [a for a in cands if a["id"] not in self._leased]
-                if free:
-                    self._leased.add(free[0]["id"])
-                    return free[0]
-                if not cands:
-                    return None
-                self._pool_cv.wait(timeout=10)
+        acc, _reason = self._acquire_text_account(exclude, wait_timeout=None, respect_cooldown=False)
+        return acc
 
     def chat_text(self, prompt: str, system: str = "", ref_paths: list[str] | None = None,
-                  model: str = "auto", timeout: float = 300.0, failover: bool = True) -> tuple[str, str]:
+                  model: str = "auto", timeout: float = 300.0, failover: bool = True,
+                  *, wait_timeout: float | None = None, respect_cooldown: bool = False) -> tuple[str, str]:
         """Gửi một tin nhắn chữ (kèm ảnh nếu có) qua tài khoản ChatGPT web, trả (văn bản đã làm sạch, nhãn tài khoản).
 
         ChatGPT web không có vai trò system: hướng dẫn hệ thống được gộp lên đầu tin nhắn, kèm yêu cầu trả văn bản thuần
@@ -158,17 +244,57 @@ class GptImageClient:
         from .pkg.gpt_plus import check_limit_refusal, clean_web_text
 
         if not any(a.get("cookies") and a.get("ua") for a in self._store.list_raw()):
-            raise GptImageError("Chưa có tài khoản ChatGPT nào. Thêm tài khoản ở Cài đặt → Tạo ảnh AI → ChatGPT.")
+            msg = "Chưa có tài khoản ChatGPT nào. Thêm tài khoản ở Cài đặt → Tạo ảnh AI → ChatGPT."
+            if wait_timeout is not None or respect_cooldown:
+                raise GptTextPoolError(msg, code="no_accounts", pool=self.text_pool_status())
+            raise GptImageError(msg)
         rules = ("[QUY TẮC TRẢ LỜI] Chỉ trả lời bằng văn bản thuần (Markdown đơn giản hoặc JSON nếu được yêu cầu). "
                  "Không tìm kiếm web, không chèn ảnh, trích dẫn hay thành phần giao diện.")
         message = "\n\n".join(x for x in (f"[HƯỚNG DẪN HỆ THỐNG]\n{system.strip()}" if system.strip() else "", rules, prompt.strip()) if x)
         refs = [str(p) for p in (ref_paths or []) if p]
         tried: set[str] = set()
         errors: list[str] = []
+        error_kinds: list[str] = []
         while True:
-            acc = self._lease_text_account(frozenset(tried))
+            acc, reason = self._acquire_text_account(
+                frozenset(tried), wait_timeout=wait_timeout, respect_cooldown=respect_cooldown,
+            )
             if acc is None:
-                raise GptImageError("Không tài khoản ChatGPT nào trả lời được. " + " | ".join(errors[-3:]))
+                if wait_timeout is None and not respect_cooldown:
+                    raise GptImageError("Không tài khoản ChatGPT nào trả lời được. " + " | ".join(errors[-3:]))
+                pool = self.text_pool_status()
+                if reason == "no_accounts":
+                    raise GptTextPoolError(
+                        "Chưa có tài khoản ChatGPT nào. Thêm tài khoản ở Cài đặt → Tạo ảnh AI → ChatGPT.",
+                        code="no_accounts", pool=pool,
+                    )
+                if reason == "all_busy" and not errors:
+                    raise GptTextPoolError(
+                        f"Tất cả tài khoản ChatGPT ({pool['busy']}/{pool['total']}) đang bận chạy ở node khác. "
+                        "Chờ xong hoặc thêm tài khoản để dùng song song.",
+                        code="all_busy", pool=pool,
+                    )
+                if reason == "all_cooldown" and not errors:
+                    sec = max(1, int(pool.get("retry_after_seconds") or 60))
+                    wait_txt = f"~{max(1, (sec + 59) // 60)} phút" if sec >= 60 else f"{sec} giây"
+                    raise GptTextPoolError(
+                        f"Tài khoản ChatGPT đang tạm giới hạn (thử lại sau {wait_txt}) hoặc thêm tài khoản mới.",
+                        code="all_cooldown", pool=pool,
+                    )
+                if error_kinds and all(k == "auth" for k in error_kinds):
+                    code = "auth_expired"
+                elif error_kinds and all(k in ("throttled", "rate") for k in error_kinds):
+                    code = "all_cooldown"
+                else:
+                    code = "all_failed"
+                if code == "all_cooldown":
+                    sec = max(1, int(pool.get("retry_after_seconds") or 60))
+                    wait_txt = f"~{max(1, (sec + 59) // 60)} phút" if sec >= 60 else f"{sec} giây"
+                    msg = f"Tài khoản ChatGPT đang tạm giới hạn (thử lại sau {wait_txt}). " + " | ".join(errors[-3:])
+                else:
+                    total = pool["total"] or len(tried)
+                    msg = f"Đã thử {len(tried)}/{total} tài khoản ChatGPT nhưng đều lỗi: " + " | ".join(errors[-3:])
+                raise GptTextPoolError(msg, code=code, pool=pool)
             label = acc.get("email") or acc["id"]
             try:
                 for attempt in (1, 2):
@@ -184,14 +310,24 @@ class GptImageClient:
                         # Câu báo hết lượt thật luôn ngắn; không dò trong câu trả lời dài (kịch bản có thể chứa "try again later"...).
                         if len(text) < 400 and check_limit_refusal(text):
                             raise GptImageError(f"rate_limit: {text[:160]}")
+                        with self._pool_cv:
+                            self._text_cooldown.pop(acc["id"], None)
                         self._store.touch(acc["id"])
                         return text, label
                     except Exception as exc:  # noqa: BLE001
-                        if attempt == 1 and self._classify(exc) == "auth" and self._heal_account(acc):
+                        err_kind = self._classify(exc)
+                        if attempt == 1 and err_kind == "auth" and self._heal_account(acc):
                             acc = self._store.get_account(acc["id"]) or acc
                             continue
-                        if self._classify(exc) == "auth":
+                        if err_kind == "auth":
                             self._store.set_status(acc["id"], "error", "Cookie hết hạn — đăng nhập lại")
+                        elif err_kind == "throttled":
+                            with self._pool_cv:
+                                self._text_cooldown[acc["id"]] = (self._now() + self.TEXT_THROTTLE_COOLDOWN_SECONDS, "throttled")
+                        elif err_kind == "rate":
+                            with self._pool_cv:
+                                self._text_cooldown[acc["id"]] = (self._now() + self.TEXT_RATE_COOLDOWN_SECONDS, "rate")
+                        error_kinds.append(err_kind)
                         errors.append(f"{label}: {str(exc)[:160]}")
                         break
                 tried.add(acc["id"])

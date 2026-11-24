@@ -18,13 +18,18 @@ import {
   scriptRefsFromSources,
   videoIngrBlockers,
   videoIngrCredits,
+  videoIngrDuration,
   videoIngrFingerprint,
   videoIngrFromJob,
   videoIngrIsBatchTile,
+  videoIngrMaxRefs,
+  videoIngrMode,
+  videoIngrModeCredits,
   videoIngrNextAttempt,
   videoIngrOverallState,
   videoIngrSlotCount,
   videoIngrState,
+  videoIngrSupportsBatch,
   videoIngrTileToRef,
   videoIngrTotalCredits,
   videoIngrTrim,
@@ -107,13 +112,17 @@ test('đoạn cắt: mặc định cả video, tối đa 15 s; credit ước tí
   assert.equal(videoIngrCredits(15), 56)
 })
 
-test('chặn trước khi gửi (không tốn credit)', () => {
+test('chặn trước khi gửi (không tốn credit) — video và ảnh đều tùy chọn', () => {
   const refs = scriptRefsFromSources([board('b1'), board('b2')])
+  const fourRefs = scriptRefsFromSources([board('b1'), board('b2'), board('b3'), board('b4')])
   const d = { prompt: 'P', trimStart: null, trimEnd: null }
   assert.deepEqual(videoIngrBlockers(d, VIDEO, refs, FLOW), [])
+  assert.deepEqual(videoIngrBlockers(d, null, refs, FLOW), []) // chỉ ảnh (ingredients) hợp lệ
+  assert.deepEqual(videoIngrBlockers(d, VIDEO, [], FLOW), []) // chỉ video (video_edit 0 ảnh) hợp lệ
+  assert.deepEqual(videoIngrBlockers(d, null, [], FLOW), []) // chỉ prompt (text_to_video) hợp lệ
+  assert.deepEqual(videoIngrBlockers(d, VIDEO, fourRefs, FLOW), []) // có video nhận tới 5 ảnh
+  assert.match(videoIngrBlockers(d, null, fourRefs, FLOW)[0], /tối đa 3 ảnh/) // không video chỉ nhận tối đa 3 ảnh
   assert.match(videoIngrBlockers(d, VIDEO, refs, null)[0], /Chưa chọn project Flow/)
-  assert.match(videoIngrBlockers(d, null, refs, FLOW)[0], /Chưa nối “Video tham chiếu”/)
-  assert.match(videoIngrBlockers(d, VIDEO, [], FLOW)[0], /Chưa nối ảnh tham chiếu/)
   assert.deepEqual(videoIngrBlockers({ ...d, trimEnd: 13 }, VIDEO, refs, FLOW), []) // 13 s: Flow nhận tới 15 s
   assert.match(videoIngrBlockers({ ...d, trimStart: 0, trimEnd: 15.5 }, { ...VIDEO, durationSec: 20 }, refs, FLOW)[0], /tối đa 15 giây/)
   assert.match(videoIngrBlockers({ ...d, trimStart: 5, trimEnd: 6 }, VIDEO, refs, FLOW)[0], /quá ngắn/)
@@ -121,6 +130,51 @@ test('chặn trước khi gửi (không tốn credit)', () => {
   assert.match(videoIngrBlockers({ ...d, trimStart: 5, trimEnd: 14.5 }, VIDEO, refs, FLOW)[0], /vượt quá độ dài video/)
   assert.match(videoIngrBlockers({ ...d, prompt: '  ' }, VIDEO, refs, FLOW)[0], /Prompt đang trống/)
   assert.match(videoIngrBlockers(d, VIDEO, refs, { ...FLOW, flowProjectId: '' })[0], /chưa có mã project trên Google Flow/)
+})
+
+test('4 chế độ đầu vào của node Ingredients: video+ảnh, chỉ video, chỉ ảnh, chỉ prompt', () => {
+  const refs = scriptRefsFromSources([board('b1'), board('b2')])
+  const d = { prompt: '  PROMPT  ', trimStart: null, trimEnd: null, targetSeconds: 8 }
+
+  // 1) video + ảnh -> video_edit, cho batch x2-x4, tối đa 5 ảnh
+  assert.equal(videoIngrMode(VIDEO, refs), 'video_edit')
+  assert.equal(videoIngrMaxRefs(VIDEO), 5)
+  assert.equal(videoIngrSupportsBatch(VIDEO, refs), true)
+
+  // 2) chỉ video (0 ảnh) -> video_edit với ingredient_image_paths=[], mỗi biến thể 1 job (num_outputs=1)
+  assert.equal(videoIngrMode(VIDEO, []), 'video_edit')
+  assert.equal(videoIngrSupportsBatch(VIDEO, []), false)
+  const vidOnly = buildVideoIngrRequest('vingr-1', d, VIDEO, [], FLOW, 'media-123', 1, 2, 3)
+  assert.equal(vidOnly.input_mode, 'video_edit')
+  assert.deepEqual(vidOnly.ingredient_image_paths, [])
+  assert.equal(vidOnly.num_outputs, 1)
+  assert.equal(vidOnly.variant, 2)
+
+  // 3) chỉ ảnh (1-3 ảnh, không video) -> ingredients, dùng targetSeconds (8s), không cần referenceVideoId
+  assert.equal(videoIngrMode(null, refs), 'ingredients')
+  assert.equal(videoIngrMaxRefs(null), 3)
+  assert.equal(videoIngrDuration(d, null, refs), 8)
+  assert.equal(videoIngrModeCredits(d, null, refs, '720p'), 24)
+  const imgOnly = buildVideoIngrRequest('vingr-1', d, null, refs, FLOW, '', 1, 2, 3)
+  assert.equal(imgOnly.input_mode, 'ingredients')
+  assert.equal(imgOnly.duration_seconds, 8)
+  assert.equal(imgOnly.num_outputs, 1)
+  assert.equal(imgOnly.variant, 2)
+  assert.deepEqual(imgOnly.ingredient_image_paths, ['D:/b1.webp', 'D:/b2.webp'])
+  assert.equal('reference_video_id' in imgOnly, false)
+
+  // 4) chỉ prompt (không video, không ảnh) -> text_to_video cố định 10s
+  assert.equal(videoIngrMode(null, []), 'text_to_video')
+  assert.equal(videoIngrDuration(d, null, []), 10)
+  assert.equal(videoIngrModeCredits(d, null, [], '720p'), 30)
+  assert.equal(videoIngrModeCredits(d, null, [], '360p'), 10)
+  const txtOnly = buildVideoIngrRequest('vingr-1', d, null, [], { ...FLOW, resolution: '360p' }, '', 1, 1, 2)
+  assert.equal(txtOnly.input_mode, 'text_to_video')
+  assert.equal(txtOnly.duration_seconds, 10)
+  assert.equal(txtOnly.resolution, '360p')
+  assert.equal(txtOnly.num_outputs, 1)
+  assert.equal('reference_video_id' in txtOnly, false)
+  assert.equal('ingredient_image_paths' in txtOnly, false)
 })
 
 test('request video_edit: Omni 1.2, 720p, ảnh theo thứ tự, đoạn cắt, media id, khóa chống trùng theo lần gửi', () => {
@@ -158,7 +212,7 @@ test('request video_edit: Omni 1.2, 720p, ảnh theo thứ tự, đoạn cắt, 
   // `variant` đi kèm để backend (chống trùng theo nội dung) không gộp các biến thể giống hệt nhau thành 1 job
   assert.deepEqual([1, 2, 3, 4].map((v) => buildVideoIngrRequest('vingr-1', d, VIDEO, refs, FLOW, 'media-123', 1, v).variant), [1, 2, 3, 4])
   assert.throws(() => buildVideoIngrRequest('vingr-1', d, VIDEO, refs, FLOW, '', 1), /mã video tham chiếu/)
-  assert.throws(() => buildVideoIngrRequest('vingr-1', d, null, refs, FLOW, 'm', 1), /Video tham chiếu/)
+  assert.equal(buildVideoIngrRequest('vingr-1', d, null, refs, FLOW, '', 1).input_mode, 'ingredients')
 })
 
 test('trạng thái: đổi thứ tự ảnh / đoạn cắt / prompt -> video là bản cũ', () => {

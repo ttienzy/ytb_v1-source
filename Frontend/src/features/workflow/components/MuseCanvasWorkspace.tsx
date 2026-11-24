@@ -98,6 +98,7 @@ import {
 } from '../services/museProjects.ts'
 import { museRuns, runKeyNodeId } from '../services/museRunRegistry.ts'
 import { MuseProjectBar, type SaveState } from './MuseProjectBar'
+import { MuseGptChatBar } from './MuseGptChatBar'
 import { useTextPrompt } from './TextPromptDialog'
 import {
   MUSE_NODE,
@@ -555,6 +556,7 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
               configSave={configSave}
               configError={saveError}
               graphRef={graphRef}
+              onOpenSettings={onOpenSettings}
               overlay={
                 projectNotice && (
                   <div className={`mc-project-notice${projectNotice.kind === 'err' ? ' err' : ''}`} role="status">
@@ -928,9 +930,10 @@ interface MuseCanvasBoardProps {
   graphRef: MutableRefObject<(() => GraphLike) | null>
   renderBar: (s: BoardBarState) => ReactNode
   overlay?: ReactNode
+  onOpenSettings?: () => void
 }
 
-function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderBar, overlay }: MuseCanvasBoardProps) {
+function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderBar, overlay, onOpenSettings }: MuseCanvasBoardProps) {
   // board gắn lại mỗi khi đổi project (key) nên chỉ cần đọc bản trên máy 1 lần
   const [localGraph] = useState(() => loadLocalProjectGraph(projectId))
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(localGraph.nodes as Node[])
@@ -1138,6 +1141,15 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
     [centerPosition, setEdges, setNodes],
   )
 
+  const spawnPromptBox = useCallback(
+    (text: string, label: string) => {
+      const node = createPromptBoxNode(centerPosition(), undefined, text)
+      node.data.label = label
+      setNodes((ns) => [...ns, node as Node])
+    },
+    [centerPosition, setNodes],
+  )
+
   const saveState: SaveState =
     configSave === 'error' || graphSave === 'error'
       ? 'error'
@@ -1264,6 +1276,12 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
           </button>
         </div>
       )}
+
+      <MuseGptChatBar
+        nodes={nodes as unknown as MuseNodeLike[]}
+        onSpawnPromptBox={spawnPromptBox}
+        onOpenSettings={onOpenSettings}
+      />
     </div>
   )
 }

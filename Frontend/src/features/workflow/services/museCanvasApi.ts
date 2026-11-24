@@ -6,6 +6,7 @@
  */
 import { API_URL } from '../../../shared/constants'
 import { fileStem } from './museCanvasNodes.ts'
+import type { GptChatErrorCode, GptChatPoolStatus } from './museGptChat.ts'
 import {
   normalizeProjectIndex,
   normalizeProjectMeta,
@@ -641,3 +642,64 @@ export async function getMergeJob(jobId: string): Promise<MergeJob | null> {
 /** Khung hình đầu / cuối của 1 clip (JPEG) — xem trước điểm nối. */
 export const mergeFrameUrl = (path: string, at: 'first' | 'last', width = 200) =>
   `${API_URL}/api/workflow/muse/merge/frame?path=${encodeURIComponent(path)}&at=${at}&w=${width}`
+
+// ---------------------------------------------------------------- ChatGPT trong Muse Canvas (ngữ cảnh tạm thời)
+
+export interface GptChatReply {
+  ok: boolean
+  provider: 'gpt'
+  reply: string
+  account_label: string
+  duration_seconds: number
+  pool?: GptChatPoolStatus
+}
+
+export class GptChatApiError extends Error {
+  code: GptChatErrorCode
+  pool?: GptChatPoolStatus
+
+  constructor(message: string, code: GptChatErrorCode = 'all_failed', pool?: GptChatPoolStatus) {
+    super(message)
+    this.code = code
+    this.pool = pool
+  }
+}
+
+export async function fetchGptChatPoolStatus(): Promise<GptChatPoolStatus> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/gpt-chat/status`)
+  return jsonOrThrow<GptChatPoolStatus>(res, 'Không đọc được trạng thái tài khoản ChatGPT')
+}
+
+export async function sendMuseGptChat(body: {
+  message: string
+  history: { role: 'user' | 'assistant'; content: string }[]
+  reference_images?: string[]
+}): Promise<GptChatReply> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/gpt-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (res.status === 404 || res.status === 405) {
+    throw new GptChatApiError('Backend chưa có chat GPT trong Muse Canvas — hãy khởi động lại backend.', 'all_failed')
+  }
+  const detail = d?.detail
+  const pool = detail && typeof detail === 'object' ? (detail.pool as GptChatPoolStatus | undefined) : undefined
+  const code = (detail && typeof detail === 'object' && typeof detail.code === 'string'
+    ? detail.code
+    : 'all_failed') as GptChatErrorCode
+  const msg =
+    detail && typeof detail === 'object' && typeof detail.message === 'string'
+      ? detail.message
+      : typeof detail === 'string' && detail
+        ? detail
+        : `ChatGPT lỗi (HTTP ${res.status})`
+  if (!res.ok || !d?.ok) {
+    throw new GptChatApiError(msg, code, pool)
+  }
+  if (!d.reply) {
+    throw new GptChatApiError('ChatGPT trả lời rỗng.', 'all_failed', d.pool)
+  }
+  return d as GptChatReply
+}
