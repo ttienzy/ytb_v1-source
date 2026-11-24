@@ -33,6 +33,8 @@ from app.publisher_monitor.router import router as monitor_router
 from app.stories.router import router as stories_router
 from app.veo.router import router as veo_router
 from app.ai.muse.router import router as muse_router
+from app.muse_production import runner as production_runner
+from app.muse_production.router import router as production_router
 from app.ai.image_gen.router import router as image_gen_router
 from app.workflow.router import router as workflow_router
 from app.campaign.router import router as campaign_router
@@ -72,10 +74,12 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger("campaign").exception("Không khởi tạo được Campaign engine")
 
+    production_runner.startup()
     yield
 
     # Dọn dẹp khi tắt server
     studio_batch.shutdown()
+    production_runner.shutdown()
     veo_service.shutdown()
 
 
@@ -87,6 +91,7 @@ app.include_router(workflow_router)
 app.include_router(campaign_router)
 app.include_router(motion_long_router)
 app.include_router(muse_router)
+app.include_router(production_router)
 app.include_router(image_gen_router)
 app.include_router(voices_router)
 app.include_router(media_router)

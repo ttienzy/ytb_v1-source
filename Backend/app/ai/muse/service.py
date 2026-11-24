@@ -14,10 +14,11 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional
 
 from app.core.config import DATA_DIR, settings
 from app.core.storage import read_config, write_config, mark_saved
@@ -48,6 +49,14 @@ MUSE_OUTPUT_DIR = DATA_DIR / "media" / "muse_outputs"
 MUSE_TEXT_DIR = DATA_DIR / "media" / "muse_texts"
 # Chế độ chữ: agent có thể viết nhiều tin liên tiếp -> chờ luồng chat im lặng lâu hơn mới chốt
 TEXT_SETTLE_SECONDS = 30
+
+
+def _has_structured_reply(result):
+    # Muse often posts progress while its VM is still reading a source.
+    if any(str(r.get("path", "")).split("?")[0].lower().endswith(".json") for r in result.resources):
+        return True
+    return any(re.search(r"(?:^|\n)\s*(?:```json\s*)?\{", part, re.I)
+               and "}" in part for part in result.reply_texts)
 MUSE_URL = "https://muse.ai/"
 NO_ACCOUNT_MSG = "Chưa có tài khoản Muse. Vào Cài đặt → Muse AI (Meta) → “(+) Thêm tài khoản Muse”."
 
@@ -547,10 +556,12 @@ class MuseService:
 
     # ------------------------------------------------------------------ tạo video
 
-    def generate_video(self, req: MuseGenerateRequest) -> MuseGenerateResponse:
+    def generate_video(self, req: MuseGenerateRequest, *, receipt: Optional[dict] = None,
+                       on_dispatch: Optional[Callable[[dict], None]] = None,
+                       on_progress: Optional[Callable[[str], None]] = None) -> MuseGenerateResponse:
         """Chọn tài khoản (chỉ định hoặc xoay vòng), rồi gửi prompt và đợi Muse tạo video."""
         try:
-            target = self._job_target(req.account_id)
+            target = self._job_target(receipt["account"] if receipt else req.account_id)
         except (ValueError, RuntimeError) as e:
             return MuseGenerateResponse(ok=False, prompt=req.prompt, error=str(e))
         lock = self._lock_for(target.key)
@@ -561,7 +572,7 @@ class MuseService:
         try:
             # đọc lại bản ghi mới nhất (cookie có thể vừa được làm mới)
             target.account = self.get_store().get_account(target.account_id) or target.account
-            res = self._generate_http(target, req)
+            res = self._generate_http(target, req, receipt=receipt, on_dispatch=on_dispatch, on_progress=on_progress)
         finally:
             lock.release()
 
@@ -648,7 +659,8 @@ class MuseService:
         prefix = self._safe_prefix(req.file_prefix, "muse_text")
         MUSE_TEXT_DIR.mkdir(parents=True, exist_ok=True)
         # Muse đôi khi viết bài dài thành file trong sandbox thay vì tin nhắn: tải về và ghép vào.
-        for i, res in enumerate(r for r in result.resources if str(r.get("path", "")).split("?")[0].lower().endswith((".md", ".txt"))):
+        extensions = (".md", ".txt", ".json") if req.expect_json else (".md", ".txt")
+        for i, res in enumerate(r for r in result.resources if str(r.get("path", "")).split("?")[0].lower().endswith(extensions)):
             try:
                 tmp = MUSE_TEXT_DIR / f"{prefix}_{stamp}_att{i}.txt"
                 gw.download(res, str(tmp))
@@ -680,7 +692,9 @@ class MuseService:
                    if result.timed_out else None),
         )
 
-    def _generate_http(self, target: MuseTarget, req: MuseGenerateRequest) -> MuseGenerateResponse:
+    def _generate_http(self, target: MuseTarget, req: MuseGenerateRequest, *, receipt: Optional[dict] = None,
+                       on_dispatch: Optional[Callable[[dict], None]] = None,
+                       on_progress: Optional[Callable[[str], None]] = None) -> MuseGenerateResponse:
         """Gửi prompt (kèm media tham chiếu) qua gateway Noise rồi chờ sự kiện video/ảnh và tải về.
 
         Đã gửi prompt thì KHÔNG bao giờ gửi lại (mỗi lần gửi tốn hạn mức): lỗi mạng khi đang chờ
@@ -714,16 +728,25 @@ class MuseService:
         try:
             # Chọn chat: nối tiếp chat trước / chat mới riêng / chat chính.
             session_id: Optional[str] = None
-            if req.continuation and acc.get("last_session_id"):
+            if receipt:
+                session_id = receipt["session"]
+            elif req.continuation and acc.get("last_session_id"):
                 session_id = acc["last_session_id"]
             elif req.use_side_chat:
                 session_id = gw.start_session(title=(req.chat_title or f"CreatorFlow · {final_prompt[:40]}")[:80])
 
-            history = gw.history(session_id, limit=1)
-            baseline = max([e.get("seq") or 0 for e in history] or [0])
-            items = [{"type": "text", "text": final_prompt}] + gw.attachment_items(media)
-            gw.send_items(items, node_id_for(gw.viewer_id), session_id)
-            self.get_store().update_account(acc["id"], last_session_id=session_id or "")
+            if receipt:
+                baseline = receipt["baseline"]
+            else:
+                history = gw.history(session_id, limit=1)
+                baseline = max([e.get("seq") or 0 for e in history] or [0])
+                items = [{"type": "text", "text": final_prompt}] + gw.attachment_items(media)
+                if on_dispatch:
+                    if not session_id:
+                        raise ValueError("Chưa tạo được hội thoại riêng cho tập.")
+                    on_dispatch({"account": target.account_id, "session": session_id, "baseline": baseline})
+                gw.send_items(items, node_id_for(gw.viewer_id), session_id)
+                self.get_store().update_account(acc["id"], last_session_id=session_id or "")
         except MuseAuthError as e:
             gw.close()
             return fail(f"{NOT_LOGGED_MARK} {e}")
@@ -743,13 +766,16 @@ class MuseService:
                     if kind == "text":
                         # chỉ cần câu trả lời chữ (want rỗng), chốt khi chat im lặng TEXT_SETTLE_SECONDS
                         result = wait_for_result(
-                            gw, session_id, baseline, want=set(), timeout=remaining, settle=TEXT_SETTLE_SECONDS
+                            gw, session_id, baseline, want=set(), timeout=remaining, settle=TEXT_SETTLE_SECONDS,
+                            text_ready=_has_structured_reply if req.expect_json else None,
+                            on_progress=on_progress,
                         )
                     else:
                         # settle_seconds: chờ chat im lặng lâu hơn (vd. Muse làm nhiều clip liên tiếp)
                         result = wait_for_result(
                             gw, session_id, baseline, want={kind}, timeout=remaining, reply_grace=REPLY_GRACE,
                             settle=req.settle_seconds or 15,
+                            on_progress=on_progress,
                         )
                     break
                 except Exception:
@@ -771,11 +797,12 @@ class MuseService:
             found = [r for r in result.resources if guess_media_kind(r) == kind]
             if not found:
                 reply = (result.reply_text or "").strip()
+                if reply:
+                    return fail(f"Muse phản hồi: “{reply[:500]}”")
                 if result.timed_out:
                     return fail(f"Muse chưa trả {noun} sau {timeout_sec} giây. Prompt ĐÃ được gửi — mở Chrome Muse để "
                                 "xem, đừng gửi lại để khỏi tốn lượt.")
-                return fail(f"Muse trả lời nhưng không có {noun}: “{reply[:400]}”" if reply
-                            else f"Muse không trả {noun} nào.")
+                return fail(f"Muse không trả {noun} nào.")
 
             # collect_all: tải mọi file đúng loại theo thứ tự (vd. clip từng đoạn + bản ghép); file cuối là kết quả chính
             chosen = found[-1]

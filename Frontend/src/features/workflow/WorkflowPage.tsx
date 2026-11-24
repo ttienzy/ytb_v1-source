@@ -87,7 +87,9 @@ import { buildVoiceoverPlan, selectCachedVoiceoverPath } from './services/workfl
 import { isValidWorkflowConnection } from './services/workflowGraph.ts'
 
 function WorkflowCanvas({ setActivePage }: { setActivePage?: (page: string) => void }) {
-  const [activeTab, setActiveTab] = useState<WorkflowTabId>('chaining')
+  const [activeTab, setActiveTab] = useState<WorkflowTabId>(() =>
+    sessionStorage.getItem('muse.production.openCanvas') ? 'muse' : 'chaining')
+  useEffect(() => { sessionStorage.removeItem('muse.production.openCanvas') }, [])
   const [edges, setEdges] = useState<Edge[]>(initialEdges)
   const { nodes, setNodes, nodesRef, captureRevision } = useWorkflowState(initialNodes, edges)
   const taskKeys = useRef(new Set<string>())

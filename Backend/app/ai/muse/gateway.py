@@ -271,14 +271,33 @@ def auth_check(cookies: str, ua: str = "") -> dict[str, Any]:
     return data
 
 
+def _clean_error_text(text: str, status_code: int) -> str:
+    cleaned = (text or "").strip()
+    if "<html" in cleaned.lower() or "<body" in cleaned.lower():
+        m = re.search(r"<body[^>]*>(.*?)</body>", cleaned, re.IGNORECASE | re.DOTALL)
+        if m:
+            body_text = re.sub(r"<[^>]+>", " ", m.group(1)).strip()
+            if body_text:
+                cleaned = re.sub(r"\s+", " ", body_text)
+        else:
+            cleaned = f"máy chủ trả về trang lỗi HTML"
+    if "AsyncSocketException" in cleaned or "errno = 104" in cleaned or "Connection reset" in cleaned:
+        cleaned = "kết nối socket bị ngắt (Connection reset by peer)"
+    return cleaned[:200]
+
+
 def session_info(cookies: str, ua: str = "") -> dict[str, Any]:
-    r = rq.get(MUSE_BASE + "/api/session?vm_state=live", headers=_web_headers(cookies, ua), impersonate=IMPERSONATE, timeout=20)
+    try:
+        r = rq.get(MUSE_BASE + "/api/session?vm_state=live", headers=_web_headers(cookies, ua), impersonate=IMPERSONATE, timeout=20)
+    except Exception as exc:
+        raise MuseGatewayError(-1, f"Lỗi mạng khi kết nối api/session: {exc}")
     if r.status_code in (401, 403):
         raise MuseAuthError(f"api/session HTTP {r.status_code}: cookie hết hạn.")
     try:
         return r.json()
     except ValueError:
-        raise MuseGatewayError(r.status_code, f"api/session trả về không phải JSON: {r.text[:120]!r}")
+        err_msg = _clean_error_text(r.text, r.status_code)
+        raise MuseGatewayError(r.status_code, f"api/session HTTP {r.status_code}: {err_msg}")
 
 
 def wake_vm(cookies: str, ua: str, access_token: str, vm_id: str) -> None:
@@ -296,36 +315,56 @@ def resolve_vm(cookies: str, ua: str, access_token: str, wait_seconds: float = 9
     deadline = time.time() + wait_seconds
     woke = False
     last: dict[str, Any] = {}
+    last_err: Optional[Exception] = None
     while True:
-        last = session_info(cookies, ua)
+        try:
+            last = session_info(cookies, ua)
+            last_err = None
+        except MuseGatewayError as exc:
+            last_err = exc
+            # Các mã 5xx (500, 502, 503, 504) hoặc lỗi socket (-1) là tạm thời trong khi VM khởi động/ngủ
+            if time.time() >= deadline or exc.status not in (-1, 500, 502, 503, 504):
+                raise
+            time.sleep(3)
+            continue
+
         vm_id = last.get("vm_id")
         state = str(last.get("vm_state") or "").upper()
         if vm_id and state in ("", "RUNNING"):
             return vm_id
         if vm_id and not woke:
-            wake_vm(cookies, ua, access_token, vm_id)
-            woke = True
+            try:
+                wake_vm(cookies, ua, access_token, vm_id)
+                woke = True
+            except Exception:
+                pass
         if time.time() > deadline:
             if vm_id:
                 return vm_id  # thử kết nối luôn, gateway sẽ báo lỗi rõ hơn
+            if last_err:
+                raise last_err
             raise MuseGatewayError(-1, f"VM Muse chưa sẵn sàng: {json.dumps(last)[:200]}")
         time.sleep(3)
 
 
 def hatch_token(cookies: str, ua: str, access_token: str, vm_id: str) -> str:
-    r = rq.post(
-        MUSE_BASE + "/api/hatch/token",
-        headers=_web_headers(cookies, ua, access_token),
-        json={"vmAddress": f"wss://{vm_id}.metaaivm.com/", "vmName": vm_id},
-        impersonate=IMPERSONATE,
-        timeout=20,
-    )
+    try:
+        r = rq.post(
+            MUSE_BASE + "/api/hatch/token",
+            headers=_web_headers(cookies, ua, access_token),
+            json={"vmAddress": f"wss://{vm_id}.metaaivm.com/", "vmName": vm_id},
+            impersonate=IMPERSONATE,
+            timeout=20,
+        )
+    except Exception as exc:
+        raise MuseGatewayError(-1, f"Lỗi mạng khi lấy hatch token: {exc}")
     try:
         tok = r.json().get("token")
     except ValueError:
         tok = None
     if r.status_code != 200 or not tok:
-        raise MuseAuthError(f"hatch/token HTTP {r.status_code}: {r.text[:160]}")
+        clean_err = _clean_error_text(r.text, r.status_code)
+        raise MuseAuthError(f"hatch/token HTTP {r.status_code}: {clean_err}")
     return tok
 
 
@@ -742,6 +781,24 @@ class ChatResult:
     timed_out: bool = False
 
 
+REJECT_KEYWORDS = (
+    "chưa tạo được",
+    "không khả dụng",
+    "lỗi tạm thời",
+    "không thể tạo",
+    "thử lại sau",
+    "từ chối",
+    "chưa thể tạo",
+    "hạn chế",
+    "lỗi hệ thống",
+    "bị lỗi",
+    "không thực hiện được",
+    "cannot create",
+    "unavailable",
+    "temporarily",
+)
+
+
 def wait_for_result(
     gw: MuseGateway,
     session_id: Optional[str],
@@ -753,11 +810,12 @@ def wait_for_result(
     poll: float = 3,
     reply_grace: Optional[float] = None,
     on_progress: Optional[Callable[[str], None]] = None,
+    text_ready: Optional[Callable[[ChatResult], bool]] = None,
 ) -> ChatResult:
     """Đọc lại lịch sử chat tới khi có media mong muốn và luồng chat im lặng `settle` giây.
 
     Media tới thành sự kiện riêng, sau câu trả lời chữ (ảnh ~20 s, video lâu hơn).
-    Nếu agent đã trả lời chữ mà không có media, vẫn chờ tới hết `timeout`.
+    Nếu agent đã trả lời chữ mà không có media, vẫn chờ tới hết `timeout` (trừ khi bot từ chối/báo lỗi).
     """
     want = set(want)
     result = ChatResult(session_id=session_id, baseline_seq=baseline)
@@ -786,15 +844,29 @@ def wait_for_result(
         result.reply_texts = texts
         result.resources = list(res.values())
         have_media = any(guess_media_kind(r) in want for r in result.resources)
+
+        # Thông báo tiến trình hoặc tin nhắn của Muse ra bên ngoài theo thời gian thực
         if on_progress:
-            on_progress(
-                f"{len(new)} sự kiện mới, {len(result.resources)} file, "
-                f"{'đã có media' if have_media else 'chưa có media'}, im lặng {int(time.time() - quiet_since)}s"
-            )
+            if result.reply_text:
+                on_progress(result.reply_text)
+            else:
+                on_progress(
+                    f"{len(new)} sự kiện mới, {len(result.resources)} file, "
+                    f"{'đã có media' if have_media else 'chờ xử lý...'}, im lặng {int(time.time() - quiet_since)}s"
+                )
+
         # want rỗng = chỉ cần câu trả lời chữ
-        done = have_media if want else bool(result.reply_text)
+        done = have_media if want else (text_ready(result) if text_ready else bool(result.reply_text))
         if done and time.time() - quiet_since >= settle:
             return result
+
+        # Nếu bot Muse đã phản hồi tin nhắn báo lỗi / không khả dụng (dù đang chờ video/ảnh)
+        # thì dừng chờ ngay sau khi chat im lặng, không bắt người dùng chờ vô ích hết timeout
+        if want and result.reply_text and not have_media:
+            lower_reply = result.reply_text.lower()
+            if any(kw in lower_reply for kw in REJECT_KEYWORDS) and time.time() - quiet_since >= min(settle, 10):
+                return result
+
         # Agent đã trả lời chữ (vd. hỏi lại / từ chối) và im lặng lâu mà không có media -> thôi chờ.
         if reply_grace and result.reply_text and not have_media and time.time() - quiet_since >= reply_grace:
             return result

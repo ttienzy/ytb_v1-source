@@ -5,7 +5,7 @@ export const museStudioDoc: HelpDoc = {
   title: 'Muse Studio (Meta Muse Spark)',
   summary:
     'Tạo video điện ảnh bằng Meta Muse: bạn viết prompt (kèm ảnh/video tham chiếu nếu muốn), app gửi thẳng tới máy ảo Muse của tài khoản bằng phiên đăng nhập đã lưu (không cần mở Chrome), chờ Muse render rồi tự tải file MP4 về xem ngay và lưu vào thư mục tải về.',
-  verifiedAt: '2026-11-15',
+  verifiedAt: '2026-11-24',
   requires: [
     {
       label: 'Ít nhất một tài khoản Muse đã đăng nhập',
@@ -39,6 +39,12 @@ export const museStudioDoc: HelpDoc = {
     },
   ],
   areas: [
+    {
+      id: 'day-chuyen-ba-muse',
+      name: 'Dây chuyền 3 Muse',
+      what: 'Chọn Tập mới, nhập chủ đề, nguồn tin và giọng văn. Scout tìm bài gốc và đề xuất ba góc. Showrunner phản biện nguồn, viết lời đọc từng cảnh và chờ bạn duyệt kịch bản. Producer tạo ảnh và clip, rồi app ghép giọng đọc thành bản nháp để phản biện và duyệt.',
+      tip: 'Mở Đội Muse và cấu hình sản xuất để gán tài khoản, chọn giọng đọc, bật duyệt cảnh mẫu hoặc lưu lịch chạy theo giờ trên máy. Nhật ký bàn giao cho xem lại từng phiên bản. Khi một lượt đã gửi bị gián đoạn, chọn Đọc lại kết quả để tiếp nối đúng hội thoại.',
+    },
     {
       id: 'trang-thai-ket-noi',
       name: 'Đầu trang: trạng thái và lối tắt',
@@ -110,6 +116,7 @@ export const museStudioDoc: HelpDoc = {
   ],
   related: ['Cài đặt', 'Veo Studio', 'Chiến dịch AI'],
   changes: [
+    { date: '2026-11-24', text: 'Thêm dây chuyền ba vai Muse, duyệt theo tập, dựng theo cảnh và tải bộ asset.' },
     { date: '2026-11-15', text: 'Tạo video kết nối thẳng tới Muse, không còn điều khiển cửa sổ Chrome; ảnh/video tham chiếu được gửi kèm prompt.' },
     { date: '2026-11-15', text: 'Chọn được tài khoản Muse để tạo video, hoặc để “Tự động” luân phiên nhiều tài khoản.' },
     { date: '2026-11-12', text: 'Muse Studio có tài liệu hướng dẫn lần đầu.' },

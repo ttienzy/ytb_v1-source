@@ -455,3 +455,29 @@ def test_generate_http_video_collect_all_downloads_every_clip(tmp_path, monkeypa
     # mặc định: chỉ file cuối, chờ im lặng 15 s
     res2 = svc.generate_video(MuseGenerateRequest(prompt="x", output_kind="video", apply_prefix=False))
     assert seen["settle"] == 15 and len(res2.local_paths) == 1 and res2.local_paths[0] == res2.local_path
+
+
+def test_clean_error_text():
+    html = "<html><body>AsyncSocketException: Network error, type = Network error, errno = 104 (Connection reset by peer)</body></html>"
+    cleaned = g._clean_error_text(html, 503)
+    assert "<" not in cleaned and ">" not in cleaned
+    assert "Connection reset by peer" in cleaned
+
+    generic_html = "<html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1><p>server down</p></body></html>"
+    assert "server down" in g._clean_error_text(generic_html, 502)
+
+
+def test_resolve_vm_retries_transient_503(monkeypatch):
+    calls = []
+
+    def fake_session_info(cookies, ua):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise g.MuseGatewayError(503, "socket reset")
+        return {"vm_id": "vm-123", "vm_state": "RUNNING"}
+
+    monkeypatch.setattr(g, "session_info", fake_session_info)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    vm_id = g.resolve_vm("cookies", "ua", "token", wait_seconds=10)
+    assert vm_id == "vm-123"
+    assert len(calls) == 2

@@ -34,6 +34,7 @@ import type {
 import * as api from './services/museApi'
 import { API_URL } from '../../shared/constants'
 import { HelpHint } from '../help/components/HelpHint'
+import { ProductionDesk } from './ProductionDesk'
 
 interface Props {
   setActivePage: (page: string) => void
@@ -49,6 +50,24 @@ const PRESET_STYLES = [
 ]
 
 export function MuseStudioPage({ setActivePage }: Props) {
+  const [team, setTeam] = useState(() => sessionStorage.getItem('muse.studio.tab') === 'team')
+  const [singleOpened, setSingleOpened] = useState(!team)
+  function select(value: boolean) {
+    setTeam(value)
+    sessionStorage.setItem('muse.studio.tab', value ? 'team' : 'single')
+    if (!value) setSingleOpened(true)
+  }
+  return <>
+    <nav className="mp-tabs" aria-label="Chế độ Muse Studio">
+      <button aria-pressed={!team} onClick={() => select(false)}>Tạo video</button>
+      <button aria-pressed={team} onClick={() => select(true)}>Dây chuyền 3 Muse</button>
+    </nav>
+    {team && <ProductionDesk onCanvas={() => setActivePage('Canvas AI')} />}
+    {singleOpened && <div hidden={team}><MuseSingleStudio setActivePage={setActivePage} /></div>}
+  </>
+}
+
+function MuseSingleStudio({ setActivePage }: Props) {
   // Connection state
   const [status, setStatus] = useState<MuseStatus | null>(null)
   const [checkingStatus, setCheckingStatus] = useState(false)

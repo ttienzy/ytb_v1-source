@@ -195,9 +195,9 @@ def _read_legacy_graph() -> Optional[MuseCanvasGraph]:
         return None
 
 
-def _fresh_project(name: str, graph: MuseCanvasGraph, settings: MuseProjectSettings) -> MuseProject:
+def _fresh_project(name: str, graph: MuseCanvasGraph, settings: MuseProjectSettings, project_id: Optional[str] = None) -> MuseProject:
     now = time.time()
-    pid = _new_id()
+    pid = project_id or _new_id()
     graph.updated_at = now
     _write_atomic(_graph_path(pid), _graph_blob(graph))
     return MuseProject(id=pid, name=name, created_at=now, updated_at=now, node_count=len(graph.nodes),
@@ -252,9 +252,15 @@ def get_project(pid: str) -> MuseProject:
     return _find(ensure_store(), pid)
 
 
-def create_project(req: MuseProjectCreate) -> MuseProject:
+def create_project(req: MuseProjectCreate, *, project_id: Optional[str] = None) -> MuseProject:
     with _LOCK:
         idx = ensure_store()
+        if project_id is not None:
+            if not re.fullmatch(r"[a-z0-9]{12,48}", project_id):
+                raise ValueError("Mã project không hợp lệ.")
+            existing = next((p for p in idx.projects if p.id == project_id), None)
+            if existing:
+                return existing
         if len(idx.projects) >= MAX_PROJECTS:
             raise ValueError(f"Đã có {MAX_PROJECTS} project — xóa bớt project cũ trước.")
         settings = req.settings
@@ -262,7 +268,7 @@ def create_project(req: MuseProjectCreate) -> MuseProject:
             active = next((p for p in idx.projects if p.id == idx.active_id), None)
             settings = active.settings.model_copy() if active else _settings_from_config()
         graph = req.graph.model_copy(deep=True) if req.graph else MuseCanvasGraph()
-        proj = _fresh_project(req.name, graph, settings)
+        proj = _fresh_project(req.name, graph, settings, project_id)
         idx.projects.append(proj)
         if req.activate:
             idx.active_id = proj.id

@@ -66,6 +66,7 @@ class MuseUploadResponse(BaseModel):
 
 
 class MuseGenerateRequest(BaseModel):
+    expect_json: bool = False
     prompt: str = Field(..., description="Prompt mô tả video cần tạo")
     reference_image: Optional[str] = Field(default=None, description="Đường dẫn ảnh mẫu hoặc URL tham chiếu (tương thích ngược)")
     reference_images: Optional[list[str]] = Field(default=None, description="Danh sách các file ảnh tham chiếu")
