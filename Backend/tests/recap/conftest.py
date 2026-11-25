@@ -24,6 +24,7 @@ def _isolate_job_files(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "segment_path", lambda job_id, i: root / job_id / "merge" / f"seg_{i}.mp4")
     monkeypatch.setattr(service, "recap_path", lambda job_id: root / job_id / "recap.json")
     monkeypatch.setattr(service, "raw_path", lambda job_id: root / job_id / "raw.txt")
+    monkeypatch.setattr(service, "chunks_dir", lambda job_id: root / job_id / "chunks")
     monkeypatch.setattr(service, "source_dir", lambda job_id: root / job_id / "source")
     monkeypatch.setattr(service, "video_path", lambda job_id: root / job_id / "source" / "video.mp4")
     monkeypatch.setattr(service, "final_path", lambda job_id: root / job_id / "final_recap.mp4")

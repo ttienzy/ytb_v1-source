@@ -148,9 +148,9 @@ def build_cut_and_mux_cmd(
         "-t", f"{dur:.3f}",
         "-map", "0:v:0", "-map", "1:a:0",
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
         *out_threads,
-        "-c:a", "aac", "-b:a", "192k",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-af", "apad",
         str(out_seg),
     ]
@@ -176,22 +176,29 @@ def cut_and_mux_segment(
     if out_seg.exists() and out_seg.stat().st_size:
         return out_seg
     out_seg.parent.mkdir(parents=True, exist_ok=True)
+    tmp_seg = out_seg.with_name(f"{out_seg.stem}.part{out_seg.suffix}")
+    tmp_seg.unlink(missing_ok=True)
     cmd, _dur = build_cut_and_mux_cmd(
         source_video,
         start_sec,
         end_sec - start_sec,
         voice_wav,
-        out_seg,
+        tmp_seg,
         voice_dur=ffprobe_duration(voice_wav),
         threads=threads,
     )
     flags = _LOW_PRIORITY_FLAG if low_priority else 0
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=TIMEOUT_MUX, creationflags=flags,
-    )
-    if proc.returncode != 0 or not out_seg.exists() or not out_seg.stat().st_size:
-        raise RuntimeError(f"ffmpeg cut_and_mux thất bại [{out_seg.name}]: {(proc.stderr or '')[-400:]}")
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=TIMEOUT_MUX, creationflags=flags,
+        )
+        if proc.returncode != 0 or not tmp_seg.exists() or not tmp_seg.stat().st_size:
+            raise RuntimeError(f"ffmpeg cut_and_mux thất bại [{out_seg.name}]: {(proc.stderr or '')[-400:]}")
+        tmp_seg.replace(out_seg)
+    except Exception:
+        tmp_seg.unlink(missing_ok=True)
+        raise
     return out_seg
 
 
@@ -212,16 +219,23 @@ def concat_segments(segments: list[Path], out: Path, work_dir: Path) -> Path:
         posix = p.as_posix().replace("'", "'\\''")
         lines.append(f"file '{posix}'")
     lst.write_text("\n".join(lines), encoding="utf-8")
+    tmp_out = out.with_name(f"{out.stem}.part{out.suffix}")
+    tmp_out.unlink(missing_ok=True)
     cmd = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(lst),
         "-c", "copy",
-        str(out),
+        str(tmp_out),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_CONCAT)
-    if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
-        raise RuntimeError(f"ffmpeg concat thất bại: {(proc.stderr or '')[-500:]}")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_CONCAT)
+        if proc.returncode != 0 or not tmp_out.exists() or not tmp_out.stat().st_size:
+            raise RuntimeError(f"ffmpeg concat thất bại: {(proc.stderr or '')[-500:]}")
+        tmp_out.replace(out)
+    except Exception:
+        tmp_out.unlink(missing_ok=True)
+        raise
     return out
 
 
@@ -245,17 +259,20 @@ def build_smart_bgm_chain(
     if out_chain.exists() and out_chain.stat().st_size > 0:
         return out_chain
 
-    # Đo thời lượng từng bài
+    # Đo thời lượng từng bài & loại track hỏng/duration=0 để tránh vòng lặp vô tận
     track_durs = {p: ffprobe_duration(p) for p in bgm_paths}
+    valid_tracks = [p for p in bgm_paths if track_durs.get(p, 0.0) > 0.0]
+    if not valid_tracks:
+        raise RuntimeError("Không đọc được thời lượng file nhạc nền nào hợp lệ.")
 
-    # Bắt đầu chuỗi với danh sách ban đầu
-    playlist = list(bgm_paths)
+    # Bắt đầu chuỗi với danh sách hợp lệ ban đầu
+    playlist = list(valid_tracks)
     current_dur = sum(track_durs.get(p, 0.0) for p in playlist)
 
-    if len(bgm_paths) > 1 and current_dur < target_duration + 10.0:
-        while current_dur < target_duration + 10.0:
-            # Chọn ngẫu nhiên trong pool bgm_paths, ưu tiên bài khác bài vừa phát
-            candidates = [p for p in bgm_paths if p != playlist[-1]] or bgm_paths
+    if len(valid_tracks) > 1 and current_dur < target_duration + 10.0:
+        while current_dur < target_duration + 10.0 and len(playlist) < 500:
+            # Chọn ngẫu nhiên trong pool valid_tracks, ưu tiên bài khác bài vừa phát
+            candidates = [p for p in valid_tracks if p != playlist[-1]] or valid_tracks
             next_p = random.choice(candidates)
             playlist.append(next_p)
             current_dur += track_durs.get(next_p, 0.0)
@@ -267,23 +284,30 @@ def build_smart_bgm_chain(
     lines = [f"file '{p.as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'" for p in playlist]
     lst.write_text("\n".join(lines), encoding="utf-8")
 
+    tmp_chain = out_chain.with_name(f"{out_chain.stem}.part{out_chain.suffix}")
+    tmp_chain.unlink(missing_ok=True)
     cmd_chain = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(lst),
-        "-c", "copy",
-        str(out_chain),
+        "-c:a", "libmp3lame", "-ar", "48000", "-ac", "2", "-b:a", "192k",
+        str(tmp_chain),
     ]
-    proc = subprocess.run(
-        cmd_chain,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=TIMEOUT_CONCAT,
-    )
-    if proc.returncode != 0 or not out_chain.exists() or not out_chain.stat().st_size:
-        raise RuntimeError(f"ffmpeg BGM concat thất bại: {(proc.stderr or '')[-400:]}")
+    try:
+        proc = subprocess.run(
+            cmd_chain,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=TIMEOUT_CONCAT,
+        )
+        if proc.returncode != 0 or not tmp_chain.exists() or not tmp_chain.stat().st_size:
+            raise RuntimeError(f"ffmpeg BGM concat thất bại: {(proc.stderr or '')[-400:]}")
+        tmp_chain.replace(out_chain)
+    except Exception:
+        tmp_chain.unlink(missing_ok=True)
+        raise
     return out_chain
 
 
@@ -324,7 +348,9 @@ def polish_final(
     else:
         bgm_input = bgm_paths[0]
 
-    # 2. Mix pass: video copy + audio amix (BGM ducked dưới VO).
+    # 2. Mix pass: video copy + audio amix (BGM ducked dưới VO) -> ghi atomic qua .part.
+    tmp_out = out.with_name(f"{out.stem}.part{out.suffix}")
+    tmp_out.unlink(missing_ok=True)
     filter_complex = (
         f"[1:a]volume={volume:.3f}[bg];"
         "[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[a]"
@@ -338,7 +364,7 @@ def polish_final(
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
         "-progress", "pipe:1",
         "-nostats",
-        str(out),
+        str(tmp_out),
     ]
     proc = subprocess.Popen(
         cmd,
@@ -350,8 +376,6 @@ def polish_final(
     )
 
     # Drain stderr trong thread riêng để tránh deadlock khi pipe buffer đầy.
-    # (for loop đọc hết stdout rồi mới gọi proc.wait() — nếu stderr không được drain
-    # thì ffmpeg block khi ghi stderr → toàn bộ treo vĩnh viễn).
     stderr_lines: list[str] = []
     def _drain_stderr() -> None:
         if proc.stderr:
@@ -360,28 +384,32 @@ def polish_final(
     t_err = threading.Thread(target=_drain_stderr, daemon=True)
     t_err.start()
 
-    last_update = 0.0
-    if proc.stdout:
-        for line in proc.stdout:
-            line = line.strip()
-            if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
-                try:
-                    us_val = int(line.split("=")[1])
-                    cur_sec = us_val / 1_000_000 if line.startswith("out_time_us=") else us_val / 1_000
-                    if progress_cb and total_dur > 0:
-                        if abs(cur_sec - last_update) >= 0.25:
-                            last_update = cur_sec
-                            progress_cb(min(cur_sec, total_dur), total_dur)
-                except (ValueError, IndexError):
-                    pass
+    try:
+        last_update = 0.0
+        if proc.stdout:
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+                    try:
+                        us_val = int(line.split("=")[1])
+                        cur_sec = us_val / 1_000_000 if line.startswith("out_time_us=") else us_val / 1_000
+                        if progress_cb and total_dur > 0:
+                            if abs(cur_sec - last_update) >= 0.25:
+                                last_update = cur_sec
+                                progress_cb(min(cur_sec, total_dur), total_dur)
+                    except (ValueError, IndexError):
+                        pass
 
-    # Chờ FFmpeg thoát và thread drain stderr xong.
-    proc.wait(timeout=TIMEOUT_POLISH)
-    t_err.join(timeout=5)
-    stderr_text = "".join(stderr_lines)
+        proc.wait(timeout=TIMEOUT_POLISH)
+        t_err.join(timeout=5)
+        stderr_text = "".join(stderr_lines)
 
-    if proc.returncode != 0 or not out.exists() or not out.stat().st_size:
-        raise RuntimeError(f"ffmpeg polish thất bại: {stderr_text[-500:]}")
+        if proc.returncode != 0 or not tmp_out.exists() or not tmp_out.stat().st_size:
+            raise RuntimeError(f"ffmpeg polish thất bại: {stderr_text[-500:]}")
+        tmp_out.replace(out)
+    except Exception:
+        tmp_out.unlink(missing_ok=True)
+        raise
 
     if progress_cb and total_dur > 0:
         progress_cb(total_dur, total_dur)

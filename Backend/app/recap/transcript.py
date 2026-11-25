@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from pathlib import Path
 
 from requests import Session
 from requests.exceptions import RequestException, Timeout
+
+_TRANSIENT_RETRY_DELAYS = (1.5, 3.0)
 from youtube_transcript_api import (
     AgeRestricted,
     CouldNotRetrieveTranscript,
@@ -39,28 +42,36 @@ def get_transcript(url: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
         raise TranscriptFetchError("Link YouTube không có mã video hợp lệ.")
 
-    try:
-        with _TranscriptSession() as session:
-            tracks = YouTubeTranscriptApi(http_client=session).list(video_id)
-            try:
-                track = tracks.find_transcript(["vi", "en"])
-            except NoTranscriptFound:
-                track = next(iter(tracks), None)
-                if track is None:
-                    raise
-            segments = track.fetch()
-    except (TranscriptsDisabled, NoTranscriptFound) as exc:
-        raise TranscriptFetchError("Video không có phụ đề công khai để lấy.") from exc
-    except (RequestBlocked, PoTokenRequired) as exc:
-        raise TranscriptFetchError("YouTube đang giới hạn truy cập phụ đề. Hãy thử lại sau hoặc cung cấp transcript.") from exc
-    except (AgeRestricted, VideoUnavailable, VideoUnplayable) as exc:
-        raise TranscriptFetchError("Video không phát được ở chế độ khách. Kiểm tra lại link hoặc quyền truy cập.") from exc
-    except Timeout as exc:
-        raise TranscriptFetchError("Kết nối đến YouTube quá thời gian khi lấy phụ đề.") from exc
-    except (RequestException, YouTubeRequestFailed) as exc:
-        raise TranscriptFetchError("Không nhận được phụ đề từ YouTube do lỗi kết nối hoặc phản hồi HTTP.") from exc
-    except (CouldNotRetrieveTranscript, ValueError) as exc:
-        raise TranscriptFetchError("Không đọc được phản hồi phụ đề của YouTube.") from exc
+    for attempt in range(len(_TRANSIENT_RETRY_DELAYS) + 1):
+        try:
+            with _TranscriptSession() as session:
+                tracks = YouTubeTranscriptApi(http_client=session).list(video_id)
+                try:
+                    track = tracks.find_transcript(["vi", "en"])
+                except NoTranscriptFound:
+                    track = next(iter(tracks), None)
+                    if track is None:
+                        raise
+                segments = track.fetch()
+            break
+        except (TranscriptsDisabled, NoTranscriptFound) as exc:
+            raise TranscriptFetchError("Video không có phụ đề công khai để lấy.") from exc
+        except (RequestBlocked, PoTokenRequired) as exc:
+            raise TranscriptFetchError("YouTube đang giới hạn truy cập phụ đề. Hãy thử lại sau hoặc cung cấp transcript.") from exc
+        except (AgeRestricted, VideoUnavailable, VideoUnplayable) as exc:
+            raise TranscriptFetchError("Video không phát được ở chế độ khách. Kiểm tra lại link hoặc quyền truy cập.") from exc
+        except Timeout as exc:
+            if attempt < len(_TRANSIENT_RETRY_DELAYS):
+                time.sleep(_TRANSIENT_RETRY_DELAYS[attempt])
+                continue
+            raise TranscriptFetchError("Kết nối đến YouTube quá thời gian khi lấy phụ đề.") from exc
+        except (RequestException, YouTubeRequestFailed) as exc:
+            if attempt < len(_TRANSIENT_RETRY_DELAYS):
+                time.sleep(_TRANSIENT_RETRY_DELAYS[attempt])
+                continue
+            raise TranscriptFetchError("Không nhận được phụ đề từ YouTube do lỗi kết nối hoặc phản hồi HTTP.") from exc
+        except (CouldNotRetrieveTranscript, ValueError) as exc:
+            raise TranscriptFetchError("Không đọc được phản hồi phụ đề của YouTube.") from exc
 
     lines = []
     for segment in segments:

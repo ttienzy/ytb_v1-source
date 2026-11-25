@@ -516,12 +516,12 @@ def _stream_once(
             "login required",
         )
         is_auth_fail_silent = any(m in rr_text_lower for m in _SILENT_AUTH_MARKERS)
-        is_http_auth_fail = resp.status_code in (401, 403)
+        is_http_auth_fail = resp.status_code in (400, 401, 403)
         has_error_frame = '"er"' in resp.text[:200]
 
         if resp.status_code != 200 or has_error_frame or is_auth_fail_silent:
             msg = f"Gemini StreamGenerate fail: HTTP {resp.status_code} — {resp.text[:300]}"
-            if is_http_auth_fail or is_auth_fail_silent:
+            if is_http_auth_fail or is_auth_fail_silent or has_error_frame:
                 raise GeminiAuthError(msg)
             if resp.status_code >= 500:
                 raise GeminiTransientError(msg)
@@ -554,6 +554,51 @@ def _parse_gemini_response(resp_text: str) -> dict:
     return _normalize_recap_dict(data)
 
 
+def _sanitize_chunk_output(data: Any) -> dict[str, Any] | None:
+    """Làm sạch và xác thực cấu trúc chunk: bỏ segment rỗng vietnamese_vo, bỏ scene rỗng."""
+    if not isinstance(data, dict):
+        return None
+    raw_scenes = data.get("scenes")
+    if not isinstance(raw_scenes, list) or not raw_scenes:
+        return None
+    kept_scenes: list[dict[str, Any]] = []
+    for scene in raw_scenes:
+        if not isinstance(scene, dict):
+            continue
+        raw_segs = scene.get("segments")
+        if not isinstance(raw_segs, list):
+            continue
+        kept_segs: list[dict[str, Any]] = []
+        for seg in raw_segs:
+            if not isinstance(seg, dict):
+                continue
+            vo = str(seg.get("vietnamese_vo") or "").strip()
+            if not vo:
+                continue
+            seg_copy = dict(seg)
+            seg_copy["vietnamese_vo"] = vo
+            kept_segs.append(seg_copy)
+        if kept_segs:
+            scene_copy = dict(scene)
+            scene_copy["segments"] = kept_segs
+            kept_scenes.append(scene_copy)
+    if not kept_scenes:
+        return None
+    out = dict(data)
+    out["scenes"] = kept_scenes
+    return out
+
+
+def _write_chunk_checkpoint(path: Path, data: dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.part")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
 def generate_recap(
     youtube_url: str,
     raw_bytes: bytes | str | dict,
@@ -566,6 +611,7 @@ def generate_recap(
     caption_prompt: str | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
     status_callback: Callable[[str], None] | None = None,
+    checkpoint_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Tạo recap hoàn chỉnh qua kiến trúc phân chunk động đa giai đoạn (Step 0 -> Step 1 -> Step 2 -> Step 2b)."""
     chunk_tpl_path = prompt_template_path or DEFAULT_CHUNK_PROMPT_PATH
@@ -597,6 +643,24 @@ def generate_recap(
 
     for idx, c in enumerate(chunks):
         c_idx = c["chunk_index"]
+        ckpt_file = (checkpoint_dir / f"chunk_{c_idx}.json") if checkpoint_dir is not None else None
+        if ckpt_file is not None and ckpt_file.is_file():
+            try:
+                cached_raw = json.loads(ckpt_file.read_text(encoding="utf-8"))
+                cached_clean = _sanitize_chunk_output(cached_raw)
+            except (OSError, ValueError):
+                cached_clean = None
+            if cached_clean is not None:
+                _log(f"[Recap Engine] [Checkpoint] Dùng lại Chunk {c_idx + 1}/{total_chunks} đã lưu trên đĩa.")
+                chunk_outputs.append(cached_clean)
+                previous_summary = cached_clean.get("chunk_summary_for_next", "")
+                if progress_callback:
+                    try:
+                        progress_callback(idx + 1, total_chunks)
+                    except Exception:
+                        pass
+                continue
+
         _log(f"\n[Recap Engine] --- Xử lý Chunk {c_idx + 1}/{total_chunks} [{c['chunk_start_sec']}s - {c['chunk_end_sec']}s] ---")
         _log(f"[Recap Engine] Segment Quota: {c['target_segments_min']} - {c['target_segments_max']} segs.")
 
@@ -627,9 +691,12 @@ def generate_recap(
                     query_text=f"Tạo kịch bản recap JSON cho chunk {c_idx + 1}/{total_chunks}. Tuân thủ prompt và dữ liệu trong file đính kèm.",
                     status_callback=status_callback,
                 )
-                chunk_json = _parse_gemini_response(resp_text)
-                if chunk_json and chunk_json.get("scenes"):
+                parsed = _parse_gemini_response(resp_text)
+                cleaned = _sanitize_chunk_output(parsed)
+                if cleaned is not None:
+                    chunk_json = cleaned
                     break
+                raise ValueError("Gemini trả về scenes/segments hợp lệ rỗng (thiếu vietnamese_vo).")
             except (GeminiAuthError, GeminiRateLimitError):
                 # Đã refresh cookie / đã chờ rate-limit đủ lần mà vẫn lỗi → thử lại chỉ tốn thêm (và mở Chrome lại).
                 raise
@@ -644,6 +711,9 @@ def generate_recap(
             raise RuntimeError(
                 f"Xử lý chunk {c_idx + 1}/{total_chunks} thất bại sau {len(OUTER_RETRY_DELAYS)} lần thử.{reason}"
             )
+
+        if ckpt_file is not None:
+            _write_chunk_checkpoint(ckpt_file, chunk_json)
 
         scenes_count = len(chunk_json.get("scenes", []))
         segs_count = sum(len(s.get("segments", [])) for s in chunk_json.get("scenes", []))

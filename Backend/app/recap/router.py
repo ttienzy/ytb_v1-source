@@ -54,7 +54,7 @@ def _overall(job: state.JobState) -> str:
     phases = [job.recap_status, job.cut_status, job.voice_status, job.merge_status, job.polish_status]
     if any(p == "error" for p in phases):
         return "error"
-    if any(p == "running" for p in phases):
+    if any(p in ("running", "rate_limited", "refreshing_cookie") for p in phases):
         return "running"
     if job.polish_status == "done":
         return "polished"

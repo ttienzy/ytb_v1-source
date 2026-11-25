@@ -57,6 +57,7 @@ from app.recap.ffmpeg import (
 )
 from app.recap.paths import (
     DOWNLOADS_DIR,
+    chunks_dir,
     clip_path,
     clips_dir,
     final_path,
@@ -277,16 +278,29 @@ async def _generate_for_job(job_id: str) -> None:
                 timing.set_detail(job_id, "gemini", **acc)
 
     try:
+        import inspect
+        selected_prompts = job.prompts or prompt_store.originals().model_dump()
+        gen_kwargs = {
+            "script_prompt": selected_prompts["script"],
+            "caption_prompt": selected_prompts["caption"],
+            "progress_callback": on_progress,
+            "status_callback": on_status,
+        }
+        try:
+            sig_params = inspect.signature(generate_recap).parameters
+            if "checkpoint_dir" in sig_params or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_params.values()
+            ):
+                gen_kwargs["checkpoint_dir"] = chunks_dir(job_id)
+        except (TypeError, ValueError):
+            pass
         with timing.timed(job_id, "gemini"):
             recap = await run_in_threadpool(
                 generate_recap,
                 job.youtube_url,
                 job.raw_bytes,
                 job.raw_name or "raw.txt",
-                script_prompt=(job.prompts or prompt_store.originals().model_dump())["script"],
-                caption_prompt=(job.prompts or prompt_store.originals().model_dump())["caption"],
-                progress_callback=on_progress,
-                status_callback=on_status,
+                **gen_kwargs,
             )
         # Phần còn lại sau chunk cuối = ghép scenes + sinh caption/hashtag.
         g_dur = (state.get_job(job_id).timings.get("gemini") or {}).get("duration_sec")
@@ -523,6 +537,14 @@ async def cut(job_id: str) -> JobState:
 # CPU: thời gian TTS tuyến tính theo số đoạn (không có lợi thế batch) → lô nhỏ để merge bắt đầu sớm
 # và khi lỗi/restart chỉ mất tối đa 1 lô thay vì toàn bộ.
 VOICE_BATCH_SIZE = 8
+VOICE_BUSY_RETRY_DELAYS = (5.0, 10.0, 15.0, 20.0, 25.0, 30.0)
+
+
+def _sanitize_vo_text(text: str) -> str:
+    """Loại bỏ ký tự điều khiển / zero-width / markdown có thể làm TTS lỗi."""
+    cleaned = re.sub(r"[\x00-\x1f\u200b-\u200f\ufeff]", " ", str(text or ""))
+    cleaned = cleaned.replace("**", "").replace("__", "").replace("`", "")
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _voice_ready(job_id: str, idx: int) -> bool:
@@ -581,7 +603,7 @@ async def voice(job_id: str, voice_id: str) -> JobState:
     if not segs:
         raise HTTPException(status_code=400, detail="Recap không có segment nào.")
 
-    items = [{"text": (seg.get("vietnamese_vo") or "").strip()} for seg in segs]
+    items = [{"text": _sanitize_vo_text(seg.get("vietnamese_vo") or "")} for seg in segs]
     missing = [i for i, it in enumerate(items) if not it["text"]]
     if missing:
         raise HTTPException(status_code=400, detail=f"Thiếu vietnamese_vo: idx {missing[:8]}.")
@@ -609,7 +631,16 @@ async def voice(job_id: str, voice_id: str) -> JobState:
                 skipped += 1  # lô đã có trên đĩa (resume) → không TTS lại
             else:
                 t0 = time.perf_counter()
-                zip_bytes = await voice_client.tts_batch(items[start:end], voice_id)
+                busy_idx = 0
+                while True:
+                    try:
+                        zip_bytes = await voice_client.tts_batch(items[start:end], voice_id)
+                        break
+                    except voice_client.VoiceBusyError:
+                        if busy_idx >= len(VOICE_BUSY_RETRY_DELAYS):
+                            raise
+                        await asyncio.sleep(VOICE_BUSY_RETRY_DELAYS[busy_idx])
+                        busy_idx += 1
                 t1 = time.perf_counter()
                 low = await run_in_threadpool(_do_voice_batch, job, segs[start:end], start, zip_bytes)
                 tts_sec += t1 - t0
@@ -1148,8 +1179,8 @@ async def resume_pipeline(job_id: str, voice_id: str | None = None, *, raw_text:
     if raw_text is not None:
         if not raw_text.strip():
             raise HTTPException(status_code=400, detail="Transcript bổ sung đang trống.")
-        if not recap_pending or job.raw_bytes:
-            raise HTTPException(status_code=409, detail="Job đã có transcript.")
+        if not recap_pending:
+            raise HTTPException(status_code=409, detail="Job đã tạo kịch bản xong.")
         raw_bytes = raw_text.encode("utf-8")
         path = raw_path(job_id)
         try:
@@ -1276,13 +1307,48 @@ def _batch_overall(job: state.JobState) -> str:
     phases = [job.recap_status, job.cut_status, job.voice_status, job.merge_status, job.polish_status]
     if any(p == "error" for p in phases):
         return "error"
-    if any(p == "running" for p in phases):
+    if any(p in ("running", "rate_limited", "refreshing_cookie") for p in phases):
         return "running"
     if job.polish_status == "done":
         return "polished"
     if job.merge_status == "done":
         return "merged"
     return "idle"
+
+
+async def _retry_existing_batch_job(
+    job_id: str,
+    url: str,
+    voice_id: str,
+    polish_opts: dict | None,
+    batch_id: str | None = None,
+    item_index: int | None = None,
+    prompts: dict | None = None,
+) -> tuple[str, str]:
+    """Chạy tiếp job đã tạo trong batch (tận dụng checkpoint chunk / video / voice đã xong); fallback tạo mới nếu job không còn."""
+    job = state.get_job(job_id) or rehydrate(job_id)
+    if job is None:
+        return await _run_one_batch_job(
+            url=url,
+            voice_id=voice_id,
+            polish_opts=polish_opts,
+            batch_id=batch_id,
+            item_index=item_index,
+            prompts=prompts,
+        )
+    if prompts is not None:
+        job.prompts = prompt_store.snapshot(prompts)
+    reset = {
+        f"{p}_status": "idle"
+        for p in ("recap", "cut", "voice", "merge", "polish")
+        if getattr(job, f"{p}_status") in _RESETTABLE
+    }
+    state.update_job(job_id, error=None, voice_id=voice_id or job.voice_id, **reset)
+    await _run_pipeline(job_id, voice_id or (job.voice_id or ""), polish_opts)
+    job_final = state.get_job(job_id)
+    if job_final is None:
+        return job_id, "error"
+    return job.job_id, _batch_overall(job_final)
 
 
 async def _run_one_batch_job(
@@ -1364,14 +1430,15 @@ async def _run_batch_worker(batch_id: str) -> None:
                 await asyncio.sleep(10)
             continue
 
-        # Lỗi lần 1 → nghỉ 15s trước khi retry
+        # Lỗi lần 1 → nghỉ 15s rồi chạy tiếp trên đúng job_id đã tạo (tận dụng checkpoint/file đã xong)
         job_fail = state.get_job(job_id)
         err_msg = (job_fail.error if job_fail else None) or "Pipeline error"
         print(f"[Batch {batch_id}] Item {i} lỗi lần 1 ({err_msg}). Tạm dừng 15s trước khi retry...")
         await asyncio.sleep(15)
         state.update_batch_item(batch_id, i, retry_count=1, status="running", error=None)
 
-        job_id, overall = await _run_one_batch_job(
+        job_id, overall = await _retry_existing_batch_job(
+            job_id=job_id,
             url=item.url,
             voice_id=batch.voice_id,
             polish_opts=batch.polish_opts,
@@ -1387,21 +1454,23 @@ async def _run_batch_worker(batch_id: str) -> None:
                 await asyncio.sleep(10)
             continue
 
-        # Lỗi lần 2 → dừng queue
+        # Lỗi lần 2 → đánh dấu item lỗi; chỉ dừng cả lô nếu chưa đăng nhập Gemini, còn lại chạy tiếp link sau
         job_fail = state.get_job(job_id)
         err_msg = (job_fail.error if job_fail else None) or "Pipeline error (retry)"
-        print(f"[Batch {batch_id}] Item {i} lỗi sau retry. Dừng queue.")
+        print(f"[Batch {batch_id}] Item {i} lỗi sau retry ({err_msg}).")
         state.update_batch_item(
             batch_id, i,
             status="error",
             job_id=job_id,
             error=err_msg,
         )
-        # Đánh dấu các item còn lại là skipped
-        for j in range(i + 1, len(batch.items)):
-            state.update_batch_item(batch_id, j, status="skipped")
-        state.update_batch(batch_id, status="stopped")
-        return
+        if "Chưa có tài khoản Gemini" in err_msg:
+            for j in range(i + 1, len(batch.items)):
+                state.update_batch_item(batch_id, j, status="skipped")
+            state.update_batch(batch_id, status="stopped")
+            return
+        if i < len(batch.items) - 1 and not batch.stop_requested:
+            await asyncio.sleep(5)
 
     # Đã xử lý hết tất cả item mà không bị dừng
     state.update_batch(batch_id, status="done")

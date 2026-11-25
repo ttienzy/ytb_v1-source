@@ -37,29 +37,39 @@ def merge_chunk_outputs(chunk_outputs: list[dict[str, Any]], video_url: str) -> 
 
 
 def validate_timestamp_integrity(scenes: list[dict[str, Any]]) -> bool:
-    """Kiểm tra tính đơn điệu tăng dần của timestamps qua các cảnh và segments."""
-    flat_segs = []
-    for scene in scenes:
-        for seg in scene.get("segments", []):
-            if isinstance(seg, dict):
-                flat_segs.append(seg)
-
+    """Kiểm tra tính đơn điệu tăng dần, làm sạch vietnamese_vo rỗng và kẹp start/end hợp lệ."""
+    kept_scenes: list[dict[str, Any]] = []
     last_start = -1.0
-    for idx, seg in enumerate(flat_segs):
-        st = float(seg.get("start_time_sec", 0.0) or 0.0)
-        et = float(seg.get("end_time_sec", 0.0) or 0.0)
-
-        # Tính toán lại duration_sec để đảm bảo khớp toán học
-        seg["start_time_sec"] = st
-        seg["end_time_sec"] = et
-        seg["duration_sec"] = round(max(0.0, et - st), 2)
-
-        if st < last_start:
-            print(
-                f"[Warning: Timestamp Drift] Seg #{idx+1} start ({st:.1f}s) < previous start ({last_start:.1f}s)"
-            )
-        last_start = st
-
+    idx = 0
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        kept_segs: list[dict[str, Any]] = []
+        for seg in scene.get("segments", []):
+            if not isinstance(seg, dict):
+                continue
+            vo = str(seg.get("vietnamese_vo") or "").strip()
+            if not vo:
+                continue
+            seg["vietnamese_vo"] = vo
+            st = max(0.0, float(seg.get("start_time_sec", 0.0) or 0.0))
+            et = float(seg.get("end_time_sec", 0.0) or 0.0)
+            if et <= st:
+                et = st + 0.5
+            seg["start_time_sec"] = st
+            seg["end_time_sec"] = et
+            seg["duration_sec"] = round(et - st, 2)
+            idx += 1
+            if st < last_start:
+                print(
+                    f"[Warning: Timestamp Drift] Seg #{idx} start ({st:.1f}s) < previous start ({last_start:.1f}s)"
+                )
+            last_start = st
+            kept_segs.append(seg)
+        if kept_segs:
+            scene["segments"] = kept_segs
+            kept_scenes.append(scene)
+    scenes[:] = kept_scenes
     return True
 
 

@@ -54,6 +54,24 @@ def download_video(youtube_url: str, dest_dir: Path) -> Path:
 
         downloaded = staging / out.name
         if not downloaded.is_file() or not downloaded.stat().st_size:
+            candidates = [
+                p for p in sorted(staging.glob("video.*"))
+                if p.is_file() and p.stat().st_size > 0 and p.suffix not in (".part", ".ytdl")
+            ]
+            if candidates:
+                src_file = candidates[0]
+                if src_file.suffix.lower() != ".mp4":
+                    remux = subprocess.run(
+                        ["ffmpeg", "-y", "-i", str(src_file), "-c", "copy", str(downloaded)],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                    )
+                    if remux.returncode == 0 and downloaded.is_file() and downloaded.stat().st_size > 0:
+                        src_file.unlink(missing_ok=True)
+                    else:
+                        downloaded = src_file
+                else:
+                    downloaded = src_file
+        if not downloaded.is_file() or not downloaded.stat().st_size:
             raise RuntimeError("yt-dlp chưa tạo được file video nguồn MP4.")
         downloaded.replace(out)
     return out
