@@ -51,7 +51,7 @@ from app.workflow.schemas import (
     MotionCharacterSheetRequest,
     MotionCharacterSheetResponse,
 )
-from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_cut, muse_gpt_image, muse_merge, muse_projects
+from app.workflow import image_library, motion_character, muse_canvas, muse_finish, muse_flow, muse_cut, muse_frame, muse_gpt_image, muse_merge, muse_projects
 from app.ai.gemini import pool as gemini_pool
 from app.ai.gemini.recap import GeminiAuthError, GeminiNotLoggedInError, check_cookie_state
 from app.ai.gemini.service import refresh_account as refresh_gemini_account
@@ -622,6 +622,29 @@ async def muse_video_cut(req: muse_cut.MuseCutRequest) -> dict:
     """Node "Cắt video": giữ các đoạn đã chọn rồi ghép thành 1 video mới (chạy đồng bộ, không tốn credit)."""
     try:
         return await run_in_threadpool(muse_cut.cut_video, req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, PermissionError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/muse/frame/file")
+def muse_frame_file(name: str = Query(..., min_length=5, max_length=80)):
+    """Trả ảnh PNG đã tách từ video (Data/media/muse_frames)."""
+    safe = Path(name).name
+    target = muse_frame.FRAME_DIR / safe
+    if not (safe.startswith("frame_") and safe.endswith(".png")) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Không thấy khung hình đã tách (file đã bị xóa?). Bấm “Tách khung hình” lại.")
+    return FileResponse(path=str(target), media_type="image/png")
+
+
+@router.post("/muse/extract-frame")
+async def muse_extract_frame(req: muse_frame.MuseFrameRequest) -> dict:
+    """Node "Tách khung hình": tách khung đầu / cuối / mốc giây từ video thành PNG (0 credit)."""
+    try:
+        return await run_in_threadpool(muse_frame.extract_frame_file, req)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except (ValueError, PermissionError) as e:

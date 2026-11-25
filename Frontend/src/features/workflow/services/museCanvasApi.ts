@@ -600,6 +600,33 @@ export async function cutMuseVideo(path: string, segments: { start: number; end:
 export const museVideoStripUrl = (path: string, width: number, height: number) =>
   `${API_URL}/api/workflow/muse/video-strip?path=${encodeURIComponent(path)}&w=${width}&h=${height}`
 
+export interface MuseFrameResult {
+  file_name: string
+  file_path: string
+  preview_url: string
+  file_size: number
+  width: number
+  height: number
+  time_sec: number
+  duration: number
+  mode: 'first' | 'last' | 'time'
+  cached: boolean
+}
+
+/** Node Tách khung hình: tách 1 khung PNG từ video bằng ffmpeg (0 credit). */
+export async function extractMuseFrame(
+  path: string,
+  mode: 'first' | 'last' | 'time' = 'last',
+  timeSec = 0,
+): Promise<MuseFrameResult> {
+  const res = await fetch(`${API_URL}/api/workflow/muse/extract-frame`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, mode, time_sec: Math.max(0, timeSec) }),
+  })
+  return detailOrThrow(res, 'Không tách được khung hình')
+}
+
 export const veoVideoUrl = (path: string) => `${API_URL}/api/veo/history/${encodeURIComponent(fileStem(path))}/file`
 
 // ---------------------------------------------------------------- Ghép video (các clip Flow đã tạo)

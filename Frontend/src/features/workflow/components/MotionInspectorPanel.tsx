@@ -38,6 +38,7 @@ import {
 import { MAX_MOTION_REFERENCE_IMAGES, type MotionAssetRole } from '../services/motionReferences'
 import {
   MOTION_DURATION_OPTIONS,
+  estimateMotionCreditCost,
   getAvailableAspectRatios,
   getAvailableResolutions,
   getAvailableDurations,
@@ -508,7 +509,7 @@ export function MotionInspectorPanel({
                         min={3}
                         max={60}
                         step={1}
-                        value={motion.trimEndSec ?? 10}
+                        value={motion.trimEndSec ?? outputConfig.durationSeconds ?? 10}
                         onChange={(e) => onUpdateAssetMeta('motion', { trimEndSec: Number(e.target.value) })}
                         style={{
                           width: '100%',
@@ -522,7 +523,7 @@ export function MotionInspectorPanel({
                     </div>
                   </div>
                   <small style={{ fontSize: '10.5px', color: '#64748B' }}>
-                    Flow dùng đoạn nguồn từ 3 đến tối đa 10 giây. Thời lượng đầu ra được tính từ đoạn trim này.
+                    Flow dùng đoạn nguồn từ 3 đến tối đa 15 giây. Thời lượng đầu ra được tính từ đoạn trim này (từ giây 11–15 Flow tính credit gấp đôi).
                   </small>
                 </div>
               </div>
@@ -1127,7 +1128,7 @@ export function MotionInspectorPanel({
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <span style={{ fontSize: '11.5px', fontWeight: 700 }}>{option.title}</span>
                         <span style={{ fontSize: '9px', fontWeight: 800, padding: '2px 4px', borderRadius: '4px', background: active ? '#C7D2FE' : '#F1F5F9', color: active ? '#312E81' : '#64748B' }}>
-                          {option.creditCost}c
+                          {estimateMotionCreditCost(outputConfig.durationSeconds, option.resolution)}c
                         </span>
                       </div>
                       <div style={{ marginTop: '2px', fontSize: '9.5px', color: '#64748B' }}>{option.detail}</div>
@@ -1167,7 +1168,7 @@ export function MotionInspectorPanel({
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
               <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>Thời lượng đoạn chuyển động</label>
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${availableDurations.length}, 1fr)`, gap: '6px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
                 {availableDurations.map((duration) => {
                   const active = outputConfig.durationSeconds === duration
                   return (
@@ -1192,7 +1193,7 @@ export function MotionInspectorPanel({
                 })}
               </div>
               <small style={{ fontSize: '10px', color: '#64748B' }}>
-                Chọn thời lượng sẽ cập nhật điểm kết thúc trim từ mốc bắt đầu hiện tại.
+                Chọn thời lượng sẽ cập nhật điểm kết thúc trim từ mốc bắt đầu hiện tại. Từ giây 11–15, Flow tính credit gấp đôi mỗi giây thêm.
               </small>
             </div>
 
@@ -1243,27 +1244,33 @@ export function MotionInspectorPanel({
               </small>
             </div>
 
-            <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '11px', color: '#64748B' }}>
-                  Chi phí: {outputConfig.creditCost ?? selectedProfile?.credit_cost ?? 40}c × {outputConfig.numOutputs || 1}
-                </span>
-                <strong style={{ fontSize: '14px', color: '#C2410C' }}>
-                  {((outputConfig.creditCost ?? selectedProfile?.credit_cost ?? 40) * (outputConfig.numOutputs || 1))} credits
-                </strong>
-              </div>
-              <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '11px', color: '#64748B' }}>Số video kết quả</span>
-                <strong style={{ fontSize: '11.5px', color: '#0F172A' }}>
-                  {outputConfig.numOutputs || 1} video hoàn chỉnh
-                </strong>
-              </div>
-              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #E2E8F0', fontSize: '10px', color: selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds ? '#047857' : '#B45309' }}>
-                {selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds
-                  ? '✓ Tổ hợp này đã được kiểm thử runtime trong project.'
-                  : 'Tổ hợp này được Flow hỗ trợ nhưng chưa được kiểm thử E2E trong project.'}
-              </div>
-            </div>
+            {(() => {
+              const unitCreditCost = estimateMotionCreditCost(outputConfig.durationSeconds, outputConfig.resolution)
+              const variantCount = outputConfig.numOutputs || 1
+              return (
+                <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '11px', color: '#64748B' }}>
+                      Chi phí: ≈{unitCreditCost}c × {variantCount}
+                    </span>
+                    <strong style={{ fontSize: '14px', color: '#C2410C' }}>
+                      ≈{unitCreditCost * variantCount} credits
+                    </strong>
+                  </div>
+                  <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '11px', color: '#64748B' }}>Số video kết quả</span>
+                    <strong style={{ fontSize: '11.5px', color: '#0F172A' }}>
+                      {variantCount} video hoàn chỉnh
+                    </strong>
+                  </div>
+                  <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #E2E8F0', fontSize: '10px', color: selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds ? '#047857' : '#B45309' }}>
+                    {selectedProfile?.runtime_verified && outputConfig.durationSeconds === selectedProfile.duration_seconds
+                      ? '✓ Tổ hợp này đã được kiểm thử runtime trong project.'
+                      : 'Tổ hợp này được Flow hỗ trợ nhưng chưa được kiểm thử E2E trong project.'}
+                  </div>
+                </div>
+              )
+            })()}
 
             <div style={{ padding: '10px', borderRadius: '8px', border: '1px solid #C7D2FE', background: '#F8FAFF' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>

@@ -70,6 +70,9 @@ import {
   type CharacterSheetState,
 } from '../services/motionCharacterSheet'
 import {
+  MOTION_MAX_DURATION_SECONDS,
+  MOTION_MIN_DURATION_SECONDS,
+  estimateMotionCreditCost,
   findMotionProfile,
   getMotionTrimDuration,
   getVideoEditProfiles,
@@ -186,16 +189,19 @@ export function MotionControlWorkspace({
     fileName: '',
   })
 
-  const [motionAsset, setMotionAsset] = useState<MotionReferenceAsset>({
-    id: 'ref-motion',
-    role: 'motion',
-    title: 'Video Chuyển Động',
-    required: true,
-    filled: false,
-    previewUrl: null,
-    fileName: '',
-    trimStartSec: 0,
-    trimEndSec: 10,
+  const [motionAsset, setMotionAsset] = useState<MotionReferenceAsset>(() => {
+    const stored = loadStoredMotionConfig()
+    return {
+      id: 'ref-motion',
+      role: 'motion',
+      title: 'Video Chuyển Động',
+      required: true,
+      filled: false,
+      previewUrl: null,
+      fileName: '',
+      trimStartSec: 0,
+      trimEndSec: stored.durationSeconds,
+    }
   })
 
   const [sceneAsset, setSceneAsset] = useState<MotionReferenceAsset>({
@@ -255,7 +261,7 @@ export function MotionControlWorkspace({
         durationSeconds: previous.durationSeconds,
         resolution: profile.resolution as MotionOutputConfig['resolution'],
         numOutputs: profile.num_outputs,
-        creditCost: profile.credit_cost,
+        creditCost: estimateMotionCreditCost(previous.durationSeconds, profile.resolution as '360p' | '720p'),
       }
       saveStoredMotionConfig(next, creativeDirectionRef.current)
       return next
@@ -362,7 +368,11 @@ export function MotionControlWorkspace({
 
   const handleSelectDuration = useCallback((durationSeconds: number) => {
     setOutputConfig((previous) => {
-      const next = { ...previous, durationSeconds }
+      const next = {
+        ...previous,
+        durationSeconds,
+        creditCost: estimateMotionCreditCost(durationSeconds, previous.resolution),
+      }
       saveStoredMotionConfig(next, creativeDirection)
       return next
     })
@@ -525,7 +535,7 @@ export function MotionControlWorkspace({
     const trimStart = motionAsset.trimStartSec ?? 0
     const trimEnd = motionAsset.trimEndSec ?? outputConfig.durationSeconds
     if (getMotionTrimDuration(trimStart, trimEnd) === null) {
-      reasons.push('Đoạn video tham chiếu phải dài 3–10 giây và dùng mốc giây nguyên')
+      reasons.push('Đoạn video tham chiếu phải dài 3–15 giây và dùng mốc giây nguyên')
     }
     return reasons
   }, [activePrompt, customPromptStale, isCustomPrompt, motionAsset, outputConfig.durationSeconds, outputConfig.projectMode, profileError,
@@ -584,17 +594,22 @@ export function MotionControlWorkspace({
           if (dur < 3) {
             showToast(`Cảnh báo: Video chỉ dài ${dur.toFixed(1)}s (yêu cầu tối thiểu 3s).`)
           }
-          const safeEnd = Math.min(10, Math.max(3, Math.floor(dur)))
+          const safeEnd = Math.min(MOTION_MAX_DURATION_SECONDS, Math.max(MOTION_MIN_DURATION_SECONDS, Math.floor(dur)))
           setMotionAsset((prev) => ({
             ...prev,
             trimStartSec: 0,
             trimEndSec: safeEnd,
             durationSec: dur,
           }))
-          setOutputConfig((prev) => ({
-            ...prev,
-            durationSeconds: safeEnd,
-          }))
+          setOutputConfig((prev) => {
+            const next = {
+              ...prev,
+              durationSeconds: safeEnd,
+              creditCost: estimateMotionCreditCost(safeEnd, prev.resolution),
+            }
+            saveStoredMotionConfig(next, creativeDirectionRef.current)
+            return next
+          })
         }
       }
       setMotionAsset((prev) => {
@@ -672,9 +687,21 @@ export function MotionControlWorkspace({
     else if (role === 'motion') {
       setMotionAsset((prev) => {
         const next = { ...prev, ...updates }
-        const duration = (next.trimEndSec ?? 10) - (next.trimStartSec ?? 0)
+        const trimStart = next.trimStartSec ?? 0
+        const trimEnd = next.trimEndSec ?? outputConfigRef.current.durationSeconds ?? 10
+        const duration = trimEnd - trimStart
         if (Number.isFinite(duration) && duration > 0) {
-          setOutputConfig((config) => ({ ...config, durationSeconds: duration }))
+          setOutputConfig((config) => {
+            const updated = {
+              ...config,
+              durationSeconds: duration,
+              creditCost: estimateMotionCreditCost(duration, config.resolution),
+            }
+            if (getMotionTrimDuration(trimStart, trimEnd) !== null) {
+              saveStoredMotionConfig(updated, creativeDirectionRef.current)
+            }
+            return updated
+          })
         }
         return next
       })
@@ -787,7 +814,7 @@ export function MotionControlWorkspace({
     }
 
     const duration = clip.durationSec || 10
-    const trimEnd = Math.min(10, Math.max(4, Math.round(duration)))
+    const trimEnd = Math.min(MOTION_MAX_DURATION_SECONDS, Math.max(MOTION_MIN_DURATION_SECONDS, Math.round(duration)))
 
     setMotionAsset((prev) => {
       if (prev.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(prev.previewUrl)
@@ -801,14 +828,20 @@ export function MotionControlWorkspace({
         mediaProjectId: undefined,
         trimStartSec: 0,
         trimEndSec: trimEnd,
+        durationSec: clip.durationSec || undefined,
       }
     })
 
-    setOutputConfig((config) => ({
-      ...config,
-      durationSeconds: trimEnd,
-      aspectRatio: clip.aspectRatio === '16:9' ? '16:9' : '9:16',
-    }))
+    setOutputConfig((config) => {
+      const next: MotionOutputConfig = {
+        ...config,
+        durationSeconds: trimEnd,
+        aspectRatio: clip.aspectRatio === '16:9' ? '16:9' : '9:16',
+        creditCost: estimateMotionCreditCost(trimEnd, config.resolution),
+      }
+      saveStoredMotionConfig(next, creativeDirectionRef.current)
+      return next
+    })
 
     showToast(`Đã nạp video chuyển động từ Thư viện: ${clip.filename}`)
   }, [showToast])

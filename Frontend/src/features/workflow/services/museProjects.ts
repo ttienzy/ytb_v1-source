@@ -184,6 +184,12 @@ function templateData(type: string | undefined, data: Record<string, unknown>): 
     case MUSE_NODE.videoCut:
       // giữ các vết cắt, bỏ video đã cắt (cắt lại ở project mới)
       return { ...data, video: null, resultKey: '', status: 'idle', error: '' }
+    case MUSE_NODE.frameExtract:
+      // giữ chế độ / mốc giây, bỏ ảnh đã tách
+      return { ...data, image: null, resultKey: '', status: 'idle', error: '' }
+    case MUSE_NODE.freeImage:
+      // giữ prompt / nhà cung cấp / tỉ lệ, bỏ ảnh kết quả
+      return { ...data, result: null }
     default:
       return data
   }

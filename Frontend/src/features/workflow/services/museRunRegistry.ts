@@ -116,10 +116,14 @@ export const runKey = {
   scriptVideo: (nodeId: string) => `scriptVideo:${nodeId}`,
   clipScript: (nodeId: string) => `clipScript:${nodeId}`,
   finish: (nodeId: string) => `finish:${nodeId}`,
-  /** node Ingredients (video + ảnh): tải video tham chiếu lên Flow + gửi job (job Flow sau đó chạy ở backend) */
+  /** node Ingredients / Tạo video Flow: tải video tham chiếu lên Flow + gửi job (job Flow sau đó chạy ở backend) */
   videoIngr: (nodeId: string) => `videoIngr:${nodeId}`,
   /** node Cắt video: ghép các đoạn giữ lại thành 1 video mới (ffmpeg ở backend, vài giây) */
   videoCut: (nodeId: string) => `videoCut:${nodeId}`,
+  /** node Tách khung hình: tách 1 khung PNG từ video bằng ffmpeg (0 credit) */
+  frameExtract: (nodeId: string) => `frameExtract:${nodeId}`,
+  /** node Tạo ảnh tự do: tạo 1 ảnh bằng Muse hoặc ChatGPT */
+  freeImage: (nodeId: string) => `freeImage:${nodeId}`,
 }
 
 /** Id node trong một khóa lượt chạy (để biết lượt thuộc node nào / project nào). */

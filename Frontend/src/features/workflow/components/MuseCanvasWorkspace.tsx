@@ -32,8 +32,10 @@ import {
 import type { MutableRefObject, ReactNode } from 'react'
 import {
   AlertTriangle,
+  Camera,
   CheckCircle2,
   Clapperboard,
+  Image as ImageIcon,
   MapPin,
   NotebookPen,
   FileText,
@@ -111,6 +113,8 @@ import {
   createVideoRefNode,
   createPromptBoxNode,
   createVideoIngrNode,
+  createFrameExtractNode,
+  createFreeImageNode,
   flowClipCredits,
   VIDEO_INGR_SPEC,
   CLIP_SCRIPT_SPEC,
@@ -140,6 +144,8 @@ import { MuseInputNode } from '../nodes/muse/MuseInputNode'
 import { MuseVideoRefNode } from '../nodes/muse/MuseVideoRefNode'
 import { MuseVideoCutNode } from '../nodes/muse/MuseVideoCutNode'
 import { createVideoCutNode } from '../services/museVideoCut.ts'
+import { MuseFrameExtractNode } from '../nodes/muse/MuseFrameExtractNode'
+import { MuseFreeImageNode } from '../nodes/muse/MuseFreeImageNode'
 import { MusePromptBoxNode } from '../nodes/muse/MusePromptBoxNode'
 import { MuseVideoIngredientsNode } from '../nodes/muse/MuseVideoIngredientsNode'
 import { MuseJobNode } from '../nodes/muse/MuseJobNode'
@@ -168,6 +174,8 @@ const MUSE_NODE_TYPES: NodeTypes = {
   [MUSE_NODE.scenePlace]: MuseJobNode,
   [MUSE_NODE.videoRef]: MuseVideoRefNode,
   [MUSE_NODE.videoCut]: MuseVideoCutNode,
+  [MUSE_NODE.frameExtract]: MuseFrameExtractNode,
+  [MUSE_NODE.freeImage]: MuseFreeImageNode,
   [MUSE_NODE.promptBox]: MusePromptBoxNode,
   [MUSE_NODE.videoIngredients]: MuseVideoIngredientsNode,
   [MUSE_NODE.output]: MuseOutputNode,
@@ -797,7 +805,7 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
             </div>
           </div>
           <div className="mc-row">
-            <span className="mc-label" title="Độ dài video Flow cho project này">Thời lượng</span>
+            <span className="mc-label" title="Độ dài video Flow cho project này (3–15 giây)">Thời lượng</span>
             <select
               className="mc-input mc-seconds-select"
               value={cfg.flowSeconds}
@@ -812,8 +820,21 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
               ))}
             </select>
           </div>
+          <div className="mc-flow-sec-chips" role="group" aria-label="Chọn nhanh thời lượng Flow 3–15s">
+            {[0, 3, 5, 6, 8, 10, 12, 15].map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={cfg.flowSeconds === s ? 'on' : ''}
+                onClick={() => update('flowSeconds', s)}
+                title={s === 0 ? 'Tự động theo kịch bản / video mẫu' : `${s} giây · ≈${flowClipCredits(s, cfg.flowResolution)} credit`}
+              >
+                {s === 0 ? 'Tự động' : `${s}s`}
+              </button>
+            ))}
+          </div>
           <div className="mc-row">
-            <span className="mc-label" title="Số video tạo mỗi lần bấm Tạo video (node Ingredients)">Biến thể</span>
+            <span className="mc-label" title="Số video tạo mỗi lần bấm Tạo video (node Tạo video Flow)">Biến thể</span>
             <div className="mc-seg">
               {Array.from({ length: FLOW_MAX_VARIANTS }, (_, i) => i + 1).map((n) => (
                 <button key={n} type="button" className={cfg.flowVariants === n ? 'on' : ''} onClick={() => update('flowVariants', n)}>
@@ -824,14 +845,14 @@ function MuseCanvasInner({ onOpenSettings }: MuseCanvasWorkspaceProps) {
           </div>
           {cfg.flowVariants > 1 && (
             <p className="mc-hint">
-              Mỗi lần bấm “Tạo video” ở node Ingredients gửi MỘT lệnh Flow ra {cfg.flowVariants} video (như chọn x{cfg.flowVariants} trên Flow):
+              Mỗi lần bấm “Tạo video” ở node Tạo video Flow gửi MỘT lệnh Flow ra {cfg.flowVariants} video (như chọn x{cfg.flowVariants} trên Flow):
               video tham chiếu tải lên 1 lần, mỗi video có kết quả riêng. Flow tính credit từng video — tổng ghi sẵn trên nút. Node Clip vẫn tạo 1 video.
             </p>
           )}
           <p className="mc-hint">
             {cfg.flowSeconds
-              ? `Mỗi clip dài đúng ${cfg.flowSeconds} giây (≈${flowClipCredits(cfg.flowSeconds, cfg.flowResolution)} credit ở ${cfg.flowResolution}): “Kịch bản tạo video” viết mọi clip ${cfg.flowSeconds} giây, “Ingredients” cắt ${cfg.flowSeconds} giây đầu video tham chiếu.`
-              : 'Tự động: “Kịch bản tạo video” để ChatGPT chọn 3–15 giây theo từng bộ; “Ingredients” gửi cả video tham chiếu (tối đa 15 giây).'}{' '}
+              ? `Mỗi clip dài đúng ${cfg.flowSeconds} giây (≈${flowClipCredits(cfg.flowSeconds, cfg.flowResolution)} credit ở ${cfg.flowResolution}): “Kịch bản tạo video” viết mọi clip ${cfg.flowSeconds} giây, “Tạo video Flow” cắt ${cfg.flowSeconds} giây đầu video mẫu hoặc tạo ảnh→video ${cfg.flowSeconds}s.`
+              : 'Tự động: “Kịch bản tạo video” để ChatGPT chọn 3–15 giây theo từng bộ; “Tạo video Flow” gửi cả video mẫu (≤ 15s) hoặc mặc định 10s khi không có video.'}{' '}
             Phần vượt 10 giây Flow tính giá gấp đôi.
           </p>
           <p className="mc-hint">
@@ -1078,7 +1099,7 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
    * 'starter' (ảnh vào nối sẵn vào node chạy cùng họ). `type` là id type node (MUSE_NODE).
    */
   const addNode = useCallback(
-    async (kind: 'input' | 'job' | 'starter' | 'script' | 'clipScript' | 'clipMerge' | 'videoRef' | 'videoCut' | 'promptBox' | 'videoIngr', type: string) => {
+    async (kind: 'input' | 'job' | 'starter' | 'script' | 'clipScript' | 'clipMerge' | 'videoRef' | 'videoCut' | 'frameExtract' | 'freeImage' | 'promptBox' | 'videoIngr', type: string) => {
       setAddError('')
       setMenuOpen(false)
       const pos = centerPosition()
@@ -1092,6 +1113,14 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
       }
       if (kind === 'videoCut') {
         setNodes((ns) => [...ns, createVideoCutNode(pos) as Node])
+        return
+      }
+      if (kind === 'frameExtract') {
+        setNodes((ns) => [...ns, createFrameExtractNode(pos) as Node])
+        return
+      }
+      if (kind === 'freeImage') {
+        setNodes((ns) => [...ns, createFreeImageNode(pos) as Node])
         return
       }
       if (kind === 'promptBox') {
@@ -1170,55 +1199,54 @@ function MuseCanvasBoard({ projectId, configSave, configError, graphRef, renderB
         </button>
         {menuOpen && (
           <div className="mc-addmenu" role="menu">
-            <div className="mc-addmenu-group">Prompt</div>
+            <div className="mc-addmenu-group">Prompt &amp; Ảnh vào</div>
             <button type="button" role="menuitem" onClick={() => addNode('promptBox', MUSE_NODE.promptBox)}>
               <NotebookPen size={13} /> Ô prompt <small>soạn và dùng chung prompt</small>
             </button>
-            <div className="mc-addmenu-group">Trang phục</div>
             <button type="button" role="menuitem" onClick={() => addNode('input', MUSE_NODE.outfit)}>
               <Shirt size={13} /> Trang phục <small title="1 ảnh người mặc bộ đồ">1 ảnh người mặc bộ đồ</small>
+            </button>
+            <button type="button" role="menuitem" onClick={() => addNode('input', MUSE_NODE.character)}>
+              <UserRound size={13} /> Nhân vật tham chiếu <small title="1 ảnh nhân vật">1 ảnh nhân vật</small>
+            </button>
+            <button type="button" role="menuitem" onClick={() => addNode('input', MUSE_NODE.scene)}>
+              <MapPin size={13} /> Tham chiếu bối cảnh <small title="1 ảnh địa điểm / phông nền">1 ảnh địa điểm / phông nền</small>
+            </button>
+            <div className="mc-addmenu-group">Tạo ảnh AI (Muse | GPT)</div>
+            <button type="button" role="menuitem" onClick={() => addNode('freeImage', MUSE_NODE.freeImage)}>
+              <ImageIcon size={13} /> Tạo ảnh tự do <small title="Text→Ảnh hoặc ghép 0–4 ảnh">prompt tự do + 0–4 ảnh mẫu</small>
             </button>
             <button type="button" role="menuitem" onClick={() => addNode('job', MUSE_NODE.extract)}>
               <Scissors size={13} /> Tách áo quần <small title="nhiều trang phục → ảnh sản phẩm">nhiều trang phục → ảnh sản phẩm</small>
             </button>
-            <button type="button" role="menuitem" onClick={() => addNode('starter', MUSE_NODE.extract)}>
-              <Plus size={13} /> Mẫu: Trang phục → Tách áo quần
-            </button>
-            <div className="mc-addmenu-group">Nhân vật</div>
-            <button type="button" role="menuitem" onClick={() => addNode('input', MUSE_NODE.character)}>
-              <UserRound size={13} /> Nhân vật tham chiếu <small title="1 ảnh nhân vật">1 ảnh nhân vật</small>
-            </button>
             <button type="button" role="menuitem" onClick={() => addNode('job', MUSE_NODE.characterSheet)}>
               <LayoutPanelLeft size={13} /> Bảng thiết kế nhân vật <small title="character setting 16:9">character setting 16:9</small>
-            </button>
-            <button type="button" role="menuitem" onClick={() => addNode('starter', MUSE_NODE.characterSheet)}>
-              <Plus size={13} /> Mẫu: Nhân vật → Bảng thiết kế
-            </button>
-            <div className="mc-addmenu-group">Bối cảnh</div>
-            <button type="button" role="menuitem" onClick={() => addNode('input', MUSE_NODE.scene)}>
-              <MapPin size={13} /> Tham chiếu bối cảnh <small title="1 ảnh địa điểm / phông nền">1 ảnh địa điểm / phông nền</small>
             </button>
             <button type="button" role="menuitem" onClick={() => addNode('job', MUSE_NODE.scenePlace)}>
               <UserRound size={13} /> Nhân vật trong bối cảnh <small title="nhân vật × bối cảnh → ảnh 9:16">nhân vật × bối cảnh → ảnh 9:16</small>
             </button>
-            <div className="mc-addmenu-group">Video</div>
+            <div className="mc-addmenu-group">Video &amp; Flow</div>
             <button type="button" role="menuitem" onClick={() => addNode('videoRef', MUSE_NODE.videoRef)}>
               <Film size={13} /> Video tham chiếu <small title="1 video mẫu">1 video mẫu</small>
+            </button>
+            <button type="button" role="menuitem" onClick={() => addNode('videoIngr', MUSE_NODE.videoIngredients)}>
+              <Clapperboard size={13} /> Tạo video Flow <small title="Chỉnh video, Thành phần, Khung đầu–cuối 3–15s">chỉnh video / ảnh / khung đầu–cuối 3–15s</small>
             </button>
             <button type="button" role="menuitem" onClick={() => addNode('videoCut', MUSE_NODE.videoCut)}>
               <Scissors size={13} /> Cắt video <small title="cắt nhiều khúc như CapCut, xem trước rồi lưu">cắt nhiều khúc, xem trước, lưu video mới</small>
             </button>
-            <button type="button" role="menuitem" onClick={() => addNode('videoIngr', MUSE_NODE.videoIngredients)}>
-              <Clapperboard size={13} /> Ingredients (video + ảnh) <small title="video mẫu + 1–5 ảnh → video Flow">video mẫu + 1–5 ảnh → video Flow</small>
-            </button>
-            <button type="button" role="menuitem" onClick={() => addNode('script', MUSE_NODE.script)}>
-              <FileText size={13} /> Kịch bản video <small title="bảng thiết kế → kịch bản + prompt">bảng thiết kế → kịch bản + prompt</small>
-            </button>
-            <button type="button" role="menuitem" onClick={() => addNode('clipScript', MUSE_NODE.clipScript)}>
-              <Clapperboard size={13} /> Kịch bản tạo video <small title="ChatGPT · mỗi ảnh 1 clip ≤ 15 s, có mối nối">ChatGPT · mỗi ảnh 1 clip ≤ 15 s, có mối nối</small>
+            <button type="button" role="menuitem" onClick={() => addNode('frameExtract', MUSE_NODE.frameExtract)}>
+              <Camera size={13} /> Tách khung hình <small title="tách khung đầu/cuối/giây bằng ffmpeg, 0 credit">lấy khung đầu / cuối / giây · 0 credit</small>
             </button>
             <button type="button" role="menuitem" onClick={() => addNode('clipMerge', MUSE_NODE.clipMerge)}>
               <Film size={13} /> Ghép video <small title="các clip Flow đã tạo → 1 video + nhạc">các clip Flow đã tạo → 1 video + nhạc</small>
+            </button>
+            <div className="mc-addmenu-group">Kịch bản</div>
+            <button type="button" role="menuitem" onClick={() => addNode('clipScript', MUSE_NODE.clipScript)}>
+              <Clapperboard size={13} /> Kịch bản tạo video <small title="ChatGPT · mỗi ảnh 1 clip ≤ 15 s, có mối nối">ChatGPT · mỗi ảnh 1 clip ≤ 15 s, có mối nối</small>
+            </button>
+            <button type="button" role="menuitem" onClick={() => addNode('script', MUSE_NODE.script)}>
+              <FileText size={13} /> Kịch bản video <small title="bảng thiết kế → kịch bản + prompt">Muse · bảng thiết kế → kịch bản</small>
             </button>
           </div>
         )}

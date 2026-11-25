@@ -1,8 +1,19 @@
 import type { VeoCapabilityProfile } from '../../veo-studio/types'
 import type { MotionOutputConfig } from '../types'
 
-// Omni 1.2: đoạn chỉnh dài 3–10 giây (gói Google AI trả phí: tới 15 giây, chưa mở).
-export const MOTION_DURATION_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10] as const
+// Omni 1.2: đoạn chỉnh dài 3–15 giây (Backend/Extension MOTION_REF_MAX_SECONDS = 15; từ giây 11 Flow tính credit gấp đôi).
+export const MOTION_MIN_DURATION_SECONDS = 3
+export const MOTION_MAX_DURATION_SECONDS = 15
+export const MOTION_DURATION_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const
+
+export function estimateMotionCreditCost(
+  durationSeconds: number,
+  resolution: '360p' | '720p' = '720p',
+): number {
+  const rate = resolution === '360p' ? 1 : 3
+  const s = Math.max(0, Number.isFinite(durationSeconds) ? durationSeconds : 10)
+  return Math.round(Math.min(s, 10) * rate + Math.max(0, s - 10) * rate * 2)
+}
 
 export function getVideoEditProfiles(profiles: VeoCapabilityProfile[]): VeoCapabilityProfile[] {
   return profiles.filter(
@@ -24,7 +35,12 @@ export function findMotionProfile(
 
 export function getMotionTrimDuration(startSeconds: number, endSeconds: number): number | null {
   const duration = endSeconds - startSeconds
-  if (startSeconds < 0 || !Number.isInteger(duration) || duration < 3 || duration > 10) return null
+  if (
+    startSeconds < 0 ||
+    !Number.isInteger(duration) ||
+    duration < MOTION_MIN_DURATION_SECONDS ||
+    duration > MOTION_MAX_DURATION_SECONDS
+  ) return null
   return duration
 }
 

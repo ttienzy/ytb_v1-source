@@ -70,8 +70,8 @@ export interface LongPlan {
   credits: number
 }
 
-/** Video dài hơn mức này mới cần chia đoạn (Flow nhận tối đa 10 giây mỗi lượt). */
-export const LONG_MOTION_THRESHOLD_SECONDS = 10.05
+/** Video dài hơn mức này mới cần chia đoạn (Motion Control đơn lẻ hỗ trợ tối đa 15 giây mỗi lượt). */
+export const LONG_MOTION_THRESHOLD_SECONDS = 15.05
 
 export const SEGMENT_STATE_LABEL: Record<SegmentState, string> = {
   idle: 'Chưa chạy',

@@ -49,7 +49,7 @@ test('đếm chữ + dòng xem trước khi thu gọn', () => {
 
 test('một Ô prompt nối nhiều loại node; mỗi cổng chỉ nhận một ô và giữ được các dây media', () => {
   const types = [
-    MUSE_NODE.extract, MUSE_NODE.characterSheet, MUSE_NODE.scenePlace, MUSE_NODE.script,
+    MUSE_NODE.extract, MUSE_NODE.characterSheet, MUSE_NODE.scenePlace, MUSE_NODE.freeImage, MUSE_NODE.script,
     MUSE_NODE.clipScript, MUSE_NODE.clipPrompt, MUSE_NODE.videoIngredients, MUSE_NODE.scriptText,
   ]
   const nodes = [

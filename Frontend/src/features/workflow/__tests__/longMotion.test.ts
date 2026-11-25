@@ -19,10 +19,11 @@ const seg = (index: number, state: LongSegment['state'], extra: Partial<LongSegm
   output: null, out_duration: null, ...extra,
 })
 
-test('chỉ video dài hơn 10 giây mới cần chia đoạn', () => {
+test('chỉ video dài hơn 15 giây mới cần chia đoạn', () => {
   assert.equal(needsLongMotion(10), false)
-  assert.equal(needsLongMotion(10.04), false)
-  assert.equal(needsLongMotion(10.5), true)
+  assert.equal(needsLongMotion(15), false)
+  assert.equal(needsLongMotion(15.04), false)
+  assert.equal(needsLongMotion(15.5), true)
   assert.equal(needsLongMotion(21.5), true)
   assert.equal(needsLongMotion(undefined), false)
   assert.equal(needsLongMotion(NaN), false)

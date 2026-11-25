@@ -194,7 +194,7 @@ export function MotionReferenceGroupNode({ data, selected }: NodeProps) {
                       }}
                     >
                       <Clock size={11} />
-                      {motion.trimEndSec ? `${motion.trimEndSec}s` : '10s'}
+                      {`${Math.max(0, (motion.trimEndSec ?? 10) - (motion.trimStartSec ?? 0))}s`}
                     </span>
                   </div>
 

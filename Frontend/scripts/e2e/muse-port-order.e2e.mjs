@@ -23,7 +23,7 @@ try {
   await canvas.addNode('Video tham chiếu')
   await vref.waitFor()
   await canvas.move(vref, -420, 700)
-  await canvas.addNode('Ingredients')
+  await canvas.addNode('Tạo video Flow')
   await ingr.waitFor()
   await canvas.move(ingr, 700)
   await canvas.fit()

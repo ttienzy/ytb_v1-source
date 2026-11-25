@@ -49,7 +49,9 @@ export function loadStoredMotionConfig(): MotionOutputConfig {
       ...parsed,
       aspectRatio: parsed.aspectRatio === '16:9' ? '16:9' : '9:16',
       resolution: '720p',   // Omni 1.2 chỉnh video mới xác minh 720p (bản lưu cũ 360p của Omni 1.1 được chuyển lên 720p)
-      durationSeconds: Number.isFinite(parsed.durationSeconds) ? parsed.durationSeconds : 10,
+      durationSeconds: Number.isFinite(parsed.durationSeconds)
+        ? Math.min(15, Math.max(3, Math.round(Number(parsed.durationSeconds))))
+        : 10,
       projectMode: parsed.projectMode === 'new_per_run' ? 'new_per_run' : 'selected',
       freshAssets: parsed.freshAssets === true,
       showReferenceComparison: parsed.showReferenceComparison !== false,

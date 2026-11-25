@@ -177,8 +177,8 @@ export function LongMotionPanel({ video, prompt, aspectRatio, getImagePaths, onC
 
         <div className="lm-body">
           <p className="lm-lead">
-            Flow chỉ nhận tối đa 10 giây mỗi lượt. Video mẫu sẽ được cắt thành {segments.length || '…'} đoạn, tạo lần lượt rồi ghép
-            thành một video. Mỗi đoạn là một lượt tính phí: đoạn lỗi thì hàng đợi dừng lại và không tự gửi lại.
+            Motion Control đơn lẻ nhận tối đa 15 giây mỗi lượt. Với video dài hơn, app cắt thành {segments.length || '…'} đoạn (mỗi đoạn ≤ 10 giây để tối ưu credit vì từ giây 11 Flow tính giá gấp đôi),
+            tạo lần lượt rồi ghép thành một video. Mỗi đoạn là một lượt tính phí: đoạn lỗi thì hàng đợi dừng lại và không tự gửi lại.
           </p>
 
           <section className="lm-settings" aria-label="Tùy chọn">
@@ -190,7 +190,7 @@ export function LongMotionPanel({ video, prompt, aspectRatio, getImagePaths, onC
               </label>
               <small>
                 Mỗi đoạn lặp lại {options.overlap_seconds} giây cuối của đoạn trước. Khi ghép, app chọn khung giống nhau nhất trong phần gối để cắt và
-                trộn mờ, nên mối nối mượt hơn. Tắt thì cắt thẳng, mối nối dễ thấy hơn nhưng ít đoạn hơn khi video vừa quá 10 giây.
+                trộn mờ, nên mối nối mượt hơn. Tắt thì cắt thẳng, mối nối dễ thấy hơn nhưng ít đoạn hơn khi video sát mốc chia đoạn.
               </small>
             </div>
 

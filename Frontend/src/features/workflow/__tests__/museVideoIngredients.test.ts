@@ -55,10 +55,20 @@ test('node mới: prompt mặc định, id tiền tố vingr, đọc dữ liệu
   assert.equal(n.type, 'museVideoIngredients')
   assert.match(n.id, /^vingr-/)
   assert.deepEqual(normalizeVideoIngrData(n.data), {
-    title: 'Ingredients (video + ảnh)', prompt: 'PROMPT', promptSource: 'default', order: [], trimStart: null, trimEnd: null, videos: [], collapsed: false,
+    title: 'Tạo video Flow',
+    prompt: 'PROMPT',
+    promptSource: 'default',
+    order: [],
+    trimStart: null,
+    trimEnd: null,
+    frameMode: 'auto',
+    durationSeconds: null,
+    videos: [],
+    collapsed: false,
   })
-  const d = normalizeVideoIngrData({ trimStart: -1, trimEnd: 7.456, video: 'x', order: ['a', 3] })
-  assert.deepEqual([d.trimStart, d.trimEnd, d.videos, d.order], [null, 7.46, [], ['a']])
+  assert.equal(normalizeVideoIngrData({ title: 'Ingredients (video + ảnh)' }).title, 'Tạo video Flow')
+  const d = normalizeVideoIngrData({ trimStart: -1, trimEnd: 7.456, video: 'x', order: ['a', 3], frameMode: 'weird', durationSeconds: 99 })
+  assert.deepEqual([d.trimStart, d.trimEnd, d.videos, d.order, d.frameMode, d.durationSeconds], [null, 7.46, [], ['a'], 'auto', null])
   // bản lưu cũ có `video` (1 video) -> biến thể 1; mảng `videos` bỏ phần tử hỏng và giới hạn 4
   const old = { status: 'done', fingerprint: 'f', attempt: 1, startedAt: 0, updatedAt: 0, files: ['a.mp4'] }
   assert.deepEqual(normalizeVideoIngrData({ video: old }).videos, [old])
@@ -175,6 +185,24 @@ test('4 chế độ đầu vào của node Ingredients: video+ảnh, chỉ video
   assert.equal(txtOnly.num_outputs, 1)
   assert.equal('reference_video_id' in txtOnly, false)
   assert.equal('ingredient_image_paths' in txtOnly, false)
+
+  // 5) Khung đầu–cuối (frames): cần đúng 2 ảnh, 6s/10s, build image_path + end_image_path
+  const dFrames = { prompt: 'F', trimStart: null, trimEnd: null, frameMode: 'frames' as const, durationSeconds: 6 }
+  assert.equal(videoIngrMode(null, refs, 'frames'), 'frames')
+  assert.equal(videoIngrMaxRefs(null, 'frames'), 2)
+  assert.equal(videoIngrDuration(dFrames, null, refs), 6)
+  assert.equal(videoIngrModeCredits(dFrames, null, refs, '360p'), 6)
+  assert.deepEqual(videoIngrBlockers(dFrames, null, refs, FLOW), [])
+  assert.match(videoIngrBlockers(dFrames, null, refs.slice(0, 1), FLOW)[0], /đúng 2 ảnh/)
+  const framesReq = buildVideoIngrRequest('vingr-1', dFrames, null, refs, FLOW, '', 1, 1, 1)
+  assert.equal(framesReq.input_mode, 'frames')
+  assert.equal(framesReq.duration_seconds, 6)
+  assert.equal(framesReq.image_path, 'D:/b1.webp')
+  assert.equal(framesReq.end_image_path, 'D:/b2.webp')
+  assert.equal('ingredient_image_paths' in framesReq, false)
+
+  // 6) Guardrail video_edit 0 ảnh: chặn 360p (chưa có HTTP 360p khi 0 ảnh)
+  assert.match(videoIngrBlockers(d, VIDEO, [], { ...FLOW, resolution: '360p' })[0], /720p/)
 })
 
 test('request video_edit: Omni 1.2, 720p, ảnh theo thứ tự, đoạn cắt, media id, khóa chống trùng theo lần gửi', () => {

@@ -35,8 +35,13 @@ import {
   VolumeX,
 } from 'lucide-react'
 import {
+  FLOW_MAX_SECONDS,
+  FLOW_MIN_SECONDS,
+} from '../../services/museCanvasConfig.ts'
+import {
   MUSE_HANDLE,
   SCRIPT_REF_KINDS,
+  VIDEO_INGR_FRAMES_DURATIONS,
   VIDEO_INGR_MAX_REFS,
   VIDEO_INGR_MAX_SECONDS,
   VIDEO_INGR_MIN_SECONDS,
@@ -409,7 +414,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
       return b
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prompt, data.trimStart, data.trimEnd, data.targetSeconds, refVideo, refs, flowProject, config.flowProjectId, config.flowAspect, config.flowResolution],
+    [prompt, data.trimStart, data.trimEnd, data.targetSeconds, data.frameMode, data.durationSeconds, refVideo, refs, flowProject, config.flowProjectId, config.flowAspect, config.flowResolution],
   )
   const videos = data.videos
   const variants = config.flowVariants
@@ -547,7 +552,14 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
     const next = [...videos]
     indices.forEach((i, k) => { next[i] = fresh(k) })
     updateNodeData(id, { videos: next })
-    const snapshot = { prompt, trimStart: data.trimStart, trimEnd: data.trimEnd, targetSeconds: data.targetSeconds }
+    const snapshot = {
+      prompt,
+      trimStart: data.trimStart,
+      trimEnd: data.trimEnd,
+      targetSeconds: data.targetSeconds,
+      frameMode: data.frameMode,
+      durationSeconds: data.durationSeconds,
+    }
     const batch: Promise<BatchOutcome> = (async () => {
       let mediaId = ''
       if (refVideo) {
@@ -707,8 +719,8 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
     if (!el.paused && el.currentTime >= trim.end) el.pause()
   }
 
-  const mode = videoIngrMode(refVideo, refs)
-  const maxRefs = videoIngrMaxRefs(refVideo)
+  const mode = videoIngrMode(refVideo, refs, data.frameMode)
+  const maxRefs = videoIngrMaxRefs(refVideo, data.frameMode)
   const duration = videoIngrDuration(runData, refVideo, refs)
   const trimOk = !refVideo || (trim.length >= VIDEO_INGR_MIN_SECONDS && trim.length <= VIDEO_INGR_MAX_SECONDS && trim.end > trim.start)
   const credits = trimOk ? videoIngrModeCredits(runData, refVideo, refs, config.flowResolution) : null
@@ -718,9 +730,11 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
       ? refs.length > 0
         ? 'chỉnh video + ảnh'
         : 'chỉnh video theo prompt'
-      : mode === 'ingredients'
-        ? `tạo video từ ảnh (${Math.round(duration)}s)`
-        : `tạo video từ chữ (${Math.round(duration)}s)`
+      : mode === 'frames'
+        ? `khung đầu–cuối (${Math.round(duration)}s)`
+        : mode === 'ingredients'
+          ? `tạo video từ ảnh (${Math.round(duration)}s)`
+          : `tạo video từ chữ (${Math.round(duration)}s)`
   const collapsed = data.collapsed
   const dur = refVideo?.durationSec || Math.max(trim.end, VIDEO_INGR_MAX_SECONDS)
   const pct = (t: number) => `${Math.min(100, Math.max(0, (t / dur) * 100))}%`
@@ -768,7 +782,7 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
         >
           {collapsed ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
         </button>
-        <NodeDeleteButton nodeId={id} confirmText={videos.length ? 'Xóa node Ingredients? Video đã tạo vẫn còn trong Thư Viện Video.' : undefined} />
+        <NodeDeleteButton nodeId={id} confirmText={videos.length ? `Xóa node ${data.title}? Video đã tạo vẫn còn trong Thư Viện Video.` : undefined} />
       </div>
 
       <div className="mc-node-body">
@@ -882,13 +896,93 @@ function MuseVideoIngredientsNodeImpl({ id, data: raw, selected }: NodeProps<VIn
             <section className="mc-vingr-card">
               <div className="mc-vingr-title">
                 Ảnh tham chiếu <span className="mc-node-badge">{refs.length}/{maxRefs}</span> <span className="mc-node-badge">Tùy chọn</span>
-                <small className="mc-xtoggle-hint">{refVideo ? 'theo thứ tự · tối đa 5 ảnh' : 'không có video · tối đa 3 ảnh'}</small>
+                <small className="mc-xtoggle-hint">
+                  {refVideo
+                    ? 'theo thứ tự · tối đa 5 ảnh'
+                    : data.frameMode === 'frames'
+                      ? 'khung đầu (#1) → khung cuối (#2)'
+                      : 'không có video · tối đa 3 ảnh'}
+                </small>
               </div>
+              {!refVideo && (
+                <div className="mc-vingr-modebar nodrag">
+                  <div className="mc-seg mc-seg-sm" role="group" aria-label="Chế độ tạo video không có video mẫu">
+                    <button
+                      type="button"
+                      className={data.frameMode !== 'frames' ? 'on' : ''}
+                      onClick={() => updateNodeData(id, { frameMode: 'auto' })}
+                      title="Ingredients (1–3 ảnh, 3–15s) hoặc Chỉ chữ (10s)"
+                    >
+                      Thành phần / Tự do
+                    </button>
+                    <button
+                      type="button"
+                      className={data.frameMode === 'frames' ? 'on' : ''}
+                      onClick={() => updateNodeData(id, { frameMode: 'frames' })}
+                      title="Khung đầu (#1) → Khung cuối (#2), 6s hoặc 10s"
+                    >
+                      Khung đầu–cuối (2 ảnh)
+                    </button>
+                  </div>
+                  <div className="mc-vingr-dur">
+                    {mode === 'frames' ? (
+                      <>
+                        <span>Thời lượng:</span>
+                        <div className="mc-seg mc-seg-sm">
+                          {VIDEO_INGR_FRAMES_DURATIONS.map((sec) => (
+                            <button
+                              key={sec}
+                              type="button"
+                              className={duration === sec ? 'on' : ''}
+                              onClick={() => updateNodeData(id, { durationSeconds: sec })}
+                            >
+                              {sec}s
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : mode === 'ingredients' ? (
+                      <>
+                        <span>Thời lượng:</span>
+                        <select
+                          className="mc-input mc-seconds-select"
+                          aria-label="Thời lượng tạo video tại node"
+                          value={data.durationSeconds ?? 0}
+                          onChange={(e) => {
+                            const v = Number(e.target.value)
+                            updateNodeData(id, { durationSeconds: v >= FLOW_MIN_SECONDS && v <= FLOW_MAX_SECONDS ? v : null })
+                          }}
+                        >
+                          <option value={0}>Theo cấu hình ({config.flowSeconds ? `${config.flowSeconds}s` : '10s'})</option>
+                          {Array.from({ length: FLOW_MAX_SECONDS - FLOW_MIN_SECONDS + 1 }, (_, i) => FLOW_MIN_SECONDS + i).map((s) => (
+                            <option key={s} value={s}>
+                              {s} giây
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    ) : (
+                      <span className="mc-node-meta">Chỉ chữ: Flow hỗ trợ cố định 10s</span>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="mc-vingr-refs">
                 {slots.map((r, i) =>
                   r ? (
                     <div key={r.sourceNodeId} className="mc-vingr-ref" title={r.label}>
-                      <span className="mc-vingr-no">#{i + 1}{i === 0 ? ' · Mở đầu' : ''}</span>
+                      <span className="mc-vingr-no">
+                        #{i + 1}
+                        {data.frameMode === 'frames' && !refVideo
+                          ? i === 0
+                            ? ' · Đầu'
+                            : i === 1
+                              ? ' · Cuối'
+                              : ''
+                          : i === 0
+                            ? ' · Mở đầu'
+                            : ''}
+                      </span>
                       {r.image ? (
                         <a href={museMediaUrl(r.image.previewUrl)} target="_blank" rel="noreferrer" className="nodrag" title="Mở ảnh">
                           <img src={museMediaUrl(r.image.previewUrl)} alt={r.label} draggable={false} />

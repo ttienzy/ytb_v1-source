@@ -151,5 +151,5 @@ test('getAvailableAspectRatios extracts unique aspect ratios', () => {
 
 test('getAvailableDurations returns duration steps', () => {
   const durs = getAvailableDurations(mockProfiles)
-  assert.deepEqual(durs, [3, 4, 5, 6, 7, 8, 9, 10])
+  assert.deepEqual(durs, [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 })
