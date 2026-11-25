@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from app.core.config import TOOLS_DIR
 from app.core.storage import read_config, write_config
-from app.externals.pippit import client
+from app.externals.pippit import client, sources
 from app.externals.pippit.client import PippitAuthError, PippitClient, PippitError
 from app.externals.pippit.schemas import (
     FacebookPageSlot,
@@ -72,6 +72,21 @@ def _save_task_record(task_data: dict) -> None:
             _write_tasks(tasks)
         except Exception as exc:
             print(f"[Pippit] Không thể lưu task record: {exc}")
+
+
+def compose_final_caption(title: str, caption: str, prepend_title: bool = False) -> str:
+    """Nội dung bài đăng cuối cùng.
+
+    Mặc định tôn trọng đúng `caption` người dùng đã soạn (không nhồi tiêu đề/tên file lên đầu); chỉ dùng tiêu đề khi
+    caption rỗng, hoặc khi `prepend_title=True` (hành vi cũ của luồng đăng lẻ).
+    """
+    title_clean = (title or "").strip()
+    caption_clean = (caption or "").strip()
+    if not caption_clean:
+        return title_clean
+    if prepend_title and title_clean and not caption_clean.startswith(title_clean):
+        return f"{title_clean}\n\n{caption_clean}"
+    return caption_clean
 
 
 def get_saved_pippit_accounts() -> list[dict]:
@@ -843,8 +858,8 @@ def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkSchedu
         try:
             c, acc = _get_client_for_target(str(item.page_id))
 
-            if item.file_path and os.path.exists(item.file_path):
-                local_file = Path(item.file_path)
+            if item.file_path:
+                local_file = sources.assert_allowed_video_path(item.file_path)
             elif item.file_id:
                 local_file = gdrive_service.download_video_temp(item.file_id, custom_name=item.file_name)
                 is_temp = True
@@ -854,36 +869,44 @@ def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkSchedu
             if not local_file or not local_file.exists() or local_file.stat().st_size == 0:
                 raise ValueError(f"Không thể đọc file video: {item.file_name}")
 
-            upload_res = c.upload(str(local_file))
-            asset_id = upload_res["asset_id"]
-            res_item.asset_id = asset_id
-
             title_clean = (item.title or "").strip()
-            caption_clean = (item.caption or "").strip()
-            if title_clean:
-                if not caption_clean.startswith(title_clean):
-                    final_caption = f"{title_clean}\n\n{caption_clean}" if caption_clean else title_clean
-                else:
-                    final_caption = caption_clean
-            else:
-                final_caption = caption_clean
+            final_caption = compose_final_caption(title_clean, item.caption, item.prepend_title)
 
-            if plat == "tiktok":
-                task_id = c.schedule_tiktok(
-                    asset_id=asset_id,
-                    platform_user_id=str(item.page_id),
-                    schedule_time_ms=item.schedule_time_ms,
-                    description=final_caption,
-                    title=title_clean,
-                )
-            else:
-                task_id = c.schedule_facebook(
-                    asset_id=asset_id,
-                    platform_user_id=str(item.page_id),
-                    schedule_time_ms=item.schedule_time_ms,
-                    description=final_caption,
-                    title=title_clean,
-                )
+            def _upload_and_schedule(client_: PippitClient) -> tuple[str, str]:
+                asset = client_.upload(str(local_file))["asset_id"]
+                res_item.asset_id = asset
+                if plat == "tiktok":
+                    tid = client_.schedule_tiktok(
+                        asset_id=asset,
+                        platform_user_id=str(item.page_id),
+                        schedule_time_ms=item.schedule_time_ms,
+                        description=final_caption,
+                        title=title_clean,
+                        privacy_level=item.privacy_level,
+                        allow_comment=item.allow_comment,
+                        allow_duet=item.allow_duet,
+                        allow_stitch=item.allow_stitch,
+                    )
+                else:
+                    tid = client_.schedule_facebook(
+                        asset_id=asset,
+                        platform_user_id=str(item.page_id),
+                        schedule_time_ms=item.schedule_time_ms,
+                        description=final_caption,
+                        title=title_clean,
+                    )
+                return asset, tid
+
+            try:
+                asset_id, task_id = _upload_and_schedule(c)
+            except PippitAuthError:
+                # Cookie hết hạn giữa lượt: đăng nhập lại ĐÚNG MỘT lần rồi làm lại video này (upload chưa tạo task nên không trùng).
+                if not (acc.get("email") and acc.get("password")):
+                    raise
+                _relogin_account(acc)
+                _persist_relogged_cookies([acc])
+                clients_by_account[acc.get("id", "default")] = c = _account_client(acc)
+                asset_id, task_id = _upload_and_schedule(c)
 
             if not task_id:
                 # Không lưu bản ghi "mồ côi"; nếu Pippit thật ra đã tạo task, lần đồng bộ sau sẽ kéo về.
@@ -912,8 +935,11 @@ def bulk_schedule_videos(payload: PippitBulkScheduleRequest) -> PippitBulkSchedu
                 "status": 1,
                 "published": False,
                 "source": "bulk",
-                # Để Drive nhận diện chính xác video đã đăng (thay vì đoán theo tiêu đề).
+                # Để Drive / kho video AI nhận diện chính xác video đã đăng (thay vì đoán theo tiêu đề).
                 "drive_file_id": item.file_id or "",
+                "source_type": item.source_type,
+                "source_id": item.source_id,
+                "local_path": str(local_file) if not is_temp else "",
                 "file_name": item.file_name,
             })
 

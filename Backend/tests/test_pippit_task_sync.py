@@ -1,4 +1,4 @@
-"""Đồng bộ lịch sử bài đăng Pippit: parse task FB/TikTok, merge với cache, sync nhiều tài khoản.
+﻿"""Đồng bộ lịch sử bài đăng Pippit: parse task FB/TikTok, merge với cache, sync nhiều tài khoản.
 
 Không gọi mạng: PippitClient.post / client.login được thay bằng hàm giả.
 """
@@ -154,6 +154,9 @@ def test_merge_clears_failed_reason_when_live_says_ok():
 def isolated(monkeypatch, tmp_path):
     tasks_file = tmp_path / "pippit_tasks.json"
     monkeypatch.setattr(service, "PIPPIT_TASKS_FILE", tasks_file)
+    # file_path chỉ được nhận khi nằm trong thư mục dữ liệu của app (sources.assert_allowed_video_path).
+    from app.externals.pippit import sources
+    monkeypatch.setattr(sources, "DATA_DIR", tmp_path)
     accounts = json.loads(json.dumps(ACCOUNTS))
     saved: list[list[dict]] = []
     monkeypatch.setattr(service, "get_saved_pippit_accounts", lambda: json.loads(json.dumps(accounts)))

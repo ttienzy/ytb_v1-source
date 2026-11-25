@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+﻿import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   channelLabel,
@@ -31,9 +31,9 @@ test('channelLabel shows platform and handle', () => {
 
 test('scheduleRange / countByTarget', () => {
   const slots = [
-    { file_id: 'a', schedule_time_ms: 300, page_id: 'p1' },
-    { file_id: 'b', schedule_time_ms: 100, page_id: 'p2' },
-    { file_id: 'c', schedule_time_ms: 200, page_id: 'p1' },
+    { uid: 'a', schedule_time_ms: 300, page_id: 'p1' },
+    { uid: 'b', schedule_time_ms: 100, page_id: 'p2' },
+    { uid: 'c', schedule_time_ms: 200, page_id: 'p1' },
   ]
   assert.deepEqual(scheduleRange(slots), { first: 100, last: 300 })
   assert.equal(scheduleRange([]), null)
@@ -44,9 +44,9 @@ test('ensureFutureTimes shifts only past slots and spaces them', () => {
   const now = 1_000_000
   const out = ensureFutureTimes(
     [
-      { file_id: 'a', schedule_time_ms: now - 10, page_id: 'p' },
-      { file_id: 'b', schedule_time_ms: now + 3_600_000, page_id: 'p' },
-      { file_id: 'c', schedule_time_ms: now + 60_000, page_id: 'p' },
+      { uid: 'a', schedule_time_ms: now - 10, page_id: 'p' },
+      { uid: 'b', schedule_time_ms: now + 3_600_000, page_id: 'p' },
+      { uid: 'c', schedule_time_ms: now + 60_000, page_id: 'p' },
     ],
     now
   )
@@ -56,7 +56,7 @@ test('ensureFutureTimes shifts only past slots and spaces them', () => {
 })
 
 test('summarizeRun', () => {
-  const base = { file_id: 'x', file_name: 'x', title: 'x', page_name: 'p', schedule_time_ms: 0 }
+  const base = { uid: 'x', file_name: 'x', title: 'x', page_name: 'p', schedule_time_ms: 0 }
   assert.equal(summarizeRun([{ ...base, ok: true }, { ...base, ok: true }]).text, 'Đã lên lịch 2/2 video qua Pippit.')
   const r = summarizeRun([{ ...base, ok: true }, { ...base, ok: false, error: 'e' }])
   assert.equal(r.failed, 1)

@@ -247,3 +247,99 @@
   color: #b91c1c;
   font-size: 11.5px;
 }
+
+
+/* ── Lên lịch Pippit 2.0 (đa nguồn + Smart Caption + Xem trước video thật) ── */
+.pub2-picker { display: flex; flex-direction: column; gap: 8px; }
+.pub2-tabs { display: flex; flex-wrap: wrap; gap: 5px; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+.pub2-tab { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pub2-tab:hover { background: #f8fafc; color: #0f172a; }
+.pub2-tab-active { background: #eef2ff; border-color: #6366f1; color: #4338ca; }
+.pub2-tab-count { font-size: 10.5px; padding: 1px 5px; border-radius: 999px; background: rgba(15, 23, 42, 0.08); }
+.pub2-tab-active .pub2-tab-count { background: #6366f1; color: #fff; }
+
+.pub2-dropzone { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 12px; border: 1.5px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; color: #475569; font-size: 12px; text-align: center; cursor: pointer; }
+.pub2-dropzone strong { color: #0f172a; font-size: 12.5px; }
+.pub2-dropzone span { font-size: 11px; color: #64748b; }
+.pub2-dropzone:hover, .pub2-dropzone-over { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
+
+.pub2-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.pub2-pill { padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; }
+.pub2-pill-active { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
+
+.pub2-selection-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; padding: 6px 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; }
+.pub2-selection-actions { display: flex; align-items: center; gap: 6px; }
+.pub2-mini-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; background: #f8fafc; border: 1px solid #cbd5e1; color: #475569; cursor: pointer; }
+.pub2-mini-btn:hover:not(:disabled) { background: #eef2ff; border-color: #a5b4fc; color: #4338ca; }
+.pub2-mini-btn:disabled { opacity: 0.5; cursor: default; }
+.pub2-load-more { width: 100%; justify-content: center; margin-top: 8px; padding: 7px; }
+
+.pub2-row-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.pub2-row-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pub2-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid #e2e8f0; background: #f8fafc; color: #475569; }
+.pub2-badge-new { background: #ecfdf5; color: #059669; border-color: #a7f3d0; }
+.pub2-badge-src { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.pub2-badge-cap { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+.pub2-badge-warn, .pub2-badge-hit { background: #fef3c7; color: #b45309; border-color: #fde68a; }
+.pub2-badge-tiktok { background: #f1f5f9; color: #0f172a; border-color: #cbd5e1; }
+.pub2-badge-facebook { background: #f0f9ff; color: #0284c7; border-color: #bae6fd; }
+.pub2-badge-youtube { background: #fff1f2; color: #e11d48; border-color: #fecdd3; }
+.pub2-inline-player { width: 100%; max-height: 220px; margin-top: 8px; border-radius: 8px; background: #000; }
+.pub2-inline-error { padding: 7px 10px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 12px; }
+.pub2-inline-form { display: inline-flex; align-items: center; gap: 4px; }
+.pub2-inline-form input { height: 26px; padding: 0 7px; font-size: 11.5px; border: 1px solid #cbd5e1; border-radius: 6px; width: 140px; }
+
+/* TikTok options */
+.pub2-tt-opts { margin-top: 10px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 9px; background: #f8fafc; }
+.pub2-tt-opts-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: #334155; }
+.pub2-tt-opts-row label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
+/* Caption Composer */
+.pub2-caption-box { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.pub2-seg-toggle { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 7px; overflow: hidden; background: #f8fafc; }
+.pub2-seg-btn { padding: 4px 9px; border: 0; background: transparent; font-size: 11px; font-weight: 600; color: #475569; cursor: pointer; }
+.pub2-seg-btn.active { background: #4f46e5; color: #fff; }
+
+.pub2-ai-cap-card { display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid #c7d2fe; border-radius: 10px; background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 100%); }
+.pub2-ai-cap-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.pub2-ai-cap-title { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #3730a3; }
+.pub2-ai-cap-title small { font-weight: 500; color: #6366f1; }
+.pub2-tone-select { height: 28px; padding: 0 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; font-size: 11.5px; color: #0f172a; }
+.pub2-ai-cap-row { display: flex; gap: 6px; }
+.pub2-ai-brief-input { flex: 1; font-size: 12px; }
+.pub2-ai-gen-btn { display: inline-flex; align-items: center; gap: 5px; padding: 0 12px; height: 34px; border: 0; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.pub2-ai-gen-btn:hover:not(:disabled) { background: #4338ca; }
+.pub2-ai-gen-btn:disabled { opacity: 0.55; cursor: default; }
+.pub2-disclosure-check { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: #475569; cursor: pointer; }
+
+.pub2-tpl-section { display: flex; flex-direction: column; gap: 6px; }
+.pub2-preset-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.pub2-preset-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.pub2-preset-pill { display: inline-flex; align-items: center; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; overflow: hidden; }
+.pub2-preset-pill button { border: 0; background: transparent; padding: 3px 8px; font-size: 11px; font-weight: 600; color: #475569; cursor: pointer; }
+.pub2-preset-pill.active { border-color: #6366f1; background: #eef2ff; }
+.pub2-preset-pill.active button { color: #4338ca; }
+.pub2-preset-del { padding: 2px 5px 2px 0 !important; color: #94a3b8 !important; }
+.pub2-preset-actions { display: flex; gap: 4px; }
+.pub2-token-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11px; color: #64748b; }
+
+/* Slot inline caption editor */
+.pub2-slot-caption { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e2e8f0; display: flex; flex-direction: column; gap: 6px; }
+.pub2-slot-caption-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.pub2-slot-cap-count { font-size: 11px; font-weight: 600; color: #64748b; }
+.pub2-slot-cap-actions { display: flex; gap: 5px; }
+.pub2-slot-cap-preview { margin: 0; font-size: 12px; color: #334155; line-height: 1.45; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; padding: 5px 8px; border-radius: 6px; background: #f8fafc; }
+.pub2-slot-cap-preview:hover { background: #eef2ff; }
+.pub2-slot-cap-preview.is-empty { color: #94a3b8; font-style: italic; }
+.pub2-slot-editor { display: flex; flex-direction: column; gap: 6px; }
+.pub2-slot-warnings { display: flex; flex-direction: column; gap: 3px; }
+.pub2-slot-warn-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 3px 7px; }
+
+/* Preview Modal video thật & TikTok 9:16 mockup */
+.pub2-preview-video { width: 100%; max-height: 380px; border-radius: 10px; background: #000; display: block; }
+.pub2-tt-mock { max-width: 360px; margin: 0 auto; border-radius: 16px; overflow: hidden; background: #0f172a; color: #f8fafc; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.25); }
+.pub2-tt-video-wrap { background: #000; }
+.pub2-tt-overlay-info { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.pub2-tt-handle { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
+.pub2-tt-handle span { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #94a3b8; }
+.pub2-tt-caption { font-size: 12.5px; line-height: 1.45; color: #e2e8f0; }

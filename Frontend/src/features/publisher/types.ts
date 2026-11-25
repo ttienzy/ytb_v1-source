@@ -5,6 +5,16 @@ export type DriveFolder = {
   modified_time?: string
 }
 
+export type PublishedChannel = {
+  platform: string
+  channel_name: string
+  channel_id?: string
+  published_at?: string
+  status?: string
+  task_id?: string | null
+  post_url?: string
+}
+
 export type DriveVideo = {
   id: string
   name: string
@@ -16,13 +26,7 @@ export type DriveVideo = {
   duration_seconds?: number
   width?: number
   height?: number
-  published_channels?: {
-    platform: string
-    channel_name: string
-    channel_id?: string
-    published_at?: string
-    status?: string
-  }[]
+  published_channels?: PublishedChannel[]
 }
 
 export type DriveVideoList = {
@@ -31,6 +35,45 @@ export type DriveVideoList = {
   folders: DriveFolder[]
   videos: DriveVideo[]
   total: number
+}
+
+/** Nguồn video có thể đăng. `drive` lấy từ Google Drive; 4 nguồn còn lại là file có sẵn trên máy (không qua Drive). */
+export type SourceType = 'campaign' | 'ai_library' | 'recap' | 'local' | 'drive'
+
+/** Một video có thể đăng, thống nhất cho mọi nguồn. */
+export type PublishableVideo = {
+  uid: string
+  source_type: SourceType
+  group: string
+  source_id: string
+  label: string
+  title: string
+  file_name: string
+  /** Đường dẫn file trên máy (rỗng với video Drive). */
+  file_path: string
+  /** Đường dẫn tương đối `/api/pippit/sources/preview?...` (rỗng với video Drive). */
+  preview_url: string
+  size_bytes: number
+  duration_seconds?: number | null
+  width?: number
+  height?: number
+  created_at: string
+  context_text: string
+  default_title: string
+  default_caption: string
+  default_hashtags: string[]
+  default_cta: string
+  published_channels: PublishedChannel[]
+  drive_file_id?: string
+  web_view_link?: string
+}
+
+export type SourceListResponse = {
+  source: SourceType
+  items: PublishableVideo[]
+  total: number
+  counts: Record<string, number>
+  groups: Record<string, number>
 }
 
 export type PippitFacebookPage = {
@@ -71,17 +114,43 @@ export type PippitAccount = {
   tiktok_channels?: PippitTikTokChannel[]
 }
 
+export type TikTokOptions = {
+  privacy_level: 1 | 2 | 3
+  allow_comment: boolean
+  allow_duet: boolean
+  allow_stitch: boolean
+}
+
 export type ScheduleSlot = {
-  file_id: string
+  uid: string
+  source_type: SourceType
+  source_id: string
+  drive_file_id: string
+  file_path: string
+  preview_url: string
+  web_view_link: string
+  source_label: string
   file_name: string
   size_bytes: number
-  duration_seconds?: number
+  duration_seconds?: number | null
   title: string
   caption: string
   schedule_time_ms: number
   page_id: string
   page_name: string
 }
+
+export type CaptionOverride = { title?: string; caption?: string }
+
+export type GeneratedCaption = {
+  uid: string
+  title: string
+  caption: string
+  hashtags: string[]
+  full_text: string
+}
+
+export type CaptionGenerateResponse = { items: GeneratedCaption[]; missing: string[] }
 
 export type PippitScheduleTask = {
   task_id?: string | null

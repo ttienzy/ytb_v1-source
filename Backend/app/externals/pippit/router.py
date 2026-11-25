@@ -1,7 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 
-from app.externals.pippit import service
+from app.externals.pippit import captions, service, sources
 from app.externals.pippit.schemas import (
+    CaptionGenerateRequest,
     PippitAccountOut,
     PippitBulkScheduleRequest,
     PippitBulkScheduleResponse,
@@ -79,6 +82,56 @@ def publish_video(payload: PippitPublishRequest):
 def bulk_schedule(payload: PippitBulkScheduleRequest):
     """Lên lịch đăng bài hàng loạt video ngắn qua Pippit."""
     return service.bulk_schedule_videos(payload)
+
+
+@router.get("/sources")
+def list_sources(source: str = "campaign", q: str = "", group: str = "",
+                 limit: int = Query(default=60, ge=1, le=200), offset: int = Query(default=0, ge=0)):
+    """Kho video có thể đăng: chiến dịch AI | ai_library | recap | local (kèm caption sẵn có + kênh đã đăng)."""
+    try:
+        return sources.list_publishable_videos(source, q, group, limit, offset)
+    except sources.SourceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/sources/preview")
+def preview_source(path: str):
+    """Phát video cục bộ để xem trước (chỉ file video trong thư mục dữ liệu của app)."""
+    try:
+        file = sources.assert_allowed_video_path(path)
+    except sources.SourceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(file, media_type="video/mp4", filename=file.name, content_disposition_type="inline")
+
+
+@router.post("/sources/upload-local")
+async def upload_local_videos(files: list[UploadFile] = File(...)):
+    """Nhận video từ máy tính vào kho tạm của app để đăng."""
+    saved: list[dict] = []
+    errors: list[str] = []
+    for f in files:
+        data = await f.read()
+        try:
+            saved.append(await run_in_threadpool(sources.save_local_upload, f.filename or "video.mp4", data))
+        except sources.SourceError as exc:
+            errors.append(str(exc))
+    if not saved and errors:
+        raise HTTPException(status_code=400, detail=" ".join(errors))
+    return {"items": saved, "errors": errors}
+
+
+@router.post("/generate-captions")
+async def generate_captions(payload: CaptionGenerateRequest):
+    """Gemini viết caption hàng loạt cho các video đã chọn (0 credit Flow/Muse, một lượt, không tự gửi lại)."""
+    try:
+        return await run_in_threadpool(
+            captions.generate_batch_captions,
+            [i.model_dump() for i in payload.items],
+            tone=payload.tone, extra_brief=payload.extra_brief,
+            include_ai_disclosure=payload.include_ai_disclosure, language=payload.language,
+        )
+    except captions.CaptionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.delete("/accounts/{account_id}")

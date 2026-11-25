@@ -1,4 +1,4 @@
-// Kiểm tra trước khi đặt lịch hàng loạt + tóm tắt kết quả. Module thuần (node:test nạp được).
+﻿// Kiểm tra trước khi đặt lịch hàng loạt + tóm tắt kết quả. Module thuần (node:test nạp được).
 
 export interface PublishedChannelRef {
   platform: string
@@ -48,7 +48,7 @@ export function channelLabel(t: TargetChannelRef): string {
 }
 
 export interface SlotLike {
-  file_id: string
+  uid: string
   schedule_time_ms: number
   page_id: string
 }
@@ -87,7 +87,7 @@ export function ensureFutureTimes<T extends SlotLike>(slots: T[], now: number, m
 }
 
 export interface BulkRunItem {
-  file_id: string
+  uid: string
   file_name: string
   title: string
   page_name: string

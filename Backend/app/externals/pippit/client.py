@@ -337,6 +337,24 @@ def commit_upload_inner(sts, upload_domain, session_key):
     return ket_qua[0]
 
 
+def smart_truncate(text: str, max_len: int) -> str:
+    """Cắt theo ranh giới từ (không cắt giữa chữ), thêm “…” khi bị cắt."""
+    text = (text or "").strip()
+    if len(text) <= max_len:
+        return text
+    cut = text[: max_len - 1]
+    space = cut.rfind(" ")
+    if space >= max_len // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:-·") + "…"
+
+
+def raise_if_auth_expired(j: dict) -> None:
+    """Pippit trả ret=1017 khi cookie hết hạn: ném PippitAuthError để tầng trên đăng nhập lại."""
+    if str(j.get("ret")) == "1017":
+        raise PippitAuthError("Cookie Pippit đã hết hạn - Cần đăng nhập lại.")
+
+
 def post_id_from_link(link: str) -> str:
     """Trích xuất post_id từ link bài đăng Facebook."""
     if not link:
@@ -475,6 +493,7 @@ class PippitClient:
             "is_web_user": True,
         }
         j = self.post("/lv/v1/asset/prepare_upload_cloud", body)
+        raise_if_auth_expired(j)
         if j.get("ret") != "0":
             raise PippitError(f"prepare_upload_cloud thất bại: {j}")
         return j["data"]
@@ -523,6 +542,7 @@ class PippitClient:
             "is_web_user": True,
         }
         j = self.post("/lv/v1/asset/create_cloud_asset", body)
+        raise_if_auth_expired(j)
         if j.get("ret") != "0":
             raise PippitError(f"create_cloud_asset thất bại: {j}")
         asset_id = ((j.get("data") or {}).get("cloud_asset") or {}).get("asset_id")
@@ -588,6 +608,7 @@ class PippitClient:
         }
         body = {"requests": [{"id": "", "task_type": 1, "publish_media_param": media_param}]}
         j = self.post("/api/biz/v1/publish/batchcreate_schedule_task", body, "publish")
+        raise_if_auth_expired(j)
         if j.get("ret") != "0":
             raise PippitError(f"schedule_facebook thất bại: {j}")
 
@@ -623,7 +644,7 @@ class PippitClient:
         allow_stitch: bool = True,
     ) -> str:
         tt_param = {
-            "title": title or description[:100],
+            "title": smart_truncate(title or description.split("\n", 1)[0] or description, 100),
             "description": description,
             "media_type": 1,
             "privacy_level": privacy_level,
@@ -655,6 +676,7 @@ class PippitClient:
         }
         body = {"requests": [{"id": "", "task_type": 1, "publish_media_param": media_param}]}
         j = self.post("/api/biz/v1/publish/batchcreate_schedule_task", body, "publish")
+        raise_if_auth_expired(j)
         if j.get("ret") != "0":
             raise PippitError(f"schedule_tiktok thất bại: {j}")
 

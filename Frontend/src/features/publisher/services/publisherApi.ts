@@ -2,12 +2,16 @@ import { API_URL } from '../../../shared/constants'
 import type {
   ActiveFacebookPage,
   BulkScheduleResponse,
+  CaptionGenerateResponse,
   DriveFolder,
   DriveVideoList,
-  DriveVideo,
   PippitAccount,
   PippitScheduleTask,
+  PublishableVideo,
   ScheduleSlot,
+  SourceListResponse,
+  SourceType,
+  TikTokOptions,
 } from '../types'
 
 export async function fetchDriveStatus() {
@@ -80,21 +84,68 @@ export async function fetchPippitAllTasks(): Promise<PippitScheduleTask[]> {
   return r.json()
 }
 
+export async function fetchSources(
+  source: Exclude<SourceType, 'drive'>,
+  opts: { q?: string; group?: string; limit?: number; offset?: number } = {}
+): Promise<SourceListResponse> {
+  const params = new URLSearchParams({ source })
+  if (opts.q) params.set('q', opts.q)
+  if (opts.group) params.set('group', opts.group)
+  params.set('limit', String(opts.limit ?? 60))
+  params.set('offset', String(opts.offset ?? 0))
+  const r = await fetch(`${API_URL}/api/pippit/sources?${params.toString()}`)
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.detail || 'Không thể tải kho video')
+  return data
+}
+
+export async function uploadLocalVideos(files: File[]): Promise<{ items: PublishableVideo[]; errors: string[] }> {
+  const form = new FormData()
+  for (const f of files) form.append('files', f)
+  const r = await fetch(`${API_URL}/api/pippit/sources/upload-local`, { method: 'POST', body: form })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.detail || 'Không thể tải video từ máy lên')
+  return data
+}
+
+export async function generateCaptions(payload: {
+  items: { uid: string; title: string; context_text: string; existing_caption: string; platform: string }[]
+  tone: string
+  extra_brief: string
+  include_ai_disclosure: boolean
+}): Promise<CaptionGenerateResponse> {
+  const r = await fetch(`${API_URL}/api/pippit/generate-captions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.detail || 'Gemini không viết được caption')
+  return data
+}
+
+export type BulkSlot = ScheduleSlot & { platform?: 'facebook' | 'tiktok' }
+
 export async function submitBulkSchedule(
   accountId: string,
-  slots: (ScheduleSlot & { platform?: 'facebook' | 'tiktok'; file_path?: string })[]
+  slots: BulkSlot[],
+  tiktok?: TikTokOptions
 ): Promise<BulkScheduleResponse> {
   const payload = {
     account_id: accountId,
     items: slots.map(s => ({
-      file_id: s.file_id,
+      file_id: s.drive_file_id || null,
       file_path: s.file_path || null,
       file_name: s.file_name,
       title: s.title,
       caption: s.caption,
       schedule_time_ms: s.schedule_time_ms,
       page_id: s.page_id,
+      source_type: s.source_type,
+      source_id: s.source_id,
+      prepend_title: false,
       ...(s.platform ? { platform: s.platform } : {}),
+      ...(s.platform === 'tiktok' && tiktok ? tiktok : {}),
     })),
   }
 
@@ -105,7 +156,8 @@ export async function submitBulkSchedule(
   })
   const data = await r.json()
   if (!r.ok) {
-    throw new Error(data.detail || 'Lên lịch đăng bài hàng loạt thất bại')
+    throw new Error(typeof data.detail === 'string' ? data.detail : 'Lên lịch đăng bài hàng loạt thất bại')
   }
   return data
 }
+

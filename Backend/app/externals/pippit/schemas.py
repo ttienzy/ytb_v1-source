@@ -110,6 +110,29 @@ class PippitBulkScheduleItem(BaseModel):
     schedule_time_ms: int = Field(..., description="Timestamp thời gian hẹn giờ đăng (ms)")
     page_id: str = Field(..., description="ID Facebook Fanpage hoặc TikTok Channel đích")
     platform: str = Field(default="facebook", description="Nền tảng đích: facebook | tiktok")
+    source_type: str = Field(default="drive", description="Nguồn video: drive | campaign | ai_library | recap | local")
+    source_id: str = Field(default="", description="ID ổn định của video trong nguồn (để chống đăng trùng)")
+    prepend_title: bool = Field(default=False, description="True = ghép tiêu đề lên đầu caption (hành vi cũ)")
+    privacy_level: int = Field(default=1, description="TikTok: 1 công khai, 2 bạn bè, 3 riêng tư")
+    allow_comment: bool = True
+    allow_duet: bool = True
+    allow_stitch: bool = True
+
+
+class CaptionGenerateItemIn(BaseModel):
+    uid: str
+    title: str = ""
+    context_text: str = ""
+    existing_caption: str = ""
+    platform: str = "tiktok"
+
+
+class CaptionGenerateRequest(BaseModel):
+    items: list[CaptionGenerateItemIn]
+    tone: str = "sales_tiktok"
+    extra_brief: str = Field(default="", max_length=1000)
+    include_ai_disclosure: bool = False
+    language: str = "vi"
 
 
 class PippitBulkScheduleRequest(BaseModel):
