@@ -619,3 +619,30 @@ button.cp-budget:hover { border-color: #a5b4fc; }
   .cp-scene { grid-template-columns: minmax(0, 1fr); }
   .cp-scene-img { width: 100%; max-width: 200px; }
 }
+
+/* ── Chiến dịch AI 2.0 (3 Chặng, Commerce Angle, Safe-Zone, Hook Multiplier, Motion Trend) ── */
+.cp-steps-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cp-commerce-card { padding: 12px 14px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 10px; }
+.cp-commerce-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cp-commerce-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.cp-commerce-summary { margin: 0; font-size: 13px; color: #0f172a; font-weight: 500; }
+.cp-commerce-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.cp-commerce-list { margin: 4px 0 0; padding-left: 16px; font-size: 12.5px; color: #334155; display: flex; flex-direction: column; gap: 3px; }
+.cp-motion-box { padding: 10px; border-radius: 9px; background: #f8fafc; border: 1px solid #cbd5e1; display: flex; flex-direction: column; gap: 8px; }
+
+.cp-sz-wrap { display: flex; flex-direction: column; gap: 8px; width: 100%; align-items: flex-start; }
+.cp-sz-toolbar { display: flex; gap: 8px; align-items: center; }
+.cp-sz-toolbar .is-active { border-color: #6366f1; color: #3730a3; background: #eef2ff; }
+.cp-sz-frame { position: relative; width: min(320px, 100%); border-radius: 10px; overflow: hidden; background: #000; }
+.cp-sz-frame video { width: 100%; max-height: 70vh; display: block; border-radius: 10px; }
+.cp-sz-overlay { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; color: rgba(255, 255, 255, .92); font-size: 11px; }
+.cp-sz-top { display: flex; justify-content: center; gap: 12px; padding-top: 4px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+.cp-sz-right { position: absolute; right: 8px; bottom: 72px; display: flex; flex-direction: column; gap: 12px; align-items: center; opacity: .88; filter: drop-shadow(0 1px 3px rgba(0,0,0,.85)); }
+.cp-sz-bottom { padding-right: 42px; padding-bottom: 30px; display: flex; flex-direction: column; gap: 6px; }
+.cp-sz-bag { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; padding: 4px 8px; border-radius: 6px; background: rgba(234, 88, 12, .88); color: #fff; font-weight: 700; font-size: 10.5px; }
+.cp-sz-lines { display: flex; flex-direction: column; gap: 4px; }
+.cp-sz-lines i { display: block; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, .42); }
+
+.cp-hook-lab { width: 100%; border-top: 1px solid #e2e8f0; padding-top: 12px; margin-top: 6px; }
+.cp-hook-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 6px; }
+.cp-hook-card { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; display: flex; flex-direction: column; gap: 8px; }

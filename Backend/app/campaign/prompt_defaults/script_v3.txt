@@ -22,6 +22,7 @@ RULES FOR WORDS
 - on_screen_text: 2 to 6 words, readable with the sound off, no arrows, no emoji.
 - Hook (shot 1): type must be one of {{hook_types}}. The hook must be fully visible in the first frame of shot 1.
 - Never claim anything in garment.do_not_say. No fake first-person customer testimonial (the model has not bought or used the item). Mention price or promotion only if the brief has it.
+- Prioritize the strongest visible angles in garment.selling_angles and proactively reassure garment.buyer_objections (e.g. fit, styling, thickness look) without inventing unverifiable fabric specs.
 
 Return ONLY one JSON object, no markdown, no comments:
 {"angle_vi":"one sentence: the idea of this ad, in Vietnamese","hook":{"type":"direct","on_screen_text":"..."},

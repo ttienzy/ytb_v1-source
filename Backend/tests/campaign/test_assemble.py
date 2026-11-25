@@ -369,3 +369,35 @@ def test_opening_hook_end_card_and_ai_label_are_added_when_the_script_has_them(p
     out2 = tmp / "card_micro.mp4"
     out2.write_bytes(res.artifacts[0].data)
     assert res.artifacts[0].meta["end_card"] is True and streams(out2)[1] > assemble.END_CARD_SECONDS
+
+
+def test_audio_modes_silent_and_music_only_and_ending_modes_render_cleanly(parts):
+    ctx, tmp = parts
+    # Chế độ silent (không thoại, không nhạc) nhưng vẫn có luồng audio im lặng chuẩn TikTok Shop
+    ctx.inputs["voice"] = []
+    ctx.params = {"edit_style": "shots", "audio_mode": "silent", "ending_mode": "cta_overlay", "cta_text": "Bấm giỏ cam"}
+    res_silent = assemble.run_assemble(ctx)
+    meta_s = res_silent.artifacts[0].meta
+    assert meta_s["audio_mode"] == "silent" and meta_s["with_voice"] is False and meta_s["ending_mode"] == "cta_overlay"
+    assert meta_s["cta_overlay"] == bool(meta_s["font"]) and meta_s["end_card"] is False
+    out_silent = tmp / "silent_cta.mp4"
+    out_silent.write_bytes(res_silent.artifacts[0].data)
+    kinds_s, dur_s, _ = streams(out_silent)
+    assert kinds_s.count("video") == 1 and kinds_s.count("audio") == 1
+    assert dur_s == pytest.approx(8.0, abs=0.4)
+
+    # Chế độ music_only với nhạc tổng hợp + loop không nối end_card
+    bgm = tmp / "bgm_loop.wav"
+    make_voice(bgm, 4.0)
+    orig_resolve = assemble.resolve_bgm
+    assemble.resolve_bgm = lambda _raw: [("Lookbook Beat", bgm)]
+    try:
+        ctx.params = {"edit_style": "shots", "audio_mode": "music_only", "bgm": ["lookbook"], "ending_mode": "loop"}
+        res_music = assemble.run_assemble(ctx)
+        meta_m = res_music.artifacts[0].meta
+        assert meta_m["audio_mode"] == "music_only" and meta_m["bgm"] == ["Lookbook Beat"] and meta_m["ending_mode"] == "loop"
+        out_music = tmp / "music_loop.mp4"
+        out_music.write_bytes(res_music.artifacts[0].data)
+        assert streams(out_music)[1] == pytest.approx(8.0, abs=0.4)
+    finally:
+        assemble.resolve_bgm = orig_resolve

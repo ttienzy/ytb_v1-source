@@ -16,8 +16,8 @@ GARMENT_REFS = ("front", "detail", "back")
 HOOK_TYPES = ("direct", "pain_question", "surprise_visual", "number_signal", "story")
 DEFAULT_FORMAT = "fit_check"
 MIN_DURATION, MAX_DURATION = 3, 15
-# Thứ tự hiển thị: format dễ làm nhất trước.
-ORDER = ("fit_check", "detail_first", "hero_piece", "occasions", "grwm")
+# Thứ tự hiển thị: format dễ làm nhất & format thương mại mới lên trước.
+ORDER = ("fit_check", "detail_first", "modular_gmv_max", "motion_trend_clone", "hero_piece", "occasions", "grwm")
 
 
 class FormatError(ValueError):
@@ -50,7 +50,11 @@ def _validate(fmt: dict[str, Any], name: str) -> dict[str, Any]:
             raise FormatError(f"{name} shot {i}: garment_ref không hợp lệ")
         if not str(shot.get("beat_hint") or "").strip():
             raise FormatError(f"{name} shot {i}: thiếu beat_hint")
-    if fmt["shots"][0]["role"] != "hook" or fmt["shots"][-1]["role"] != "cta":
+    mode = str(fmt.get("mode") or "r2v")
+    if mode == "motion" and len(fmt["shots"]) == 1:
+        if fmt["shots"][0]["role"] != "hook":
+            raise FormatError(f"{name}: shot duy nhất của format motion phải có role 'hook'")
+    elif fmt["shots"][0]["role"] != "hook" or fmt["shots"][-1]["role"] != "cta":
         raise FormatError(f"{name}: shot đầu phải là hook, shot cuối phải là cta")
     for t in fmt.get("hook_types") or []:
         if t not in HOOK_TYPES:
@@ -77,7 +81,8 @@ def total_seconds(fmt: dict[str, Any]) -> int:
 
 def summary(fmt: dict[str, Any]) -> dict[str, Any]:
     return {
-        "id": fmt["id"], "name_vi": fmt["name_vi"], "desc_vi": fmt["desc_vi"], "best_for_vi": fmt.get("best_for_vi", ""),
+        "id": fmt["id"], "mode": str(fmt.get("mode") or "r2v"),
+        "name_vi": fmt["name_vi"], "desc_vi": fmt["desc_vi"], "best_for_vi": fmt.get("best_for_vi", ""),
         "scenes": int(fmt["scenes"]), "shots": len(fmt["shots"]), "total_seconds": total_seconds(fmt),
         "hook_types": list(fmt.get("hook_types") or []),
         "shot_list": [{"role": s["role"], "scene": int(s.get("scene", 1)), "duration": int(s["duration"]),

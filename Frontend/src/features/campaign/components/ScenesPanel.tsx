@@ -96,7 +96,7 @@ export function ScenesPanel({ campaignId, state, formats, busy, onChanged, onRun
       <header className="cp-card-head">
         <div className="cp-head-title">
           <h3>Các cảnh (nơi quay) và phong cách</h3>
-          <span className="cp-head-sub">{sceneHint} · mỗi cảnh một nơi, một ánh sáng. Ảnh bối cảnh không có người là tham chiếu bối cảnh của khung chốt và clip.</span>
+          <span className="cp-head-sub">{sceneHint} · mỗi cảnh một nơi, một ánh sáng. Ảnh bối cảnh không có người là tùy chọn (mặc định Chặng 2 chạy Direct Look tạo thẳng, không bắt buộc vẽ nền trống trước).</span>
         </div>
         <div className="cp-head-actions">
           <SuggestButton campaignId={campaignId} step="scene_set" state={state} onResult={onSuggest} onError={onError} />

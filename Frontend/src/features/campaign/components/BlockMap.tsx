@@ -1,28 +1,34 @@
 import { Check } from 'lucide-react'
-import { blockBadge } from '../services/campaignView.ts'
+import { CAMPAIGN_STAGES, stageBadge } from '../services/campaignView.ts'
 import type { BlockView } from '../types.ts'
 
 interface Props {
   blocks: BlockView[]
-  active: number
-  onSelect: (block: number) => void
+  active: 1 | 2 | 3
+  onSelect: (stage: 1 | 2 | 3) => void
 }
 
-/** Thanh 8 bước gọn trên một hàng: số thứ tự (dấu tích khi xong), tên khối và trạng thái ngắn. */
+/** Thanh 3 Chặng theo dòng tư duy Marketing Thời trang: Sản phẩm & Chiến lược -> Look & Kịch bản -> Clip & Biến thể. */
 export function BlockMap({ blocks, active, onSelect }: Props) {
   return (
-    <nav className="cp-steps" aria-label="Sơ đồ 6 khối">
-      {blocks.map(b => {
-        const badge = blockBadge(b)
+    <nav className="cp-steps cp-steps-3" aria-label="Sơ đồ 3 chặng Chiến dịch AI">
+      {CAMPAIGN_STAGES.map(stage => {
+        const badge = stageBadge(blocks, stage)
         const done = badge.tone === 'ok'
         return (
-          <button key={b.block} type="button" title={badge.hint || badge.label}
-                  className={`cp-step cp-step-${badge.tone} ${active === b.block ? 'is-active' : ''}`}
-                  aria-current={active === b.block ? 'step' : undefined} onClick={() => onSelect(b.block)}>
-            <span className="cp-step-num">{done ? <Check size={13} strokeWidth={3} /> : b.block}</span>
+          <button
+            key={stage.id}
+            type="button"
+            title={stage.subtitle}
+            className={`cp-step cp-step-${badge.tone} ${active === stage.id ? 'is-active' : ''}`}
+            aria-current={active === stage.id ? 'step' : undefined}
+            data-testid={`stage-tab-${stage.id}`}
+            onClick={() => onSelect(stage.id)}
+          >
+            <span className="cp-step-num">{done ? <Check size={13} strokeWidth={3} /> : stage.id}</span>
             <span className="cp-step-text">
-              <span className="cp-step-title">{b.title}</span>
-              <span className="cp-step-status">{badge.label}</span>
+              <span className="cp-step-title">{stage.title}</span>
+              <span className="cp-step-status">{badge.label} · {stage.subtitle}</span>
             </span>
           </button>
         )

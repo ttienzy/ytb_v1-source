@@ -35,6 +35,9 @@ CAPTION_SAFE_BOTTOM = 0.83  # đáy khối chữ ở 83% chiều cao: sát đáy
 TRANSITIONS = {"cut": None, "fade": "fade", "slide": "slideleft", "zoom": "zoomin"}
 TRANSITION_SECONDS = 0.3
 EDIT_STYLES = ("shots", "micro")                  # shots: giữ trọn clip đúng thời lượng đã chọn (mặc định); micro: nhiều cú cắt ngắn theo nhịp nhạc
+AUDIO_MODES = ("voice_bgm", "music_only", "silent")
+ENDING_MODES = ("cta_overlay", "loop", "end_card")
+CTA_OVERLAY_SECONDS = 2.2
 OPENING_SECONDS = 1.2        # chữ hook mở màn: xuất hiện ngay giây 0 (hook phải thấy trong 1–3 giây đầu)
 END_CARD_SECONDS = 1.8       # thẻ kết: CTA trên nền tối, dán sau clip cuối
 AI_LABEL_TEXT = "Hình ảnh tạo bằng AI"   # nhãn AI nhỏ ở góc (luật AI Việt Nam 1/3/2026; TikTok/Shopee yêu cầu nhãn)
@@ -167,6 +170,21 @@ def mix_bgm(video: Path, tracks: list[Path], volume: float, total: float, work: 
     return out
 
 
+def mix_bgm_only(video: Path, tracks: list[Path], volume: float, total: float, work: Path) -> Path:
+    """Trộn nhạc nền trực tiếp khi video không có giọng đọc (Lookbook / Music-only)."""
+    from app.recap.ffmpeg import build_smart_bgm_chain
+    music = build_smart_bgm_chain(tracks, total, work / "bgm_chain.mp3", work) if len(tracks) > 1 else tracks[0]
+    fade_start = max(0.0, total - BGM_FADE_OUT)
+    # Nhạc Lookbook tăng nhẹ ~1.4x so với mức nền dưới giọng đọc để nghe rõ nhịp hơn.
+    eff_vol = min(0.8, volume * 1.4)
+    graph = f"[1:a]volume={eff_vol:.3f},afade=t=in:d=0.6,afade=t=out:st={fade_start:.2f}:d={BGM_FADE_OUT},alimiter=limit=0.95[a]"
+    out = work / "mixed_music.mp4"
+    _run(["ffmpeg", "-y", "-i", video.name, "-stream_loop", "-1", "-i", str(music.resolve()), "-filter_complex", graph,
+          "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-t", f"{total:.3f}",
+          "-movflags", "+faststart", out.name], work)
+    return out
+
+
 def _run(cmd: list[str], cwd: Path) -> None:
     proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
     if proc.returncode != 0:
@@ -230,6 +248,29 @@ def ai_label_filters(work: Path, size: tuple[int, int], text: str = AI_LABEL_TEX
     fs = max(12, round(w / 34))
     return [f"drawtext=fontfile=font.ttf:textfile=ai_label.txt:fontcolor=white@0.85:fontsize={fs}:borderw=1:bordercolor=black@0.6"
             f":x={max(8, round(w * 0.035))}:y={round(h * 0.075)}"]
+
+
+def cta_overlay_filters(work: Path, text: str, size: tuple[int, int], window: tuple[float, float]) -> list[str]:
+    """Thẻ CTA nổi góc dưới trái (trên vùng giỏ hàng TikTok Shop) hiện ở cuối video, không cắt sang màn đen."""
+    w, h = size
+    cleaned = clean_caption(text)
+    if not cleaned:
+        return []
+    lines = wrap_caption(cleaned, 18 if w < h else 34).split(chr(10))[:2]
+    fs = max(16, round(w / 17))
+    line_h = round(fs * 1.25)
+    top = round(h * 0.72) - len(lines) * line_h
+    a, b = window
+    pad = max(8, round(w / 50))
+    out = []
+    for k, line in enumerate(lines):
+        (work / f"cta_{k}.txt").write_bytes(line.encode("utf-8"))
+        out.append(
+            f"drawtext=fontfile=font.ttf:textfile=cta_{k}.txt:fontcolor=#FEF08A:fontsize={fs}:"
+            f"box=1:boxcolor=0x0f172a@0.82:boxborderw={pad}:x={max(12, round(w * 0.04))}:y={top + k * line_h}:"
+            f"alpha='if(lt(t-{a:.3f},0.2),(t-{a:.3f})/0.2,1)':enable='between(t,{a:.3f},{b:.3f})'"
+        )
+    return out
 
 
 def build_end_card(work: Path, size: tuple[int, int], lines: list[str], has_font: bool, label: bool, seconds: float = END_CARD_SECONDS) -> Path:
@@ -413,8 +454,12 @@ def _flag(params: dict[str, Any], key: str, default: bool = True) -> bool:
 
 
 # Cờ nội bộ chỉ do campaign/exports.py đặt khi tạo bản tải phụ (không phải tham số người dùng lưu ở bước ghép):
-EXPORT_CLEAN = "_export_clean"        # xóa watermark trên từng clip gốc trước khi dựng
-EXPORT_NO_BGM = "_export_no_bgm"      # bỏ nhạc nền, giữ tiếng đọc và phụ đề
+EXPORT_CLEAN = "_export_clean"              # xóa watermark trên từng clip gốc trước khi dựng
+EXPORT_NO_BGM = "_export_no_bgm"            # bỏ nhạc nền, giữ tiếng đọc và phụ đề
+EXPORT_OPENING_TEXT = "_export_opening_text"
+EXPORT_CTA_TEXT = "_export_cta_text"
+EXPORT_AUDIO_MODE = "_export_audio_mode"
+EXPORT_ENDING_MODE = "_export_ending_mode"
 
 
 def clean_clips(ctx: ExecContext, shots: list[dict[str, Any]], clips: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
@@ -465,6 +510,12 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
 
     bgm = resolve_bgm(ctx.params.get("bgm"))            # kiểm tra nhạc nền TRƯỚC khi ghép: lỗi thì dừng sớm, không tốn công
     volume = bgm_volume(ctx.params)
+    audio_mode = str(ctx.params.get(EXPORT_AUDIO_MODE) or ctx.params.get("audio_mode") or "voice_bgm")
+    audio_mode = audio_mode if audio_mode in AUDIO_MODES else "voice_bgm"
+    if audio_mode in ("music_only", "silent"):
+        voices = {}
+    if audio_mode == "silent":
+        bgm = []
     style = str(ctx.params.get("caption_style") or "pop")
     style = style if style in CAPTION_STYLES else "pop"
     color = str(ctx.params.get("caption_color") or "white")
@@ -473,10 +524,20 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
     transition = transition if transition in TRANSITIONS else "cut"
     edit_style = str(ctx.params.get("edit_style") or "shots")
     edit_style = edit_style if edit_style in EDIT_STYLES else "shots"
-    # Chữ hook mở màn (giây 0–1,2), thẻ kết CTA và nhãn AI: mặc định bật; tắt từng cái ở khối Ghép & Xuất.
-    opening = str((script_doc.get("hook") or {}).get("on_screen_text") or (shots[0].get("on_screen_text") if shots else "") or "") if _flag(ctx.params, "opening_text") else ""
-    end_lines = [str(script_doc.get("cta") or "")] if _flag(ctx.params, "end_card") else []
-    end_lines = [t for t in end_lines if t.strip()]
+    raw_ending = ctx.params.get(EXPORT_ENDING_MODE) or ctx.params.get("ending_mode")
+    if raw_ending in ENDING_MODES:
+        ending_mode = str(raw_ending)
+    else:
+        ending_mode = "end_card" if _flag(ctx.params, "end_card") else "loop"
+    # Chữ hook mở màn (giây 0–1,2) và CTA: hỗ trợ override từ Hook Multiplier (0 credit Flow).
+    raw_opening = ctx.params.get(EXPORT_OPENING_TEXT)
+    if raw_opening is not None:
+        opening = str(raw_opening)
+    else:
+        opening = str((script_doc.get("hook") or {}).get("on_screen_text") or (shots[0].get("on_screen_text") if shots else "") or "") if _flag(ctx.params, "opening_text") else ""
+    raw_cta = ctx.params.get(EXPORT_CTA_TEXT)
+    cta_text = str(raw_cta if raw_cta is not None else (ctx.params.get("cta_text") or script_doc.get("cta") or "")).strip()
+    end_lines = [cta_text] if (ending_mode == "end_card" and cta_text) else []
     ai_label = _flag(ctx.params, "ai_label")
     extra: dict[str, Any] = {}
     if ctx.params.get(EXPORT_NO_BGM):
@@ -498,9 +559,19 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
         has_font = font is not None
         label_vf = ai_label_filters(work, size) if (ai_label and has_font) else []
         open_vf = opening_filters(work, opening, size) if (opening and has_font) else []
+        use_cta_overlay = ending_mode == "cta_overlay" and bool(cta_text) and has_font
         if edit_style == "micro":
-            final, report, micro_extra = build_micro(ctx, work, shots, script, clips, voices, bgm, size, style, color, has_font, open_vf + label_vf)
-            extra.update(micro_extra)
+            micro_extra = open_vf + label_vf
+            if use_cta_overlay:
+                est_total = sum(
+                    plan_segment(probe(Path(clips[sh["key"]]["path"]))["duration"],
+                                 edit_plan.clamp_cut(ctx.params.get("cut_seconds")) * 2,
+                                 audio_seconds(Path(voices[sh["key"]]["path"])) if voices.get(sh["key"]) else 0.0)[0]
+                    for sh in shots
+                )
+                micro_extra = micro_extra + cta_overlay_filters(work, cta_text, size, (max(0.0, est_total - CTA_OVERLAY_SECONDS), max(0.5, est_total)))
+            final, report, micro_extra_meta = build_micro(ctx, work, shots, script, clips, voices, bgm, size, style, color, has_font, micro_extra)
+            extra.update(micro_extra_meta)
         else:
             segments, report = [], []
             for i, shot in enumerate(shots):
@@ -515,8 +586,12 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
                 speed = plan_speed(clip_seconds, seconds)
                 text = str(shot.get("on_screen_text") or "")
                 ctx.report(f"Đang ghép {key} ({i + 1}/{len(shots)})…")
+                seg_extra = (open_vf if i == 0 else []) + label_vf
+                if use_cta_overlay and i == len(shots) - 1:
+                    cta_win = (max(0.0, seconds - min(CTA_OVERLAY_SECONDS, seconds)), seconds)
+                    seg_extra = seg_extra + cta_overlay_filters(work, cta_text, size, cta_win)
                 segments.append(build_segment(work, i, clip_path, seconds, atempo, voice_path, text, size, has_font, speed, style, color,
-                                              (open_vf if i == 0 else []) + label_vf))
+                                              seg_extra))
                 report.append({"shot": key, "seconds": round(seconds, 2), "atempo": round(atempo, 3), "speed": round(speed, 3),
                                "voice": voice_path is not None, "caption": bool(clean_caption(text) and has_font and style != "none")})
             ctx.report("Đang nối các đoạn thành video hoàn chỉnh…" if transition == "cut" else "Đang nối các đoạn với chuyển cảnh…")
@@ -524,11 +599,21 @@ def run_assemble(ctx: ExecContext) -> ExecResult:
         if end_lines and has_font:
             ctx.report("Đang dán thẻ kết…")
             final = append_end_card(work, final, build_end_card(work, size, end_lines, has_font, ai_label))
-        extra.update({"opening_text": opening if (opening and has_font) else "", "end_card": bool(end_lines and has_font), "ai_label": bool(ai_label and has_font)})
+        extra.update({
+            "opening_text": opening if (opening and has_font) else "",
+            "end_card": bool(end_lines and has_font),
+            "cta_overlay": use_cta_overlay,
+            "audio_mode": audio_mode,
+            "ending_mode": ending_mode,
+            "ai_label": bool(ai_label and has_font),
+        })
         total = probe(final)["duration"]
         if bgm:
-            ctx.report("Đang trộn nhạc nền dưới tiếng đọc…")
-            final = mix_bgm(final, [p for _, p in bgm], volume, total, work)
+            ctx.report("Đang trộn nhạc nền…" if audio_mode == "music_only" else "Đang trộn nhạc nền dưới tiếng đọc…")
+            if any(r["voice"] for r in report):
+                final = mix_bgm(final, [p for _, p in bgm], volume, total, work)
+            else:
+                final = mix_bgm_only(final, [p for _, p in bgm], volume, total, work)
         data = final.read_bytes()
     finally:
         shutil.rmtree(work, ignore_errors=True)

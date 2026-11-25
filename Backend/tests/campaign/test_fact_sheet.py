@@ -165,3 +165,22 @@ def test_cast_library_validation(svc):
         svc.cast_library_add(cid, "khong-co", "X")
     with pytest.raises(LookupError):
         svc.cast_library_use(cid, "khong-co")
+
+
+def test_commerce_angle_fields_normalize_and_stay_backward_compatible():
+    legacy = fact_sheet.normalize({"category": "t-shirt", "color": "white", "pattern": "solid"})
+    assert legacy["selling_angles"] == [] and legacy["buyer_objections"] == []
+    assert legacy["vibe_tags"] == [] and legacy["fit_benefits"] == []
+
+    rich = fact_sheet.normalize({
+        "category": "t-shirt",
+        "pattern": "solid",
+        "selling_angles": ["Che bắp tay to nhờ tay lỡ rộng", "Che bắp tay to nhờ tay lỡ rộng", "Phối 1 áo được 3 dịp"],
+        "buyer_objections": "Mặc trắng có bị lộ nội y không?",
+        "vibe_tags": ["Clean Girl", "Minimalist"],
+        "fit_benefits": ["Tôn eo cao", "Thoáng mát cả ngày"],
+    })
+    assert rich["selling_angles"] == ["Che bắp tay to nhờ tay lỡ rộng", "Phối 1 áo được 3 dịp"]
+    assert rich["buyer_objections"] == ["Mặc trắng có bị lộ nội y không?"]
+    assert rich["vibe_tags"] == ["Clean Girl", "Minimalist"]
+    assert rich["fit_benefits"] == ["Tôn eo cao", "Thoáng mát cả ngày"]

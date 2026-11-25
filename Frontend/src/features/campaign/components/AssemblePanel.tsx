@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AlertTriangle, Check, Circle, Film, Loader2, Mic, Square } from 'lucide-react'
 import { API_URL } from '../../../shared/constants.ts'
-import { artifactUrl, cancelRun, planRun, reroll, setParams } from '../services/campaignApi.ts'
+import { artifactUrl, cancelRun, fetchArtifactJson, planRun, reroll, setParams } from '../services/campaignApi.ts'
 import { describeElement, errorMessage, planBlocker, progressText } from '../services/campaignView.ts'
-import type { ArtifactView, CampaignState, Plan, Tier } from '../types.ts'
+import type { ArtifactView, AudioMode, CampaignState, EndingMode, Plan, ScriptDoc, Tier } from '../types.ts'
 import { Badge } from './Common.tsx'
 import { DownloadMenu } from './DownloadMenu.tsx'
 import { ExportPackPanel } from './ExportPackPanel.tsx'
+import { HookMultiplierPanel } from './HookMultiplierPanel.tsx'
+import { SafeZoneVideoPlayer } from './SafeZoneVideoPlayer.tsx'
 
 interface Props {
   campaignId: string
@@ -113,12 +115,27 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
   const voiceReady = !!voiceEl?.selected_artifact_id && voiceEl.state !== 'stale'
 
   const setOpt = (params: Record<string, unknown>) => void setParams(campaignId, 'assemble', params).then(onChanged).catch(e => onError(errorMessage(e)))
+  const rawAudio = String(assembleStep?.params.audio_mode ?? 'voice_bgm')
+  const audioMode: AudioMode = (['voice_bgm', 'music_only', 'silent'].includes(rawAudio) ? rawAudio : 'voice_bgm') as AudioMode
+  const flag = (key: string) => { const v = assembleStep?.params[key]; return v == null ? true : !['0', 'false', 'no', 'off', ''].includes(String(v).toLowerCase()) }
+  const rawEnding = String(assembleStep?.params.ending_mode ?? '')
+  const endingMode: EndingMode = (['cta_overlay', 'loop', 'end_card'].includes(rawEnding)
+    ? rawEnding
+    : (assembleStep?.params.end_card === false ? 'loop' : 'end_card')) as EndingMode
+  const scriptEl = steps.find(s => s.key === 'script')?.elements[0]
+  const [scriptCta, setScriptCta] = useState('')
+  useEffect(() => {
+    const id = scriptEl?.selected_artifact_id
+    if (!id) { setScriptCta(''); return }
+    fetchArtifactJson<ScriptDoc>(id).then(d => setScriptCta(String(d?.cta ?? ''))).catch(() => {})
+  }, [scriptEl?.selected_artifact_id])
+  const ctaText = String(assembleStep?.params.cta_text ?? scriptCta ?? '')
   const captionStyle = String(assembleStep?.params.caption_style ?? 'pop')
   const captionColor = String(assembleStep?.params.caption_color ?? 'white')
   const transition = String(assembleStep?.params.transition ?? 'cut')
   const editStyle = String(assembleStep?.params.edit_style ?? 'shots')
   const cutSeconds = Number(assembleStep?.params.cut_seconds ?? 2.2)
-  const flag = (key: string) => { const v = assembleStep?.params[key]; return v == null ? true : !['0', 'false', 'no', 'off', ''].includes(String(v).toLowerCase()) }
+  const voiceNeeded = audioMode === 'voice_bgm'
   // Video đã mới nhất mà bấm "Ghép lại": tạo lượt mới (nonce) rồi chạy, giống nút "Tạo lại" ở các khối khác.
   const rerunAssemble = async () => {
     try {
@@ -143,22 +160,36 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
           </div>
         </header>
 
-        <div className="cp-group">
-          <h4 className="cp-group-title"><Mic size={14} /> Giọng đọc</h4>
-          <div className="cp-row">
-            <select id="voice-pick" aria-label="Giọng đọc" className="cp-grow" value={voiceId} disabled={running} onChange={e => pickVoice(e.target.value)}>
-              <option value="">— chọn giọng —</option>
-              {voiceId && !options.some(o => o.value === voiceId) && <option value={voiceId}>{voiceId} (đã lưu)</option>}
-              {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            {voiceEl && <Badge badge={describeElement(voiceEl)} />}
-            <button type="button" className="btn-g cp-small" data-testid="run-voice" disabled={busy || running || !voiceId} onClick={() => void onRun('voice')}>
-              {voiceEl?.active_run ? <Loader2 size={13} className="spinning" /> : <Mic size={13} />} Đọc lời thoại
-            </button>
+        <div className="cp-group" data-testid="audio-mode-row">
+          <h4 className="cp-group-title"><Mic size={14} /> Chế độ âm thanh & giọng đọc</h4>
+          <div className="cp-seg" role="group" aria-label="Chế độ âm thanh" data-testid="audio-mode-seg">
+            <button type="button" className={audioMode === 'voice_bgm' ? 'is-active' : ''} disabled={running}
+                    onClick={() => setOpt({ audio_mode: 'voice_bgm' })}>Giọng đọc + Nhạc (Chốt đơn)</button>
+            <button type="button" className={audioMode === 'music_only' ? 'is-active' : ''} disabled={running}
+                    onClick={() => setOpt({ audio_mode: 'music_only' })}>Chỉ nhạc nền (Lookbook)</button>
+            <button type="button" className={audioMode === 'silent' ? 'is-active' : ''} disabled={running}
+                    onClick={() => setOpt({ audio_mode: 'silent' })}>Tắt tiếng (Gắn Sound TikTok)</button>
           </div>
-          {voiceNote && <p className="cp-warn"><AlertTriangle size={13} /> {voiceNote}</p>}
-          {voiceEl?.last_run?.state === 'error' && <p className="cp-error-inline">Giọng đọc lỗi: {voiceEl.last_run.error}</p>}
-          {voiceEl?.active_run && <p className="cp-running-note"><Loader2 size={13} className="spinning" /> {progressText(voiceEl.progress) || 'Đang đọc…'}</p>}
+          {voiceNeeded ? (
+            <>
+              <div className="cp-row">
+                <select id="voice-pick" aria-label="Giọng đọc" className="cp-grow" value={voiceId} disabled={running} onChange={e => pickVoice(e.target.value)}>
+                  <option value="">— chọn giọng —</option>
+                  {voiceId && !options.some(o => o.value === voiceId) && <option value={voiceId}>{voiceId} (đã lưu)</option>}
+                  {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                {voiceEl && <Badge badge={describeElement(voiceEl)} />}
+                <button type="button" className="btn-g cp-small" data-testid="run-voice" disabled={busy || running || !voiceId} onClick={() => void onRun('voice')}>
+                  {voiceEl?.active_run ? <Loader2 size={13} className="spinning" /> : <Mic size={13} />} Đọc lời thoại
+                </button>
+              </div>
+              {voiceNote && <p className="cp-warn"><AlertTriangle size={13} /> {voiceNote}</p>}
+              {voiceEl?.last_run?.state === 'error' && <p className="cp-error-inline">Giọng đọc lỗi: {voiceEl.last_run.error}</p>}
+              {voiceEl?.active_run && <p className="cp-running-note"><Loader2 size={13} className="spinning" /> {progressText(voiceEl.progress) || 'Đang đọc…'}</p>}
+            </>
+          ) : (
+            <p className="cp-note">Không bắt buộc giọng đọc AI — phù hợp Lookbook nhịp nhạc hoặc xuất video sạch để gắn Trending Sound trực tiếp trên TikTok.</p>
+          )}
         </div>
 
         <div className="cp-group" data-testid="look-row">
@@ -206,8 +237,18 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
           </p>
           <div className="cp-row" data-testid="assemble-extras">
             <label className="cp-switch"><input type="checkbox" checked={flag('opening_text')} disabled={running} onChange={e => setOpt({ opening_text: e.target.checked })} /> Chữ hook mở màn (giây 0–1,2)</label>
-            <label className="cp-switch"><input type="checkbox" checked={flag('end_card')} disabled={running} onChange={e => setOpt({ end_card: e.target.checked })} /> Thẻ kết với CTA (1,8 giây)</label>
             <label className="cp-switch"><input type="checkbox" checked={flag('ai_label')} disabled={running} onChange={e => setOpt({ ai_label: e.target.checked })} /> Nhãn “Hình ảnh tạo bằng AI”</label>
+          </div>
+          <div className="cp-field">
+            <span>Kiểu kết video</span>
+            <div className="cp-seg" role="group" aria-label="Kiểu kết video" data-testid="ending-mode-seg">
+              <button type="button" className={endingMode === 'cta_overlay' ? 'is-active' : ''} disabled={running}
+                      onClick={() => setOpt({ ending_mode: 'cta_overlay', end_card: false })}>CTA nổi góc giỏ hàng (Khuyên dùng)</button>
+              <button type="button" className={endingMode === 'loop' ? 'is-active' : ''} disabled={running}
+                      onClick={() => setOpt({ ending_mode: 'loop', end_card: false })}>Loop liền mạch</button>
+              <button type="button" className={endingMode === 'end_card' ? 'is-active' : ''} disabled={running}
+                      onClick={() => setOpt({ ending_mode: 'end_card', end_card: true })}>Thẻ kết nền đen (1,8s)</button>
+            </div>
           </div>
         </div>
 
@@ -240,9 +281,9 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
           {assembleEl && <Badge badge={describeElement(assembleEl)} />}
         </header>
         <ul className="cp-checklist" aria-label="Điều kiện để ghép">
-          <CheckItem ok={clipEls.length > 0 && approvedClips === clipEls.length}>Clip đã duyệt: {approvedClips}/{clipEls.length} (khối 6)</CheckItem>
-          <CheckItem ok={!!voiceId}>Đã chọn giọng đọc</CheckItem>
-          <CheckItem ok={voiceReady}>Lời thoại đã đọc xong{voiceEl?.state === 'stale' ? ' (lời đã đổi, cần đọc lại)' : ''}</CheckItem>
+          <CheckItem ok={clipEls.length > 0 && approvedClips === clipEls.length}>Clip đã duyệt: {approvedClips}/{clipEls.length}</CheckItem>
+          <CheckItem ok={!voiceNeeded || !!voiceId}>{voiceNeeded ? 'Đã chọn giọng đọc' : `Âm thanh: ${audioMode === 'music_only' ? 'Chỉ nhạc nền' : 'Tắt tiếng'}`}</CheckItem>
+          <CheckItem ok={!voiceNeeded || voiceReady}>{!voiceNeeded ? 'Không cần đọc lời thoại' : `Lời thoại đã đọc xong${voiceEl?.state === 'stale' ? ' (lời đã đổi, cần đọc lại)' : ''}`}</CheckItem>
         </ul>
 
         {running ? (
@@ -251,22 +292,32 @@ export function AssemblePanel({ campaignId, state, artifacts, busy, onChanged, o
             <button type="button" className="btn-g cp-small" onClick={() => void cancelRun(campaignId).then(onChanged)}><Square size={13} /> Hủy</button>
           </div>
         ) : (
-          <button type="button" className="btn-p cp-wide-btn" data-testid="run-assemble" disabled={busy || !!blocker || !voiceId} onClick={() => void rerunAssemble()}>
+          <button type="button" className="btn-p cp-wide-btn" data-testid="run-assemble" disabled={busy || !!blocker || (voiceNeeded && !voiceId)} onClick={() => void rerunAssemble()}>
             <Film size={15} /> {finalVideo ? 'Ghép lại video' : 'Ghép video hoàn chỉnh'}
           </button>
         )}
         {blocker && !running && <p className="cp-note">{blocker.reason}</p>}
-        {!voiceId && !running && <p className="cp-note">Chọn một giọng đọc để ghép (video luôn kèm tiếng đọc).</p>}
+        {voiceNeeded && !voiceId && !running && <p className="cp-note">Chọn một giọng đọc để ghép (hoặc chuyển chế độ âm thanh sang Chỉ nhạc nền / Tắt tiếng).</p>}
         {assembleEl?.last_run?.state === 'error' && <p className="cp-error-inline">Ghép lỗi: {assembleEl.last_run.error}</p>}
 
         {finalVideo ? (
           <div className="cp-final" data-testid="final-video">
-            <video key={finalVideo.id} src={artifactUrl(finalVideo.id)} controls preload="metadata" playsInline />
+            <SafeZoneVideoPlayer src={artifactUrl(finalVideo.id)} ctaText={ctaText} />
             <div className="cp-final-meta">
               <span>{String(meta.size ?? '')} · {String(meta.seconds ?? '')} giây{meta.edit_style === 'micro' ? ` · cắt nhanh ${meta.cuts ?? ''} cú` : ''}</span>
               <span>{meta.with_voice ? 'có tiếng đọc' : 'không có tiếng đọc'}{Array.isArray(meta.bgm) && meta.bgm.length ? ` · nhạc: ${(meta.bgm as string[]).join(', ')}` : ' · không nhạc nền'}</span>
             </div>
             <DownloadMenu campaignId={campaignId} videoId={finalVideo.id} fileName={`${state.campaign?.name ?? 'video'}.mp4`} watermarkTool={wmTool} onError={onError} />
+            <HookMultiplierPanel
+              campaignId={campaignId}
+              videoId={finalVideo.id}
+              hasVideo={!!finalVideo}
+              isFresh={assembleEl?.state === 'fresh' || assembleEl?.state === 'pinned'}
+              defaultAudioMode={audioMode}
+              defaultEndingMode={endingMode}
+              defaultCtaText={ctaText}
+              onError={onError}
+            />
           </div>
         ) : (
           <div className="cp-placeholder cp-final-empty">Video sẽ hiện ở đây sau khi ghép.</div>

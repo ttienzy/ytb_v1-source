@@ -181,6 +181,19 @@ class Engine:
                     break
         return out
 
+    @staticmethod
+    def _dep_is_optional(sd: StepDef, dep: str, params: dict[str, Any]) -> bool:
+        if dep not in sd.optional_deps:
+            return False
+        if sd.key == "assemble" and dep == "voice":
+            return str(params.get("audio_mode") or "voice_bgm") in ("music_only", "silent")
+        return True
+
+    @staticmethod
+    def _dep_is_skipped(sd: StepDef, dep: str, params: dict[str, Any]) -> bool:
+        """Phụ thuộc bị bỏ qua hoàn toàn theo cấu hình bước (vd. voice khi audio_mode != voice_bgm)."""
+        return sd.key == "assemble" and dep == "voice" and str(params.get("audio_mode") or "voice_bgm") in ("music_only", "silent")
+
     # ── vân tay hiện tại ────────────────────────────────────────────────────
     def current_parts(self, s: Session, cid: str, sd: StepDef, element_key: str, tier: str
                       ) -> tuple[dict[str, Any], list[dict[str, str]], dict[str, list[dict[str, Any]]]]:
@@ -199,31 +212,47 @@ class Engine:
 
         targets = self.dep_targets(s, cid, sd, element_key)
         for dep in sd.deps:
+            if self._dep_is_skipped(sd, dep, params):
+                refs[dep] = []
+                continue
+            optional = self._dep_is_optional(sd, dep, params)
             dd = graph.get_step(dep)
             if dep in targets:
                 # Bước map dùng ĐÚNG MỘT phần tử của bước map/danh sách khác (vd. clip -> khung chốt của cảnh mà shot dùng).
                 target = targets[dep]
                 if not target:
-                    block(dep, f"phần tử chưa ghi trường '{sd.dep_elements[dep]}'")
+                    if not optional:
+                        block(dep, f"phần tử chưa ghi trường '{sd.dep_elements[dep]}'")
+                    else:
+                        refs[dep] = []
                     continue
                 if dd.kind == "input_params":
                     scene_items = self.map_items(s, cid, dep) or {}
                     if target not in scene_items:
-                        block(dep, f"không có phần tử '{target}' trong danh sách")
+                        if not optional:
+                            block(dep, f"không có phần tử '{target}' trong danh sách")
+                        else:
+                            refs[dep] = []
                         continue
                     inputs[f"{dep}[{target}]"] = sha(canonical(scene_items[target]))
                     refs[dep] = [{"item": scene_items[target], "element_key": target}]
                 else:
                     art, why = self._resolve_dep(s, cid, dd, target)
                     if art is None:
-                        block(dep, f"{target}: {why}")
+                        if not optional:
+                            block(dep, f"{target}: {why}")
+                        else:
+                            refs[dep] = []
                         continue
                     inputs[f"{dep}[{target}]"] = art.content_hash
                     refs[dep] = self._expand(s, art, lambda a, _e=target: ref(a, _e))
             elif sd.map_from and dep == sd.map_from:
                 items = self.items_of(s, cid, sd)
                 if items is None or element_key not in items:
-                    block(dep, "chưa có phần tử trong danh sách")
+                    if not optional:
+                        block(dep, "chưa có phần tử trong danh sách")
+                    else:
+                        refs[dep] = []
                     continue
                 item = items[element_key]
                 hashed = item if sd.item_fields is None else {k: item.get(k) for k in sd.item_fields}
@@ -236,14 +265,20 @@ class Engine:
                 if sd.map_from == dd.map_from and element_key:
                     art, why = self._resolve_dep(s, cid, dd, element_key)
                     if art is None:
-                        block(dep, why)
+                        if not optional:
+                            block(dep, why)
+                        else:
+                            refs[dep] = []
                         continue
                     inputs[f"{dep}[{element_key}]"] = art.content_hash
                     refs[dep] = self._expand(s, art, lambda a, _e=element_key: ref(a, _e))
                 else:  # gom toàn bộ phần tử của bước map
                     keys = self.elements(s, cid, dd)
                     if keys is None:
-                        block(dep, "chưa có danh sách phần tử")
+                        if not optional:
+                            block(dep, "chưa có danh sách phần tử")
+                        else:
+                            refs[dep] = []
                         continue
                     pairs: list[tuple[str, str]] = []
                     collected: list[dict[str, Any]] = []
@@ -251,21 +286,26 @@ class Engine:
                     for k in keys:
                         art, why = self._resolve_dep(s, cid, dd, k)
                         if art is None:
-                            block(dep, f"{k}: {why}")
-                            ok = False
+                            if not optional:
+                                block(dep, f"{k}: {why}")
+                                ok = False
                             continue
                         pairs.append((k, art.content_hash))
                         collected.append(ref(art, k))
-                    if ok and not keys:
+                    if ok and not keys and not optional:
                         block(dep, "danh sách phần tử trống")
                         ok = False
                     if ok:
-                        inputs[dep] = sha(canonical(sorted(pairs)))
+                        if pairs:
+                            inputs[dep] = sha(canonical(sorted(pairs)))
                         refs[dep] = collected
             else:
                 art, why = self._resolve_dep(s, cid, dd, "")
                 if art is None:
-                    block(dep, why)
+                    if not optional:
+                        block(dep, why)
+                    else:
+                        refs[dep] = []
                     continue
                 inputs[dep] = art.content_hash
                 refs[dep] = self._expand(s, art, ref)
@@ -279,6 +319,11 @@ class Engine:
         }
         if "_nonce" in params:
             parts["params"]["_nonce"] = params["_nonce"]
+        if sd.key == "clip" and params.get("motion_video_artifact_id"):
+            v_art = s.get(Artifact, str(params["motion_video_artifact_id"]))
+            if v_art is not None and v_art.campaign_id == cid and v_art.kind == "video":
+                inputs["motion_video"] = v_art.content_hash
+                refs["motion_video"] = [ref(v_art)]
         if "prompt" in sd.param_keys:
             pref = params.get("prompt") or ({"template_id": sd.default_template} if sd.default_template else None)
             if pref and pref.get("template_id"):
@@ -419,6 +464,16 @@ class Engine:
             total += int(r.credit_actual if r.credit_actual is not None else (r.credit_est or 0))
         return total
 
+    def effective_needed(self, s: Session, cid: str, target: str | None) -> set[str]:
+        """Tập bước cần chạy cho `target`, bỏ qua `scene_plate` khi đang ở Direct Look Mode (chưa có plate nào)."""
+        needed = graph.needed_for(target)
+        if target != "scene_plate" and "scene_plate" in needed:
+            plate_sd = graph.get_step("scene_plate")
+            plate_elems = self.elements(s, cid, plate_sd) or []
+            if not any(self._selected(s, cid, "scene_plate", k) is not None for k in plate_elems):
+                needed.discard("scene_plate")
+        return needed
+
     # ── kế hoạch (dry-run) ──────────────────────────────────────────────────
     def plan(self, s: Session, cid: str, target: str | None = None, tier: str = "draft",
              only_approved: bool | None = None, elements: list[str] | None = None) -> Plan:
@@ -429,7 +484,7 @@ class Engine:
         only_approved = bool(only_approved)
         if target:
             graph.get_step(target)
-        needed = graph.needed_for(target)
+        needed = self.effective_needed(s, cid, target)
         # (step_key, element_key) -> "run" | "approval": trạng thái sau khi kế hoạch được thực hiện
         pending: dict[tuple[str, str], str] = {}
         items: list[PlanItem] = []

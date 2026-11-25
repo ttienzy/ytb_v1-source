@@ -1,0 +1,13 @@
+{
+  "id": "motion_trend_clone",
+  "mode": "motion",
+  "name_vi": "Motion Trend Clone (1 lượt Flow 3–15s)",
+  "desc_vi": "Lấy chuyển động người thật từ video mẫu viral hoặc clip tự quay, thay nhân vật + áo của shop vào trong MỘT lượt Motion Control — tự nhiên nhất, không lộ ghép.",
+  "best_for_vi": "Bắt trend nhảy/đi dáng TikTok hoặc giữ chuyển động thật mượt mà với chi phí 1 clip duy nhất",
+  "scenes": 1,
+  "hook_types": ["direct", "surprise_visual", "pain_question"],
+  "shots": [
+    {"role": "hook", "scene": 1, "duration": 8, "camera": {"angle": "eye-level", "lens": "35mm", "move": "handheld tracking"}, "needs_face": true, "garment_ref": "front", "motion": "free",
+     "beat_hint": "copy exact body movement, pose timing and camera rhythm of the reference motion video while keeping the shop model and garment completely consistent"}
+  ]
+}

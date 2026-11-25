@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  CAMPAIGN_STAGES, stageBadge,
   beatsFor, countSyllables, elementLabel, maxSyllables, sceneItems, sceneName,
   blockBadge, bundleMembers, describeElement, describeGate, backendMismatch, errorMessage, fillEmpty, httpErrorMessage, isRunning, nothingToRunMessage, planBlocker, progressText, linesToList, listToLines, planSummary, reasonText, riskBadge,
   runStateBadge,
@@ -15,8 +16,10 @@ const el = (over: Partial<ElementState> = {}): ElementState => ({
 
 const block = (n: number, steps: { key: string; elements: ElementState[] }[]): BlockView => ({
   block: n, title: 'x', state: 'fresh',
-  steps: steps.map(s => ({ ...s, title: s.key, kind: 'compute', lane: 'local', paid: false, gate: false,
-    advisory: false, map: false, params: {} })),
+  steps: steps.map(s => ({
+    ...s, title: s.key, kind: 'compute', lane: 'local', paid: false, gate: false,
+    advisory: false, map: false, params: {}
+  })),
 })
 
 test('describeElement explains why a step is stale in Vietnamese', () => {
@@ -141,8 +144,10 @@ test('planBlocker and nothingToRunMessage explain a run that cannot start', () =
   const item = (element_key: string, action: string, reason: string) => ({
     step_key: 'clip', element_key, action, reason, fingerprint: null, lane: 'flow', credit: 0, images: 0, llm_calls: 0, estimate: false, blockers: [],
   })
-  const plan = { items: [item('shot:1', 'waiting', 'chờ duyệt: keyframe'), item('shot:2', 'run', 'chưa có kết quả')], total_credit: 10, unknown_cost_items: 0,
-    images: 0, llm_calls: 0, credit_cap: null, spent_credit: 0, over_budget: false, needs_confirm: true, runnable: 1 } as Plan
+  const plan = {
+    items: [item('shot:1', 'waiting', 'chờ duyệt: keyframe'), item('shot:2', 'run', 'chưa có kết quả')], total_credit: 10, unknown_cost_items: 0,
+    images: 0, llm_calls: 0, credit_cap: null, spent_credit: 0, over_budget: false, needs_confirm: true, runnable: 1
+  } as Plan
   assert.equal(planBlocker(plan, 'clip', 'shot:1')?.action, 'waiting')
   assert.equal(planBlocker(plan, 'clip', 'shot:2'), null)
   assert.equal(planBlocker(plan, 'clip', 'shot:9'), null)
@@ -183,8 +188,10 @@ test('adaptScriptDoc: kịch bản v3 thiếu trường được bù mặc đị
     format_id: 'fit_check', angle_vi: 'ý', hook: { type: 'direct', on_screen_text: 'Hook' }, caption: '', hashtags: ['#x'], cta: '',
     motion_limit: 'gentle', total_seconds: 9,
     items: [
-      { key: 'shot:1', role: 'hook', scene: 'scene:1', duration: 4, camera: { angle: 'eye-level', lens: '35mm', move: 'static' },
-        needs_face: true, garment_ref: 'front', motion: 'gentle', beats: ['a', 'b'], expression: '', voiceover: 'v', on_screen_text: 't', max_syllables: 17 },
+      {
+        key: 'shot:1', role: 'hook', scene: 'scene:1', duration: 4, camera: { angle: 'eye-level', lens: '35mm', move: 'static' },
+        needs_face: true, garment_ref: 'front', motion: 'gentle', beats: ['a', 'b'], expression: '', voiceover: 'v', on_screen_text: 't', max_syllables: 17
+      },
       { key: 'shot:2', beats: ['x'] }, // sửa tay/Gemini bỏ sót gần hết trường
     ],
   })

@@ -11,6 +11,7 @@ Quy tắc bất di bất dịch: KHÔNG BAO GIỜ gửi lại lệnh tạo video
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 from .. import graph
@@ -23,7 +24,6 @@ from .scene_plate import scene_vars
 
 DEFAULT_TEMPLATE = "system:clip_v3"
 DEFAULT_ASPECT = "9:16"
-PROMPT_MAX = 2000                   # giới hạn của VeoJobRequest.prompt
 POLL_SECONDS = 3.0
 TIMEOUT_SECONDS = 1200.0            # 20 phút
 MIN_DURATION, MAX_DURATION = 3, 15
@@ -78,10 +78,15 @@ def shot_beats(shot: dict[str, Any]) -> list[str]:
 
 def build_request(prompts: PromptLibrary, params: dict[str, Any], inputs: dict[str, list[dict[str, Any]]],
                   note: str = "") -> dict[str, Any]:
+    from .. import formats
     anchors, sheets, items = inputs.get("scene_anchor") or [], inputs.get("cast_sheet") or [], inputs.get("script") or []
     if not items or "item" not in items[0]:
         raise ClipInputError("Chưa có shot tương ứng trong kịch bản (khối 3).")
     shot = items[0]["item"]
+    script_doc = common.load_input(inputs, "script")
+    fmt_meta = formats.get_format(common.s(script_doc.get("format_id"))) or {}
+    clip_mode = str(params.get("clip_mode") or "").strip().lower()
+    is_motion = clip_mode == "motion" or (fmt_meta.get("mode") == "motion" and clip_mode != "r2v")
     if not anchors:
         raise ClipInputError(f"Chưa có khung chốt đã duyệt cho cảnh {shot.get('scene') or ''} (khối 4).")
     if not sheets:
@@ -95,12 +100,21 @@ def build_request(prompts: PromptLibrary, params: dict[str, Any], inputs: dict[s
     tier = str(params.get("_tier") or "draft")
     if tier not in graph.TIERS:
         raise ClipInputError(f"tier không hợp lệ: {tier}")
+    motion_start = float(params.get("motion_start") or 0.0)
+    motion_end = float(params.get("motion_end") or 0.0)
     try:
         duration = int(params.get("duration") or shot.get("duration") or 5)
     except (TypeError, ValueError):
         duration = 5
-    if not MIN_DURATION <= duration <= MAX_DURATION:
-        raise ClipInputError(f"Thời lượng {duration} giây không hợp lệ: Ingredients nhận {MIN_DURATION}–{MAX_DURATION} giây.")
+    if is_motion and motion_end > motion_start:
+        span = motion_end - motion_start
+        if span < MIN_DURATION or span > MAX_DURATION:
+            raise ClipInputError(f"Đoạn cắt video mẫu phải từ {MIN_DURATION} đến {MAX_DURATION} giây (đang chọn {span:.1f}s).")
+        duration = max(MIN_DURATION, min(MAX_DURATION, int(round(span))))
+    elif not MIN_DURATION <= duration <= MAX_DURATION:
+        raise ClipInputError(f"Thời lượng {duration} giây không hợp lệ: Flow nhận {MIN_DURATION}–{MAX_DURATION} giây.")
+    if is_motion and motion_end <= motion_start:
+        motion_end = motion_start + duration
     aspect = str(params.get("aspect") or DEFAULT_ASPECT)
     if aspect not in ("9:16", "16:9"):
         raise ClipInputError(f"Tỉ lệ không hỗ trợ: {aspect}")
@@ -128,14 +142,20 @@ def build_request(prompts: PromptLibrary, params: dict[str, Any], inputs: dict[s
                               ref_paths=[r[2]["path"] for r in refs])
     rendered["ref_order"] = [{"role": role, "label": label, "path": r["path"], "artifact_id": r["artifact_id"]} for role, label, r in refs]
     warnings = [w for w in rendered["warnings"] if w["code"] not in ("ref_count_mismatch", "missing_variables")]
-    if len(rendered["prompt"]) > PROMPT_MAX:
-        warnings.append({"code": "prompt_too_long", "message": f"Prompt dài {len(rendered['prompt'])} ký tự, vượt giới hạn {PROMPT_MAX} của Flow."})
     if not shot_beats(shot):
         warnings.append({"code": "beats_missing", "message": "Shot chưa có beat nào: video sẽ chỉ theo mô tả máy quay."})
+    motion_refs = inputs.get("motion_video") or []
+    motion_video_path = motion_refs[0]["path"] if motion_refs else ""
+    if is_motion and not motion_video_path:
+        warnings.append({"code": "motion_video_missing", "message": "Chế độ Motion Trend Clone cần 1 video chuyển động mẫu (MP4/MOV 3–15s)."})
     rendered["warnings"] = warnings
     credit = graph.clip_cost({"duration": duration}, tier)
     rendered.update({
-        "tier": tier, "resolution": resolution, "aspect": aspect, "duration": duration, "motion": motion, "mode": "r2v",
+        "tier": tier, "resolution": resolution, "aspect": aspect, "duration": duration, "motion": motion,
+        "mode": "video_edit" if is_motion else "r2v",
+        "motion_video_path": motion_video_path,
+        "motion_start": motion_start,
+        "motion_end": motion_end,
         "model": FlowProvider.model_id(duration, resolution),
         "credit": credit, "credit_known": credit is not None, "credit_estimate": graph.clip_cost_estimate({"duration": duration}, tier),
         "shot": shot.get("key", ""), "scene": s(shot.get("scene")),
@@ -163,8 +183,6 @@ def _classify_failure(state: Any, job_id: str) -> Exception:
 
 def run_clip(ctx: ExecContext) -> ExecResult:
     req = build_request(ctx.prompts, {**ctx.params, "_tier": ctx.tier}, ctx.inputs, ctx.note)
-    if len(req["prompt"]) > PROMPT_MAX:
-        raise ClipInputError(f"Prompt dài {len(req['prompt'])} ký tự, vượt giới hạn {PROMPT_MAX}. Rút gọn prompt rồi chạy lại.")
     provider = _provider()
     project_id = provider.active_project_id()
     if project_id is None:
@@ -173,9 +191,21 @@ def run_clip(ctx: ExecContext) -> ExecResult:
         raise RuntimeError("Đã hủy trước khi gửi lên Flow.")
     try:
         # Cùng vân tay + cùng lần thử = cùng lệnh (Veo trả lại job cũ). Lần chạy lại sau khi người dùng xác nhận/sửa là lần thử mới.
-        job_id, dedup = provider.submit(prompt=req["prompt"], aspect=req["aspect"], duration=req["duration"], resolution=req["resolution"],
-                                        project_id=project_id, image_paths=[r["path"] for r in req["ref_order"]],
-                                        idempotency_key=f"cmp-{ctx.fingerprint[:40]}-a{ctx.attempt}")
+        if req["mode"] == "video_edit":
+            vid_path = Path(req.get("motion_video_path") or "")
+            if not req.get("motion_video_path") or not vid_path.is_file():
+                raise ClipInputError("Chưa chọn video chuyển động mẫu cho chế độ Motion Trend Clone.")
+            job_id, dedup = provider.submit_motion(
+                prompt=req["prompt"], aspect=req["aspect"], duration=req["duration"], resolution=req["resolution"],
+                project_id=project_id, flow_project_id=provider.active_flow_project_id(),
+                image_paths=[r["path"] for r in req["ref_order"]], reference_video_path=vid_path,
+                start_seconds=req.get("motion_start", 0.0), end_seconds=req.get("motion_end", req["duration"]),
+                idempotency_key=f"cmp-{ctx.fingerprint[:40]}-a{ctx.attempt}",
+            )
+        else:
+            job_id, dedup = provider.submit(prompt=req["prompt"], aspect=req["aspect"], duration=req["duration"], resolution=req["resolution"],
+                                            project_id=project_id, image_paths=[r["path"] for r in req["ref_order"]],
+                                            idempotency_key=f"cmp-{ctx.fingerprint[:40]}-a{ctx.attempt}")
     except ValueError as exc:                        # kiểm tra đầu vào ở đây: lỗi = CHƯA gửi gì
         raise ClipInputError(str(exc)) from exc
     ctx.set_external_ref(job_id)
@@ -211,7 +241,7 @@ def run_clip(ctx: ExecContext) -> ExecResult:
         [ArtifactSpec("video", ext="mp4", data=data, meta={
             "veo_job_id": job_id, "model": req["model"], "tier": ctx.tier, "resolution": req["resolution"],
             "duration": req["duration"], "aspect": req["aspect"], "prompt": req["prompt"], "template": req["template"],
-            "motion": req["motion"], "credit_estimated": req["credit_estimate"], "shot": req["shot"], "scene": req["scene"], "mode": "r2v",
+            "motion": req["motion"], "credit_estimated": req["credit_estimate"], "shot": req["shot"], "scene": req["scene"], "mode": req["mode"],
             "provider": provider.name, "refs": [r["artifact_id"] for r in req["ref_order"]],
         })],
         credit_actual=req["credit"] if req["credit"] is not None else req["credit_estimate"],   # giá đã đo, không thì dự kiến (trần ngân sách vẫn có tác dụng)

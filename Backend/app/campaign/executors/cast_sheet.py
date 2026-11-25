@@ -47,6 +47,7 @@ def build_request(prompts: PromptLibrary, params: dict[str, Any], inputs: dict[s
                                                                        "Cân nhắc tạo nhân vật AI từ ảnh này trước khi tốn ảnh và credit."})
     rendered["aspect"] = str(params.get("aspect") or DEFAULT_ASPECT)
     rendered["count"] = max(1, min(int(params.get("count") or 1), MAX_COUNT))
+    rendered["image_provider"] = common.image_provider_of(params)
     rendered["note"] = note
     return rendered
 

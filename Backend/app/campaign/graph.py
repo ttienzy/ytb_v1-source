@@ -86,6 +86,8 @@ class StepDef:
     # (dep, trường của phần tử): bước map này dùng ĐÚNG MỘT phần tử của `dep` (bước map theo danh sách khác), chọn theo trường đó.
     # vd. clip (theo shot) dùng scene_anchor (theo cảnh) có khóa = shot["scene"]. Đổi cảnh khác không làm cũ clip này.
     dep_element: tuple[tuple[str, str], ...] = ()
+    # Các phụ thuộc tùy chọn (không chặn chạy khi thiếu, tùy tham số bước): vd. scene_plate (Direct Look) hoặc voice (music_only/silent).
+    optional_deps: tuple[str, ...] = ()
 
     @property
     def dep_elements(self) -> dict[str, str]:
@@ -105,12 +107,12 @@ STEPS: tuple[StepDef, ...] = (
     StepDef("cast_profile", 2, "Hồ sơ nhân vật", "input_params"),
     # Cast sheet: nhân dạng + trang phục trên nền trơn (Flow Help: ảnh chủ thể nên nền trơn). Mọi khối sau chỉ dùng bản đã duyệt.
     StepDef("cast_sheet", 2, "Cast sheet", "compute", ("garment_source", "cast", "cast_profile"), lane="chatgpt-image", gate=True,
-            param_keys=("prompt", "count", "aspect"), output="image", default_template="system:cast_sheet"),
+            param_keys=("prompt", "count", "aspect", "image_provider"), output="image", default_template="system:cast_sheet"),
     StepDef("scene_set", 2, "Các cảnh", "input_params"),
     StepDef("style", 2, "Phong cách chung", "input_params"),
     # Scene plate: ảnh bối cảnh KHÔNG người, một ảnh mỗi cảnh (Flow Help: ảnh bối cảnh không có chủ thể).
     StepDef("scene_plate", 2, "Ảnh bối cảnh", "compute", ("scene_set", "style"), lane="chatgpt-image", map_from="scene_set",
-            param_keys=("prompt", "aspect"), output="image", default_template="system:scene_plate", images_fixed=1,
+            param_keys=("prompt", "aspect", "image_provider"), output="image", default_template="system:scene_plate", images_fixed=1,
             item_fields=SCENE_FIELDS),
     # 3. Format & Kịch bản
     StepDef("brief", 3, "Brief", "input_params"),
@@ -118,22 +120,22 @@ STEPS: tuple[StepDef, ...] = (
     # Một lượt LLM điền nội dung vào khung format: hook, beat từng shot, lời thoại, chữ, caption. Nhìn cast sheet đã duyệt.
     StepDef("script", 3, "Kịch bản", "compute", ("fact_sheet", "cast_sheet", "scene_set", "brief", "format", "cast_profile"), lane="llm",
             param_keys=("prompt",), default_template="system:script_v3"),
-    # 4. Khung chốt cảnh: MỘT ảnh người-trong-cảnh cho mỗi cảnh (cast sheet + ảnh áo + scene plate), duyệt một lần mỗi cảnh.
+    # 4. Khung chốt cảnh: MỘT ảnh người-trong-cảnh cho mỗi cảnh (cast sheet + ảnh áo + tùy chọn scene plate), duyệt một lần mỗi cảnh.
     StepDef("scene_anchor", 4, "Khung chốt cảnh", "compute", ("scene_set", "style", "scene_plate", "cast_sheet", "garment_source", "fact_sheet", "cast_profile"),
-            lane="chatgpt-image", map_from="scene_set", gate=True, param_keys=("prompt", "aspect"), output="image",
-            default_template="system:scene_anchor", images_fixed=1, item_fields=SCENE_FIELDS),
-    # 5. Clip: Ingredients 3 ảnh theo vai (khung chốt cảnh của shot, cast sheet, ảnh áo thật), prompt theo công thức Google.
+            lane="chatgpt-image", map_from="scene_set", gate=True, param_keys=("prompt", "aspect", "image_provider"), output="image",
+            default_template="system:scene_anchor", images_fixed=1, item_fields=SCENE_FIELDS, optional_deps=("scene_plate",)),
+    # 5. Clip: Ingredients 3 ảnh theo vai (khung chốt cảnh của shot, cast sheet, ảnh áo thật) hoặc Motion Trend Clone (video_edit 3-15s).
     StepDef("clip", 5, "Clip", "compute", ("script", "scene_anchor", "cast_sheet", "garment_source", "fact_sheet", "scene_set", "style", "cast_profile"),
             lane="flow", paid=True, map_from="script", gate=True, uses_tier=True,
-            param_keys=("prompt", "duration", "aspect", "model"),
+            param_keys=("prompt", "duration", "aspect", "model", "clip_mode", "motion_video_artifact_id", "motion_start", "motion_end"),
             output="video", default_template="system:clip_v3", cost=clip_cost, cost_estimate=clip_cost_estimate,
             item_fields=SHOT_CLIP_FIELDS, dep_element=(("scene_anchor", "scene"), ("scene_set", "scene"))),
     # 6. Ghép & Xuất
     StepDef("voice", 6, "Giọng đọc", "compute", ("script",), lane="local", param_keys=("voice_id",), output="bundle", isolated=True),
     StepDef("assemble", 6, "Ghép video", "compute", ("clip", "voice", "script"), lane="local",
             param_keys=("bgm", "bgm_volume", "caption_style", "caption_color", "transition", "edit_style", "cut_seconds",
-                         "opening_text", "end_card", "ai_label"),
-            output="video", isolated=True),
+                        "opening_text", "end_card", "ai_label", "audio_mode", "ending_mode", "cta_text", "hook_variants"),
+            output="video", isolated=True, optional_deps=("voice",)),
     StepDef("export_pack", 6, "Gói xuất", "compute", ("assemble", "script", "brief"), lane="local", param_keys=("platforms",),
             isolated=True),
 )

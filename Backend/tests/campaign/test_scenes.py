@@ -89,3 +89,35 @@ def test_style_change_stales_plates_but_not_the_cast_sheet(svc):
     svc.set_params(cid, "style", {"lighting": "hard noon sun"})
     assert element_state(svc, cid, "cast_sheet")["state"] == "fresh"
     assert element_state(svc, cid, "scene_plate", "scene:1")["reasons"] == ["inputs.style"]
+
+
+def test_scene_anchor_direct_look_mode_works_without_scene_plate(real_scenes):
+    svc, client = real_scenes
+    cid = prime(svc)
+    approve_cast_sheet(svc, cid)
+    run_and_wait(svc, cid, "fact_sheet")
+    p = svc.preview_prompt(cid, "scene_anchor", "scene:1")
+    assert p["direct_look"] is True and p["template"]["template_id"] == "system:scene_anchor_direct"
+    assert [r["role"] for r in p["ref_order"]] == ["sheet", "photo"]
+    run_and_wait(svc, cid, "scene_anchor", elements=["scene:1"])
+    assert len(client.calls[0]["refs"]) == 2
+    assert element_state(svc, cid, "scene_anchor", "scene:1")["state"] == "fresh"
+
+
+def test_dual_image_provider_routes_scene_anchor_to_muse_when_selected(real_scenes, monkeypatch):
+    svc, chatgpt_client = real_scenes
+    cid = prime(svc)
+    approve_cast_sheet(svc, cid)
+    run_and_wait(svc, cid, "fact_sheet")
+    muse_calls = []
+
+    def fake_muse(prompt, ref_paths, label, campaign_id):
+        muse_calls.append({"prompt": prompt, "refs": list(ref_paths or []), "label": label, "campaign_id": campaign_id})
+        return b"\x89PNG\r\n\x1a\nmuse"
+
+    monkeypatch.setattr(common, "muse_generate_image", fake_muse)
+    svc.set_params(cid, "scene_anchor", {"image_provider": "muse"})
+    run_and_wait(svc, cid, "scene_anchor", elements=["scene:1"])
+    assert len(muse_calls) == 1 and len(chatgpt_client.calls) == 0
+    art = svc.list_artifacts(cid, "scene_anchor", "scene:1")[0]
+    assert art["meta"]["image_provider"] == "muse"

@@ -31,7 +31,7 @@ export function BriefPanel({ campaignId, state, onChanged, onError }: Common) {
   const [suggestNote, setSuggestNote] = useState('')
   useEffect(() => { setDraft(JSON.parse(savedJson)); setSuggested([]) }, [savedJson])
 
-  const keys = [...BRIEF_FIELDS.map(f => f.key), 'language', 'platform']
+  const keys = [...BRIEF_FIELDS.map(f => f.key), 'language', 'platform', 'funnel_goal']
   const onSuggest = (r: SuggestResult) => {
     const { next, filled } = fillEmpty(draft, r.suggestion as Record<string, string>, BRIEF_FIELDS.map(f => f.key))
     setDraft(next)
@@ -67,6 +67,14 @@ export function BriefPanel({ campaignId, state, onChanged, onError }: Common) {
           </label>
         ))}
         <label className="cp-field">
+          <span>Mục tiêu phễu</span>
+          <select value={draft.funnel_goal ?? 'gmv_max'} onChange={e => setDraft({ ...draft, funnel_goal: e.target.value })}>
+            <option value="gmv_max">Chốt đơn (GMV Max / Problem-Solution)</option>
+            <option value="view">Hút View Organic (Lookbook / Trend)</option>
+            <option value="aov">Tăng giá trị đơn (Mix & Match)</option>
+          </select>
+        </label>
+        <label className="cp-field">
           <span>Ngôn ngữ lời thoại</span>
           <select value={draft.language ?? 'vi'} onChange={e => setDraft({ ...draft, language: e.target.value })}>
             <option value="vi">Tiếng Việt</option>
@@ -76,7 +84,7 @@ export function BriefPanel({ campaignId, state, onChanged, onError }: Common) {
         <label className="cp-field">
           <span>Nền tảng đăng</span>
           <select value={draft.platform ?? 'tiktok'} onChange={e => setDraft({ ...draft, platform: e.target.value })}>
-            <option value="tiktok">TikTok</option>
+            <option value="tiktok">TikTok / TikTok Shop</option>
             <option value="reels">Facebook / Instagram Reels</option>
             <option value="shopee">Shopee Video</option>
           </select>
@@ -127,6 +135,8 @@ export function FormatPanel({ campaignId, state, formats, busy, onChanged, onErr
                 <span className="cp-choice-body">{f.desc_vi}</span>
                 <span className="cp-row">
                   <span className="cp-tag">{f.scenes} cảnh</span><span className="cp-tag">{f.shots} shot</span><span className="cp-tag">≈{f.total_seconds} giây</span>
+                  {f.mode === 'motion' && <span className="cp-badge cp-tone-info">Motion Control 1 lượt</span>}
+                  {f.id === 'modular_gmv_max' && <span className="cp-badge cp-tone-ok">Chuẩn GMV Max</span>}
                 </span>
                 {f.best_for_vi && <span className="cp-note">Hợp: {f.best_for_vi}</span>}
               </label>

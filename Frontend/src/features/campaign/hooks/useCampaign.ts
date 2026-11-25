@@ -17,6 +17,7 @@ export function useCampaign(campaignId: string | null, tier: Tier = 'draft') {
   const currentTier = useRef(tier)
   currentTier.current = tier
   const loadFailed = useRef(false)
+  const seenExecErrorId = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
     const id = currentId.current
@@ -27,6 +28,10 @@ export function useCampaign(campaignId: string | null, tier: Tier = 'draft') {
       setState(s)
       setArtifacts(a)
       setRuns(r.runs)
+      if (r.last_exec?.state === 'error' && r.last_exec.error && r.last_exec.id !== seenExecErrorId.current) {
+        seenExecErrorId.current = r.last_exec.id
+        setError(`Lượt chạy gặp lỗi: ${r.last_exec.error}`)
+      }
       // Chỉ xóa lỗi do chính việc tải gây ra; lỗi của thao tác (bấm chạy, duyệt...) phải ở lại đến khi người dùng đóng.
       if (loadFailed.current) { loadFailed.current = false; setError('') }
     } catch (e) {
@@ -39,6 +44,7 @@ export function useCampaign(campaignId: string | null, tier: Tier = 'draft') {
     setArtifacts([])
     setRuns([])
     setError('')
+    seenExecErrorId.current = null
     if (!campaignId) return
     setLoading(true)
     refresh().finally(() => setLoading(false))

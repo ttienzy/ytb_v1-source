@@ -11,6 +11,8 @@ import {
   type ExportStatus,
   type ExportVariant,
   type FormatSummary,
+  type HookVariantItem,
+  type HookVariantsStatus,
   type Plan,
   type PromptPreview,
   type PromptTemplate,
@@ -70,6 +72,12 @@ export async function uploadImage(id: string, file: File): Promise<ArtifactView>
   return request<ArtifactView>(`/${id}/artifacts/upload`, { method: 'POST', body: form }, 'tải ảnh lên')
 }
 
+export async function uploadMotionVideo(id: string, file: File): Promise<ArtifactView> {
+  const form = new FormData()
+  form.append('file', file)
+  return request<ArtifactView>(`/${id}/artifacts/upload-video`, { method: 'POST', body: form }, 'tải video chuyển động')
+}
+
 export const setInputFiles = (id: string, step: string, files: { artifact_id: string; role: string }[]) =>
   request<ArtifactView>(`/${id}/steps/${step}/input`, json('POST', { files }), 'lưu ảnh đầu vào')
 
@@ -107,7 +115,11 @@ export const runTarget = (id: string, target: string | null, tier: Tier = 'draft
 export const cancelRun = (id: string) => request<{ cancelled: boolean }>(`/${id}/cancel`, json('POST'), 'hủy')
 
 export const listRuns = (id: string) =>
-  request<{ runs: RunView[]; active_exec: string | null }>(`/${id}/runs`, undefined, 'tải lịch sử chạy')
+  request<{ runs: RunView[]; active_exec: string | null; last_exec?: { id: string; state: string; error?: string } | null }>(
+    `/${id}/runs`,
+    undefined,
+    'tải lịch sử chạy',
+  )
 
 export const resolveRun = (runId: string) =>
   request<{ ok: boolean }>(`/runs/${runId}/resolve`, json('POST', { outcome: 'not_sent' }), 'xác nhận')
@@ -178,8 +190,16 @@ export async function getBackendMeta(): Promise<{ executors: string[]; gated_ste
   }
 }
 
-// ── bản tải phụ của video đã ghép (xóa watermark / không nhạc nền) ─────────────
+// ── bản tải phụ & Hook Multiplier (0 credit Flow) ────────────────────────────
 export const getExports = (id: string) => request<ExportStatus>(`/${id}/exports`, undefined, 'xem các bản tải')
 export const startExport = (id: string, variant: ExportVariant) =>
   request<ExportStatus>(`/${id}/exports/${variant}`, json('POST'), 'tạo bản tải')
 export const exportFileUrl = (id: string, variant: ExportVariant) => `${BASE}/${id}/exports/${variant}/file`
+
+export const getHookVariants = (id: string) =>
+  request<HookVariantsStatus>(`/${id}/hook-variants`, undefined, 'tải trạng thái biến thể hook')
+export const suggestHookVariants = (id: string) =>
+  request<{ variants: HookVariantItem[]; provider: string }>(`/${id}/hook-variants/suggest`, json('POST'), 'gợi ý 3 hook bán hàng')
+export const renderHookVariants = (id: string, variants: HookVariantItem[], clean = false) =>
+  request<HookVariantsStatus>(`/${id}/hook-variants/render`, json('POST', { variants, clean }), 'tạo các biến thể video')
+export const hookVariantFileUrl = (id: string, variantId: string) => `${BASE}/${id}/hook-variants/${encodeURIComponent(variantId)}/file`

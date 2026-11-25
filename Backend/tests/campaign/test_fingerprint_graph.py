@@ -44,8 +44,12 @@ def test_clip_cost_only_for_verified_prices():
 
 def test_formats_are_valid_and_listed_easy_first():
     lst = formats.list_formats()
-    assert [f["id"] for f in lst][:2] == ["fit_check", "detail_first"] and len(lst) == 5
+    assert [f["id"] for f in lst][:2] == ["fit_check", "detail_first"] and len(lst) == 7
     for f in lst:
-        assert f["shot_list"][0]["role"] == "hook" and f["shot_list"][-1]["role"] == "cta" and 1 <= f["scenes"] <= 3
-        assert 12 <= f["total_seconds"] <= 30
+        if f.get("mode") == "motion" and f["shots"] == 1:
+            assert f["shot_list"][0]["role"] == "hook"
+        else:
+            assert f["shot_list"][0]["role"] == "hook" and f["shot_list"][-1]["role"] == "cta"
+        assert 1 <= f["scenes"] <= 3
+        assert 3 <= f["total_seconds"] <= 30
     assert formats.resolve({"format_id": "nope"})["id"] == "fit_check"

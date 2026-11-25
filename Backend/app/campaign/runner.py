@@ -178,6 +178,20 @@ class Runner:
     def active_exec(self, campaign_id: str) -> str | None:
         return next((e.id for e in self._execs.values() if e.campaign_id == campaign_id and e.state == "running"), None)
 
+    def last_exec(self, campaign_id: str) -> dict[str, Any] | None:
+        """Trạng thái lượt điều phối gần nhất của chiến dịch (để UI hiện lỗi điều phối nếu có)."""
+        matching = [e for e in self._execs.values() if e.campaign_id == campaign_id]
+        if not matching:
+            return None
+        e = matching[-1]
+        return {
+            "id": e.id,
+            "state": e.state,
+            "error": e.error,
+            "started_at": e.started_at.isoformat(),
+            "finished_at": e.finished_at.isoformat() if e.finished_at else None,
+        }
+
     def cancel(self, campaign_id: str) -> bool:
         hit = False
         for e in self._execs.values():
@@ -191,7 +205,9 @@ class Runner:
                     elements: list[str] | None = None) -> None:
         only_approved = bool(only_approved)          # 720p không bắt buộc phải duyệt bản 360p trước (xem engine.plan)
         try:
-            needed = graph.needed_for(target)
+            with self._scope() as s:
+                fn = getattr(self.engine, "effective_needed", None)
+                needed = fn(s, ex.campaign_id, target) if callable(fn) else graph.needed_for(target)
             for sd in graph.STEPS:
                 if ex.cancel.is_set():
                     break

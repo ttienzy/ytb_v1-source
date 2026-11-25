@@ -25,9 +25,12 @@ const REF_TITLE: Record<string, string> = { sheet: 'Cast sheet', photo: 'Ảnh �
 export function SceneAnchorPanel({ campaignId, state, artifacts, busy, onChanged, onRun, onError, onPreview }: Props) {
   const steps = useMemo(() => state.blocks.flatMap(b => b.steps), [state])
   const step = steps.find(s => s.key === 'scene_anchor')
+  const plateStep = steps.find(s => s.key === 'scene_plate')
   const sheetEl = steps.find(s => s.key === 'cast_sheet')?.elements[0]
   const scenes = sceneItems(steps.find(s => s.key === 'scene_set')?.params)
   const params = step?.params ?? {}
+  const imageProvider = String(params.image_provider ?? 'chatgpt') === 'muse' ? 'muse' : 'chatgpt'
+  const hasAnyPlate = (plateStep?.elements ?? []).some(e => !!e.selected_artifact_id)
   const elements: ElementState[] = (step?.elements ?? []).filter(e => e.element_key)
   const running = !!state.active_exec || elements.some(e => e.active_run)
 
@@ -117,12 +120,20 @@ export function SceneAnchorPanel({ campaignId, state, artifacts, busy, onChanged
       </header>
 
       <div className="cp-toolbar">
+        <label className="cp-label">Tạo ảnh bằng</label>
+        <div className="cp-seg" role="group" aria-label="Engine tạo khung chốt" data-testid="anchor-provider-toggle">
+          <button type="button" className={imageProvider === 'chatgpt' ? 'is-active' : ''} disabled={running}
+                  onClick={() => void guard(() => setParams(campaignId, 'scene_anchor', { image_provider: 'chatgpt' }))}>ChatGPT</button>
+          <button type="button" className={imageProvider === 'muse' ? 'is-active' : ''} disabled={running}
+                  onClick={() => void guard(() => setParams(campaignId, 'scene_anchor', { image_provider: 'muse' }))}>Muse</button>
+        </div>
         <label className="cp-label" htmlFor="anchor-aspect">Tỉ lệ video</label>
         <select id="anchor-aspect" value={String(params.aspect || '9:16')} disabled={running} onChange={e => setAspect(e.target.value)}>
           <option value="9:16">9:16 (dọc, TikTok/Reels)</option>
           <option value="16:9">16:9 (ngang)</option>
         </select>
-        <span className="cp-note">Dùng chung cho ảnh bối cảnh, khung chốt và clip · {approvedCount}/{elements.length} cảnh đã duyệt · mỗi cảnh 1 lượt ảnh ChatGPT, 0 credit Flow</span>
+        {!hasAnyPlate && <span className="cp-badge cp-tone-info" data-testid="direct-look-badge">Direct Look (tạo thẳng, không cần ảnh nền riêng)</span>}
+        <span className="cp-note">{approvedCount}/{elements.length} cảnh đã duyệt · 0 credit Flow</span>
       </div>
       {sheetNotApproved && <p className="cp-warn"><AlertTriangle size={13} /> Cast sheet ở khối 2 chưa được duyệt.</p>}
       {elements.length === 0 && <p className="cp-warn"><AlertTriangle size={13} /> Chưa có cảnh nào (khối 2).</p>}

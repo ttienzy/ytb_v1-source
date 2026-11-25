@@ -4,8 +4,8 @@ export const campaignDoc: HelpDoc = {
   pageId: 'Chiến dịch AI',
   title: 'Chiến dịch AI (video quảng cáo thời trang)',
   summary:
-    'Biến ảnh áo thật + ảnh người mẫu thành video quảng cáo hoàn chỉnh qua 6 khối: Sản phẩm → Nhân vật & Cảnh → Format & Kịch bản → Khung chốt cảnh → Clip → Ghép & Xuất. Bạn chọn một format quảng cáo, app dựng sẵn khung shot; bạn duyệt cast sheet, khung chốt từng cảnh và từng clip. Chỉ khối Clip mới tốn credit.',
-  verifiedAt: '2026-11-14',
+    'Biến ảnh áo thật + ảnh người mẫu thành bộ video quảng cáo chuẩn TikTok Shop / GMV Max qua 3 Chặng: (1) Sản phẩm & Chiến lược (Thẻ Góc Bán Hàng + Brief & Format) → (2) Dựng Look & Kịch bản (AI KOC ChatGPT/Muse + Direct Look Card + Kịch bản) → (3) Clip & Xưởng Biến Thể (Ingredients hoặc Motion Trend Clone 3–15s + Hook Multiplier 0 credit + Safe-Zone Preview). Chỉ bước tạo Clip mới tốn credit Flow.',
+  verifiedAt: '2026-11-25',
   requires: [
     {
       label: 'Tài khoản ChatGPT (tạo ảnh)',
@@ -30,39 +30,19 @@ export const campaignDoc: HelpDoc = {
   ],
   start: [
     {
-      title: 'Tạo chiến dịch',
-      do: 'Cột trái “Chiến dịch”: bấm “+”, nhập tên (ví dụ “Áo Haim”) rồi bấm “Tạo”. Mỗi chiến dịch là một video quảng cáo cho một mẫu áo.',
+      title: 'Chặng 1: Sản phẩm, Góc Bán Hàng & Chiến lược',
+      do: 'Tải ảnh áo thật (mặt trước, mặt sau, chi tiết/logo, nhãn), bấm “Phân tích bằng Gemini” để lấy Thẻ Góc Bán Hàng (nỗi đau dáng người, rào cản khách hỏi, vibe) + Hồ sơ kỹ thuật gấp gọn, rồi điền Brief (mục tiêu phễu) và chọn Format ngay trong Chặng 1.',
+      result: 'Khóa sự thật sản phẩm và chọn đúng cấu trúc video (GMV Max, Motion Trend Clone, Fit check…).',
     },
     {
-      title: 'Khối 1: nạp ảnh áo',
-      do: 'Tải ảnh áo thật (mặt trước, mặt sau, chi tiết/logo, nhãn), bấm “Lưu ảnh” rồi “Phân tích bằng Gemini”.',
-      result: 'Hồ sơ áo được Gemini đọc ra, bạn có thể sửa.',
+      title: 'Chặng 2: Dựng Look & Kịch bản',
+      do: 'Chọn hoặc tải ảnh nhân vật, chọn engine tạo ảnh ChatGPT hoặc Muse để tạo Cast sheet và duyệt. Thêm cảnh (mẫu nhanh / Gợi ý bằng Gemini), tạo thẳng Khung chốt từng cảnh theo chế độ Direct Look (không bắt buộc vẽ ảnh nền trống trước), rồi bấm “Viết kịch bản”.',
+      result: 'Có bộ Look nhất quán và kịch bản tối ưu cho hook 3 giây đầu.',
     },
     {
-      title: 'Khối 3 trước: chọn format',
-      do: 'Điền Brief và chọn một “Format quảng cáo” (ví dụ Fit check / OOTD). Format quyết định số cảnh, số shot, thời lượng và máy quay.',
-    },
-    {
-      title: 'Khối 2: nhân vật và cảnh',
-      do: 'Tải một ảnh nhân vật, bấm “Tạo cast sheet” và “Duyệt ảnh này”. Thêm đủ số cảnh mà format cần (mẫu nhanh hoặc “Gợi ý bằng Gemini”), “Lưu”, rồi tạo ảnh bối cảnh.',
-    },
-    {
-      title: 'Khối 3: viết kịch bản',
-      do: 'Bấm “Viết kịch bản”. Sửa beat, lời thoại, chữ của từng shot nếu cần rồi “Lưu chỉnh sửa”.',
-    },
-    {
-      title: 'Khối 4: duyệt khung chốt từng cảnh',
-      do: 'Bấm “Tạo khung chốt”, xem từng cảnh rồi “Duyệt”, hoặc từ chối kèm lý do để tạo lại.',
-    },
-    {
-      title: 'Khối 5: tạo clip (tốn credit)',
-      do: 'Chọn 360p (rẻ) hoặc 720p (nét), kiểm tra giá, rồi tạo clip cho từng shot. Nên thử một shot 360p trước.',
-      result: 'Mỗi shot có một clip để duyệt.',
-    },
-    {
-      title: 'Khối 6: ghép và xuất',
-      do: 'Chọn giọng đọc, “Đọc lời thoại”, rồi “Ghép video hoàn chỉnh”. Bấm “Tạo gói đăng” để lấy caption, hashtag và checklist.',
-      result: 'Video hoàn chỉnh có chữ mở màn, thẻ kết và nhãn AI.',
+      title: 'Chặng 3: Tạo Clip (360p/720p) & Xưởng Biến Thể',
+      do: 'Chạy Clip Ingredients hoặc chọn chế độ Motion Trend Clone (nạp video mẫu 3–15s), duyệt clip rồi sang Ghép & Xuất. Chọn Chế độ âm thanh (Giọng đọc + Nhạc / Chỉ nhạc nền Lookbook / Tắt tiếng gắn Sound TikTok), Kiểu kết CTA nổi góc giỏ hàng, bật Safe-Zone Preview và dùng Hook Multiplier (0 credit) đẻ 3 biến thể A/B test.',
+      result: 'Bộ video đa biến thể sẵn sàng tải sạch hoặc đăng TikTok Shop / Reels.',
     },
   ],
   areas: [
@@ -207,6 +187,7 @@ export const campaignDoc: HelpDoc = {
   ],
   related: ['Veo Studio', 'Canvas AI', 'Voices', 'Thư viện nhạc', 'Cài đặt', 'Lên lịch Youtube'],
   changes: [
+    { date: '2026-11-25', text: 'Chiến dịch AI 2.0: gộp thành 3 Chặng chuẩn Marketing Thời trang, thêm Thẻ Góc Bán Hàng (gấp gọn thông số kỹ thuật), công tắc ảnh ChatGPT | Muse, Direct Look Mode (bỏ qua bước vẽ phòng trống), Track Motion Trend Clone (3–15s) & Ma trận GMV Max, gỡ bắt buộc Voiceover, CTA Overlay / Loop, Safe-Zone TikTok Shop và Hook Multiplier (0 credit).' },
     { date: '2026-11-14', text: 'Sửa: mở khối Format & Kịch bản của chiến dịch cũ không còn làm trắng màn hình; ảnh bối cảnh không còn bị ChatGPT từ chối; thông báo lỗi tạo ảnh nói đúng lý do.' },
     { date: '2026-11-14', text: 'Quy trình mới 6 khối: chọn format quảng cáo, nhiều cảnh, cast sheet nền trơn, khung chốt theo cảnh, kịch bản một lượt, clip theo beat; video có chữ mở màn, thẻ kết, nhãn AI và gói đăng. Bỏ bước vẽ bảng phân cảnh từng shot.' },
     { date: '2026-11-12', text: 'Chiến dịch AI có tài liệu hướng dẫn lần đầu.' },

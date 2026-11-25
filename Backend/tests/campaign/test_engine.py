@@ -364,3 +364,42 @@ def test_full_run_without_a_target_still_runs_every_step(svc, calls):
     assert {s.key for s in graph.STEPS} == graph.needed_for(None)
     assert graph.needed_for("assemble") == {"assemble"} and "clip" in graph.needed_for("clip")
     assert graph.get_step("clip").dep_elements == {"scene_anchor": "scene", "scene_set": "scene"}
+
+
+def test_assemble_skips_missing_voice_in_music_only_and_silent_modes(svc, calls):
+    from .conftest import reach_clips
+    cid = prime(svc)
+    reach_clips(svc, cid)
+    for k in ("shot:1", "shot:2", "shot:3", "shot:4"):
+        svc.decide_gate(cid, "clip", "approved", element_key=k)
+    run_and_wait(svc, cid, "script")
+
+    # Mặc định voice_bgm vẫn đòi hỏi bước voice
+    blocked = svc.plan(cid, "assemble")["items"][0]
+    assert blocked["action"] in ("blocked", "waiting", "input_missing")
+    assert any(b["dep"] == "voice" for b in blocked["blockers"])
+
+    # Chuyển sang music_only hoặc silent -> mở khóa assemble dù chưa tạo voice
+    for mode in ("music_only", "silent"):
+        svc.set_params(cid, "assemble", {"audio_mode": mode})
+        p = svc.plan(cid, "assemble")
+        assert p["items"][0]["action"] == "run"
+        assert p["items"][0]["blockers"] == []
+    out = run_and_wait(svc, cid, "assemble")
+    assert out["exec_id"] is not None
+    assert element_state(svc, cid, "assemble")["state"] == "fresh"
+
+
+def test_direct_look_mode_runs_scene_anchor_without_scene_plate(svc, calls):
+    from .conftest import approve_cast_sheet
+    cid = prime(svc)
+    approve_cast_sheet(svc, cid)
+    run_and_wait(svc, cid, "fact_sheet")
+    plan = svc.plan(cid, "scene_anchor")
+    anchor_items = [i for i in plan["items"] if i["step_key"] == "scene_anchor"]
+    assert [i["action"] for i in anchor_items] == ["run", "run"]
+    assert all(i["blockers"] == [] for i in anchor_items)
+    out = run_and_wait(svc, cid, "scene_anchor")
+    assert out["exec_id"] is not None
+    assert element_state(svc, cid, "scene_anchor", "scene:1")["state"] == "fresh"
+    assert element_state(svc, cid, "scene_anchor", "scene:2")["state"] == "fresh"

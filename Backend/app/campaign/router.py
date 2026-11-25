@@ -138,7 +138,7 @@ def meta():
     svc = get_service()
     return {"executors": sorted(svc.runner.executors), "gated_steps": sorted(s.key for s in graph.STEPS if s.gate),
             "steps": [s.key for s in graph.STEPS], "blocks": [{"block": n, "title": t} for n, t in graph.BLOCKS.items()],
-            "features": ["exports", "formats", "v3"]}
+            "features": ["exports", "formats", "v3", "v4", "hook_variants", "direct_look", "motion_clone"]}
 
 
 @router.get("/formats")
@@ -269,6 +269,12 @@ async def upload_artifact(campaign_id: str, file: UploadFile = File(...)):
     return _call(get_service().upload_image, campaign_id, file.filename or "", data)
 
 
+@router.post("/{campaign_id}/artifacts/upload-video")
+async def upload_video_artifact(campaign_id: str, file: UploadFile = File(...)):
+    data = await file.read()
+    return _call(get_service().upload_video, campaign_id, file.filename or "", data)
+
+
 @router.get("/{campaign_id}/artifacts")
 def list_artifacts(campaign_id: str, step_key: Optional[str] = None, element_key: Optional[str] = None):
     return {"artifacts": _call(get_service().list_artifacts, campaign_id, step_key, element_key)}
@@ -344,7 +350,12 @@ def run(campaign_id: str, body: RunBody):
 
 @router.get("/{campaign_id}/runs")
 def list_runs(campaign_id: str, limit: int = 50):
-    return {"runs": _call(get_service().list_runs, campaign_id, limit), "active_exec": get_service().runner.active_exec(campaign_id)}
+    svc = get_service()
+    return {
+        "runs": _call(svc.list_runs, campaign_id, limit),
+        "active_exec": svc.runner.active_exec(campaign_id),
+        "last_exec": svc.runner.last_exec(campaign_id),
+    }
 
 
 @router.post("/{campaign_id}/cancel")
@@ -369,4 +380,50 @@ def export_start(campaign_id: str, variant: str):
 def export_file(campaign_id: str, variant: str):
     from . import exports
     path, name = _call(exports.file_path, get_service(), campaign_id, variant)
+    return FileResponse(path, media_type="video/mp4", filename=name)
+
+
+# ── Hook Multiplier (0 credit Flow) ───────────────────────────────────────────
+class HookVariantItemBody(BaseModel):
+    id: str = ""
+    angle: str = ""
+    opening_text: str = ""
+    cta_text: str = ""
+    audio_mode: str = ""
+    ending_mode: str = "cta_overlay"
+
+
+class HookRenderBody(BaseModel):
+    variants: list[HookVariantItemBody] = Field(default_factory=list)
+    clean: bool = False
+
+
+@router.get("/{campaign_id}/hook-variants")
+def hook_variants_status(campaign_id: str):
+    from . import exports
+    return _call(exports.hook_variants_status, get_service(), campaign_id)
+
+
+@router.post("/{campaign_id}/hook-variants/suggest")
+def hook_variants_suggest(campaign_id: str):
+    from . import exports
+    return _call(exports.suggest_hook_variants, get_service(), campaign_id)
+
+
+@router.post("/{campaign_id}/hook-variants/render")
+def hook_variants_render(campaign_id: str, body: HookRenderBody):
+    from . import exports
+    return _call(
+        exports.render_hook_variants,
+        get_service(),
+        campaign_id,
+        [v.model_dump() for v in body.variants],
+        clean=body.clean,
+    )
+
+
+@router.get("/{campaign_id}/hook-variants/{variant_id}/file")
+def hook_variant_file(campaign_id: str, variant_id: str):
+    from . import exports
+    path, name = _call(exports.hook_variant_file_path, get_service(), campaign_id, variant_id)
     return FileResponse(path, media_type="video/mp4", filename=name)

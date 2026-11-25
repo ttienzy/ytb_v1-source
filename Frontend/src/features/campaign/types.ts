@@ -169,6 +169,7 @@ export interface FactSheet {
   category: string; color: string; material: string; fit: string; length: string; neckline: string
   sleeves: string; pattern: string; logo_present: boolean; logo_text: string; details: string[]
   sizes: string; summary: string; summary_vi: string; do_not_say: string[]
+  selling_angles?: string[]; buyer_objections?: string[]; vibe_tags?: string[]; fit_benefits?: string[]
   risk?: FactSheetRisk
 }
 
@@ -203,7 +204,7 @@ export interface ScriptDoc {
 /** GET /api/campaigns/formats: bản thiết kế video có sẵn. */
 export interface FormatShot { role: ShotRole; scene: number; duration: number; needs_face: boolean; camera: ShotCamera; garment_ref: GarmentRef; motion: Motion }
 export interface FormatSummary {
-  id: string; name_vi: string; desc_vi: string; best_for_vi: string; scenes: number; shots: number; total_seconds: number
+  id: string; mode?: 'r2v' | 'motion' | string; name_vi: string; desc_vi: string; best_for_vi: string; scenes: number; shots: number; total_seconds: number
   hook_types: string[]; shot_list: FormatShot[]
 }
 
@@ -271,5 +272,31 @@ export interface ExportStatus {
   has_bgm: boolean
   watermark_removed?: boolean
   variants: Partial<Record<ExportVariant, ExportVariantState>>
+  reason: string
+}
+
+export type ImageProvider = 'chatgpt' | 'muse'
+export type AudioMode = 'voice_bgm' | 'music_only' | 'silent'
+export type EndingMode = 'cta_overlay' | 'loop' | 'end_card'
+export type FunnelGoal = 'view' | 'gmv_max' | 'aov'
+
+export interface HookVariantItem {
+  id: string
+  angle: string
+  opening_text: string
+  cta_text: string
+  audio_mode?: AudioMode | ''
+  ending_mode?: EndingMode
+  state?: 'none' | 'ready' | 'running' | 'error'
+  bytes?: number
+}
+
+export interface HookVariantsStatus {
+  artifact_id: string | null
+  fresh: boolean
+  state: 'idle' | 'running' | 'ready' | 'error'
+  message?: string
+  error?: string
+  variants: HookVariantItem[]
   reason: string
 }

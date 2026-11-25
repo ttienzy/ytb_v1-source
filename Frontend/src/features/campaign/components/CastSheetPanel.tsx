@@ -83,8 +83,10 @@ export function CastSheetPanel({ campaignId, state, artifacts, busy, onChanged, 
   const gateBadge = describeGate(element?.gate ?? null)
   const lastError = element?.last_run?.state === 'error' ? element.last_run.error : ''
   const realFace = String(profile.real_face ?? '') === 'yes'
+  const imageProvider = String(params.image_provider ?? 'chatgpt') === 'muse' ? 'muse' : 'chatgpt'
 
   const setProfile = (patch: Record<string, unknown>) => void guard(() => setParams(campaignId, 'cast_profile', patch))
+  const setProvider = (provider: 'chatgpt' | 'muse') => void guard(() => setParams(campaignId, 'cast_sheet', { image_provider: provider }))
   const generateNew = () => void guard(async () => { await reroll(campaignId, 'cast_sheet'); await onRun('cast_sheet') })
   const copyPrompt = async () => {
     if (!preview) return
@@ -124,10 +126,19 @@ export function CastSheetPanel({ campaignId, state, artifacts, busy, onChanged, 
       </header>
 
       <div className="cp-toolbar" data-testid="cast-profile">
+        <label className="cp-label">Tạo ảnh bằng</label>
+        <div className="cp-seg" role="group" aria-label="Engine tạo cast sheet" data-testid="cast-provider-toggle">
+          <button type="button" className={imageProvider === 'chatgpt' ? 'is-active' : ''} disabled={running} onClick={() => setProvider('chatgpt')}>ChatGPT</button>
+          <button type="button" className={imageProvider === 'muse' ? 'is-active' : ''} disabled={running} onClick={() => setProvider('muse')}>Muse</button>
+        </div>
         <label className="cp-label" htmlFor="cast-presentation">Gọi nhân vật là</label>
         <select id="cast-presentation" value={String(profile.presentation ?? 'person')} disabled={running} onChange={e => setProfile({ presentation: e.target.value })}>
           {Object.entries(PRESENTATION_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
+        <label className="cp-label" htmlFor="cast-height">Dáng mẫu</label>
+        <input id="cast-height" className="cp-input cp-narrow" style={{ width: 96 }} placeholder="vd: 1m58·47kg"
+               defaultValue={String(profile.body_spec ?? '')} disabled={running}
+               onBlur={e => { const v = e.target.value.trim(); if (v !== String(profile.body_spec ?? '')) setProfile({ body_spec: v || null }) }} />
         <label className="cp-switch">
           <input type="checkbox" checked={realFace} disabled={running} onChange={e => setProfile({ real_face: e.target.checked ? 'yes' : 'no' })} />
           Ảnh nhân vật là người thật

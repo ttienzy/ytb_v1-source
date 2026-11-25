@@ -42,6 +42,10 @@ SYSTEM_TEMPLATES: dict[str, dict[str, Any]] = {
         "kind": "scene_anchor", "name": "Khung chốt cảnh: người trong bối cảnh", "version": 1, "file": "scene_anchor.txt",
         "ref_slots": [{"role": "sheet", "label": "Image 1"}, {"role": "photo", "label": "Image 2"}, {"role": "plate", "label": "Image 3"}],
     },
+    "system:scene_anchor_direct": {
+        "kind": "scene_anchor", "name": "Khung chốt cảnh nhanh (không cần ảnh nền riêng)", "version": 1, "file": "scene_anchor_direct.txt",
+        "ref_slots": [{"role": "sheet", "label": "Image 1"}, {"role": "photo", "label": "Image 2"}],
+    },
     "system:script_v3": {"kind": "script", "name": "Kịch bản theo format: beat, lời thoại, chữ, caption (một lượt)", "version": 1,
                          "file": "script_v3.txt", "ref_slots": []},
     "system:clip_v3": {

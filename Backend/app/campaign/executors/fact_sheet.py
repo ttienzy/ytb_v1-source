@@ -16,7 +16,7 @@ DEFAULT_TEMPLATE = "system:fact_sheet"
 PATTERNS = ("solid", "small_print", "stripes", "large_print", "lace", "sheer", "glossy", "other")
 TEXT_FIELDS = ("category", "color", "material", "fit", "length", "neckline", "sleeves", "logo_text", "sizes",
                "summary", "summary_vi")
-LIST_FIELDS = ("details", "do_not_say")
+LIST_FIELDS = ("details", "do_not_say", "selling_angles", "buyer_objections", "vibe_tags", "fit_benefits")
 LEVELS = ("low", "medium", "high")
 
 

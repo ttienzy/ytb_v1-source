@@ -20,7 +20,9 @@ from .runner import AlreadyRunning, Runner
 from .store import ArtifactStore
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp"}
+VIDEO_EXT = {".mp4", ".mov", ".webm"}
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_VIDEO_UPLOAD_BYTES = 150 * 1024 * 1024
 
 
 class CampaignError(ValueError):
@@ -164,6 +166,21 @@ class CampaignService:
             self._campaign(s, cid)
             art = self.store.add_artifact(s, campaign_id=cid, kind="image", data=data, ext=ext,
                                           meta={"filename": safe, "size": len(data), "source": "upload"})
+            return self._artifact_dict(art)
+
+    def upload_video(self, cid: str, filename: str, data: bytes) -> dict[str, Any]:
+        ext = Path(filename or "").suffix.lower()
+        if ext not in VIDEO_EXT:
+            raise CampaignError("Chỉ nhận video mp4/mov/webm.")
+        if not data:
+            raise CampaignError("File video rỗng.")
+        if len(data) > MAX_VIDEO_UPLOAD_BYTES:
+            raise CampaignError("Video vượt giới hạn 150MB.")
+        safe = re.sub(r"[^\w.\- ]", "_", Path(filename).name)[:120]
+        with self.session() as s:
+            self._campaign(s, cid)
+            art = self.store.add_artifact(s, campaign_id=cid, kind="video", data=data, ext=ext,
+                                          meta={"filename": safe, "size": len(data), "source": "motion_upload"})
             return self._artifact_dict(art)
 
     def set_input_files(self, cid: str, step_key: str, items: list[dict[str, Any]]) -> dict[str, Any]:

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Clapperboard, Loader2, RefreshCw, Square, ThumbsDown, Undo2 } from 'lucide-react'
 import {
-  artifactUrl, cancelRun, decideGate, fetchArtifactJson, planRun, previewStepPrompt, reroll, resolveRun, selectArtifact, setParams,
+  artifactUrl, cancelRun, decideGate, fetchArtifactJson, planRun, previewStepPrompt, reroll, resolveRun, selectArtifact, setParams, uploadMotionVideo,
 } from '../services/campaignApi.ts'
 import {
   ROLE_LABEL, describeElement, describeGate, elementLabel, errorMessage, planBlocker, planSummary, progressText, reasonText, sceneItems, sceneName,
   type Badge as BadgeData,
 } from '../services/campaignView.ts'
-import type { ArtifactView, CampaignState, ClipPreview, ElementState, Plan, ScriptDoc, Tier } from '../types.ts'
+import type { ArtifactView, CampaignState, ClipPreview, ElementState, FormatSummary, Plan, ScriptDoc, Tier } from '../types.ts'
 import { Badge, Fold, RunError } from './Common.tsx'
 import { PromptEditor } from './PromptEditor.tsx'
 import { HelpHint } from '../../help/components/HelpHint'
@@ -16,6 +16,7 @@ interface Props {
   campaignId: string
   state: CampaignState
   artifacts: ArtifactView[]
+  formats?: FormatSummary[]
   busy: boolean
   tier: Tier
   onTier: (tier: Tier) => void
@@ -31,10 +32,12 @@ const TIER_INFO: Record<Tier, { title: string; res: string; hint: string }> = {
 }
 const REF_TITLE: Record<string, string> = { sheet: 'Cast sheet', photo: 'Ảnh áo thật', anchor: 'Khung chốt cảnh' }
 
-/** Khối 5: mỗi shot một clip Ingredients từ cast sheet, ảnh áo thật và khung chốt của cảnh shot dùng. TỐN CREDIT FLOW: luôn xem ước tính. */
-export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, onChanged, onRun, onError, onPreview }: Props) {
+/** Khối 5: mỗi shot một clip Ingredients từ cast sheet, ảnh áo thật và khung chốt của cảnh shot dùng, hoặc Motion Trend Clone (3-15s). TỐN CREDIT FLOW. */
+export function ClipPanel({ campaignId, state, artifacts, formats = [], busy, tier, onTier, onChanged, onRun, onError, onPreview }: Props) {
   const steps = useMemo(() => state.blocks.flatMap(b => b.steps), [state])
   const step = steps.find(s => s.key === 'clip')
+  const formatId = String(steps.find(s => s.key === 'format')?.params.format_id ?? '')
+  const formatMode = formats.find(f => f.id === formatId)?.mode ?? 'r2v'
   const anchorEls = steps.find(s => s.key === 'scene_anchor')?.elements ?? []
   const scriptEl = steps.find(s => s.key === 'script')?.elements[0]
   const scenes = sceneItems(steps.find(s => s.key === 'scene_set')?.params)
@@ -118,6 +121,26 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
   const anchorId = key ? anchorOf(key) : null
   const seconds = Number(el?.params?.duration ?? shot?.duration ?? 5)
   const hist = key ? history(key) : []
+  const shotClipMode = String(el?.params?.clip_mode ?? (formatMode === 'motion' ? 'motion' : 'r2v'))
+  const isMotionMode = shotClipMode === 'motion'
+  const motionVideoId = String(el?.params?.motion_video_artifact_id ?? params.motion_video_artifact_id ?? '')
+  const motionStart = Number(el?.params?.motion_start ?? params.motion_start ?? 0)
+  const motionEnd = Number(el?.params?.motion_end ?? params.motion_end ?? seconds)
+  const motionVideos = artifacts.filter(a => a.kind === 'video' && a.meta?.source === 'motion_upload')
+  const [uploadingMotion, setUploadingMotion] = useState(false)
+  const handleUploadMotion = async (file: File) => {
+    setUploadingMotion(true)
+    try {
+      const art = await uploadMotionVideo(campaignId, file)
+      const len = Math.max(3, Math.min(15, Math.round(motionEnd - motionStart) || seconds))
+      await setParams(campaignId, 'clip', { clip_mode: 'motion', motion_video_artifact_id: art.id, motion_start: 0, motion_end: len, duration: len }, key)
+      await onChanged()
+    } catch (err) {
+      onError(errorMessage(err))
+    } finally {
+      setUploadingMotion(false)
+    }
+  }
   const unknown = el?.last_run?.state === 'unknown'
   const blocker = key ? planBlocker(plan, 'clip', key) : null
   const waitingAnchor = !!el && (blocker?.action === 'waiting' || (!video && el.blockers.some(b => b.dep === 'scene_anchor')))
@@ -232,6 +255,56 @@ export function ClipPanel({ campaignId, state, artifacts, busy, tier, onTier, on
                     : <div className="cp-placeholder cp-clip-empty">{el.active_run ? <><Loader2 size={18} className="spinning" /> {progressText(el.progress)}</> : 'Chưa có clip'}</div>}
                 </div>
                 <div className="cp-clip-side">
+                  <div className="cp-field">
+                    <span>Chế độ tạo clip</span>
+                    <div className="cp-seg" role="group" aria-label="Chế độ tạo clip" data-testid={`clip-mode-${key}`}>
+                      <button type="button" className={!isMotionMode ? 'is-active' : ''} disabled={busy || running}
+                              onClick={() => void guard(() => setParams(campaignId, 'clip', { clip_mode: 'r2v' }, key))}>Ingredients 3 ảnh</button>
+                      <button type="button" className={isMotionMode ? 'is-active' : ''} disabled={busy || running}
+                              onClick={() => void guard(() => setParams(campaignId, 'clip', { clip_mode: 'motion' }, key))}>Motion Trend Clone</button>
+                    </div>
+                  </div>
+                  {isMotionMode && (
+                    <div className="cp-motion-box" data-testid={`motion-box-${key}`}>
+                      <span className="cp-label">Video chuyển động mẫu (3–15s)</span>
+                      <div className="cp-row">
+                        <label className="btn-g cp-small" style={{ cursor: uploadingMotion ? 'wait' : 'pointer' }}>
+                          <input type="file" accept="video/mp4,video/quicktime,video/webm" hidden disabled={uploadingMotion || running}
+                                 onChange={e => { const f = e.target.files?.[0]; if (f) void handleUploadMotion(f); e.target.value = '' }} />
+                          {uploadingMotion ? <Loader2 size={12} className="spinning" /> : null} Tải video mẫu
+                        </label>
+                        {motionVideos.length > 0 && (
+                          <select className="cp-grow" value={motionVideoId} disabled={running}
+                                  onChange={e => void guard(() => setParams(campaignId, 'clip', { motion_video_artifact_id: e.target.value || null }, key))}>
+                            <option value="">— chọn video đã tải —</option>
+                            {motionVideos.map(v => <option key={v.id} value={v.id}>{String(v.meta?.filename || v.id)}</option>)}
+                          </select>
+                        )}
+                      </div>
+                      <div className="cp-form cp-form-2">
+                        <label className="cp-field">
+                          <span>Từ (giây)</span>
+                          <input className="cp-input" type="number" min={0} max={50} step={1} value={motionStart} disabled={running}
+                                 onChange={e => {
+                                   const s = Math.max(0, Number(e.target.value) || 0)
+                                   const span = Math.max(3, Math.min(15, Math.round(motionEnd - s)))
+                                   void guard(() => setParams(campaignId, 'clip', { motion_start: s, duration: span }, key))
+                                 }} />
+                        </label>
+                        <label className="cp-field">
+                          <span>Đến (giây)</span>
+                          <input className="cp-input" type="number" min={3} max={60} step={1} value={motionEnd} disabled={running}
+                                 onChange={e => {
+                                   const end = Math.max(motionStart + 3, Number(e.target.value) || 3)
+                                   const clampedEnd = Math.min(motionStart + 15, end)
+                                   const span = Math.max(3, Math.min(15, Math.round(clampedEnd - motionStart)))
+                                   void guard(() => setParams(campaignId, 'clip', { motion_end: clampedEnd, duration: span }, key))
+                                 }} />
+                        </label>
+                      </div>
+                      <small className="cp-note">Đoạn dùng: {Math.max(3, Math.min(15, Math.round(motionEnd - motionStart)))}s (từ giây 11–15 Flow tính credit gấp đôi).</small>
+                    </div>
+                  )}
                   <label className="cp-field" data-testid={`duration-${key}`}>
                     <span>Thời lượng</span>
                     <select id={`duration-${key}`} value={seconds} disabled={busy || running}

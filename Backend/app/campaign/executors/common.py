@@ -133,10 +133,41 @@ def lint_text(fields: dict[str, str], garment: dict[str, Any]) -> list[dict[str,
     return out
 
 
-# ── ảnh ChatGPT ───────────────────────────────────────────────────────────────
+# ── ảnh ChatGPT / Muse (Dual Image Engine) ───────────────────────────────────
+IMAGE_PROVIDERS = ("chatgpt", "muse")
+
+
+def image_provider_of(params: dict[str, Any] | None) -> str:
+    p = str((params or {}).get("image_provider") or "chatgpt").strip().lower()
+    return p if p in IMAGE_PROVIDERS else "chatgpt"
+
+
 def image_client():
     from app.ai.image_gen.service import get_image_client
     return get_image_client()
+
+
+def muse_generate_image(prompt: str, ref_paths: list[str] | None, label: str, campaign_id: str) -> bytes:
+    """Tạo một ảnh qua Meta Muse (tài khoản Muse xoay vòng), dùng cùng ref_paths theo thứ tự."""
+    from app.ai.muse.schemas import MuseGenerateRequest
+    from app.ai.muse.service import muse_service
+
+    req = MuseGenerateRequest(
+        prompt=prompt,
+        output_kind="image",
+        reference_media=list(ref_paths or []),
+        apply_prefix=False,
+        use_side_chat=True,
+        chat_title=f"Campaign {campaign_id[:6]} · {label}",
+        file_prefix=f"cmp_{campaign_id[:6]}_{label}",
+    )
+    res = muse_service.generate_video(req)
+    if not res.ok or not res.local_path:
+        raise RuntimeError(res.error or "Muse không trả về ảnh.")
+    path = Path(res.local_path)
+    if not path.is_file():
+        raise RuntimeError(f"Không tìm thấy file ảnh Muse đã tải: {path.name}")
+    return path.read_bytes()
 
 
 def sniff_ext(data: bytes) -> str:
@@ -150,18 +181,23 @@ def sniff_ext(data: bytes) -> str:
 
 
 def generate_image(ctx: ExecContext, req: dict[str, Any], label: str, extra_meta: dict[str, Any] | None = None) -> ArtifactSpec:
-    """Tạo MỘT ảnh ChatGPT theo prompt đã dựng (ref theo thứ tự `ref_order`) và trả ArtifactSpec kèm provenance."""
-    tmp = ctx.store.campaign_dir(ctx.campaign_id) / "tmp"
-    tmp.mkdir(parents=True, exist_ok=True)
-    dest = tmp / f"{label}_{uuid.uuid4().hex[:10]}.png"
+    """Tạo MỘT ảnh qua ChatGPT hoặc Muse (ref theo thứ tự `ref_order`) và trả ArtifactSpec kèm provenance."""
+    provider = str(req.get("image_provider") or image_provider_of(ctx.params))
     started = time.time()
-    try:
-        image_client().generate(prompt=req["prompt"], dest=str(dest), ref_paths=[r["path"] for r in req["ref_order"]] or None,
-                                aspect=req["aspect"])
-        data = dest.read_bytes()
-    finally:
-        dest.unlink(missing_ok=True)
-    meta = {"prompt": req["prompt"], "template": req["template"], "aspect": req["aspect"],
+    ref_paths = [r["path"] for r in req["ref_order"]]
+    if provider == "muse":
+        data = muse_generate_image(req["prompt"], ref_paths, label, ctx.campaign_id)
+    else:
+        tmp = ctx.store.campaign_dir(ctx.campaign_id) / "tmp"
+        tmp.mkdir(parents=True, exist_ok=True)
+        dest = tmp / f"{label}_{uuid.uuid4().hex[:10]}.png"
+        try:
+            image_client().generate(prompt=req["prompt"], dest=str(dest), ref_paths=ref_paths or None,
+                                    aspect=req["aspect"])
+            data = dest.read_bytes()
+        finally:
+            dest.unlink(missing_ok=True)
+    meta = {"prompt": req["prompt"], "template": req["template"], "aspect": req["aspect"], "image_provider": provider,
             "refs": [r.get("artifact_id") for r in req["ref_order"]], "seconds": round(time.time() - started, 1)}
     meta.update(extra_meta or {})
     return ArtifactSpec("image", ext=sniff_ext(data), data=data, meta=meta)

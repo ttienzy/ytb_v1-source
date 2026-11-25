@@ -31,6 +31,12 @@ const REASON_TEXT: Record<string, string> = {
   'inputs.scene_set': 'các cảnh',
   'inputs.style': 'phong cách',
   'inputs.scene_plate': 'ảnh bối cảnh',
+  'params.image_provider': 'engine tạo ảnh (ChatGPT/Muse)',
+  'params.audio_mode': 'chế độ âm thanh',
+  'params.ending_mode': 'kiểu kết video',
+  'params.cta_text': 'chữ CTA',
+  'params.clip_mode': 'kiểu tạo clip',
+  'inputs.motion_video': 'video chuyển động mẫu',
   'inputs.scene_anchor': 'khung chốt cảnh đã duyệt',
   'inputs.brief': 'brief',
   'inputs.format': 'format',
@@ -73,6 +79,49 @@ export function describeGate(gate: ElementState['gate']): Badge | null {
   if (gate === 'need_approval') return { label: 'Cần duyệt', tone: 'warn' }
   if (gate === 'rejected') return { label: 'Đã từ chối', tone: 'bad' }
   return null
+}
+
+/** Sơ đồ 3 Chặng chuẩn Marketing Thời trang (Chặng 1: Sản phẩm & Chiến lược -> Chặng 2: Look & Kịch bản -> Chặng 3: Clip & Biến thể). */
+export interface CampaignStageDef {
+  id: 1 | 2 | 3
+  title: string
+  subtitle: string
+  stepKeys: string[]
+}
+
+export const CAMPAIGN_STAGES: CampaignStageDef[] = [
+  {
+    id: 1,
+    title: 'Sản phẩm & Chiến lược',
+    subtitle: 'Ảnh áo · Góc bán hàng · Brief & Format',
+    stepKeys: ['garment_source', 'fact_sheet', 'brief', 'format'],
+  },
+  {
+    id: 2,
+    title: 'Dựng Look & Kịch bản',
+    subtitle: 'AI KOC · Cảnh & Look Card · Kịch bản',
+    stepKeys: ['cast', 'cast_profile', 'cast_sheet', 'scene_set', 'style', 'scene_anchor', 'script'],
+  },
+  {
+    id: 3,
+    title: 'Clip & Xưởng Biến Thể',
+    subtitle: 'Flow Clip / Motion · Safe-Zone · Hook Multiplier',
+    stepKeys: ['clip', 'assemble', 'export_pack'],
+  },
+]
+
+export function stageBadge(blocks: BlockView[], stage: CampaignStageDef): Badge {
+  const els = blocks
+    .flatMap(b => b.steps)
+    .filter(s => stage.stepKeys.includes(s.key) && IMPLEMENTED_STEPS.has(s.key))
+    .flatMap(s => s.elements)
+  if (els.length === 0) return { label: 'Chờ đầu vào', tone: 'muted' }
+  if (els.some(e => e.active_run)) return { label: 'Đang chạy', tone: 'info' }
+  if (els.some(e => e.gate === 'need_approval')) return { label: 'Cần duyệt', tone: 'warn' }
+  if (els.some(e => e.state === 'stale')) return { label: 'Cũ', tone: 'warn' }
+  if (els.some(e => e.state === 'missing')) return { label: 'Chưa đủ', tone: 'muted' }
+  if (els.some(e => e.state === 'blocked')) return { label: 'Chờ bước trước', tone: 'muted' }
+  return { label: 'Sẵn sàng', tone: 'ok' }
 }
 
 /** Huy hiệu của cả khối, chỉ xét các bước đã có thực thi. */

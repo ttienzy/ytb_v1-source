@@ -39,14 +39,74 @@ class FlowProvider:
         project = self.veo.get_active_project()
         return None if project is None else project.id
 
+    def active_flow_project_id(self) -> str | None:
+        project = self.veo.get_active_project()
+        return None if project is None else getattr(project, "flow_project_id", None)
+
     def submit(self, *, prompt: str, aspect: str, duration: int, resolution: str, project_id: str, image_paths: list[str],
                idempotency_key: str) -> tuple[str, bool]:
-        """Gửi job. Lỗi ValueError = kiểm tra đầu vào thất bại TRƯỚC khi gửi (không mất credit)."""
+        """Gửi job Ingredients (r2v). Lỗi ValueError = kiểm tra đầu vào thất bại TRƯỚC khi gửi (không mất credit)."""
         from app.veo.schemas import AspectRatio, InputMode, VeoJobRequest
         request = VeoJobRequest(
             prompt=prompt, model_display_name=self.model_name, aspect_ratio=AspectRatio(aspect), duration_seconds=duration,
             resolution=resolution, num_outputs=1, project_id=project_id, input_mode=InputMode.INGREDIENTS,
             ingredient_image_paths=list(image_paths), idempotency_key=idempotency_key)
+        job = self.veo.submit_job(request)
+        return job.job_id, bool(getattr(job, "deduplicated", False))
+
+    def upload_reference_video(self, *, flow_project_id: str, video_path: Path) -> str:
+        import base64
+        from app.veo import router as veo_router
+        raw_bytes = Path(video_path).read_bytes()
+        req = veo_router.VideoUploadRequest(
+            project_id=flow_project_id,
+            video_base64=base64.b64encode(raw_bytes).decode("ascii"),
+            video_filename=Path(video_path).name,
+            force_fresh=False,
+            native_ui=False,
+        )
+        uploader = getattr(self.veo, "upload_video_reference", None) or veo_router.upload_video_reference
+        res = uploader(req)
+        media_id = (res or {}).get("media_id") if isinstance(res, dict) else getattr(res, "media_id", None)
+        if not media_id:
+            raise ValueError("Không tải được video mẫu lên Google Flow.")
+        return str(media_id)
+
+    def submit_motion(
+        self,
+        *,
+        prompt: str,
+        aspect: str,
+        duration: int,
+        resolution: str,
+        project_id: str,
+        flow_project_id: str | None,
+        image_paths: list[str],
+        reference_video_path: Path,
+        start_seconds: float,
+        end_seconds: float,
+        idempotency_key: str,
+    ) -> tuple[str, bool]:
+        """Gửi job Motion Control (Omni 1.2 video_edit, 3-15s). Lỗi ValueError trước submit = chưa mất credit."""
+        from app.veo.schemas import AspectRatio, InputMode, VeoJobRequest
+        if not flow_project_id:
+            raise ValueError("Project Google Flow đang chọn chưa có flow_project_id để upload video mẫu.")
+        media_id = self.upload_reference_video(flow_project_id=flow_project_id, video_path=reference_video_path)
+        request = VeoJobRequest(
+            prompt=prompt,
+            model_display_name=self.model_name,
+            aspect_ratio=AspectRatio(aspect),
+            duration_seconds=duration,
+            resolution=resolution,
+            num_outputs=1,
+            project_id=project_id,
+            input_mode=InputMode.VIDEO_EDIT,
+            ingredient_image_paths=list(image_paths),
+            reference_video_id=media_id,
+            reference_video_start_seconds=float(start_seconds),
+            reference_video_end_seconds=float(end_seconds),
+            idempotency_key=idempotency_key,
+        )
         job = self.veo.submit_job(request)
         return job.job_id, bool(getattr(job, "deduplicated", False))
 

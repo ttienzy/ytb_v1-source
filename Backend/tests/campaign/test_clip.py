@@ -30,8 +30,13 @@ class FakeVeo:
         self.tmp = tmp_path
         self.submitted: list = []
         self.script = script or (lambda n, job: ("done", None))
-        self.project = SimpleNamespace(id="proj1")
+        self.project = SimpleNamespace(id="proj1", flow_project_id="flow_proj_1")
         self.jobs: dict[str, SimpleNamespace] = {}
+        self.uploaded_videos: list = []
+
+    def upload_video_reference(self, req):
+        self.uploaded_videos.append(req)
+        return {"media_id": f"media_{len(self.uploaded_videos)}"}
 
     def get_active_project(self):
         return self.project
@@ -352,3 +357,49 @@ def test_campaign_saved_with_an_old_template_id_still_previews(cl):
     svc.set_params(cid, "clip", {"prompt": {"template_id": "system:clip_ingredients", "changes": "slower"}})
     p = svc.preview_prompt(cid, "clip", "shot:1", "draft")
     assert "single continuous shot" in p["prompt"] and "slower" in p["prompt"]
+
+
+def test_motion_trend_clone_mode_uploads_video_and_submits_video_edit_3_to_15s(cl):
+    from app.veo.schemas import InputMode
+    svc, veo, _, _ = cl
+    cid = prime(svc, format_id="motion_trend_clone")
+    approve_scene_anchors(svc, cid)
+    run_and_wait(svc, cid, "script")
+
+    # Tải video chuyển động mẫu (.mp4 giả)
+    up = svc.upload_video(cid, "dance_sample.mp4", b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+    svc.set_params(cid, "clip", {
+        "clip_mode": "motion",
+        "motion_video_artifact_id": up["id"],
+        "motion_start": 1.0,
+        "motion_end": 13.0,
+    }, element_key="shot:1")
+
+    p = svc.preview_prompt(cid, "clip", "shot:1", "draft")
+    assert p["mode"] == "video_edit" and p["duration"] == 12
+    assert p["motion_start"] == 1.0 and p["motion_end"] == 13.0
+
+    run_and_wait(svc, cid, "clip", confirm=True, elements=["shot:1"])
+    assert len(veo.uploaded_videos) == 1
+    assert len(veo.submitted) == 1
+    req = veo.submitted[0]
+    assert req.input_mode == InputMode.VIDEO_EDIT
+    assert req.duration_seconds == 12
+    assert req.reference_video_id == "media_1"
+    assert req.reference_video_start_seconds == 1.0
+    assert req.reference_video_end_seconds == 13.0
+    art = svc.list_artifacts(cid, "clip", "shot:1")[0]
+    assert art["meta"]["mode"] == "video_edit" and art["meta"]["duration"] == 12
+
+
+def test_long_prompt_over_2000_chars_previews_and_submits_without_rejection(cl):
+    svc, veo, _, _ = cl
+    cid = ready(svc)
+    long_note = "detailed fabric texture movement " * 60
+    svc.set_params(cid, "clip", {"prompt": {"changes": long_note}}, element_key="shot:1")
+    p = svc.preview_prompt(cid, "clip", "shot:1", "draft")
+    assert len(p["prompt"]) > 2000
+    assert not any(w["code"] == "prompt_too_long" for w in p["warnings"])
+    run_and_wait(svc, cid, "clip", confirm=True, elements=["shot:1"])
+    assert len(veo.submitted) == 1
+    assert len(veo.submitted[0].prompt) > 2000

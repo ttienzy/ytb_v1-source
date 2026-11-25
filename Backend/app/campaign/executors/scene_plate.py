@@ -39,7 +39,7 @@ def build_request(prompts: PromptLibrary, params: dict[str, Any], inputs: dict[s
     rendered = prompts.render(template_id, version=version, variables=variables, changes=common.changes_with_note(params, note), ref_paths=[])
     rendered["ref_order"] = []
     rendered["warnings"] = [w for w in rendered["warnings"] if w["code"] not in ("ref_count_mismatch", "missing_variables")]
-    rendered.update({"aspect": aspect, "scene": scene["key"], "note": note})
+    rendered.update({"aspect": aspect, "scene": scene["key"], "image_provider": common.image_provider_of(params), "note": note})
     return rendered
 
 

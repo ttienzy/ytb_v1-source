@@ -93,7 +93,7 @@ export function CampaignPage() {
 function Workspace({ campaignId, formats, onDeleted, onRenamed }: { campaignId: string; formats: FormatSummary[]; onDeleted: () => Promise<void>; onRenamed: () => Promise<void> }) {
   const [tier, setTier] = useState<Tier>('draft')
   const { state, artifacts, runs, loading, error, setError, refresh } = useCampaign(campaignId, tier)
-  const [activeBlock, setActiveBlock] = useState(1)
+  const [activeStage, setActiveStage] = useState<1 | 2 | 3>(1)
   const [busy, setBusy] = useState(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
 
@@ -134,7 +134,13 @@ function Workspace({ campaignId, formats, onDeleted, onRenamed }: { campaignId: 
   if (loading && !state) return <p className="cp-note"><Loader2 size={14} className="spinning" /> Đang tải chiến dịch…</p>
   if (!state?.campaign) return <ErrorBanner message={error || 'Không tải được chiến dịch.'} onClose={() => setError('')} />
 
-  const block = state.blocks.find(b => b.block === activeBlock) ?? state.blocks[0]
+  const stageNames: Record<1 | 2 | 3, string> = {
+    1: 'Chặng 1 · Sản phẩm & Chiến lược',
+    2: 'Chặng 2 · Dựng Look & Kịch bản',
+    3: 'Chặng 3 · Clip & Xưởng Biến Thể',
+  }
+  const stageBlockIndex = activeStage === 1 ? 1 : activeStage === 2 ? 2 : 5
+  const block = state.blocks.find(b => b.block === stageBlockIndex) ?? state.blocks[0]
   const common = { campaignId, state, artifacts, onChanged: refresh, onError: setError, onPreview: setLightbox }
   const unknownRuns = runs.filter(r => r.state === 'unknown').length
 
@@ -143,18 +149,24 @@ function Workspace({ campaignId, formats, onDeleted, onRenamed }: { campaignId: 
       <CampaignHeader campaign={state.campaign} spent={state.spent_credit} onRename={rename} onSetCap={saveCap} onDelete={() => void remove()} />
 
       <ErrorBanner message={error} onClose={() => setError('')} />
-      <BlockMap blocks={state.blocks} active={activeBlock} onSelect={setActiveBlock} />
+      <BlockMap blocks={state.blocks} active={activeStage} onSelect={setActiveStage} />
 
       <div className="cp-panels">
-        <PanelBoundary key={activeBlock} label={block?.title ?? `Khối ${activeBlock}`}>
-        {activeBlock === 1 && (
-          <div className="cp-split cp-split-sticky">
-            <ImageInputPanel {...common} stepKey="garment_source" title="Ảnh sản phẩm" roles={GARMENT_ROLES} maxImages={4}
-              hint="Ảnh áo thật: mặt trước (dùng cho cast sheet và khung chốt), chi tiết/logo (dùng cho shot cận), mặt sau, nhãn. Gemini xem tất cả." />
-            <FactSheetPanel {...common} busy={busy} onRun={onRun} />
-          </div>
+        <PanelBoundary key={activeStage} label={stageNames[activeStage]}>
+        {activeStage === 1 && (
+          <>
+            <div className="cp-split cp-split-sticky">
+              <ImageInputPanel {...common} stepKey="garment_source" title="Ảnh sản phẩm" roles={GARMENT_ROLES} maxImages={4}
+                hint="Ảnh áo thật: mặt trước (dùng cho cast sheet và khung chốt), chi tiết/logo (dùng cho shot cận), mặt sau, nhãn. Gemini xem tất cả." />
+              <FactSheetPanel {...common} busy={busy} onRun={onRun} />
+            </div>
+            <div className="cp-split">
+              <BriefPanel campaignId={campaignId} state={state} onChanged={refresh} onError={setError} />
+              <FormatPanel campaignId={campaignId} state={state} formats={formats} busy={busy} onChanged={refresh} onError={setError} />
+            </div>
+          </>
         )}
-        {activeBlock === 2 && (
+        {activeStage === 2 && (
           <>
             <div className="cp-split">
               <div className="cp-col">
@@ -165,24 +177,20 @@ function Workspace({ campaignId, formats, onDeleted, onRenamed }: { campaignId: 
               <CastSheetPanel {...common} busy={busy} onRun={onRun} />
             </div>
             <ScenesPanel {...common} formats={formats} busy={busy} onRun={onRun} />
-          </>
-        )}
-        {activeBlock === 3 && (
-          <>
-            <div className="cp-split">
-              <BriefPanel campaignId={campaignId} state={state} onChanged={refresh} onError={setError} />
-              <FormatPanel campaignId={campaignId} state={state} formats={formats} busy={busy} onChanged={refresh} onError={setError} />
-            </div>
+            <SceneAnchorPanel {...common} busy={busy} onRun={onRun} />
             <ScriptPanel {...common} busy={busy} onRun={onRun} />
           </>
         )}
-        {activeBlock === 4 && <SceneAnchorPanel {...common} busy={busy} onRun={onRun} />}
-        {activeBlock === 5 && <ClipPanel {...common} busy={busy} onRun={onRun} tier={tier} onTier={setTier} />}
-        {activeBlock === 6 && <AssemblePanel {...common} busy={busy} onRun={onRun} />}
+        {activeStage === 3 && (
+          <>
+            <ClipPanel {...common} formats={formats} busy={busy} onRun={onRun} tier={tier} onTier={setTier} />
+            <AssemblePanel {...common} busy={busy} onRun={onRun} />
+          </>
+        )}
         </PanelBoundary>
         <Fold className="cp-fold-card" key={`tech-${unknownRuns > 0}`} defaultOpen={unknownRuns > 0} testId="tech-details"
               title="Chi tiết kỹ thuật"
-              meta={unknownRuns > 0 ? `${unknownRuns} lần chạy chưa rõ kết quả cần kiểm tra` : `các bước của khối “${block?.title ?? ''}” · sổ chạy (${runs.length})`}>
+              meta={unknownRuns > 0 ? `${unknownRuns} lần chạy chưa rõ kết quả cần kiểm tra` : `${stageNames[activeStage]} · sổ chạy (${runs.length})`}>
           {block && <StepList block={block} />}
           <RunsPanel runs={runs} onChanged={refresh} onError={setError} />
         </Fold>

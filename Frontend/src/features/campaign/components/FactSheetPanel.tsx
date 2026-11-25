@@ -27,6 +27,7 @@ const TEXT_FIELDS: { key: keyof FactSheet; label: string }[] = [
 const EMPTY: FactSheet = {
   category: '', color: '', material: '', fit: '', length: '', neckline: '', sleeves: '', pattern: 'other',
   logo_present: false, logo_text: '', details: [], sizes: '', summary: '', summary_vi: '', do_not_say: [],
+  selling_angles: [], buyer_objections: [], vibe_tags: [], fit_benefits: [],
 }
 
 const firstLine = (items: string[]) => (items[0] ? `${items[0]}${items.length > 1 ? ' …' : ''}` : '')
@@ -128,34 +129,94 @@ export function FactSheetPanel({ campaignId, state, artifacts, busy, onChanged, 
           <div className="cp-riskline">
             <Badge badge={riskBadge(risk?.level)} />
             {risk && <span className="cp-plan">{MOTION_TEXT[risk.motion_limit]}{risk.logo_rule === 'reference_only' ? ' · logo chỉ lấy từ ảnh thật' : ''}</span>}
+            {draft.logo_present && <span className="cp-tag">Logo: {draft.logo_text || 'có logo'}</span>}
             {risk?.reasons.map(r => <span key={r} className="cp-warn-chip"><AlertTriangle size={12} /> {r}</span>)}
           </div>
 
-          <div className="cp-form cp-form-dense">
-            {TEXT_FIELDS.map(f => (
-              <label key={f.key} className="cp-field">
-                <span>{f.label}</span>
-                <input className="cp-input" value={String(draft[f.key] ?? '')} onChange={e => set(f.key, e.target.value as never)} />
-              </label>
-            ))}
-            <label className="cp-field">
-              <span>Họa tiết</span>
-              <select value={draft.pattern} onChange={e => set('pattern', e.target.value)}>
-                {Object.entries(PATTERN_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </label>
-            <label className="cp-field cp-span2">
-              <span className="cp-field-row">
-                Chữ/logo đúng như in (và vị trí)
-                <span className="cp-inline-check">
-                  <input type="checkbox" checked={draft.logo_present} onChange={e => set('logo_present', e.target.checked)} aria-label="Có logo / chữ in" /> có logo
-                </span>
-              </span>
-              <input className="cp-input" value={draft.logo_text} disabled={!draft.logo_present} onChange={e => set('logo_text', e.target.value)} />
-            </label>
+          <div className="cp-commerce-card" data-testid="commerce-angle-card">
+            <div className="cp-commerce-head">
+              <strong>Thẻ Góc Bán Hàng (Commerce Angle)</strong>
+              <div className="cp-commerce-tags">
+                {(draft.vibe_tags ?? []).map(tag => <span key={tag} className="cp-chip is-active">{tag}</span>)}
+              </div>
+            </div>
+            {draft.summary_vi && <p className="cp-commerce-summary">{draft.summary_vi}</p>}
+            <div className="cp-commerce-cols">
+              <div>
+                <span className="cp-label">Góc bán & nỗi đau dáng người</span>
+                {(draft.selling_angles ?? []).length > 0 ? (
+                  <ul className="cp-commerce-list">
+                    {(draft.selling_angles ?? []).map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                ) : (
+                  <p className="cp-note">Bấm “Phân tích bằng Gemini” hoặc tự thêm góc bán ở dưới.</p>
+                )}
+              </div>
+              <div>
+                <span className="cp-label">Rào cản khách hay hỏi</span>
+                {(draft.buyer_objections ?? []).length > 0 ? (
+                  <ul className="cp-commerce-list">
+                    {(draft.buyer_objections ?? []).map((o, i) => <li key={i}>{o}</li>)}
+                  </ul>
+                ) : (
+                  <p className="cp-note">Chưa có rào cản (vd: mỏng lộ nội y, bai cổ, form size).</p>
+                )}
+              </div>
+            </div>
+            {(draft.fit_benefits ?? []).length > 0 && (
+              <div className="cp-row">
+                <span className="cp-label">Điểm tôn dáng:</span>
+                {(draft.fit_benefits ?? []).map((f, i) => <span key={i} className="cp-tag">{f}</span>)}
+              </div>
+            )}
           </div>
 
           <div className="cp-folds">
+            <Fold title="Chỉnh góc bán hàng, rào cản & vibe" meta={`${(draft.selling_angles ?? []).length} góc · ${(draft.buyer_objections ?? []).length} rào cản`} testId="fold-commerce-edit">
+              <div className="cp-form cp-form-2">
+                <label className="cp-field">
+                  <span>Góc bán hàng (mỗi dòng một ý)</span>
+                  <AutoText label="Góc bán hàng" value={listToLines(draft.selling_angles)} onChange={v => set('selling_angles', linesToList(v))} minRows={3} />
+                </label>
+                <label className="cp-field">
+                  <span>Rào cản khách hay hỏi (mỗi dòng một ý)</span>
+                  <AutoText label="Rào cản" value={listToLines(draft.buyer_objections)} onChange={v => set('buyer_objections', linesToList(v))} minRows={3} />
+                </label>
+                <label className="cp-field">
+                  <span>Vibe / Aesthetic (mỗi dòng một thẻ)</span>
+                  <AutoText label="Vibe" value={listToLines(draft.vibe_tags)} onChange={v => set('vibe_tags', linesToList(v))} minRows={2} />
+                </label>
+                <label className="cp-field">
+                  <span>Lợi ích form dáng (mỗi dòng một ý)</span>
+                  <AutoText label="Lợi ích form dáng" value={listToLines(draft.fit_benefits)} onChange={v => set('fit_benefits', linesToList(v))} minRows={2} />
+                </label>
+              </div>
+            </Fold>
+            <Fold title="Thông số kỹ thuật cho AI (Ground Truth)" meta={[draft.category, draft.color, draft.fit].filter(Boolean).join(' · ') || 'khóa sự thật sản phẩm'} testId="fold-tech-specs">
+              <div className="cp-form cp-form-dense">
+                {TEXT_FIELDS.map(f => (
+                  <label key={f.key} className="cp-field">
+                    <span>{f.label}</span>
+                    <input className="cp-input" value={String(draft[f.key] ?? '')} onChange={e => set(f.key, e.target.value as never)} />
+                  </label>
+                ))}
+                <label className="cp-field">
+                  <span>Họa tiết</span>
+                  <select value={draft.pattern} onChange={e => set('pattern', e.target.value)}>
+                    {Object.entries(PATTERN_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </label>
+                <label className="cp-field cp-span2">
+                  <span className="cp-field-row">
+                    Chữ/logo đúng như in (và vị trí)
+                    <span className="cp-inline-check">
+                      <input type="checkbox" checked={draft.logo_present} onChange={e => set('logo_present', e.target.checked)} aria-label="Có logo / chữ in" /> có logo
+                    </span>
+                  </span>
+                  <input className="cp-input" value={draft.logo_text} disabled={!draft.logo_present} onChange={e => set('logo_text', e.target.value)} />
+                </label>
+              </div>
+            </Fold>
             <Fold title="Quảng cáo KHÔNG được nói" meta={draft.do_not_say.length ? `${draft.do_not_say.length} ý · ${firstLine(draft.do_not_say)}` : 'chưa có'} testId="fold-dont-say">
               <AutoText label="Quảng cáo không được nói, mỗi dòng một ý" value={listToLines(draft.do_not_say)} onChange={v => set('do_not_say', linesToList(v))} minRows={3} />
               <p className="cp-note">Mỗi dòng một ý. Kịch bản, lời thoại và chữ trên video sẽ tránh các ý này.</p>

@@ -88,3 +88,45 @@ def test_without_a_final_video_status_explains_and_start_refuses(svc):
     assert exports.status(svc, cid)["artifact_id"] is None
     with pytest.raises(exports.ExportError, match="Chưa có video"):
         exports.start(svc, cid, "clean")
+
+
+def test_hook_multiplier_suggest_and_render_creates_downloadable_variants(done, monkeypatch):
+    from app.campaign.executors import llm
+    svc, cid, _ = done
+
+    monkeypatch.setattr(
+        llm,
+        "call_llm_json",
+        lambda prompt, image_paths=None, retries=1: (
+            {
+                "variants": [
+                    {"id": "fit_pain", "angle": "Nỗi đau dáng người", "opening_text": "Vai ngang mặc sao gọn?", "cta_text": "Chốt size giỏ cam"},
+                    {"id": "texture", "angle": "Cận chất vải", "opening_text": "Cotton dày không bai cổ", "cta_text": "Xem bảng màu ngay"},
+                ]
+            },
+            "{}",
+            "gemini",
+        ),
+    )
+
+    sug = exports.suggest_hook_variants(svc, cid)
+    assert sug["provider"] == "gemini" and len(sug["variants"]) == 2
+    assert sug["variants"][0]["opening_text"] == "Vai ngang mặc sao gọn?"
+
+    seen: list[dict] = []
+
+    def fake_hook_exec(ctx):
+        seen.append({
+            "opening": ctx.params.get(assemble.EXPORT_OPENING_TEXT),
+            "cta": ctx.params.get(assemble.EXPORT_CTA_TEXT),
+            "clean": ctx.params.get(assemble.EXPORT_CLEAN),
+        })
+        return ExecResult([ArtifactSpec("video", ext="mp4", data=f"HOOK:{ctx.params[assemble.EXPORT_OPENING_TEXT]}".encode())])
+
+    st = exports.render_hook_variants(svc, cid, sug["variants"], clean=True, executor=fake_hook_exec, wait=True)
+    assert st["state"] == "ready" and len(st["variants"]) == 2
+    assert all(v["state"] == "ready" and v["bytes"] > 0 for v in st["variants"])
+    assert len(seen) == 2 and seen[0]["opening"] == "Vai ngang mặc sao gọn?" and seen[0]["clean"] is True
+    p, dl_name = exports.hook_variant_file_path(svc, cid, "fit_pain")
+    assert p.read_bytes() == "HOOK:Vai ngang mặc sao gọn?".encode()
+    assert dl_name.endswith("fit_pain.mp4")

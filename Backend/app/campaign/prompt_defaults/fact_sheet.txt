@@ -16,7 +16,11 @@ Return ONLY one JSON object, no markdown, no commentary, with exactly these keys
   "sizes": "size info only if visible in the photos, else \"unknown\"",
   "summary": "one precise English sentence describing the garment for an image-generation prompt",
   "summary_vi": "one Vietnamese sentence describing the garment for the shop owner",
-  "do_not_say": ["claims an ad must NOT make because they cannot be verified from the photos (e.g. fabric composition, brand authenticity, size chart)"]
+  "do_not_say": ["claims an ad must NOT make because they cannot be verified from the photos (e.g. fabric composition, brand authenticity, size chart)"],
+  "selling_angles": ["3 practical Vietnamese fashion selling hooks/pain-point angles for TikTok Shop based ONLY on what is visible (e.g. form dáng, phối đồ, che khuyết điểm, phong cách)"],
+  "buyer_objections": ["2-3 likely Vietnamese online shopper questions/objections visible from the photo (e.g. white fabric sheerness, collar stretch, length for petite heights)"],
+  "vibe_tags": ["2-4 fashion aesthetic tags (e.g. Clean Girl, Streetwear Hàn, Công sở tối giản)"],
+  "fit_benefits": ["2-3 visible silhouette/fit benefits (e.g. vai xuôi che bắp tay, cạp cao tôn eo)"]
 }
 
 {{#changes}}
